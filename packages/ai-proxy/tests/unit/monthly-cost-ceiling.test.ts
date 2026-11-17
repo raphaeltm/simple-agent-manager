@@ -1,5 +1,5 @@
 /**
- * F2: the installation-wide monthly ceiling (`aiProxy.monthlyCostCeilingUsd`), and the one cap
+ * F2: the installation-wide monthly ceiling (`aiProxy.perUserMonthlyCostCeilingUsd`), and the one cap
  * predicate shared by the gate, the budget page and validation (`effectiveMonthlyCostCapUsd`).
  */
 import { PLATFORM_AI_MODELS } from '@simple-agent-manager/shared';

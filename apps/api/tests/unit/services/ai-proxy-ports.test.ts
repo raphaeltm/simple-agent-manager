@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   getPlatformAgentCredential: vi.fn(),
   resolveAdminSetting: vi.fn(),
+  resolveAdminSettingDetails: vi.fn(),
   drizzle: vi.fn(() => ({ handle: 'fresh' })),
 }));
 
@@ -15,11 +16,12 @@ vi.mock('../../../src/services/platform-credentials', () => ({
 }));
 vi.mock('../../../src/services/admin-settings-resolution', () => ({
   resolveAdminSetting: mocks.resolveAdminSetting,
+  resolveAdminSettingDetails: mocks.resolveAdminSettingDetails,
 }));
 vi.mock('drizzle-orm/d1', () => ({ drizzle: mocks.drizzle }));
 
 import type { Env } from '../../../src/env';
-import { aiProxyPorts } from '../../../src/services/ai-proxy-ports';
+import { __resetLastKnownCeilingForTest, aiProxyPorts } from '../../../src/services/ai-proxy-ports';
 
 const env = {
   DATABASE: { name: 'd1' },
@@ -30,6 +32,7 @@ const env = {
 describe('aiProxyPorts', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    __resetLastKnownCeilingForTest();
   });
 
   it('reads the Claude Code platform credential with the credential encryption key', async () => {
@@ -73,10 +76,27 @@ describe('aiProxyPorts', () => {
     );
   });
 
-  it('reads the installation monthly ceiling admin setting as a number', async () => {
-    mocks.resolveAdminSetting.mockResolvedValueOnce(25);
+  it('reads the per-user monthly ceiling admin setting as a number', async () => {
+    mocks.resolveAdminSettingDetails.mockResolvedValueOnce({ value: 25 });
 
     await expect(aiProxyPorts(env).monthlyCostCeilingUsd()).resolves.toBe(25);
-    expect(mocks.resolveAdminSetting).toHaveBeenCalledWith(env, 'aiProxy.monthlyCostCeilingUsd');
+    expect(mocks.resolveAdminSettingDetails).toHaveBeenCalledWith(
+      env,
+      'aiProxy.perUserMonthlyCostCeilingUsd'
+    );
+  });
+
+  it('serves the last-known ceiling while settings are unreadable', async () => {
+    mocks.resolveAdminSettingDetails.mockResolvedValueOnce({ value: 25 });
+    await aiProxyPorts(env).monthlyCostCeilingUsd();
+    mocks.resolveAdminSettingDetails.mockRejectedValueOnce(new Error('settings unavailable'));
+
+    await expect(aiProxyPorts(env).monthlyCostCeilingUsd()).resolves.toBe(25);
+  });
+
+  it('throws on a cold isolate with unreadable settings, rather than reporting no ceiling', async () => {
+    mocks.resolveAdminSettingDetails.mockRejectedValueOnce(new Error('settings unavailable'));
+
+    await expect(aiProxyPorts(env).monthlyCostCeilingUsd()).rejects.toThrow('settings unavailable');
   });
 });

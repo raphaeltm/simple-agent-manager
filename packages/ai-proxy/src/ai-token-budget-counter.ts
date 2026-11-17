@@ -186,7 +186,7 @@ export class AiTokenBudgetCounter extends DurableObject<AiProxyEnv> {
     });
   }
 
-  /** Per-day, per-model rows since `startDateKey`: at most 31 days x catalog models per month. */
+  /** Per-day, per-model rows since `startDateKey`: days in the period (≤ 90) x priced models used. */
   async getModelUsage(startDateKey: string): Promise<AiModelUsageRow[]> {
     return this.sql
       .exec(

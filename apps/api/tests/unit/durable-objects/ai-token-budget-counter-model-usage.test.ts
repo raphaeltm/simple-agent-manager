@@ -8,12 +8,14 @@ import { PLATFORM_AI_MODELS } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ resolveAdminSetting: vi.fn() }));
+const mocks = vi.hoisted(() => ({ resolveAdminSettingDetails: vi.fn() }));
 vi.mock('../../../src/services/admin-settings-resolution', () => ({
-  resolveAdminSetting: mocks.resolveAdminSetting,
+  resolveAdminSetting: vi.fn(),
+  resolveAdminSettingDetails: mocks.resolveAdminSettingDetails,
 }));
 
 import { AiTokenBudgetCounter } from '../../../src/durable-objects/ai-token-budget-counter';
+import { __resetLastKnownCeilingForTest } from '../../../src/services/ai-proxy-ports';
 import type { Env } from '../../../src/env';
 import { checkAiUsageGate, incrementProviderUsage } from '../../../src/services/ai-token-budget';
 import { attachTokenUsageAccounting } from '../../../src/services/ai-token-usage-accounting';
@@ -55,7 +57,8 @@ beforeEach(() => {
     DATABASE: {},
     AI_TOKEN_BUDGET_COUNTER: { idFromName: (name: string) => name, get: () => counter },
   } as unknown as Env;
-  mocks.resolveAdminSetting.mockReset();
+  mocks.resolveAdminSettingDetails.mockReset();
+  __resetLastKnownCeilingForTest();
 });
 afterEach(() => db.close());
 
@@ -118,19 +121,43 @@ describe("the worker's usage gate reads the installation ceiling (F2)", () => {
   it('blocks a user who never set a cap once spend reaches the ceiling', async () => {
     await pricedResponse('user');
     const spent = await getLocalMonthlyAiCostUsd(env.KV, 'user', env);
-    mocks.resolveAdminSetting.mockResolvedValue(Math.max(1, Math.floor(spent)));
+    mocks.resolveAdminSettingDetails.mockResolvedValue({ value: Math.max(1, Math.floor(spent)) });
     expect(spent).toBeGreaterThanOrEqual(1);
 
     await expect(checkAiUsageGate(env.KV, 'user', env)).resolves.toMatchObject({
       allowed: false,
       reason: 'monthly-cost-cap',
     });
-    expect(mocks.resolveAdminSetting).toHaveBeenCalledWith(env, 'aiProxy.monthlyCostCeilingUsd');
+    expect(mocks.resolveAdminSettingDetails).toHaveBeenCalledWith(
+      env,
+      'aiProxy.perUserMonthlyCostCeilingUsd'
+    );
   });
 
   it('lets the same user through with no ceiling set (control)', async () => {
     await pricedResponse('user');
-    mocks.resolveAdminSetting.mockResolvedValue(0);
+    mocks.resolveAdminSettingDetails.mockResolvedValue({ value: 0 });
     await expect(checkAiUsageGate(env.KV, 'user', env)).resolves.toEqual({ allowed: true });
+  });
+});
+
+describe('gateway install: the worker gate never reads the ceiling (rule 60)', () => {
+  it('makes no admin-settings read and the same KV reads as before', async () => {
+    const gatewayEnv = {
+      ...env,
+      AI_GATEWAY_ID: 'gw',
+      CF_ACCOUNT_ID: 'acct',
+      CF_API_TOKEN: 'tok',
+    } as unknown as Env;
+    const getProviderUsage = vi.spyOn(counter, 'getProviderUsage');
+    await expect(checkAiUsageGate(gatewayEnv.KV, 'user', gatewayEnv)).resolves.toEqual({
+      allowed: true,
+    });
+    expect(mocks.resolveAdminSettingDetails).not.toHaveBeenCalled();
+    expect(getProviderUsage).not.toHaveBeenCalled();
+    // settings (token budget), settings (monthly cap); daily usage goes to the DO counter.
+    expect(
+      vi.mocked(gatewayEnv.KV.get).mock.calls.map(([key]) => String(key).split(':')[0])
+    ).toEqual(['ai-budget-settings', 'ai-budget-settings']);
   });
 });

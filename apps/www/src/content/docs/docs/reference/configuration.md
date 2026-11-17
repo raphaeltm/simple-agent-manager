@@ -2133,7 +2133,7 @@ default (`services/llm-endpoint-settings.ts`).
 | `llm.openAICompatible.aiProxyModel`        | unset   | Override for the proxy's Workers AI chat route.                                                                                                                                     |
 | `llm.openAICompatible.allowPrivateNetwork` | `false` | Explicitly allow an operator endpoint on a private host. Metadata/link-local hosts remain forbidden.                                                                                |
 | `aiProxy.directUpstreamEnabled`            | `false` | Enable platform and BYO AI proxy routes when no addressable Cloudflare AI Gateway exists. Requires a provider credential for platform calls. Ignored when a gateway is addressable. |
-| `aiProxy.monthlyCostCeilingUsd`            | `0`     | Installation-wide monthly spend ceiling per user, in whole USD (`0` = none). Superadmin only. Applies only without an addressable gateway; ignored when one exists.                 |
+| `aiProxy.perUserMonthlyCostCeilingUsd`     | `0`     | Monthly spend ceiling applied to every user, in whole USD (`0` = none). Superadmin only. Applies only without an addressable gateway; ignored when one exists.                      |
 
 The endpoint capability reuses the existing per-isolate settings cache (up to 60 seconds); a warm,
 unconfigured Cloudflare call performs no additional D1 or credential reads. Configured URL/key
@@ -2168,12 +2168,18 @@ endpoint/provider as appropriate (`packages/ai-proxy/src/ai-monthly-cost-cap.ts`
 `packages/ai-proxy/src/ai-gateway-availability.ts:isMonthlyCostCapAvailable`).
 
 Without a gateway, the cap each call is checked against is the lower of the user's own cap and
-`aiProxy.monthlyCostCeilingUsd` (`ai-monthly-cost-cap.ts:effectiveMonthlyCostCapUsd`, the one cap
+`aiProxy.perUserMonthlyCostCeilingUsd` (`ai-monthly-cost-cap.ts:effectiveMonthlyCostCapUsd`, the one cap
 predicate shared by the gate, `GET /api/usage/ai/budget` and budget validation). A user who clears
 their cap is still held to the ceiling, and `PUT /api/usage/ai/budget` refuses a cap above it. The
-ceiling is read from the per-isolate admin settings cache, only on the no-gateway path, so a
-gateway installation's `/ai/v1` reads are unchanged. If the setting cannot be read the ceiling is
-treated as unset (daily token budgets still apply). Spend is priced after each response, so calls
+ceiling is per user, not a total across users. It is read from the per-isolate admin settings
+cache (a change applies within 60 seconds), only on the no-gateway path, so a gateway
+installation's `/ai/v1` reads are unchanged. While settings are unreadable an isolate keeps using
+the last ceiling it read (`services/ai-proxy-ports.ts`); only an isolate that has never read it
+applies no ceiling, logged as `ai_proxy.monthly_cost_ceiling_unreadable` (daily token budgets
+still apply). Once a ceiling is set, every gated call on such an installation reads the month's
+priced total (one Durable Object call), not only calls by users with their own cap. Passthrough
+calls served by a platform-owned credential are priced too; a user's or project's own credential
+is their own spend. Spend is priced after each response, so calls
 admitted together before the total crosses the cap can each overshoot it by their own cost. A
 stored per-user settings row that cannot be parsed is ignored (platform defaults, logged as
 `ai_proxy.budget_settings_row_skipped`) rather than failing the call. Priced calls also record a

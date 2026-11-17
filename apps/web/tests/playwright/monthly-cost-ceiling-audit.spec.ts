@@ -5,7 +5,7 @@
  */
 import { expect, type Page, type Route, test } from '@playwright/test';
 
-import { assertNoOverflow } from './audit-helpers';
+import { assertNoClippedOverflow, assertNoOverflow, seedTheme } from './audit-helpers';
 
 const MOCK_USER = {
   user: {
@@ -57,9 +57,32 @@ function budget({ userCap, ceilingUsd, available, monthCostUsd }: Scenario) {
   };
 }
 
-async function setup(page: Page, scenario: Scenario) {
+/** Bodies the page sent to PUT /api/usage/ai/budget. */
+type Puts = Array<Record<string, unknown>>;
+
+async function setup(page: Page, scenario: Scenario, puts: Puts = []) {
+  // The first-run onboarding modal would otherwise cover the page (rule 62).
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, MOCK_USER.user.id);
   await page.route('**/api/**', (route: Route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/api/usage/ai/budget' && route.request().method() === 'PUT') {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      puts.push(body);
+      // Enforce the receiver's contract (rule 23): no cap where unpriced, none above the ceiling.
+      const cap = body.monthlyCostCapUsd as number | null;
+      const refused =
+        cap !== null &&
+        (!scenario.available || (scenario.ceilingUsd !== null && cap > scenario.ceilingUsd));
+      return route.fulfill({
+        status: refused ? 400 : 200,
+        contentType: 'application/json',
+        body: JSON.stringify(
+          refused ? { error: 'VALIDATION_ERROR', message: 'refused' } : { success: true }
+        ),
+      });
+    }
     const respond = (body: unknown) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
     if (path.includes('/api/auth/')) return respond(MOCK_USER);
@@ -103,6 +126,11 @@ async function setup(page: Page, scenario: Scenario) {
   await expect(page.getByText('Budget Controls')).toBeVisible();
 }
 
+async function checkLayout(page: Page) {
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+}
+
 async function shot(page: Page, name: string) {
   await page.screenshot({
     path: `../../.codex/tmp/playwright-screenshots/monthly-ceiling-${name}.png`,
@@ -118,25 +146,31 @@ function viewportName(page: Page): string {
   test.describe('monthly cost ceiling', () => {
     test('ceiling binds when the user set no cap', async ({ page }) => {
       await setup(page, { userCap: null, ceilingUsd: 25, available: true, monthCostUsd: 18.4 });
-      const bar = page.getByRole('meter', { name: 'Monthly Cost Cap (installation limit)' });
+      const bar = page.getByRole('meter', { name: 'Monthly Cost Cap (administrator limit)' });
       await expect(bar).toBeVisible();
       await expect(bar).toHaveAttribute('aria-valuenow', '74');
-      await assertNoOverflow(page);
+      await expect(bar).toHaveAttribute('aria-valuetext', '$18.40 of $25.00 (74%)');
+      await expect(page.getByText('$18.40 / $25.00')).toBeVisible();
+      await checkLayout(page);
       await shot(page, `ceiling-binds-${viewportName(page)}`);
     });
 
     test('a lower user cap is shown as the user cap', async ({ page }) => {
       await setup(page, { userCap: 10, ceilingUsd: 25, available: true, monthCostUsd: 4 });
-      await expect(page.getByRole('meter', { name: 'Monthly Cost Cap' })).toBeVisible();
-      await expect(page.getByText('(installation limit)')).toHaveCount(0);
-      await assertNoOverflow(page);
+      const bar = page.getByRole('meter', { name: 'Monthly Cost Cap', exact: true });
+      await expect(bar).toHaveAttribute('aria-valuenow', '40');
+      await expect(page.getByText('$4.00 / $10.00')).toBeVisible();
+      await expect(page.getByText('(administrator limit)')).toHaveCount(0);
+      await checkLayout(page);
       await shot(page, `user-cap-${viewportName(page)}`);
     });
 
     test('exceeded at the ceiling shows the exceeded alert', async ({ page }) => {
       await setup(page, { userCap: null, ceilingUsd: 25, available: true, monthCostUsd: 31 });
       await expect(page.getByRole('alert')).toContainText('Budget Exceeded');
-      await assertNoOverflow(page);
+      await expect(page.getByRole('alert')).toContainText('set by your administrator');
+      await expect(page.getByRole('alert')).toContainText('resets on the 1st');
+      await checkLayout(page);
       await shot(page, `exceeded-${viewportName(page)}`);
     });
 
@@ -145,8 +179,8 @@ function viewportName(page: Page): string {
       await page.getByRole('button', { name: 'Configure' }).click();
       const field = page.getByLabel('Monthly Cost Cap (USD)');
       await expect(field).toHaveAttribute('max', '25');
-      await expect(page.locator('#monthlyCapCeiling')).toContainText('limits everyone to');
-      await assertNoOverflow(page);
+      await expect(field).toHaveAccessibleDescription(/limits everyone to \$25\.00 a month/);
+      await checkLayout(page);
       await shot(page, `form-ceiling-${viewportName(page)}`);
     });
 
@@ -169,8 +203,79 @@ function viewportName(page: Page): string {
       await page.getByRole('button', { name: 'Configure' }).click();
       await expect(page.getByLabel('Monthly Cost Cap (USD)')).toHaveCount(0);
       await expect(page.getByLabel('Daily Input Token Limit')).toBeVisible();
-      await assertNoOverflow(page);
+      await checkLayout(page);
       await shot(page, `unavailable-${viewportName(page)}`);
+    });
+    test('a saved cap above the ceiling is enforced at the ceiling and cannot be saved', async ({
+      page,
+    }) => {
+      const puts: Puts = [];
+      await setup(page, { userCap: 40, ceilingUsd: 25, available: true, monthCostUsd: 5 }, puts);
+      const bar = page.getByRole('meter', { name: 'Monthly Cost Cap (administrator limit)' });
+      await expect(bar).toHaveAttribute('aria-valuetext', '$5.00 of $25.00 (20%)');
+      await page.getByRole('button', { name: 'Configure' }).click();
+      await expect(page.locator('#monthlyCapCeiling')).toContainText(
+        'saved cap of $40.00 is above it'
+      );
+      await page.getByRole('button', { name: 'Save' }).click();
+      await expect(
+        page.getByText("can't be above your administrator's limit of $25.00")
+      ).toBeVisible();
+      expect(puts).toHaveLength(0);
+      await page.getByLabel('Monthly Cost Cap (USD)').fill('20');
+      await page.getByRole('button', { name: 'Save' }).click();
+      await expect(page.getByText('Budget settings saved.')).toBeVisible();
+      expect(puts.at(-1)).toMatchObject({ monthlyCostCapUsd: 20 });
+      await checkLayout(page);
+      await shot(page, `saved-above-ceiling-${viewportName(page)}`);
+    });
+
+    test('cap unavailable: saving other limits succeeds and clears the unenforced cap', async ({
+      page,
+    }) => {
+      const puts: Puts = [];
+      await setup(page, { userCap: 40, ceilingUsd: null, available: false, monthCostUsd: 0 }, puts);
+      await page.getByRole('button', { name: 'Configure' }).click();
+      await page.getByLabel('Daily Input Token Limit').fill('300000');
+      await page.getByRole('button', { name: 'Save' }).click();
+      await expect(page.getByText('Budget settings saved.')).toBeVisible();
+      expect(puts.at(-1)).toMatchObject({ dailyInputTokenLimit: 300000, monthlyCostCapUsd: null });
+    });
+
+    test('user cap without a ceiling still shows its bar (regression control)', async ({
+      page,
+    }) => {
+      await setup(page, { userCap: 50, ceilingUsd: null, available: true, monthCostUsd: 12.34 });
+      await expect(
+        page.getByRole('meter', { name: 'Monthly Cost Cap', exact: true })
+      ).toHaveAttribute('aria-valuetext', '$12.34 of $50.00 (25%)');
+      await page.getByRole('button', { name: 'Configure' }).click();
+      await expect(page.locator('#monthlyCapCeiling')).toHaveCount(0);
+    });
+
+    test('long values wrap without overflow', async ({ page }) => {
+      // The narrowest supported width on the mobile project.
+      if (viewportName(page) === 'mobile') await page.setViewportSize({ width: 320, height: 667 });
+      await setup(page, {
+        userCap: null,
+        ceilingUsd: 1_000_000,
+        available: true,
+        monthCostUsd: 123_456.78,
+      });
+      await expect(
+        page.getByRole('meter', { name: 'Monthly Cost Cap (administrator limit)' })
+      ).toBeVisible();
+      await page.getByRole('button', { name: 'Configure' }).click();
+      await checkLayout(page);
+      await shot(page, `long-values-${viewportName(page)}`);
+    });
+    test('light theme: ceiling bar and hint', async ({ page }) => {
+      await seedTheme(page, 'light');
+      await setup(page, { userCap: null, ceilingUsd: 25, available: true, monthCostUsd: 18.4 });
+      await page.getByRole('button', { name: 'Configure' }).click();
+      await expect(page.locator('#monthlyCapCeiling')).toBeVisible();
+      await checkLayout(page);
+      await shot(page, `light-${viewportName(page)}`);
     });
   });
 }

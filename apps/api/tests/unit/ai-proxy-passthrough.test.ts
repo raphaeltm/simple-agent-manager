@@ -3,12 +3,24 @@ vi.mock('../../src/services/outbound-fetch-settings', () => ({
 }));
 /** URL-path-based proxy auth routes and usage tracking. */
 import { Hono } from 'hono';
+import { PLATFORM_AI_MODELS } from '@simple-agent-manager/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Route protocol tests mock D1; real pin enforcement is covered by provider-limit-platform-attribution.test.ts.
 vi.mock('../../src/services/provider-limit-credential-pin', () => ({
   assertProviderLimitCredentialPin: vi.fn(async () => {}),
 }));
+
+// L13 tests turn on direct upstream (no gateway); every other test keeps the real availability.
+const proxyEnabledOverride = vi.hoisted(() => ({ value: undefined as boolean | undefined }));
+vi.mock('../../src/services/ai-proxy-availability', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/services/ai-proxy-availability')>();
+  return {
+    ...actual,
+    isAiProxyEnabled: async (env: Parameters<typeof actual.isAiProxyEnabled>[0]) =>
+      proxyEnabledOverride.value ?? actual.isAiProxyEnabled(env),
+  };
+});
 
 // --- Mock dependencies ---
 
@@ -1083,4 +1095,67 @@ describe('L12 guarded redirects at every passthrough fetch site', () => {
       expect(new Headers(init.headers).has('x-api-key')).toBe(false);
     }
   );
+});
+
+describe('L13: platform-owned passthrough credentials count toward the monthly cap and ceiling', () => {
+  const PRICED = PLATFORM_AI_MODELS.find(
+    (m) => m.provider === 'openai' && m.costPer1kOutputTokens > 0
+  )!;
+  // No addressable gateway: SAM prices platform-billed spend itself.
+  const NO_GATEWAY = { AI_GATEWAY_ID: '', CF_ACCOUNT_ID: '' };
+  beforeEach(() => {
+    proxyEnabledOverride.value = true; // aiProxy.directUpstreamEnabled
+    return () => {
+      proxyEnabledOverride.value = undefined;
+    };
+  });
+
+  async function callWithSource(source: string) {
+    mockWorkspaceAuth('openai-codex');
+    mockAllowedRateLimit();
+    mockCheckTokenBudget.mockResolvedValue({ allowed: true });
+    mockResolveForConsumer.mockImplementation((_db, _userId, _key, consumer) =>
+      Promise.resolve({
+        consumer,
+        configuration: { settings: { providerId: 'openai', providerName: 'OpenAI' } },
+        credential: {
+          id: 'cred-openai',
+          secret: {
+            kind: 'openai-compatible',
+            apiKey: 'sk-openai',
+            baseUrl: 'https://custom-openai.example/v1',
+          },
+        },
+        source,
+      })
+    );
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ id: 'c', usage: { prompt_tokens: 1_000, completion_tokens: 1_000 } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+    const res = await postJson(
+      OPENAI_CHAT_COMPLETIONS_PATH,
+      openaiChatBody(PRICED.id),
+      {},
+      NO_GATEWAY
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+  }
+
+  it('prices a call served by a platform credential, with its catalog model', async () => {
+    await callWithSource('platform');
+    expect(mockIncrementProviderUsage).toHaveBeenCalledTimes(1);
+    const args = mockIncrementProviderUsage.mock.calls[0]!;
+    expect(args[6]).toBeGreaterThan(0);
+    expect(args[7]).toBe(PRICED.id);
+  });
+
+  it("does not price a user's own credential (their own spend; control)", async () => {
+    await callWithSource('user-attachment');
+    expect(mockIncrementProviderUsage).toHaveBeenCalledTimes(1);
+    expect(mockIncrementProviderUsage.mock.calls[0]).toHaveLength(6);
+  });
 });

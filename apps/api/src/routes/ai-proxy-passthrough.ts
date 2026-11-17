@@ -34,10 +34,7 @@ import {
   retryAfterSeconds,
 } from './ai-proxy-passthrough-prepare';
 import { schedulePassthroughLimitHeaders } from './ai-proxy-passthrough-telemetry';
-import {
-  type ResolvedProxyUpstream,
-  trimTrailingSlashes,
-} from './ai-proxy-passthrough-upstream';
+import { type ResolvedProxyUpstream, trimTrailingSlashes } from './ai-proxy-passthrough-upstream';
 
 const aiProxyPassthroughRoutes = new Hono<{ Bindings: Env }>();
 type ProxyContext = Context<{ Bindings: Env }>;
@@ -58,6 +55,15 @@ function trimLeadingSlashes(value: string): string {
 
 function joinUpstreamUrl(baseUrl: string, path: string): string {
   return `${trimTrailingSlashes(baseUrl)}/${trimLeadingSlashes(path)}`;
+}
+
+/**
+ * A passthrough call served by a platform-owned credential spends the installation's money, so
+ * where SAM prices spend itself (no AI Gateway) it is priced into the monthly cap and ceiling like
+ * every other platform-billed call. A user's or project's own credential is their own spend.
+ */
+function platformCostModelId(upstream: ResolvedProxyUpstream, modelId: string): string | undefined {
+  return upstream.credentialSource === 'platform' ? modelId : undefined;
 }
 
 function buildUpstreamAuthHeaders(upstream: ResolvedProxyUpstream): Record<string, string> {
@@ -200,6 +206,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
       format: 'anthropic',
       fallbackInputTokens: estimateInputTokensFromMessages(body.messages),
       provider: upstream.provider,
+      costModelId: platformCostModelId(upstream, modelId),
       onMeasuredUsage: prepared.value.recordRunUsage,
       executionCtx: optionalExecutionContext(() => c.executionCtx),
       headers: responseHeaders,
@@ -384,6 +391,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
       format: 'openai',
       fallbackInputTokens: estimateInputTokensFromMessages(body.messages),
       provider: upstream.provider,
+      costModelId: platformCostModelId(upstream, modelId),
       onMeasuredUsage: prepared.value.recordRunUsage,
       executionCtx: optionalExecutionContext(() => c.executionCtx),
       headers: responseHeaders,
@@ -399,10 +407,6 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
   }
 });
 
-export {
-  aiProxyPassthroughRoutes,
-  buildUpstreamAuthHeaders,
-  joinUpstreamUrl,
-};
+export { aiProxyPassthroughRoutes, buildUpstreamAuthHeaders, joinUpstreamUrl };
 
 export { resolveProxyUpstream } from './ai-proxy-passthrough-upstream';

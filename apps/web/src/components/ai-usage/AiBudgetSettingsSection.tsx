@@ -22,15 +22,15 @@ function BudgetBar({
   unit: string;
 }) {
   const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
+  const format = unit === '$' ? formatCost : formatTokens;
   const barColor = pct >= 100 ? 'bg-danger' : pct >= 80 ? 'bg-warning' : 'bg-accent-emphasis';
 
   return (
     <div className="space-y-1">
-      <div className="flex justify-between text-sm">
-        <span className="text-fg-muted">{label}</span>
+      <div className="flex flex-wrap justify-between gap-x-2 text-sm">
+        <span className="text-fg-muted min-w-0 break-words">{label}</span>
         <span className="tabular-nums font-medium">
-          {unit === '$' ? formatCost(used) : formatTokens(used)} /{' '}
-          {unit === '$' ? formatCost(limit) : formatTokens(limit)}
+          {format(used)} / {format(limit)}
         </span>
       </div>
       <div
@@ -40,6 +40,7 @@ function BudgetBar({
         aria-valuemin={0}
         aria-valuemax={100}
         aria-label={label}
+        aria-valuetext={`${format(used)} of ${format(limit)} (${Math.round(pct)}%)`}
       >
         <div
           className={`h-full ${barColor} rounded-full transition-all`}
@@ -93,6 +94,17 @@ export function BudgetSettingsSection() {
   }, [loadBudget]);
 
   async function handleSave() {
+    // Where caps cannot be priced the field is hidden and any saved cap is not enforced, so it is
+    // cleared rather than sent (the API refuses a cap there).
+    const monthlyCostCapUsd =
+      budget?.monthlyCostCap.available !== false && monthlyCap ? parseFloat(monthlyCap) : null;
+    const ceiling = budget?.monthlyCostCap.ceilingUsd ?? null;
+    if (monthlyCostCapUsd !== null && ceiling !== null && monthlyCostCapUsd > ceiling) {
+      setError(
+        `Your monthly cap can't be above your administrator's limit of ${formatCost(ceiling)}.`
+      );
+      return;
+    }
     setSaving(true);
     setError(null);
     setSuccess(false);
@@ -100,7 +112,7 @@ export function BudgetSettingsSection() {
       await updateUserAiBudget({
         dailyInputTokenLimit: dailyInput ? parseInt(dailyInput, 10) : null,
         dailyOutputTokenLimit: dailyOutput ? parseInt(dailyOutput, 10) : null,
-        monthlyCostCapUsd: monthlyCap ? parseFloat(monthlyCap) : null,
+        monthlyCostCapUsd,
         alertThresholdPercent: parseInt(alertThreshold, 10) || 80,
       });
       setSuccess(true);
@@ -118,9 +130,9 @@ export function BudgetSettingsSection() {
   const cap = budget?.monthlyCostCap;
   const ceilingUsd = cap?.ceilingUsd ?? null;
   // The installation ceiling, not the user's own cap, is what binds.
-  const capFromCeiling =
-    ceilingUsd !== null &&
-    (budget?.settings.monthlyCostCapUsd == null || budget.settings.monthlyCostCapUsd > ceilingUsd);
+  const savedCapUsd = budget?.settings.monthlyCostCapUsd ?? null;
+  const capFromCeiling = ceilingUsd !== null && (savedCapUsd === null || savedCapUsd > ceilingUsd);
+  const monthlyExceeded = (budget?.utilization.monthlyCostPercent ?? 0) >= 100;
 
   if (loading) {
     return (
@@ -181,7 +193,7 @@ export function BudgetSettingsSection() {
           />
           {cap?.effectiveCapUsd != null && (
             <BudgetBar
-              label={capFromCeiling ? 'Monthly Cost Cap (installation limit)' : 'Monthly Cost Cap'}
+              label={capFromCeiling ? 'Monthly Cost Cap (administrator limit)' : 'Monthly Cost Cap'}
               used={budget.monthCostUsd}
               limit={cap.effectiveCapUsd}
               unit="$"
@@ -189,8 +201,8 @@ export function BudgetSettingsSection() {
           )}
           {cap && !cap.available && (
             <Body className="text-fg-muted text-xs m-0" data-testid="monthly-cap-unavailable">
-              Monthly cost caps are not available on this installation: SAM cannot price AI spend
-              here. Daily token limits still apply.
+              Monthly cost caps are turned off because AI spend can&apos;t be priced on this server.
+              Daily token limits still apply.
             </Body>
           )}
           {budget.exceeded && (
@@ -206,8 +218,9 @@ export function BudgetSettingsSection() {
               <div>
                 <Body className="text-danger text-sm font-medium m-0">Budget Exceeded</Body>
                 <Body className="text-fg-muted text-sm mt-1 m-0">
-                  AI proxy requests will be rejected (429) until the limit resets. Daily limits
-                  reset at midnight UTC.
+                  {monthlyExceeded
+                    ? `You reached the monthly cost limit${capFromCeiling ? ' set by your administrator' : ''}. AI requests are paused until it resets on the 1st (UTC).`
+                    : 'AI requests are paused until the limit resets. Daily limits reset at midnight UTC.'}
                 </Body>
               </div>
             </div>
@@ -225,7 +238,10 @@ export function BudgetSettingsSection() {
         <Card className="p-4 space-y-4">
           <CardTitle>Budget Settings</CardTitle>
           <Body className="text-fg-muted text-sm m-0">
-            Leave fields empty to use platform defaults. Set to 0 or clear to remove a limit.
+            Leave fields empty to use platform defaults.{' '}
+            {ceilingUsd === null
+              ? 'Clear the monthly cap to remove it.'
+              : 'The monthly cap can be lowered, not removed.'}
           </Body>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -278,7 +294,7 @@ export function BudgetSettingsSection() {
                   max={ceilingUsd ?? undefined}
                   value={monthlyCap}
                   onChange={(e) => setMonthlyCap(e.target.value)}
-                  placeholder={ceilingUsd !== null ? formatCost(ceilingUsd) : 'No limit'}
+                  placeholder={ceilingUsd !== null ? 'Administrator limit' : 'No limit'}
                   aria-describedby={ceilingUsd !== null ? 'monthlyCapCeiling' : undefined}
                   className="w-full px-3 py-2.5 min-h-[44px] rounded-md text-fg-primary text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-accent-primary"
                 />
@@ -286,6 +302,13 @@ export function BudgetSettingsSection() {
                   <p id="monthlyCapCeiling" className="text-fg-muted text-xs mt-1 mb-0">
                     Your administrator limits everyone to {formatCost(ceilingUsd)} a month. You can
                     set a lower cap; leaving it empty uses that limit.
+                    {savedCapUsd !== null && savedCapUsd > ceilingUsd && (
+                      <>
+                        {' '}
+                        Your saved cap of {formatCost(savedCapUsd)} is above it, so the limit
+                        applies.
+                      </>
+                    )}
                   </p>
                 )}
               </div>
