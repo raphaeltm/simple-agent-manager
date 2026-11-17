@@ -55,3 +55,17 @@ Draft [PR #2855](https://github.com/raphaeltm/simple-agent-manager/pull/2855) op
 No live reproduction on the external installation. A complete upstream live pass remains required; draft status, no merge and no production deployment remain explicit constraints.
 
 Class: state-interaction race; advisory and atomic admission omitted durable provisioning ownership. Existing tests covered workspace reservations without a second TaskRunner selecting during the boot window. Process fix is discriminating SQL/workerd tests through production selection/admission, plus crash-boundary controls; existing rules 44/62/69 already require this coverage.
+
+## Corrected-account follow-up (15:55 UTC; live rerun pending)
+
+Raphaël clarified that verification must sign in as `test-user@simple-agent-manager.org` (`staging2-test-user`) and use that user's attached Anthropic account. Metadata confirms its active Claude Code OAuth credential and user attachment, GCP credential, and Artifacts `test-project` (`01M7M62YQ2XRZ6HYT1VYJ3WDS2`). The prepared harness explicitly selects OAuth configuration `cc-cfg-01M7M62R81N29Q65EC6PMFF4K8`. The previous bootstrap-user/API-key 402 does not establish a failure of this account.
+
+Exact-user workload login, session verification, project read and sign-out passed at 14:55 after the installation-specific trust was applied by PR #2841's staging deployment. No further human configuration was needed for the earlier target-allowlist 403. No new VM has been created for the corrected-account rerun.
+
+Our branch's old staging workflow still contains the credential-copy path prohibited by project policy 795e72a6. Wait for upstream [PR #2841](https://github.com/raphaeltm/simple-agent-manager/pull/2841) to merge, update this branch from main, review the merge and run appropriate checks before redeploying. At 15:52 it remains open, with no failures and its final CI run 44114588924 progressing. This task does not authorize merging that other PR.
+
+Staging2 reservation 44104898905 succeeded. The preceding branch released early; authoritative 15:51:54 status shows our protected turn through 16:23:58 UTC, holder=null. The handoff event was read and acknowledged. Do not deploy an unsafe workflow or bypass another branch's lease if the queue changes.
+
+A nonsecret, ephemeral verification harness and checkpoint are saved in the Project Library at `/engineering/issue-2848/handoff-2848.tgz`, file ID `01M7N3G4ZEV5FT93QAWF3RHG3E` (download with `download_library_file`). Local ignored files were omitted when SAM replaced the workspace, so this artifact prevents repeated reconstruction. It contains no cookie or credential values. The harness requires our exact candidate lease, uses at most two allocated 8 GB GCP VMs for a 12-minute overall trial, verifies B was accepted while A remained unplaced, checks actual assistant replies and chat DOM, and preserves strict ownership/occupancy cleanup guards. Syntax and browser tooling checks passed; the paid `race` mode remains **UNRUN**. Conservative incremental allowance: USD 1, with regional/disk/IP margin; [published Compute Engine pricing](https://cloud.google.com/products/compute/pricing/general-purpose).
+
+PR #2855 stays **DRAFT ONLY**. Full runtime CI passed at `3bd7ca450`; later evidence-only checks pass except PR Evidence, which fails because the explicit `needs-human-review` label is retained while live verification is incomplete. Do not describe that label gate as green or remove it to bypass review.
