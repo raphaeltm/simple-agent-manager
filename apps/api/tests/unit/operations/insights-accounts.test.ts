@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { countD1RoundTrips } from '../../helpers/insights-d1';
 import { createDeclaredIndexes } from '../../helpers/sqlite-d1';
 import {
   createAccountsTestDb,
@@ -769,45 +770,8 @@ describe('projectAccounts', () => {
   });
 
   it('stays within its round-trip budget', async () => {
-    const real = env.DATABASE;
-    let trips = 0;
-    const wrap = <T extends Record<string, unknown>>(statement: T): T => ({
-      ...statement,
-      all: async (...a: unknown[]) => {
-        trips += 1;
-        return (statement.all as (...x: unknown[]) => unknown)(...a);
-      },
-      first: async (...a: unknown[]) => {
-        trips += 1;
-        return (statement.first as (...x: unknown[]) => unknown)(...a);
-      },
-      run: async (...a: unknown[]) => {
-        trips += 1;
-        return (statement.run as (...x: unknown[]) => unknown)(...a);
-      },
-      raw: async (...a: unknown[]) => {
-        trips += 1;
-        return (statement.raw as (...x: unknown[]) => unknown)(...a);
-      },
-    });
-    env = {
-      ...env,
-      DATABASE: {
-        ...real,
-        prepare: (sql: string) => {
-          const statement = real.prepare(sql) as unknown as Record<string, unknown>;
-          return {
-            ...wrap(statement),
-            bind: (...params: unknown[]) =>
-              wrap((statement.bind as (...p: unknown[]) => Record<string, unknown>)(...params)),
-          };
-        },
-        batch: async (statements: unknown[]) => {
-          trips += 1;
-          return (real.batch as (s: unknown[]) => unknown)(statements);
-        },
-      },
-    } as unknown as Env;
+    const counter = countD1RoundTrips(env);
+    env = counter.env;
     // Busy project: 120 runs over every account, own accounts with stalls, so every read fires.
     for (let i = 0; i < 120; i += 1) {
       const id = ['cc-max', 'cc-key', 'cc-mate', LONG_ID][i % 4] as string;
@@ -815,7 +779,7 @@ describe('projectAccounts', () => {
       if (i % 10 === 0) await wait(`t${i}`, ref(id), (i + 1) * HOUR, { phase: 'released' });
     }
     await projectAccounts(ctx(), { projectId: 'p', range: '30d', nowMs: NOW }); // warm settings
-    trips = 0;
+    counter.reset();
     const result = await projectAccounts(ctx(), { projectId: 'p', range: '30d', nowMs: NOW });
     expect(result.totals.runs).toBe(120);
     expect(result.accounts.find((a) => a.key === 'cred:cc-max')?.stalls.episodes).toBeGreaterThan(
@@ -823,6 +787,6 @@ describe('projectAccounts', () => {
     );
     // Rule 60 budget for this read is 6 (Insights spec). Measured: membership, the batch, the
     // viewer's own limit windows (settings are cached after the first call).
-    expect(trips).toBe(3);
+    expect(counter.trips()).toBe(3);
   });
 });

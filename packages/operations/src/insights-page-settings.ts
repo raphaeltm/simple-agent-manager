@@ -1,5 +1,5 @@
 /**
- * Insights page limits, Flow, Agent setups and Accounts tabs (listed under "Operations" in Admin → Settings). Runtime settings rather
+ * Insights page limits, Flow, Agent setups, Accounts and People tabs (listed under "Operations" in Admin → Settings). Runtime settings rather
  * than Worker vars (policy 9017df94, `.claude/rules/07`). The definitions carry no imports so the
  * admin settings registry can depend on them; `getInsightsPageLimits` resolves them per request.
  */
@@ -80,6 +80,20 @@ export const INSIGHTS_PAGE_SETTINGS = [
       'Headroom added to the 90th-percentile peak memory when suggesting a memory request for a skill.',
     range: { min: 0, max: 200 },
   },
+  {
+    name: 'insights.peopleWaitingItemsListed',
+    defaultValue: 10,
+    description:
+      'Open items listed per person under "Waiting on" on Insights · People, oldest first. Each person still shows how many are open.',
+    range: { min: 1, max: 50 },
+  },
+  {
+    name: 'insights.peopleReviewScanCap',
+    defaultValue: 2000,
+    description:
+      'Review requests in the range, newest first, examined for "Review pickup" on Insights · People. The page says when the cap cut the range short.',
+    range: { min: 100, max: 20000 },
+  },
 ] as const;
 
 export type InsightsPageSettingName = (typeof INSIGHTS_PAGE_SETTINGS)[number]['name'];
@@ -96,6 +110,8 @@ export interface InsightsPageLimits {
   setupsSuggestionMinRuns: number;
   setupsSuggestionMinGapPercent: number;
   setupsMemoryHeadroomPercent: number;
+  peopleWaitingItemsListed: number;
+  peopleReviewScanCap: number;
 }
 
 const KEYS: Record<InsightsPageSettingName, keyof InsightsPageLimits> = {
@@ -110,6 +126,8 @@ const KEYS: Record<InsightsPageSettingName, keyof InsightsPageLimits> = {
   'insights.setupsSuggestionMinRuns': 'setupsSuggestionMinRuns',
   'insights.setupsSuggestionMinGapPercent': 'setupsSuggestionMinGapPercent',
   'insights.setupsMemoryHeadroomPercent': 'setupsMemoryHeadroomPercent',
+  'insights.peopleWaitingItemsListed': 'peopleWaitingItemsListed',
+  'insights.peopleReviewScanCap': 'peopleReviewScanCap',
 };
 
 /** Each value falls back to its code default when settings storage cannot be read. */

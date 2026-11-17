@@ -1129,6 +1129,34 @@ Returns `ProjectSetupsResponse` (`packages/shared/src/types/insights-setups.ts`)
   `apply` is `{ skillId, patch }`, the body to send to `PATCH /api/projects/:projectId/skills/:skillId`.
 - `unavailable`: sections whose read failed this time (`runs`, `nudges`).
 
+### `GET /api/projects/:projectId/insights/people`
+
+Insights · People for one project (`projectPeople`, `packages/operations/src/insights-people.ts`).
+Query `range` is `7d`, `30d` or `90d` (default `30d`; anything else is `400`). Requires project
+membership. Sent with `Cache-Control: private, no-store`: the body carries the titles of the inbox
+items the caller may open. Returns `ProjectPeopleResponse`
+(`packages/shared/src/types/insights-people.ts`):
+`{ projectId, range, since, until, waiting, reviewPickup, firstPerson, unavailable, generatedAt }`.
+
+- `waiting`: `{ groups, total, listed }`, open `question`/`review`/`task` asks right now (not
+  range-bound), longest wait first. Each group is
+  `{ key, kind: 'person' | 'unassigned', userId, name, member, you, open, blocking, oldestAgeMs, items }`;
+  `name` is set only for an active member (`member: false` for someone who left). `items` are the
+  oldest `listed` (`insights.peopleWaitingItemsListed`), each
+  `{ private, ref, title, kind, blocking, claimed, createdAt, ageMs, canReassign }`. For an item the
+  caller could not open in the Inbox, `private` is true and `ref`, `title`, `kind`, `blocking` and
+  `claimed` are `null`. `canReassign` is true only for a human task the caller may hand on through
+  `POST /api/projects/:projectId/inbox/items/:ref/reassign`.
+- `reviewPickup`: `{ state: 'recorded', samples, medianMs, p90Ms, waiting, recordedSince, truncated }`
+  or `{ state: 'not_recorded', waiting, recordedSince }`: `not_recorded` when nothing is recorded
+  yet (`recordedSince` null) or no request in the range has been picked up yet. From review
+  request cycles the GitHub webhook ingest records (`pull_request_review_requests`,
+  `services/github-pull-request-reviews.ts`); a cycle still open when its pull request closes is
+  closed as removed and never counts as waiting.
+  `truncated` means the scan cap (`insights.peopleReviewScanCap`) kept only the newest requests.
+- `firstPerson`: `{ closed, firstPerson, share }`, `share` `null` when nothing closed.
+- `unavailable`: sections whose read failed this time (`waiting`, `reviews`, `first_person`).
+
 ### `POST /api/projects/:id/tasks`
 
 Create a task record.

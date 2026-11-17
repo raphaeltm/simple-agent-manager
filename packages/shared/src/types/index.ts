@@ -893,6 +893,17 @@ export type {
   InsightsStallOutcome,
   ProjectAccountsResponse,
 } from './insights-accounts';
+export type {
+  InsightsFirstPerson,
+  InsightsPeopleAskKind,
+  InsightsPeopleSection,
+  InsightsReviewPickup,
+  InsightsWaiting,
+  InsightsWaitingGroup,
+  InsightsWaitingItem,
+  ProjectPeopleResponse,
+} from './insights-people';
+export { INSIGHTS_PEOPLE_ASK_KINDS } from './insights-people';
 
 // Insights · Agent setups (Insights slice S)
 export type {

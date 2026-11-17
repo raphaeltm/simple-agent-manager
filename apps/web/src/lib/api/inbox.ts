@@ -5,6 +5,7 @@ import type {
   InboxFilter,
   InboxItemResponse,
   InboxListResponse,
+  InboxTaskActionResponse,
 } from '@simple-agent-manager/shared';
 
 import { request } from './client';
@@ -74,5 +75,21 @@ export function archiveInboxItem(
     method: 'POST',
     body: '{}',
     keepalive: options.keepalive,
+  });
+}
+
+/**
+ * Hand a human task to one active member, or back to the team (inbox slice H1,
+ * `POST …/inbox/items/:ref/reassign`). The server checks who may do this and that the new
+ * assignee is an active member; Insights · People reuses this path rather than its own.
+ */
+export function reassignInboxTask(
+  projectId: string,
+  ref: string,
+  body: { assigneeUserId: string } | { team: true }
+): Promise<InboxTaskActionResponse> {
+  return request<InboxTaskActionResponse>(`${itemPath(projectId, ref)}/reassign`, {
+    method: 'POST',
+    body: JSON.stringify(body),
   });
 }
