@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // Enumerate the terminal control classes independently of the encoder. A positive
@@ -244,5 +245,34 @@ func TestTerminalBoundaryDeviceJSONDiagnostic(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("calls=%d want2", calls)
+	}
+}
+
+func TestTerminalBoundaryTableTruncationPreservesUTF8(t *testing.T) {
+	for _, suffix := range []string{"é", "世界", "🙂"} {
+		t.Run(suffix, func(t *testing.T) { runTerminalTableTruncation(t, suffix) })
+	}
+}
+
+func runTerminalTableTruncation(t *testing.T, suffix string) {
+	t.Helper()
+	// DEL expands by five bytes: the previous byte cutoff bisected suffix.
+	prefix := strings.Repeat("a", 110)
+	name := prefix + "\x7f" + suffix + "bbbbbbb"
+	response, _ := json.Marshal(map[string]any{"projects": []any{map[string]any{"id": "project_1", "name": name}}})
+	doer, captured := captureJSONRequest(t, string(response), http.StatusOK)
+	runtime, stdout, stderr := testRuntime(t, []string{"projects"}, doer, activeProjectEnv(t))
+	if code := Run(context.Background(), runtime); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+	}
+	if !utf8.Valid(stdout.Bytes()) {
+		t.Fatalf("table split Unicode rune: %q", stdout.String())
+	}
+	requireInertTerminal(t, stdout.String())
+	if !strings.Contains(stdout.String(), prefix+"\\u007F...") {
+		t.Fatalf("wrong safe cutoff: %q", stdout.String())
+	}
+	if !strings.HasSuffix(captured.URL, "/api/projects") {
+		t.Fatalf("unexpected trigger: %s", captured.URL)
 	}
 }

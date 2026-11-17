@@ -49,3 +49,13 @@ Command-boundary tests use injected HTTP/env/writers and realistic API responses
 HTTP listener regression asserts request path and response bytes as well as inert diagnostics.
 Existing API error-message suppression remains in effect (hostile server message is not echoed).
 Staging/CI/review evidence will be linked from the PR description. No production user flows.
+
+## Review correction
+
+Codex review4604056329 identified sanitization expansion moving table's byte cutoff into
+multibyte Unicode. Reproduced from Run(projects): DEL+é/CJK/emoji at cutoff produces U+FFFD
+because the final renderer replaces the split rune. SanitizeTableCell now backs the cutoff
+up to a UTF-8 rune boundary while retaining its existing byte width. Regression failed on
+all3 examples before the guard and passes after it. No transport/JSON behavior changed.
+CodeRabbit review5944517877 requested full release-template sections; populated honestly
+with staging and exact-head CI pending. Its approval5944519326 does not waive those gates.
