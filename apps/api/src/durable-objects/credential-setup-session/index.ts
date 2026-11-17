@@ -22,8 +22,8 @@
  * delete credential files, destroy sandbox, mark D1) so a vanished browser leaves
  * no orphan (rules 43/47).
  *
- * Storage: embedded SQLite (wrangler `new_sqlite_classes`). DDL is inlined in
- * the constructor (CREATE TABLE IF NOT EXISTS) — no separate DO migration file.
+ * Storage: embedded SQLite (wrangler `new_sqlite_classes`). The constructor runs
+ * the additive DDL in `./schema.ts`, which the DO migration safety check scans.
  */
 import type { AgentType, CredentialKind } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
@@ -52,7 +52,9 @@ import {
 } from '../../services/sandbox';
 import { releaseSetupSlot } from '../../services/setup-session-pool';
 import { CredentialValidator } from '../../services/validation';
+import { type SetupSessionD1Extra, updateSetupSessionD1Status } from './d1-status';
 import { type DeviceAuthState, DeviceAuthStateSchema, driverFailure } from './driver-state';
+import { type DeviceAuthDetailsRow, ensureSetupSessionSchema, type SetupSessionRow } from './schema';
 
 export interface CreateSetupSessionParams {
   id: string;
@@ -78,32 +80,6 @@ export interface SetupSessionStateResult {
   verificationUrl: string | null;
   userCode: string | null;
 }
-
-// `type` (not `interface`) so it carries an implicit index signature and
-// satisfies the `Record<string, SqlStorageValue>` constraint on sql.exec<T>().
-type SetupSessionRow = {
-  id: string;
-  user_id: string;
-  project_id: string | null;
-  scope: string;
-  agent_type: string;
-  credential_kind: string;
-  provider: string;
-  agent_name: string;
-  status: string;
-  pool_lease_id: string | null;
-  codex_home: string;
-  expires_at: number;
-  capture_poll_ms: number;
-  error_code: string | null;
-  error_message: string | null;
-  completed_at: number | null;
-};
-
-type DeviceAuthDetailsRow = {
-  verification_url: string;
-  user_code: string | null;
-};
 
 /** Relative paths of captured credential files inside the per-session setup home. */
 const CODEX_AUTH_FILE = 'auth.json';
@@ -131,33 +107,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     ctx.blockConcurrencyWhile(async () => {
-      this.sql.exec(
-        `CREATE TABLE IF NOT EXISTS setup_session (
-          id              TEXT PRIMARY KEY NOT NULL,
-          user_id         TEXT NOT NULL,
-          project_id      TEXT,
-          scope           TEXT NOT NULL,
-          agent_type      TEXT NOT NULL,
-          credential_kind TEXT NOT NULL,
-          provider        TEXT NOT NULL,
-          agent_name      TEXT NOT NULL,
-          status          TEXT NOT NULL,
-          pool_lease_id   TEXT,
-          codex_home      TEXT NOT NULL,
-          expires_at      INTEGER NOT NULL,
-          capture_poll_ms INTEGER NOT NULL,
-          error_code      TEXT,
-          error_message   TEXT,
-          completed_at    INTEGER
-        )`
-      );
-      this.sql.exec(
-        `CREATE TABLE IF NOT EXISTS device_auth_details (
-          singleton        INTEGER PRIMARY KEY NOT NULL CHECK (singleton = 1),
-          verification_url TEXT NOT NULL,
-          user_code        TEXT
-        )`
-      );
+      ensureSetupSessionSchema(this.sql);
     });
   }
 
@@ -712,43 +662,11 @@ export class CredentialSetupSession extends DurableObject<Env> {
     );
   }
 
-  private async updateD1Status(
+  private updateD1Status(
     id: string,
     status: SetupSessionStatus,
-    extra?: { errorCode?: string; errorMessage?: string; completed?: boolean; started?: boolean }
+    extra?: SetupSessionD1Extra
   ): Promise<void> {
-    const now = new Date().toISOString();
-    const set = ['status = ?', 'updated_at = ?'];
-    const binds: unknown[] = [status, now];
-    if (extra?.started) {
-      set.push('started_at = COALESCE(started_at, ?)');
-      binds.push(now);
-    }
-    if (extra?.completed) {
-      set.push('completed_at = ?');
-      binds.push(now);
-    }
-    if (extra?.errorCode !== undefined) {
-      set.push('error_code = ?');
-      binds.push(extra.errorCode);
-    }
-    if (extra?.errorMessage !== undefined) {
-      set.push('error_message = ?');
-      binds.push(extra.errorMessage);
-    }
-    binds.push(id);
-    try {
-      await this.env.DATABASE.prepare(
-        `UPDATE agent_credential_setup_sessions SET ${set.join(', ')} WHERE id = ?`
-      )
-        .bind(...binds)
-        .run();
-    } catch (err) {
-      log.warn('credential_setup.d1_update_failed', {
-        sessionId: id,
-        status,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    return updateSetupSessionD1Status(this.env, id, status, extra);
   }
 }

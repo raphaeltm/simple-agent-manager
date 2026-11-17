@@ -29,7 +29,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const DO_MIGRATION_FILES = [
+export const DO_MIGRATION_FILES = [
   resolve(
     import.meta.dirname,
     '../../packages/project-data/src/do/migrations.ts'
@@ -45,13 +45,17 @@ const DO_MIGRATION_FILES = [
     '../../packages/project-data/src/do/anchored-comments-migration.ts'
   ),
   // setup-session-pool uses inline constructor DDL (pure DO-SQLite) — scan it.
-  // NOTE: credential-setup-session is intentionally NOT scanned here: it mixes DO
-  // SQLite with D1 writes (UPDATE agent_credential_setup_sessions ... WHERE id=?),
-  // and this scanner's line heuristic false-positives on the dynamic-SET D1 UPDATE.
-  // Its DO-SQLite DDL is a safe CREATE TABLE IF NOT EXISTS + WHERE-scoped writes.
   resolve(
     import.meta.dirname,
     '../../apps/api/src/durable-objects/setup-session-pool.ts'
+  ),
+  // CredentialSetupSession keeps every DO-SQLite DDL statement (CREATE TABLE IF NOT
+  // EXISTS plus guarded ALTER TABLE ADD COLUMN) in schema.ts. Its index.ts is not
+  // scanned: it also writes D1 through a dynamic `SET ${...}` UPDATE that this
+  // scanner's line heuristic misreads. Any new DO DDL for it belongs in schema.ts.
+  resolve(
+    import.meta.dirname,
+    '../../apps/api/src/durable-objects/credential-setup-session/schema.ts'
   ),
 ];
 

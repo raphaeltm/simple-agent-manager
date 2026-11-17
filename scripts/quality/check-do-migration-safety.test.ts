@@ -97,6 +97,9 @@ describe('DO migration safety check', () => {
     );
     expect(result).toContain('migrations.ts: PASS');
     expect(result).toContain('notification-migrations.ts: PASS');
+    // A missing file only logs SKIPPED, so pin that the setup-session DDL is scanned.
+    expect(result).toContain('schema.ts: PASS');
+    expect(result).not.toContain('SKIPPED');
   });
 });
 
