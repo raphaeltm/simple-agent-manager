@@ -17,7 +17,7 @@ Shared Worker seams (zero added I/O on Cloudflare, where no extension is install
 - `fetchNodeAgent`, the ws-* proxy and the logs stream fold `transport` into the node read they
   already make. The liveness probe reads `transport` from its existing snapshot query.
 - `services/node-websocket-gateway.ts`: WeakMap marker + decision headers; one WeakMap lookup on CF.
-- Snapshot upload relay: tunnel-only nodes are never relays (SQL predicate + flag, no I/O).
+- Snapshot upload relay: stored transport excludes tunnel-only relays; the flag suppresses only new relay provisioning (no added Cloudflare I/O).
 
 Self-host only (`selfhost/reverse-tunnel/`): `route.ts` lease origin, `gateway.ts` frps plugin +
 node-websocket forward_auth, `entry.ts` `withReverseTunnel(worker, render)` mounting the gateway
@@ -132,3 +132,32 @@ suites: 49/49; real Worker/D1 suites: 35/35. Typecheck, focused lint and the sec
 readback guard pass. Independent Cloudflare/security and test/completion delta
 reviews PASS with no findings. Final-head CI and staging disposition remain tracked
 in the PR body; BOX remains the documented integration debt, not a slice merge gate.
+
+
+## Completion validation and final workflow gates
+
+Task-completion-validator independently PASS at a4aca4c3b (2026-11-17):
+
+| Check | Verdict | Evidence |
+|---|---|---|
+| A Research to checklist | PASS | F19–F21 implemented, prior L17a, or named L22/rotation follow-ups |
+| B Checklist to diff | PASS | Shared route/gateway, self-host entry/sweep, tests and docs present |
+| C Acceptance to verification | PASS | Graph/I/O, lease/revocation, frps serialization, cron isolation/kill switch and live seams |
+| D UI propagation | N/A | No UI inputs |
+| E Resource selection | PASS | Public/container/reverse controls; mixed-transport relay selection |
+| F Vertical slice | PASS | Real Worker/D1 routes and both real SQLite liveness adapters |
+
+No missing implementation or unsupported checked item. The remaining unchecked PR/CI/merge/idea
+item is workflow finalization, not unimplemented scope. BOX is the explicit coordinator-approved
+integration deferral after M4 and before L22.
+
+Normal release 44201139702 succeeded. At 23:45:54 staging2 had no holder and the next task had
+its turn; that task was notified. Global D1 read found zero allocated VMs; our node is absent.
+
+Coordinator event ae8a3d4e-1ef9-493e-960a-33777d05ede0 approves staging carry-over:
+"live VM proof taken on 2bb45037e; a4aca4c3b carried over, Cloudflare-neutral per coordinator review".
+The installed-extension branch is unreachable on Cloudflare, its relay flag is always false,
+and selfhost/route.ts is outside the Worker graph. Fresh full final-head CI including Workers
+remains required. Any further shared Worker behavior change voids carry-over. Production #2841
+merge hold was lifted at channel seq 231; serialized merge announcement and post-merge SHA
+remain required. This final archive commit changes only task documentation.
