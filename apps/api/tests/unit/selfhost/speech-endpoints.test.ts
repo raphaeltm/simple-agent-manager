@@ -615,6 +615,9 @@ describe('server read-aloud through an OpenAI-compatible endpoint', () => {
 
     const limited = await postSynthesize(env, 'msg-2');
     expect(limited.status).toBe(429);
+    const retryAfter = Number(limited.headers.get('Retry-After'));
+    expect(retryAfter).toBeGreaterThanOrEqual(1);
+    expect(retryAfter).toBeLessThanOrEqual(3600);
     expect(fetchMock.mock.calls.length).toBe(callsAfterFirst);
   });
 

@@ -4,6 +4,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getAuth, requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import { RateLimitError } from '../middleware/rate-limit';
 import { parseOptionalBody, TtsRequestSchema } from '../schemas';
 import { getWorkersAiBindingOrNull } from '../services/platform-capabilities';
 import { resolveSpeechSynthesisBackend } from '../services/speech-backend';
@@ -47,7 +48,12 @@ ttsRoutes.post('/synthesize', async (c) => {
     );
   }
   // A backend spends the admin's endpoint on every miss; it decides whether this user may.
-  await backend?.admit(c.env, userId);
+  try {
+    await backend?.admit(c.env, userId);
+  } catch (err) {
+    if (err instanceof RateLimitError) c.header('Retry-After', String(err.retryAfter));
+    throw err;
+  }
 
   const body = await parseOptionalBody(c.req.raw, TtsRequestSchema, {});
   if (!body.text || !body.storageId) {

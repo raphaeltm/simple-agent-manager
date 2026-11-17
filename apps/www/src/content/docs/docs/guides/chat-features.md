@@ -648,7 +648,9 @@ can use other encodings. `speech.synthesis.maxAudioBytes` caps the combined audi
 or voice settings cannot mix chunks. `speech.transcription.maxResponseBytes` caps transcription
 JSON responses before parsing (1 MiB by default). Endpoint synthesis admission uses an atomic
 per-user database counter, bounded by `speech.synthesis.maxRequestsPerHour` even for concurrent
-requests; unavailable counters refuse synthesis before calling the endpoint. An installation with neither, or
+requests; unavailable counters refuse synthesis before calling the endpoint. Follow the
+[single-box speech setup walkthrough](/docs/guides/self-hosting/#speech-endpoints-on-a-single-box-build)
+for endpoint configuration. An installation with neither, or
 with `TTS_ENABLED` set to `false`, reports that through
 [`GET /api/config/platform-capabilities`](/docs/reference/api/), and the app hides the microphone
 (and, for TTS, plays read-aloud through the browser's own speech synthesis) instead of showing a
