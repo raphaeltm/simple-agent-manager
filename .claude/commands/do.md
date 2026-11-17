@@ -304,8 +304,9 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
    If the env var is not set, ask the human for credentials.
 
    On `staging2` (`sammy2.party`), sign in with your workload identity instead (audience
-   `https://api.sammy2.party/api/auth/workload-identity-login`, target `staging2-agent-user` or
-   `staging2-agent-admin`); see "Two Staging Installations" in the full reference.
+   `https://api.sammy2.party/api/auth/workload-identity-login`, target `staging2-test-user`, the
+   account that holds staging2's credentials, once the trust names it); see "Two Staging
+   Installations" in the full reference.
 
 6. **Verify the changed behavior works end-to-end:**
    - **UI changes**: interact as a real user — click buttons, submit forms, navigate pages

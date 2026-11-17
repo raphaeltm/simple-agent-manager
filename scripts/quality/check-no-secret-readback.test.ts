@@ -76,6 +76,9 @@ const POSITIVE: Array<[string, RuleId]> = [
   ['/usr/bin/env -0', 'env-dump'],
   ['/usr/bin/printenv', 'env-dump'],
   ['export', 'env-dump'],
+  ['command env', 'env-dump'],
+  ['        run: command printenv', 'env-dump'],
+  ['sudo env | sort', 'env-dump'],
   ['set', 'env-dump'],
   ['        run: set | sort', 'env-dump'],
   ['declare -x', 'env-dump'],
@@ -87,6 +90,8 @@ const POSITIVE: Array<[string, RuleId]> = [
   ['pulumi config get encryptionKey --stack staging', 'show-secrets'],
   ['const outputs = await stack.outputs({ showSecrets });', 'show-secrets'],
   ["const plain = await crypto.subtle['decrypt'](params, key, data);", 'decryption'],
+  ['const plain = await crypto.subtle?.decrypt(params, key, data);', 'decryption'],
+  ["const plain = await subtle?.['decrypt'](params, key, data);", 'decryption'],
   ["const enc = await import('../../apps/api/src/services/encryption');", 'decryption'],
   ["const { decrypt: open } = require('../api/src/services/encryption.js');", 'decryption'],
   ['set -e -x', 'xtrace'],
@@ -131,6 +136,8 @@ const NEGATIVE = [
   'bash scripts/ci/x.sh -x-ray-mode',
   'set -euo pipefail; set -- "$@"',
   'set +e',
+  'command -v node',
+  'sudo env FOO=1 make deploy',
 ];
 
 describe('check-no-secret-readback rules', () => {

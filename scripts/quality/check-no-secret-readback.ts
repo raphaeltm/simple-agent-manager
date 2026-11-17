@@ -70,7 +70,8 @@ const SAME_COMMAND = String.raw`[^#\n;|&]*?`;
  * The start of a shell command: line start, a YAML `run:` value, a Dockerfile `RUN`, or after
  * `;`, `&&`, `||`, `|`.
  */
-const COMMAND_START = String.raw`(?:^\s*(?:-\s*)?(?:run:\s*|RUN\s+)?|[;&|]\s*)`;
+// Wrappers that still run the named command: `command env`, `sudo printenv`, `exec env`.
+const COMMAND_START = String.raw`(?:^\s*(?:-\s*)?(?:run:\s*|RUN\s+)?|[;&|]\s*)(?:(?:command|builtin|exec|sudo|nohup|time)\s+)*`;
 
 /** An optional directory before a command name: `/bin/bash`, `/usr/bin/env`. */
 const EXECUTABLE_PATH = String.raw`(?:\S*/)?`;
@@ -81,7 +82,11 @@ export const RULES: readonly Rule[] = [
   { id: 'show-secrets', pattern: /\bshowSecrets\b(?!\s*:\s*false\b)/ },
   // `pulumi config get` prints a secret config value decrypted.
   { id: 'show-secrets', pattern: /\bpulumi\s+config\s+get\b/ },
-  { id: 'decryption', pattern: /\bsubtle\s*(?:\.\s*decrypt|\[\s*['"`]decrypt['"`]\s*\])\s*\(/ },
+  // `subtle.decrypt(`, `subtle?.decrypt(`, `subtle['decrypt'](`, `subtle?.['decrypt'](`.
+  {
+    id: 'decryption',
+    pattern: /\bsubtle\s*(?:\??\.\s*decrypt|(?:\?\.)?\[\s*['"`]decrypt['"`]\s*\])\s*\(/,
+  },
   { id: 'decryption', pattern: /\bcreateDecipher(?:iv)?\s*\(/ },
   { id: 'decryption', pattern: /\brequire\s*\([^)]*\)\s*\.\s*decrypt\w*/i },
   // Dynamic import or require of the API's encryption module.

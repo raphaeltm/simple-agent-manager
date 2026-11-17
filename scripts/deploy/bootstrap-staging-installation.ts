@@ -6,12 +6,12 @@
  *
  * It never reads a secret out of Pulumi, never decrypts or copies a stored credential, and never
  * derives a secret from another installation's (policy 795e72a6,
- * `.claude/rules/83-no-secret-readback-in-ci.md`). An admin adds the installation's platform
- * cloud credential and agent key by hand in Admin → Credentials and picks machines in Admin →
- * Infrastructure; the agent sign-in trust comes from the installation's own GitHub secret
- * (`AGENT_SIGN_IN_TRUST_STAGING2` for staging2, written by configure-secrets.sh). The manual steps are in
- * `.agent-instructions/reference/rules/13-staging-verification-full.md`, "Two Staging
- * Installations".
+ * `.claude/rules/83-no-secret-readback-in-ci.md`). A human adds the credentials by hand. On
+ * staging2 they belong to the account `test-user@simple-agent-manager.org`, and machines are
+ * picked in Admin → Infrastructure. The agent sign-in trust comes from the installation's own
+ * GitHub secret (`AGENT_SIGN_IN_TRUST_STAGING2` for staging2, written by configure-secrets.sh).
+ * The manual steps are in `.agent-instructions/reference/rules/13-staging-verification-full.md`,
+ * "Two Staging Installations".
  *
  * Every write is keyed on a fixed ID and safe to repeat. The script refuses to run unless the
  * installation is a registered secondary installation of the given non-production environment,

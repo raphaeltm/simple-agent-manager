@@ -48,42 +48,53 @@ primary-only, and so is the signed GitHub-trigger audit (staging2 has no GitHub 
 shared deployment engine (`use_shared_engine`) is not supported for staging2. A `staging2` GitHub Environment exists only because lease records are kept per
 installation; it holds no secrets and must not get any (staging2's jobs run with `staging`).
 
+**The staging2 account to use.** Since 2026-11-17 the working account is
+`test-user@simple-agent-manager.org` (user `staging2-test-user`, superadmin). Raphaël added its
+own credentials by hand: a Claude Code OAuth credential, a GCP cloud credential, and a platform
+`google-infrastructure` integration. Run sessions and VMs as that user. The two bootstrap users
+(`staging2-agent-admin`, `staging2-agent-user`) have no credentials of their own.
+
 **Signing in to staging2.** Use workload identity; no separate token exists for staging2.
-Audience `https://api.sammy2.party/api/auth/workload-identity-login`; targets
-`staging2-agent-admin` (superadmin) or `staging2-agent-user` (ordinary user). Add the returned
-cookie for `.sammy2.party`. The issuer and allowed source project/user are the same as for
-`staging`. The trust comes from the `staging` Environment's GitHub secret
-`AGENT_SIGN_IN_TRUST_STAGING2`, which deploys pass straight to `configure-secrets.sh` (as
-`SECONDARY_AGENT_SIGN_IN_TRUST`, in the same bulk secret write). Deploys
-never derive it from staging's trust. While that secret is unset, a deploy leaves staging2's
-Worker secret as it is, so revoking it means deleting the Worker secret by hand as well. The staging smoke token works on staging2 only where a
-registration row already exists (the one made before 2026-11-17 does). Deploys no longer register it,
-because that needs staging2's `ENCRYPTION_KEY` in the runner. When staging2 refuses the token,
-the deploy's smoke tests are skipped with a warning.
+Audience `https://api.sammy2.party/api/auth/workload-identity-login`; target `staging2-test-user`
+once the trust names it, otherwise `staging2-agent-admin` (superadmin) or `staging2-agent-user`.
+Add the returned cookie for `.sammy2.party`. The issuer and allowed source project/user are the
+same as for `staging`.
+
+The trust comes from the `staging` Environment's GitHub secret `AGENT_SIGN_IN_TRUST_STAGING2`.
+Deploys pass it straight to `configure-secrets.sh` as `SECONDARY_AGENT_SIGN_IN_TRUST`, in the same
+bulk secret write, and never derive it from staging's trust. Its `allowedTargets` must include
+`staging2-test-user`. The Worker value still in place from earlier deploys names only the two
+bootstrap users, so signing in as `staging2-test-user` returns 403 until that secret is set.
+While the secret is unset, a deploy leaves staging2's Worker secret as it is; revoking the trust
+therefore also means deleting the Worker secret by hand.
+
+The staging smoke token works on staging2 only where a registration row already exists (the
+one made before 2026-11-17 does). Deploys no longer register it, because that needs staging2's
+`ENCRYPTION_KEY` in the runner. When staging2 refuses the token, the deploy's smoke tests are
+skipped with a warning.
 
 **What a fresh staging2 has.** The deploy seeds only what needs no secret value
 (`scripts/deploy/bootstrap-staging-installation.ts`, secondary installations only): the two
-users above, both opted into the SAM AI proxy for Claude Code (`providerMode: sam`, the only way
-a platform key is used). It never reads a Pulumi secret, decrypts a credential, or copies
-anything from `staging` (policy 795e72a6, `.claude/rules/83-no-secret-readback-in-ci.md`). A
-human (Raphaël) sets up the rest by hand, once per installation:
+bootstrap users above, both opted into the SAM AI proxy for Claude Code (`providerMode: sam`).
+It never reads a Pulumi secret, decrypts a credential, or copies anything from `staging` (policy
+795e72a6, `.claude/rules/83-no-secret-readback-in-ci.md`). A human (Raphaël) sets up the rest by
+hand, once per installation:
 
-1. Admin → Credentials: a platform cloud credential (Hetzner today; staging's GCP credential is
-   workload identity, which only trusts `sammy.party`'s issuer) and a Claude Code platform
-   agent key.
-2. Admin → Infrastructure: pick the shared pool's machines (at least 2 vCPU and 8 GB, at most
-   2 nodes, because the Hetzner account is shared with staging and production).
+1. Sign in as `test-user@simple-agent-manager.org`. On a rebuilt installation, add that user
+   first, as superadmin, in the D1 console. Then add its credentials (Claude Code, GCP) and the
+   Google infrastructure integration.
+2. Admin → Infrastructure: pick the shared pool's machines, at most 2 nodes.
 3. GitHub → Environments → `staging`: the `AGENT_SIGN_IN_TRUST_STAGING2` secret. It is staging's
-   trust JSON with `allowedTargets` set to `["staging2-agent-admin", "staging2-agent-user"]`.
+   trust JSON with `allowedTargets` naming `staging2-test-user` (and the bootstrap users, if
+   wanted).
 
-The rows copied by earlier deploys (credentials `staging2-bootstrap-cloud` and
-`staging2-bootstrap-agent-claude-code`, smoke token `staging2-bootstrap-smoke-token`, the pool
-machines) remain on the current staging2, so it works today. A teardown removes them, and
-staging2 then has no cloud credential, agent key, pool or smoke token until the steps above are
-repeated. Before tearing staging2 down, ask Raphaël (inbox) whether he can redo them; do not
-expect a rebuilt staging2 to run VMs or agent sessions on its own. Start sessions with the
-Claude Code agent (for example set the project's default agent); the installation default
-agent has no key. There is no GitHub App: use Artifacts-backed projects.
+Earlier deploys copied some rows into staging2 by the old, now removed path: platform
+credentials `staging2-bootstrap-cloud` (Hetzner) and `staging2-bootstrap-agent-claude-code`, the
+smoke token `staging2-bootstrap-smoke-token`, and the pool machines. Those rows are still in
+place; deleting them is Raphaël's call. A teardown removes everything, and the steps above must
+then be repeated: file an inbox item for Raphaël before tearing staging2 down, and do not expect
+a rebuilt staging2 to run VMs or agent sessions on its own. There is no GitHub App: use
+Artifacts-backed projects.
 
 **Querying staging2 directly.** Same account and `$CF_TOKEN` as staging. Look the D1 id up by
 name (`sam2-staging2`): `GET /accounts/$CF_ACCOUNT_ID/d1/database?name=sam2-staging2`.
