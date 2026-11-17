@@ -175,15 +175,15 @@ func TestTerminalBoundaryForwardedPathAndResponse(t *testing.T) {
 	defer remote.Close()
 	doer, _ := captureJSONRequest(t, `{"token":"fake-forward-token","expiresAt":"2099-01-01T00:00:00Z"}`, 200)
 	client := NewAPIClient(CLIConfig{APIURL: remote.URL, SessionCookie: "fake-cookie"}, doer)
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer listener.Close()
 	port := listener.Addr().(*net.TCPAddr).Port
 	var stderr bytes.Buffer
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -191,7 +191,11 @@ func TestTerminalBoundaryForwardedPathAndResponse(t *testing.T) {
 	}()
 	localClient := &http.Client{Timeout: 5 * time.Second}
 	path := "/" + payload
-	res, err := localClient.Get(fmt.Sprintf("http://127.0.0.1:%d", port) + "/" + url.PathEscape(path))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d", port)+"/"+url.PathEscape(path), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := localClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
