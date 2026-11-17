@@ -131,6 +131,7 @@ import {
   handleUpdateAgentProfile,
 } from './profile-tools';
 import { handleAckEventDelivery, handleGetEvent } from './project-event-tools';
+import { handleProjectInsights } from './project-insights-tool';
 import { handleListRuntimeEnv, handleRequestSecret } from './secret-request-tools';
 import {
   handleGetResourceHistory,
@@ -161,7 +162,6 @@ import {
   handleUpdateTrigger,
 } from './trigger-tools';
 import { handleGetWorkflowRun, handleStartWorkflowRun } from './workflow-tools';
-import { handleProjectInsights } from './project-insights-tool';
 import { handleExposePort } from './workspace-tools';
 import { handleGetCredentialLimits } from './workspace-tools-credential-limits';
 import { handleGetPeerAgentOutput, handleListProjectAgents } from './workspace-tools-direct';

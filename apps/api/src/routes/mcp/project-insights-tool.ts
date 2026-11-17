@@ -14,8 +14,8 @@
 import {
   getInsightsAgentRateLimit,
   OperationError,
-  ProjectInsightsInputSchema,
   projectInsights,
+  ProjectInsightsInputSchema,
 } from '@simple-agent-manager/operations';
 import * as v from 'valibot';
 
