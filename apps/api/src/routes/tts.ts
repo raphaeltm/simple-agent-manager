@@ -6,6 +6,7 @@ import { getAuth, requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { parseOptionalBody, TtsRequestSchema } from '../schemas';
 import { getWorkersAiBindingOrNull } from '../services/platform-capabilities';
+import { resolveSpeechSynthesisBackend } from '../services/speech-backend';
 import { getAudioFromR2, getTTSConfig,synthesizeSpeech } from '../services/tts';
 
 const ttsRoutes = new Hono<{ Bindings: Env }>();
@@ -33,14 +34,20 @@ ttsRoutes.post('/synthesize', async (c) => {
   if (!config.enabled) {
     throw errors.badRequest('Text-to-speech is disabled');
   }
-  // Synthesis runs on Workers AI. Without the binding, say so instead of failing with a 500.
-  const ai = getWorkersAiBindingOrNull(c.env);
+  // Synthesis runs on Workers AI. Without the binding, a backend the self-host build installed
+  // (services/speech-backend.ts) serves instead; with neither, say so instead of failing with a
+  // 500. With the binding nothing else is read.
+  const binding = getWorkersAiBindingOrNull(c.env);
+  const backend = binding ? null : await resolveSpeechSynthesisBackend(c.env);
+  const ai = binding ?? backend;
   if (!ai) {
     throw errors.featureUnavailable(
       'textToSpeech',
       'Text-to-speech is not available on this installation'
     );
   }
+  // A backend spends the admin's endpoint on every miss; it decides whether this user may.
+  await backend?.admit(c.env, userId);
 
   const body = await parseOptionalBody(c.req.raw, TtsRequestSchema, {});
   if (!body.text || !body.storageId) {
@@ -74,6 +81,8 @@ ttsRoutes.post('/synthesize', async (c) => {
       textLength: text.length,
       mode,
     });
+    // A backend error can name the admin's endpoint host or the provider's status; log only.
+    if (backend) throw errors.serviceUnavailable('Text-to-speech failed. Try again shortly.');
     const errorMessage = err instanceof Error ? err.message : String(err);
     throw errors.internal(`TTS synthesis failed: ${errorMessage}`);
   }

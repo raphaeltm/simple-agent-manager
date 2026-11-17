@@ -33,8 +33,14 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { log } from '../lib/logger';
+import type { SpeechSynthesisBackend } from './speech-backend';
 import { retryWithBackoff, type TTSConfig } from './tts-config';
-import { cleanTextForSpeech, splitTextIntoChunks, summarizeTextForSpeech } from './tts-text';
+import {
+  cleanTextForSpeech,
+  fallbackStripMarkdown,
+  splitTextIntoChunks,
+  summarizeTextForSpeech,
+} from './tts-text';
 
 export { getTTSConfig, retryWithBackoff, type TTSConfig, type TTSEnvVars } from './tts-config';
 export {
@@ -47,15 +53,38 @@ export {
 // ─── Audio Generation ────────────────────────────────────────────────────────
 
 /**
+ * Where audio comes from: the Workers AI binding, or (without it) a backend the self-host build
+ * installed (services/speech-backend.ts).
+ */
+export type SpeechAudioSource = Ai | SpeechSynthesisBackend;
+
+function isSynthesisBackend(source: SpeechAudioSource): source is SpeechSynthesisBackend {
+  return typeof (source as Partial<SpeechSynthesisBackend>).synthesize === 'function';
+}
+
+/**
  * Generate speech audio for a single chunk of plain text using Workers AI TTS.
  * Retries with exponential backoff on failure.
  * Returns raw audio bytes as an ArrayBuffer.
  */
 export async function generateSpeechAudioChunk(
   text: string,
-  ai: Ai,
+  ai: SpeechAudioSource,
   config: TTSConfig = {}
 ): Promise<ArrayBuffer> {
+  if (isSynthesisBackend(ai)) {
+    const encoding = config.encoding ?? DEFAULT_TTS_ENCODING;
+    return retryWithBackoff(
+      async () => {
+        const buffer = await ai.synthesize(text, encoding);
+        if (buffer.byteLength === 0) throw new Error('Speech backend returned empty audio');
+        return buffer;
+      },
+      config.retryAttempts ?? DEFAULT_TTS_RETRY_ATTEMPTS,
+      config.retryBaseDelayMs ?? DEFAULT_TTS_RETRY_BASE_DELAY_MS,
+      'tts_backend_chunk'
+    );
+  }
   const model = config.model ?? DEFAULT_TTS_MODEL;
   const speaker = config.speaker ?? DEFAULT_TTS_SPEAKER;
   const encoding = config.encoding ?? DEFAULT_TTS_ENCODING;
@@ -128,7 +157,7 @@ export async function generateSpeechAudioChunk(
  */
 export async function generateSpeechAudio(
   text: string,
-  ai: Ai,
+  ai: SpeechAudioSource,
   config: TTSConfig = {},
   r2?: R2Bucket,
   storageId?: string,
@@ -351,7 +380,7 @@ export interface SynthesizeResult {
  *
  * @param text - The raw text (possibly with markdown) to synthesize
  * @param storageId - Unique identifier for R2 caching (e.g., messageId)
- * @param ai - Workers AI binding
+ * @param ai - Workers AI binding, or a speech backend (no cleanup or summary model then)
  * @param r2 - R2 bucket binding
  * @param config - Optional TTS configuration overrides
  * @param userId - User ID for R2 key scoping
@@ -360,7 +389,7 @@ export interface SynthesizeResult {
 export async function synthesizeSpeech(
   text: string,
   storageId: string,
-  ai: Ai,
+  ai: SpeechAudioSource,
   r2: R2Bucket,
   config: TTSConfig = {},
   userId: string = 'anonymous',
@@ -396,21 +425,29 @@ export async function synthesizeSpeech(
 
   // 3. Decide mode: auto-detect if not explicitly set
   const effectiveMode: TTSMode = mode ?? (inputText.length > summaryThreshold ? 'summary' : 'full');
-  const summarized = effectiveMode === 'summary';
+  // A speech backend has no model to clean up or summarize with: strip markdown with the regex
+  // fallback and keep the text within the chunk limit instead of summarizing.
+  const workersAi = isSynthesisBackend(ai) ? null : ai;
+  const summarized = workersAi !== null && effectiveMode === 'summary';
 
   let processedText: string;
 
-  if (summarized) {
+  if (!workersAi) {
+    const chunkSize = config.chunkSize ?? DEFAULT_TTS_CHUNK_SIZE;
+    const maxChunks = config.maxChunks ?? DEFAULT_TTS_MAX_CHUNKS;
+    // One chunk of headroom: sentence-boundary splitting can need more chunks than length / size.
+    processedText = fallbackStripMarkdown(inputText).slice(0, chunkSize * Math.max(1, maxChunks - 1));
+  } else if (summarized) {
     // Summarize long text via LLM
     log.info('tts.summary_mode', {
       textLength: inputText.length,
       summaryThreshold,
       storageId,
     });
-    processedText = await summarizeTextForSpeech(inputText, ai, config);
+    processedText = await summarizeTextForSpeech(inputText, workersAi, config);
   } else {
     // Clean markdown for natural speech
-    processedText = await cleanTextForSpeech(inputText, ai, config);
+    processedText = await cleanTextForSpeech(inputText, workersAi, config);
   }
 
   if (!processedText) {
