@@ -1,4 +1,5 @@
 /** Canonical trigger creation shared by authenticated REST and project-scoped MCP. */
+import { cronToNextFire, validateCronExpression } from '@simple-agent-manager/cron';
 import {
   ResourceRequirementsValidationError,
   serializeResourceRequirementsInput,
@@ -25,7 +26,6 @@ import { errors } from '../middleware/error';
 import type { CreateTriggerSchema } from '../schemas/triggers';
 import { generateAddressKey } from './agent-email/address';
 import { requireAgentEmailOn, resolveAllowedSenders } from './agent-email/trigger-config';
-import { cronToNextFire, validateCronExpression } from './cron-utils';
 import { validateGitHubTriggerQueueConfig } from './github-trigger-config';
 import type { McpTokenData } from './mcp-token';
 import { clearTriggerPageCaches } from './trigger-cache';

@@ -1,4 +1,5 @@
 /** Authenticated trigger CRUD. Execution actions live in actions.ts. */
+import { cronToNextFire } from '@simple-agent-manager/cron';
 import {
   ResourceRequirementsValidationError,
   serializeResourceRequirementsInput,
@@ -33,7 +34,6 @@ import {
   toEmailTriggerConfig,
 } from '../../services/agent-email/trigger-config';
 import { buildCredentialAttributionForTriggers } from '../../services/credential-attribution-health';
-import { cronToNextFire } from '../../services/cron-utils';
 import {
   assertGitHubTriggerConfigExists,
   githubTriggerConfigUpdate,

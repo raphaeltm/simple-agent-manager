@@ -75,6 +75,9 @@ Also changed this week:
 - **The sign-in page waits for your instance** to say which sign-in options it has, instead of
   briefly showing a GitHub button that might not work.
 - **A task waiting on a usage limit is no longer failed as "stuck"** when the limit resets.
+- **A VM chat whose sleep saved no recovery point wakes again.** Every wake of such a chat used to
+  fail; the agent now starts fresh in a new workspace and rebuilds its context from the transcript.
+  → [Continue from the transcript](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot)
 
 ### For self-hosters & admins
 
