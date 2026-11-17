@@ -614,7 +614,7 @@
         {
           "name": "Configure Worker Secrets",
           "env": {
-            "AGENT_SIGN_IN_TRUST_FILE": "${{ steps.deploy_resources.outputs.secondary == 'true' && format('{0}/agent-sign-in-trust.json', runner.temp) || '' }}",
+            "AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET": "${{ steps.deploy_resources.outputs.secondary == 'true' && 'true' || '' }}",
             "CLOUDFLARE_API_TOKEN": "${{ secrets.CF_API_TOKEN }}",
             "CF_API_TOKEN": "${{ secrets.CF_API_TOKEN }}",
             "CF_ZONE_ID": "${{ steps.deploy_resources.outputs.secondary == 'true' && (steps.installation_zone.outputs.zone_id || 'unresolved-zone') || secrets.CF_ZONE_ID }}",
@@ -649,6 +649,7 @@
             "R2_SECRET_ACCESS_KEY": "${{ secrets.R2_SECRET_ACCESS_KEY }}",
             "SMOKE_TEST_AUTH_ENABLED": "${{ secrets.SMOKE_TEST_AUTH_ENABLED }}",
             "AGENT_SIGN_IN_TRUST": "${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.AGENT_SIGN_IN_TRUST || '' }}",
+            "SECONDARY_AGENT_SIGN_IN_TRUST": "${{ steps.deploy_resources.outputs.secondary == 'true' && steps.deploy_resources.outputs.installation == 'staging2' && secrets.AGENT_SIGN_IN_TRUST_STAGING2 || '' }}",
             "DEPLOY_SIGNING_PRIVATE_KEY": "${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.DEPLOY_SIGNING_PRIVATE_KEY || '' }}",
             "DEPLOY_SIGNING_PUBLIC_KEY": "${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.DEPLOY_SIGNING_PUBLIC_KEY || '' }}",
             "SEGMENT_WRITE_KEY": "${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.SEGMENT_WRITE_KEY || '' }}",
