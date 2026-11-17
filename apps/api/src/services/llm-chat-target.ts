@@ -7,7 +7,6 @@ import {
 import { classifyHost } from '@simple-agent-manager/worker-core';
 
 import type { Env } from '../env';
-import { resolveAdminSettingDetailsMany } from './admin-settings-resolution';
 import { DEFAULT_CONFIG_READ_TIMEOUT_MS } from './config-read-deadline';
 import { withDeadline } from './fetch-timeout';
 import {
@@ -15,6 +14,7 @@ import {
   type LlmPurpose,
   normalizeLlmBaseUrl,
 } from './llm-endpoint-settings';
+import { resolveLlmEndpointSettings } from './llm-endpoint-snapshot';
 import { outboundMaxRedirectsValue } from './outbound-fetch-settings';
 import {
   hasCloudflareAccountApi,
@@ -44,7 +44,7 @@ export async function resolveOpenAICompatibleTarget(
   if (!(await resolveLlmEndpointCapability(env))) return null;
   try {
     // Re-read the URL with its key/model under the same mutation generation.
-    const details = await resolveAdminSettingDetailsMany(env, [
+    const details = await resolveLlmEndpointSettings(env, [
       'llm.openAICompatible.baseUrl',
       'llm.openAICompatible.apiKey',
       'llm.openAICompatible.model',

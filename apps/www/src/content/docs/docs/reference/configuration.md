@@ -2136,8 +2136,10 @@ default (`services/llm-endpoint-settings.ts`).
 | `llm.openAICompatible.allowPrivateNetwork` | `false` | Explicitly allow an operator endpoint on a private host. Metadata/link-local hosts remain forbidden.                                                                                |
 | `aiProxy.directUpstreamEnabled`            | `false` | Enable platform and BYO AI proxy routes when no addressable Cloudflare AI Gateway exists. Requires a provider credential for platform calls. Ignored when a gateway is addressable. |
 
-Endpoint settings reuse the existing per-isolate settings cache (up to 60 seconds); a warm,
-unconfigured Cloudflare call performs no additional D1 or credential reads. Admin changes
+The endpoint capability reuses the existing per-isolate settings cache (up to 60 seconds); a warm,
+unconfigured Cloudflare call performs no additional D1 or credential reads. Configured URL/key
+pairs share one atomic D1 snapshot and TTL, so another isolate’s rotation cannot mix an old URL
+with a new key (`services/llm-endpoint-snapshot.ts:resolveLlmEndpointSettings`). Admin changes
 invalidate the local cache immediately. Unreadable configuration refuses the request instead of
 sending prompts to another provider: the Workers AI proxy returns 503, and title generation falls
 back to truncation. Title and diagnosis settings lookups receive at most one quarter of the

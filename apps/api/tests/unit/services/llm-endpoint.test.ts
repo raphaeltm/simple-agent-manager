@@ -1,7 +1,6 @@
-import * as capabilities from '../../../src/services/platform-capabilities';
-import { resolveOperatorModel } from '../../../src/durable-objects/sam-session/operator/model';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { resolveOperatorModel } from '../../../src/durable-objects/sam-session/operator/model';
 import type { Env } from '../../../src/env';
 import { createRequestScopedD1 } from '../../../src/lib/d1-session';
 import { forwardToWorkersAI } from '../../../src/routes/ai-proxy-upstream';
@@ -14,7 +13,9 @@ import { isAiProxyEnabled } from '../../../src/services/ai-proxy-availability';
 import { fetchWorkersAIChatCompletion } from '../../../src/services/ai-proxy-shared';
 import { complete } from '../../../src/services/debug-agent-tools';
 import { resolveOpenAICompatibleTarget } from '../../../src/services/llm-chat-target';
+import * as capabilities from '../../../src/services/platform-capabilities';
 import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
+import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 let fixture: ReturnType<typeof createAdminSettingsEnv>;
 let env: Env;
@@ -60,6 +61,66 @@ async function configure(baseUrl = 'https://llm.example.com/v1') {
 }
 
 describe('L12 endpoint routing through real settings storage/cache', () => {
+  it('refuses all-corrupt stored endpoint keys but accepts a deliberately keyless endpoint', async () => {
+    await configure();
+    fixture.sqlite.exec(
+      "UPDATE platform_credentials SET encrypted_token='bad-ciphertext',iv='bad-iv' WHERE provider='openai-compatible'"
+    );
+    invalidateAdminSettings(env);
+    expect((await forwardToWorkersAI(env, { messages: [] }, '@cf/model', '{}')).status).toBe(503);
+    expect(fetchMock).not.toHaveBeenCalled();
+    fixture.sqlite.exec("DELETE FROM platform_credentials WHERE provider='openai-compatible'");
+    invalidateAdminSettings(env);
+    expect((await forwardToWorkersAI(env, { messages: [] }, '@cf/model', '{}')).status).toBe(200);
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('Authorization')).toBeNull();
+  });
+
+  it('jointly caches URL and key across remote-isolate rotation even when credential caching is disabled', async () => {
+    vi.useFakeTimers();
+    env.PLATFORM_CONFIG_CACHE_MS = '0';
+    await configure();
+    const batch = vi.spyOn(env.DATABASE, 'batch');
+    const initial = await Promise.all(
+      Array.from({ length: 10 }, () => resolveOpenAICompatibleTarget(env, 'agent', 'model'))
+    );
+    expect(initial.every((target) => target?.apiKey === 'endpoint-secret')).toBe(true);
+    expect(batch).toHaveBeenCalledTimes(1);
+    const remoteEnv = { ...env, DATABASE: createSqliteD1(fixture.sqlite) };
+    await updateAdminSettings(remoteEnv, {
+      actorUserId: 'admin',
+      changes: [
+        { name: 'llm.openAICompatible.baseUrl', value: 'https://new-endpoint.example.org/v1' },
+        { name: 'llm.openAICompatible.apiKey', value: 'new-endpoint-secret' },
+      ],
+    });
+    expect(await resolveOpenAICompatibleTarget(env, 'agent', 'model')).toMatchObject({
+      baseUrl: 'https://llm.example.com/v1',
+      apiKey: 'endpoint-secret',
+    });
+    expect(batch).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(60_001);
+    expect(await resolveOpenAICompatibleTarget(env, 'agent', 'model')).toMatchObject({
+      baseUrl: 'https://new-endpoint.example.org/v1',
+      apiKey: 'new-endpoint-secret',
+    });
+    expect(batch).toHaveBeenCalledTimes(2);
+  });
+
+  it('skips a malformed unrelated credential and a corrupt endpoint candidate while retaining the valid endpoint key', async () => {
+    await configure();
+    // Copy a real production-shaped row, then corrupt only its ciphertext; its newer date
+    // places it before the usable key. An unrelated raw credential is never decrypted here.
+    fixture.sqlite
+      .exec(`INSERT INTO platform_credentials (id,credential_type,provider,credential_kind,label,encrypted_token,iv,is_enabled,created_by,created_at,updated_at)
+      SELECT 'bad-endpoint',credential_type,provider,credential_kind,label,'bad-ciphertext','bad-iv',is_enabled,created_by,created_at,'2099-01-01' FROM platform_credentials LIMIT 1;
+      INSERT INTO platform_credentials (id,credential_type,provider,credential_kind,label,encrypted_token,iv,is_enabled,created_by,created_at,updated_at)
+      SELECT 'unrelated-raw',credential_type,'hetzner',credential_kind,label,'raw-cloud-key','bad-iv',is_enabled,created_by,created_at,'2099-01-01' FROM platform_credentials LIMIT 1`);
+    invalidateAdminSettings(env);
+    expect(await resolveOpenAICompatibleTarget(env, 'agent', 'model')).toMatchObject({
+      apiKey: 'endpoint-secret',
+    });
+  });
+
   it('keeps URL and key from one generation when admin rotates between capability and settings reads', async () => {
     await configure();
     let release!: () => void, entered!: () => void;

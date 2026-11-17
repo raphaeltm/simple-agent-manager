@@ -1,4 +1,3 @@
-import { hasLocalAiCostMetering } from './ai-gateway-availability';
 /**
  * Per-user daily token budget tracking.
  *
@@ -7,7 +6,6 @@ import { hasLocalAiCostMetering } from './ai-gateway-availability';
  * environments, but it is no longer the primary counter because KV read-modify-
  * write updates are not atomic under concurrent requests.
  */
-
 import type { UserAiBudgetSettings } from '@simple-agent-manager/shared';
 import {
   DEFAULT_AI_PROXY_DAILY_INPUT_TOKEN_LIMIT,
@@ -17,6 +15,7 @@ import {
 import { log } from '@simple-agent-manager/worker-core';
 
 import { getUserBudgetSettings } from './ai-budget-settings';
+import { hasLocalAiCostMetering } from './ai-gateway-availability';
 import { checkMonthlyCostCap } from './ai-monthly-cost-cap';
 import type { AiProxyEnv } from './env';
 
