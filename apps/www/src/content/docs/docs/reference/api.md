@@ -1099,6 +1099,29 @@ names and limit windows. Returns `ProjectAccountsResponse`
   (`insights.accountsStallScanCap`) left older limit waits out.
 - `unavailable`: sections whose read failed this time (`runs`, `stalls`, `usage`).
 
+### `GET /api/projects/:projectId/insights/people`
+
+Insights · People for one project (`projectPeople`, `packages/operations/src/insights-people.ts`).
+Query `range` is `7d`, `30d` or `90d` (default `30d`; anything else is `400`). Requires project
+membership. Sent with `Cache-Control: private, no-store`: the body carries the titles of the inbox
+items the caller may open. Returns `ProjectPeopleResponse`
+(`packages/shared/src/types/insights-people.ts`):
+`{ projectId, range, since, until, waiting, reviewPickup, firstPerson, unavailable, generatedAt }`.
+
+- `waiting`: `{ groups, total, listed }`, open `question`/`review`/`task` asks right now (not
+  range-bound), longest wait first. Each group is
+  `{ key, kind: 'person' | 'unassigned', userId, name, you, open, blocking, oldestAgeMs, items }`;
+  `items` are the oldest `listed` (`insights.peopleWaitingItemsListed`), each
+  `{ ref, title, kind, blocking, claimed, createdAt, ageMs, canReassign }`. `ref` and `title` are
+  `null` for an item the caller could not open in the Inbox. `canReassign` is true only for a human
+  task the caller may hand on through `POST /api/projects/:projectId/inbox/items/:ref/reassign`.
+- `reviewPickup`: `{ state: 'recorded', samples, medianMs, p90Ms, waiting, recordedSince, truncated }`
+  or `{ state: 'not_recorded', waiting, recordedSince }`. From review request cycles the GitHub
+  webhook ingest records (`pull_request_review_requests`, `services/github-pull-request-reviews.ts`).
+  `truncated` means the scan cap (`insights.peopleReviewScanCap`) kept only the newest requests.
+- `firstPerson`: `{ closed, firstPerson, share }`, `share` `null` when nothing closed.
+- `unavailable`: sections whose read failed this time (`waiting`, `reviews`, `first_person`).
+
 ### `POST /api/projects/:id/tasks`
 
 Create a task record.

@@ -1,14 +1,14 @@
 ---
 title: Insights
-description: See how work moves from idea to merged in a project — merge times, CI on the first try, why runs stop, flaky checks, the ideas that have waited longest, and which accounts carried the work.
+description: See how work moves from idea to merged in a project — merge times, CI on the first try, why runs stop, flaky checks, the ideas that have waited longest, which accounts carried the work, and where work waits on people.
 ---
 
 **Insights** is a project page, in the project's navigation on desktop and on a phone. It shows how
 work moves from idea to merged pull request, over the last **7**, **30** or **90 days** (the range
 control at the top right; the range stays in the page's address, so a link keeps it).
 
-It has four tabs. **Flow** and **Accounts** are described below. **Agent setups** and **People** are
-coming; until then each says what it will show.
+It has four tabs. **Flow**, **Accounts** and **People** are described below. **Agent setups** is
+coming; until then it says what it will show.
 
 Every number is worked out from what SAM already records about tasks, ideas, pull requests and
 their checks. Nothing is estimated: when SAM has no record for something, the page says so.
@@ -115,6 +115,58 @@ its own length. Another member's personal accounts contribute their runs' waits,
 provider windows they reported, as on the project's other limit views. If a section can't be read,
 the tab says so rather than showing it empty.
 
+## People
+
+Where work is waiting on people right now, and how quickly people pick it up. It never counts how
+much anyone did: there is no per-person tally of answers, reviews or merges anywhere on the tab.
+
+### The four figures
+
+- **Waiting on people now**: open questions, review requests and human tasks agents filed in the
+  Inbox. System error items are left out.
+- **Longest wait**: how long the oldest of them has been open.
+- **Review pickup, median**: on the project's GitHub pull requests, the time from a review being
+  requested to the first review. Per project, never per reviewer.
+- **Answered by the first person asked**: of the questions and tasks first given to one person and
+  closed in the range, the share that person answered without handing it on.
+
+### Waiting on
+
+Open items grouped by who they wait on, the longest wait first: each person, then **Not taken
+yet** for team tasks nobody has taken. A team task one member took waits on that member. Each
+group says how many are open, how old the oldest is and how many have an agent blocked on them, and
+lists the oldest ten.
+
+You see the title of an item only if you could open it in your own Inbox: your own items, team
+tasks, and tasks your runs filed. Other people's items show only their kind and age (for example
+**Question for someone else**).
+
+**Reassign** appears on a human task you are allowed to hand on: one assigned to you, one your run
+filed, or a team task nobody has taken, if your project role can change tasks. Choose a member or
+**Back to the team**. It is the same action as handing a task on from the Inbox, with the same
+checks: the new person must be an active member of the project. Questions cannot be reassigned.
+
+### Review pickup
+
+The median time from a review request to the first review, the time 9 in 10 requests were picked
+up within, and how many requests made in the range are still waiting. SAM records review requests
+from the GitHub App's webhooks, so pickup starts from when this was first recorded for the project
+(the panel says since when); earlier requests read **Not recorded**, never estimated.
+
+- A request to a person ends at that person's first review (a comment review counts).
+- A request to a team ends at the first review by anyone except the pull request's author.
+- A request that is withdrawn is not a pickup and is left out. Requests to and reviews by bots are
+  ignored.
+- Asking the same person again after they reviewed starts a new request.
+
+### Answered by the first person asked
+
+Counts questions and human tasks that were answered or marked done in the range. An item first
+given to the team is left out, since no single person was asked. An item counts as answered by the
+first person when it was never handed on and the person it was given to answered it. Handing a task
+on, including the automatic hand-back to the team when its assignee leaves the project, means it
+was not.
+
 ## On the Overview
 
 The [Project Overview](/docs/guides/project-overview/) shows a small **This week** pane with three of
@@ -125,6 +177,7 @@ whichever affected more work.
 ## For administrators
 
 How many ideas "idea to merged" looks at, how many flaky checks and waiting ideas are listed, the
-rework window, how many limit waits the Accounts tab examines and how many stalls it lists are
-runtime settings under **Admin → Settings → Operations** (`insights.flow*`, `insights.accounts*`).
+rework window, how many limit waits the Accounts tab examines and how many stalls it lists, and how
+many items People lists per person and how many review requests it examines are runtime settings
+under **Admin → Settings → Operations** (`insights.flow*`, `insights.accounts*`, `insights.people*`).
 See [Admin settings](/docs/guides/admin-settings/).
