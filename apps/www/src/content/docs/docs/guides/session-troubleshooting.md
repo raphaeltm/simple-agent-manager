@@ -52,6 +52,9 @@ your work is safe and what to do next. Everything here applies to both
   transcript is safe. → [Send a message to try again](#a-snapshot-could-not-be-fully-restored)
 - **"SAM restored this sleeping conversation from a degraded snapshot…"** (VM). The chat is back,
   but some unpushed work may not be. → [Check what's missing](#a-snapshot-could-not-be-fully-restored)
+- **"SAM could not restore this conversation's workspace: its last sleep saved no snapshot or Git
+  recovery point."** (VM). The chat is back in a fresh workspace, without the earlier files.
+  → [Continue from the transcript](#sam-could-not-save-a-complete-snapshot)
 - **"SAM is putting this session to sleep without saving all of its files."** (VM). Snapshots kept failing,
   so SAM slept the chat on a Git recovery point. → [See what was kept](#sam-could-not-save-a-complete-snapshot)
 - **“SAM is terminating this idle workspace after repeated snapshot failures.”** The transcript and
@@ -426,8 +429,10 @@ filesystem recovery point could be verified. SAM stops the runtime to avoid ongo
 charges, keeps this conversation and any successful backups, and explains the degraded recovery
 in the chat. Unpublished files, uncommitted work, installed tools and saved agent state may be lost.
 Send a message to continue in a fresh workspace; the agent uses the transcript to reconstruct
-missing work. It cannot promise an exact restore. Instant sessions also use this fresh continuation
-after repeated snapshot failures.
+missing work. It cannot promise an exact restore. On a VM, the chat then says SAM **could not
+restore this conversation's workspace** and that the agent is starting fresh in a new checkout.
+Check GitHub for anything the agent already pushed before asking it to redo work. Instant sessions
+also use this fresh continuation after repeated snapshot failures.
 
 ## SAM could not finish putting the session to sleep
 

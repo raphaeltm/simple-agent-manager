@@ -1,0 +1,11 @@
+{
+  "comment": "Cross-boundary contract (.claude/rules/23) for waking a chat whose sleep fell back to transcript-only. controlPlaneRestoreResponse is what GET /api/workspaces/:id/session-snapshot/restore answers (sessionSnapshotRestoreResponse in apps/api/src/services/session-snapshot-restore-response.ts). vmAgentRestoreResponse is what the vm-agent's restore handler answers the control plane after reading it (restoreSessionSnapshot in packages/vm-agent/internal/server/session_snapshot_restore.go). The VM wake bootstrap (snapshotRestoreOutcome in apps/api/src/services/agent-session-bootstrap.ts) must start the agent fresh on it. Readers: apps/api/tests/integration/session-sleep-bounded-fallback.test.ts, apps/api/tests/unit/durable-objects/task-runner-transcript-only-wake.test.ts, packages/vm-agent/internal/server/session_snapshot_restore_contract_test.go.",
+  "controlPlaneRestoreResponse": {
+    "available": false,
+    "reason": "transcript_only_sleep_fallback"
+  },
+  "vmAgentRestoreResponse": {
+    "status": "transcript-replay",
+    "reason": "transcript_only_sleep_fallback"
+  }
+}
