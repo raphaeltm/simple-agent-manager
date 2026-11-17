@@ -34,20 +34,20 @@ credentialName` and credential-id account keys (`cred:<id>`).
 
 ## Implementation checklist
 
-- [ ] `phaseDurationStats`: `phases` optional (omitted = every phase for the skill/profile)
-- [ ] `runReceipt` option to skip the account-name read (agent view never shows it) so receipt +
+- [x] `phaseDurationStats`: `phases` optional (omitted = every phase for the skill/profile)
+- [x] `runReceipt` option to skip the account-name read (agent view never shows it) so receipt +
       rate-limit RPC stays ≤ 8
-- [ ] `packages/operations/src/insights-agent.ts`: `projectInsights(ctx, input)` dispatch + numbers-only
+- [x] `packages/operations/src/insights-agent.ts`: `projectInsights(ctx, input)` dispatch + numbers-only
       projections per method; `projectPhaseStats` authorizes then calls the core
-- [ ] Catalog op `sam_project_insights` in `insights-operations.ts` (Connector lists it)
-- [ ] Settings `insights.agentToolCallsPerWindow`, `insights.agentToolWindowSeconds` (typed admin
+- [x] Catalog op `sam_project_insights` in `insights-operations.ts` (Connector lists it)
+- [x] Settings `insights.agentToolCallsPerWindow`, `insights.agentToolWindowSeconds` (typed admin
       runtime settings, Operations group)
-- [ ] sam-mcp: tool definition `project_insights` (method arg), handler: validate with the op
+- [x] sam-mcp: tool definition `project_insights` (method arg), handler: validate with the op
       schema → per-session rate limit (McpRateCounter, key `project_insights:<chatSession|agentSession|workspace>`)
       → `runWorkspaceOperation`
-- [ ] Tests: project-scope attack + owner control (real SQL), rate limit at-limit + window rollover,
+- [x] Tests: project-scope attack + owner control (real SQL), rate limit at-limit + window rollover,
       contract test through the real MCP route per method, projection strips text fields
-- [ ] Docs: MCP/API reference, server instructions only if needed, tool description short
+- [x] Docs: MCP/API reference, server instructions only if needed, tool description short
 - [ ] Staging: every method against real data, cross-project rejection, rate limit
 
 ## Acceptance criteria
@@ -59,3 +59,12 @@ credentialName` and credential-id account keys (`cred:<id>`).
 - Limit and window are admin runtime settings.
 - Each method stays within its surface's round-trip budget (+1 rate-limit RPC), stated in the PR.
 - `sam_project_insights` is listed by the Connector from the same definition.
+
+## Notes
+
+- Review (2026-11-17): security M2 found the shared receipt showed spend when the run's account
+  was unrecorded; fixed with `receiptSpendVisible` (fail closed). Docs edit had dropped two
+  headings; restored. Projections now copy fields one by one (no spreads).
+- Deferred by design: the per-chat budget can be multiplied by new chats (security M1); new chats
+  come only from dispatch/triggers and every call also spends the task-keyed /mcp HTTP limit.
+- The Connector path spends the per-user `connector.readRateLimitPerMinute` budget, not the chat one.
