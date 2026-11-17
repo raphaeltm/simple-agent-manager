@@ -46,6 +46,7 @@ export default defineConfig({
             { slug: 'docs/guides/chat-features' },
             { slug: 'docs/guides/project-overview' },
             { slug: 'docs/guides/insights' },
+            { slug: 'docs/guides/agent-context' },
             { slug: 'docs/guides/ideas' },
             { slug: 'docs/guides/collaboration' },
             { slug: 'docs/guides/account-map' },

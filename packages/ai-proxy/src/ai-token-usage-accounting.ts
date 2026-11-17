@@ -1,6 +1,8 @@
 import { log } from '@simple-agent-manager/worker-core';
 import { maybeJsonRecord } from '@simple-agent-manager/worker-core';
 
+import { findPricedModel, priceModelUsageUsd } from './ai-cost-pricing';
+import { hasLocalAiCostMetering } from './ai-gateway-availability';
 import {
   type AiProviderUsageAttribution,
   incrementProviderUsage,
@@ -19,6 +21,7 @@ export interface ExtractedTokenUsage {
   cacheWriteTokens?: number;
   /** Reasoning tokens reported separately (OpenAI); also counted in `outputTokens`. */
   reasoningTokens?: number;
+  outputBytes?: number;
 }
 
 /**
@@ -38,6 +41,9 @@ export interface TokenUsageAccountingOptions {
   userId: string;
   format: TokenUsageFormat;
   fallbackInputTokens?: number;
+  /** Platform-billed catalog model; BYO and custom endpoints leave this unset. */
+  costModelId?: string;
+  estimateMissingUsage?: boolean;
   provider?: AiProviderUsageAttribution;
   executionCtx?: Pick<ExecutionContext, 'waitUntil'>;
   /**
@@ -56,6 +62,8 @@ export async function accountTokenUsageFromJson(
   options: TokenUsageAccountingOptions
 ): Promise<void> {
   const usage = extractJsonTokenUsage(payload, options.format);
+  if (options.estimateMissingUsage && usage.outputTokens === undefined)
+    usage.outputBytes = jsonOutputByteLength(payload);
   await incrementExtractedUsage(usage, options);
 }
 
@@ -64,8 +72,8 @@ export function accountTokenUsageFromStream(
   options: TokenUsageAccountingOptions
 ): void {
   scheduleTokenAccounting(
-    collectStreamTokenUsage(stream, options.format).then((usage) =>
-      incrementExtractedUsage(usage, options)
+    collectStreamTokenUsage(stream, options.format, options.estimateMissingUsage === true).then(
+      (usage) => incrementExtractedUsage(usage, options)
     ),
     options
   );
@@ -99,7 +107,10 @@ export async function attachTokenUsageAccounting(
   }
 
   try {
-    await accountTokenUsageFromJson(payload, { ...options, fallbackInputTokens: undefined });
+    await accountTokenUsageFromJson(
+      payload,
+      options.estimateMissingUsage ? options : { ...options, fallbackInputTokens: undefined }
+    );
   } catch (err) {
     log.warn('ai_proxy.token_usage_increment_failed', {
       userId: options.userId,
@@ -199,12 +210,13 @@ export function estimateInputTokensFromMessages(messages: unknown): number {
 
 export async function collectStreamTokenUsage(
   stream: ReadableStream<Uint8Array>,
-  format: TokenUsageFormat
+  format: TokenUsageFormat,
+  estimate = false
 ): Promise<ExtractedTokenUsage> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  const usage: ExtractedTokenUsage = {};
+  const usage: ExtractedTokenUsage = estimate ? { outputBytes: 0 } : {};
 
   try {
     let keepReading = true;
@@ -231,18 +243,41 @@ async function incrementExtractedUsage(
   options: TokenUsageAccountingOptions
 ): Promise<void> {
   const inputTokens = usage.inputTokens ?? options.fallbackInputTokens ?? 0;
-  const outputTokens = usage.outputTokens ?? 0;
+  const outputTokens =
+    usage.outputTokens ??
+    (options.estimateMissingUsage ? Math.ceil((usage.outputBytes ?? 0) / 3) : 0);
   if (inputTokens <= 0 && outputTokens <= 0) return;
 
   await incrementTokenUsage(options.env.KV, options.userId, inputTokens, outputTokens, options.env);
-  if (options.provider) {
+  const model =
+    options.costModelId && hasLocalAiCostMetering(options.env)
+      ? findPricedModel(options.costModelId)
+      : null;
+  const provider =
+    options.provider ??
+    (model
+      ? { providerId: model.provider, providerName: model.provider, dialect: options.format }
+      : undefined);
+  if (provider) {
+    const cached = usage.cacheReadTokens ?? 0;
+    const writes = usage.cacheWriteTokens ?? 0;
+    const totalInput = options.format === 'anthropic' ? inputTokens + cached + writes : inputTokens;
+    const costUsd = model
+      ? priceModelUsageUsd(model, {
+          inputTokens: totalInput,
+          outputTokens,
+          cachedInputTokens: cached,
+          cacheWriteInputTokens: writes,
+        })
+      : 0;
     await incrementProviderUsage(
       options.env.KV,
       options.userId,
-      options.provider,
+      provider,
       inputTokens,
       outputTokens,
-      options.env
+      options.env,
+      ...(options.costModelId ? ([costUsd] as const) : [])
     );
   }
   // Budget accounting is the billing control and runs first; run usage is telemetry and must
@@ -254,7 +289,10 @@ async function incrementExtractedUsage(
  * Hand the measured usage to `onMeasuredUsage` outside the response path: inside the request's
  * `waitUntil` when there is one, so a slow D1 write never adds latency to a proxied response.
  */
-function scheduleMeasuredUsage(usage: ExtractedTokenUsage, options: TokenUsageAccountingOptions): void {
+function scheduleMeasuredUsage(
+  usage: ExtractedTokenUsage,
+  options: TokenUsageAccountingOptions
+): void {
   if (!options.onMeasuredUsage) return;
   const pending = recordMeasuredUsage(usage, options);
   try {
@@ -337,6 +375,41 @@ function applyStreamUsage(
   usage.outputTokens = jsonUsage.outputTokens ?? usage.outputTokens;
   usage.cacheReadTokens = jsonUsage.cacheReadTokens ?? usage.cacheReadTokens;
   usage.reasoningTokens = jsonUsage.reasoningTokens ?? usage.reasoningTokens;
+  if (usage.outputBytes !== undefined) {
+    usage.outputBytes += choicesOutputByteLength(record.choices, 'delta');
+    if (
+      typeof record.delta === 'string' &&
+      [
+        'response.output_text.delta',
+        'response.function_call_arguments.delta',
+        'response.reasoning_text.delta',
+      ].includes(String(record.type))
+    )
+      usage.outputBytes += utf8ByteLength(record.delta);
+  }
+}
+
+const UTF8 = new TextEncoder();
+function utf8ByteLength(text: string): number {
+  return UTF8.encode(text).byteLength;
+}
+/** Bytes of generated output in a chat completion's choices (`message`) or chunk (`delta`). */
+function choicesOutputByteLength(choices: unknown, field: 'message' | 'delta'): number {
+  if (!Array.isArray(choices)) return 0;
+  let bytes = 0;
+  for (const choice of choices) {
+    const part = maybeJsonRecord(maybeJsonRecord(choice)?.[field]);
+    if (!part) continue;
+    for (const key of ['content', 'reasoning_content', 'reasoning'] as const) {
+      if (typeof part[key] === 'string') bytes += utf8ByteLength(part[key]);
+    }
+    if (Array.isArray(part.tool_calls)) bytes += utf8ByteLength(JSON.stringify(part.tool_calls));
+  }
+  return bytes;
+}
+
+function jsonOutputByteLength(payload: unknown): number {
+  return choicesOutputByteLength(maybeJsonRecord(payload)?.choices, 'message');
 }
 
 function isStreamingResponse(response: Response): boolean {

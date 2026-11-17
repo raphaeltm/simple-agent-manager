@@ -32,10 +32,7 @@ type OpenAIProxyCredential = AIProxyCredentialAttribution & {
 };
 
 export function buildProxyMetadata(
-  auth: Pick<
-    AIProxyRequestContext,
-    'userId' | 'workspaceId' | 'projectId' | 'chatSessionId'
-  >,
+  auth: Pick<AIProxyRequestContext, 'userId' | 'workspaceId' | 'projectId' | 'chatSessionId'>,
   body: Record<string, unknown>,
   modelId: string
 ): string {
@@ -147,7 +144,8 @@ export function accountingResponse(
   userId: string,
   estimatedInputTokens: number,
   /** Insights run usage hook (`proxyRunUsageRecorder`); receives measured usage only. */
-  onMeasuredUsage?: (usage: MeasuredTokenUsage) => Promise<void>
+  onMeasuredUsage?: (usage: MeasuredTokenUsage) => Promise<void>,
+  metering: { costModelId?: string; estimateMissingUsage?: boolean } = {}
 ): Promise<Response> {
   let executionCtx: Pick<ExecutionContext, 'waitUntil'> | undefined;
   try {
@@ -162,5 +160,6 @@ export function accountingResponse(
     fallbackInputTokens: estimatedInputTokens,
     executionCtx,
     onMeasuredUsage,
+    ...metering,
   });
 }

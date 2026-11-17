@@ -2,9 +2,10 @@ import { DEFAULT_DEBUG_AGENT_DAILY_TOKEN_LIMIT } from '@simple-agent-manager/sha
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { platformSettings } from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { runDebugDiagnosis } from '../../../src/services/debug-agent';
-import { createSqliteD1 } from '../../helpers/sqlite-d1';
+import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 function createKv(): KVNamespace {
   const values = new Map<string, string>();
@@ -21,6 +22,7 @@ describe('runDebugDiagnosis vertical slice', () => {
 
   it('redacts realistic observability evidence before the next model turn and persists output', async () => {
     const main = new Database(':memory:');
+    createSchemaTables(main, [platformSettings]);
     main.exec(`
       CREATE TABLE debug_diagnoses (
         id TEXT PRIMARY KEY, error_id TEXT, start_time TEXT NOT NULL, end_time TEXT NOT NULL,
@@ -163,6 +165,7 @@ describe('runDebugDiagnosis vertical slice', () => {
 
   it('allows automated diagnosis to continue past the old two-turn token ceiling', async () => {
     const main = new Database(':memory:');
+    createSchemaTables(main, [platformSettings]);
     main.exec(`
       CREATE TABLE debug_diagnoses (
         id TEXT PRIMARY KEY, error_id TEXT, start_time TEXT NOT NULL, end_time TEXT NOT NULL,
