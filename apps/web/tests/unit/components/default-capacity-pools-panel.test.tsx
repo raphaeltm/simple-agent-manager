@@ -215,6 +215,21 @@ describe('DefaultCapacityPoolsPanel', () => {
       ).toHaveTextContent('keeps 5 GB for itself');
     });
 
+    it('shows the pool state warning instead when the pool cannot be used at all', async () => {
+      const body = withInstallationSettings({ minVcpu: 2, minMemoryGb: 8 }, 1024);
+      body.effective = { ...body.effective!, effectiveState: 'catalog-unavailable' };
+      mocks.fetchUserDefaultCapacityPools.mockResolvedValue(body);
+
+      renderPanel({ scope: 'user' });
+
+      expect(
+        await screen.findByText("SAM couldn't read the provider's machine list. Try Refresh.")
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText(/No allowed machine can run a default workspace/)
+      ).not.toBeInTheDocument();
+    });
+
     it('stays quiet when an allowed machine fits the installation default', async () => {
       mocks.fetchUserDefaultCapacityPools.mockResolvedValue(
         withInstallationSettings({ minVcpu: 2, minMemoryGb: 4 }, 1024)

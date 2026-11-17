@@ -1558,17 +1558,24 @@ describe('ProjectChat profile setup wizard', () => {
     renderProjectChat();
 
     await waitFor(() => expect(screen.getByText('Ready to chat')).toBeInTheDocument());
-    expect(screen.getByPlaceholderText('Create a profile to start chatting...')).toBeDisabled();
     expect(
-      screen.getByText(/One click creates a profile named "Claude Code Chat"/)
+      screen.getByPlaceholderText('Choose Start chatting above to write your first message...')
+    ).toBeDisabled();
+    // The copy names the runtime the click will use, once the installation has answered.
+    expect(
+      await screen.findByText(
+        'One click creates a profile named "Claude Code Chat" that runs in an Instant container. You can change it later.'
+      )
     ).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: /Start chatting with Claude Code/ })
     ).toBeInTheDocument();
     expect(screen.queryByText(/Using/)).not.toBeInTheDocument();
     // Nothing is created until the person clicks (fresh installs never get seeded profiles).
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 50));
+    // Liveness: every read the page makes has answered, so an auto-create would have run.
+    await waitFor(() => {
+      expect(mocks.getInstantRuntimeEnabled).toHaveBeenCalled();
+      expect(mocks.listAgentProfiles).toHaveBeenCalled();
     });
     expect(mocks.createAgentProfile).not.toHaveBeenCalled();
 
@@ -1713,9 +1720,12 @@ describe('ProjectChat profile setup wizard', () => {
     );
     expect(screen.queryByText('Ready to chat')).not.toBeInTheDocument();
     expect(screen.queryByText('What kind of work?')).not.toBeInTheDocument();
-    expect(
-      await screen.findByPlaceholderText('Describe what you want the agent to do...')
-    ).not.toBeDisabled();
+    const composer = await screen.findByPlaceholderText(
+      'Describe what you want the agent to do...'
+    );
+    expect(composer).not.toBeDisabled();
+    // The gate's button unmounted under the focus; the box has it now.
+    await waitFor(() => expect(composer).toHaveFocus());
   });
 
   it('one click creates a Cloud VM chat profile where Instant is unavailable', async () => {
@@ -1747,7 +1757,9 @@ describe('ProjectChat profile setup wizard', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Profile limit reached');
     expect(mocks.createAgentProfile).toHaveBeenCalledTimes(1);
     expect(screen.getByText('Ready to chat')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Create a profile to start chatting...')).toBeDisabled();
+    expect(
+      screen.getByPlaceholderText('Choose Start chatting above to write your first message...')
+    ).toBeDisabled();
   });
 
   it('disables the Instant card in the wizard where Instant is unavailable', async () => {
@@ -1760,8 +1772,103 @@ describe('ProjectChat profile setup wizard', () => {
 
     const instant = screen.getByRole('button', { name: /Instant container/i });
     await waitFor(() => expect(instant).toBeDisabled());
-    expect(instant).toHaveTextContent(/Not available on this installation/);
+    expect(instant).toHaveAccessibleDescription(
+      'Instant is not available on this installation: it needs Cloudflare Containers.'
+    );
     expect(screen.getByRole('button', { name: /Cloud VM/i })).not.toBeDisabled();
+  });
+
+  it('learns Instant availability live in a wizard opened before the installation answered', async () => {
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    let answer: (enabled: boolean) => void = () => {};
+    mocks.getInstantRuntimeEnabled.mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        answer = resolve;
+      })
+    );
+    renderProjectChat();
+
+    await openProfileWizardFromGate();
+    chooseWorkType(/Chat and explore/i);
+    const instant = screen.getByRole('button', { name: /Instant container/i });
+    // Unknown is not available: Instant cannot be picked before the answer.
+    expect(instant).toBeDisabled();
+    expect(instant).toHaveAccessibleDescription(
+      'Checking whether this installation can run Instant…'
+    );
+
+    await act(async () => answer(false));
+    await waitFor(() =>
+      expect(instant).toHaveAccessibleDescription(
+        'Instant is not available on this installation: it needs Cloudflare Containers.'
+      )
+    );
+    expect(instant).toBeDisabled();
+  });
+
+  it('enables Instant in the wizard once the installation says it can run it', async () => {
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    let answer: (enabled: boolean) => void = () => {};
+    mocks.getInstantRuntimeEnabled.mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        answer = resolve;
+      })
+    );
+    renderProjectChat();
+
+    await openProfileWizardFromGate();
+    chooseWorkType(/Chat and explore/i);
+    const instant = screen.getByRole('button', { name: /Instant container/i });
+    expect(instant).toBeDisabled();
+    await act(async () => answer(true));
+    await waitFor(() => expect(instant).not.toBeDisabled());
+    expect(instant).not.toHaveAttribute('aria-describedby');
+  });
+
+  it('a click before the installation answers waits for it and then picks the runtime', async () => {
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    let answer: (enabled: boolean) => void = () => {};
+    mocks.getInstantRuntimeEnabled.mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        answer = resolve;
+      })
+    );
+    renderProjectChat();
+
+    // Runtime unknown: the copy does not guess it.
+    expect(
+      await screen.findByText(
+        'One click creates a profile named "Claude Code Chat". You can change it later.'
+      )
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Start chatting with Claude Code/ }));
+    expect(await screen.findByRole('button', { name: /Creating profile/ })).toBeDisabled();
+    expect(mocks.createAgentProfile).not.toHaveBeenCalled();
+
+    await act(async () => answer(false));
+    await waitFor(() => expect(mocks.createAgentProfile).toHaveBeenCalledTimes(1));
+    expect(mocks.createAgentProfile).toHaveBeenCalledWith(
+      PROJECT_ID,
+      expect.objectContaining({ runtime: 'vm' })
+    );
+  });
+
+  it('a double click creates one profile', async () => {
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    renderProjectChat();
+    const quickStart = await screen.findByRole('button', {
+      name: /Start chatting with Claude Code/,
+    });
+    await screen.findByText(/that runs in an Instant container/);
+
+    fireEvent.click(quickStart);
+    fireEvent.click(quickStart);
+
+    await waitFor(() => expect(mocks.createAgentProfile).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mocks.createAgentProfile).toHaveBeenCalledTimes(1);
   });
 
   it('gates multiple agents behind the setup wizard and creates a profile', async () => {

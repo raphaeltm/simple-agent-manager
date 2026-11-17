@@ -438,6 +438,23 @@ describe('default capacity pool routes', () => {
     expect(body.placementSettings.hostMemoryReserveMb).toBe(2048);
   });
 
+  it.each([
+    [{ VM_AGENT_MEMORY_RESERVE_MB: '1536' }, 1536],
+    [{ TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB: '3072', VM_AGENT_MEMORY_RESERVE_MB: '1536' }, 3072],
+    [{ TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB: 'not-a-number' }, 1024],
+  ])('resolves the reported host reserve from %o as placement does', async (vars, expected) => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+
+    const res = await createApp().request('/api/capacity-pools/defaults', {}, {
+      ...env,
+      ...vars,
+    } as Env);
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).placementSettings.hostMemoryReserveMb).toBe(expected);
+  });
+
   it('keeps a zero-active user default visible and effective as configured-empty', async () => {
     const { sqlite, env } = createEnv();
     seedUser(sqlite, 'user-1');

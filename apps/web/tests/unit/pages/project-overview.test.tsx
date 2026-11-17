@@ -130,6 +130,12 @@ function route(path: string, method: string): Response {
   if (method === 'POST' && path === `/api/projects/${PROJECT_ID}/tasks/submit`) {
     return json(submitResponse.status, submitResponse.body);
   }
+  if (method === 'POST' && path === `/api/projects/${PROJECT_ID}/agent-profiles`) {
+    // The server now has the profile, so later list reads return it.
+    const created = { ...PROFILE, id: 'prof-created', name: 'Claude Code Chat' };
+    profileItems = [created];
+    return json(201, created);
+  }
   if (method === 'PATCH' && path === `/api/projects/${PROJECT_ID}/triggers/trg-deps`) {
     return json(200, { ...FAILING_TRIGGER, status: 'active' });
   }
@@ -838,6 +844,35 @@ describe('Project Overview', () => {
       profileItems = [];
       renderOverview();
       expect(await screen.findByText(NO_PROFILES_GATE)).toBeInTheDocument();
+    });
+
+    it('the task box creates the one chat profile on one click, and only then', async () => {
+      profileItems = [];
+      extraRoutes['/api/config/instant-runtime'] = { enabled: true };
+      renderOverview();
+
+      const quickStart = await screen.findByRole('button', {
+        name: /Start chatting with Claude Code/,
+      });
+      await screen.findByText(/that runs in an Instant container/);
+      const posts = () =>
+        recorded.filter(
+          (call) =>
+            call.method === 'POST' && call.path === `/api/projects/${PROJECT_ID}/agent-profiles`
+        );
+      expect(posts()).toHaveLength(0);
+
+      fireEvent.click(quickStart);
+
+      await screen.findByText('Claude Code Chat', { selector: 'button *' });
+      expect(posts()).toHaveLength(1);
+      expect(posts()[0]?.body).toMatchObject({
+        name: 'Claude Code Chat',
+        agentType: 'claude-code',
+        runtime: 'cf-container',
+        taskMode: 'conversation',
+      });
+      expect(screen.queryByText(NO_PROFILES_GATE)).not.toBeInTheDocument();
     });
   });
 });

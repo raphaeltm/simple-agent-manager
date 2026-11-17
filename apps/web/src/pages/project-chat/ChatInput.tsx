@@ -43,9 +43,10 @@ import {
 } from '../../components/resource-requirements';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import type { UseProfilePickerResult } from '../../hooks/useProfilePicker';
-import { getComposerPlaceholder, soleAgentQuickStart } from './profileWizardHelpers';
+import { getComposerPlaceholder } from './profileWizardHelpers';
 import { NoAgentsNotice, NoProfilesGate, ProfileWizardPanel } from './ProfileWizardPanel';
 import type { ProfileSheetState, ProfileWizardState } from './useProfileChoice';
+import { useSoleAgentQuickStart } from './useSoleAgentQuickStart';
 
 interface ChatAttachmentDisplay {
   file: File;
@@ -188,9 +189,18 @@ export function ChatInput({
   const inputDisabled =
     noAgents || needsProfileBeforeSubmit || profileWizard.open || Boolean(profilesLoading);
   const showToolbar = !inputDisabled && agentProfiles.length > 0;
+  const quickStart = useSoleAgentQuickStart({
+    agents,
+    suggestProfileName,
+    onCreate: onCreateDefaultChatProfile,
+    instantAvailable: profileWizard.instantAvailable,
+    inputDisabled,
+    containerRef,
+  });
   const composerPlaceholder = getComposerPlaceholder({
     noAgents,
     needsProfileBeforeSubmit,
+    quickStartOffered: Boolean(quickStart),
     wizardOpen: profileWizard.open,
     placeholder,
   });
@@ -330,10 +340,7 @@ export function ChatInput({
       {noAgents && <NoAgentsNotice projectId={projectId} />}
 
       {needsProfileBeforeSubmit && !profileWizard.open && (
-        <NoProfilesGate
-          onStartWizard={onOpenProfileWizard}
-          quickStart={soleAgentQuickStart(agents, suggestProfileName, onCreateDefaultChatProfile)}
-        />
+        <NoProfilesGate onStartWizard={onOpenProfileWizard} quickStart={quickStart} />
       )}
 
       {profileWizard.open && (

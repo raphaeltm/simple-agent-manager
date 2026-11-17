@@ -29,6 +29,7 @@ export function defaultWorkspaceFitWarning(
   const allowed = groups.flatMap((group) => group.rows.filter((row) => row.allowed));
   if (allowed.length === 0) return null;
   const neededMemoryMb = defaults.minMemoryGb * 1024;
+  // A machine of unknown size counts as a fit: say nothing rather than warn about a guess.
   const fits = allowed.some(
     ({ vcpu, ramGb }) =>
       vcpu === null ||
@@ -43,6 +44,6 @@ export function defaultWorkspaceFitWarning(
     `${formatOfferingNumber(defaults.minMemoryGb, 'GB')} of memory, and each machine keeps ` +
     `${formatOfferingNumber(reserveMb / 1024, 'GB')} for itself. Allow a machine with at least ` +
     `${formatOfferingNumber(defaults.minVcpu, '')} vCPU and ${formatOfferingNumber(totalGb, 'GB')} ` +
-    `of memory, or chats and tasks that use the defaults will fail to start.`
+    `of memory, or workspaces this pool starts at the default size will fail to start.`
   );
 }

@@ -1,5 +1,4 @@
 import type {
-  AgentInfo,
   AgentProfileRuntime,
   TaskMode,
   VMSize,
@@ -64,37 +63,30 @@ export interface NoProfilesQuickStart {
   agentName: string;
   /** Name of the profile the click creates, shown so nothing is created invisibly. */
   profileName: string;
+  /** Where it will run ("in an Instant container", "on a Cloud VM"), once that is known. */
+  runtimeLabel: string | null;
   onCreate: () => Promise<unknown>;
-}
-
-/** The quick start for a project with exactly one configured agent, otherwise none. */
-export function soleAgentQuickStart(
-  agents: AgentInfo[],
-  suggestProfileName: (agentType: string | null, workType: TaskMode | null) => string,
-  onCreate: (() => Promise<unknown>) | undefined
-): NoProfilesQuickStart | undefined {
-  const soleAgent = agents.length === 1 ? agents[0] : undefined;
-  if (!soleAgent || !onCreate) return undefined;
-  return {
-    agentName: soleAgent.name,
-    profileName: suggestProfileName(soleAgent.id, 'conversation'),
-    onCreate,
-  };
 }
 
 /** The composer's placeholder while it waits for an agent or a profile. */
 export function getComposerPlaceholder({
   noAgents,
   needsProfileBeforeSubmit,
+  quickStartOffered,
   wizardOpen,
   placeholder,
 }: Readonly<{
   noAgents: boolean;
   needsProfileBeforeSubmit: boolean;
+  /** The gate above offers the one-click profile, so point at it rather than at a wizard. */
+  quickStartOffered: boolean;
   wizardOpen: boolean;
   placeholder: string;
 }>) {
   if (noAgents) return 'Add an agent in Settings to start chatting...';
+  if (needsProfileBeforeSubmit && quickStartOffered && !wizardOpen) {
+    return 'Choose Start chatting above to write your first message...';
+  }
   if (needsProfileBeforeSubmit || wizardOpen) return 'Create a profile to start chatting...';
   return placeholder;
 }

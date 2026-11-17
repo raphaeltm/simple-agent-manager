@@ -567,7 +567,14 @@ test.describe('Project chat composer audit', () => {
     await chooseWizardOption(page, /Chat and explore/i);
     const instant = page.getByRole('button', { name: /Instant container/i });
     await expect(instant).toBeDisabled();
-    await expect(instant).toContainText('Not available on this installation');
+    await expect(instant).toHaveAccessibleDescription(
+      'Instant is not available on this installation: it needs Cloudflare Containers.'
+    );
+    await expect(
+      page.getByText(
+        'Instant is not available on this installation: it needs Cloudflare Containers.'
+      )
+    ).toBeVisible();
     await captureComposerAudit(
       page,
       `project-chat-profile-wizard-no-instant-${getProjectSuffix(testInfo.project.name)}`

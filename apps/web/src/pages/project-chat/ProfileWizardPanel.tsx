@@ -1,6 +1,6 @@
 import type { AgentInfo, AgentProfileRuntime, TaskMode } from '@simple-agent-manager/shared';
 import { Check, ChevronRight, MessageSquare, Server, Wrench, Zap } from 'lucide-react';
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useId, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import {
@@ -101,6 +101,7 @@ export function ProfileWizardPanel({
   onCreateProfileFromWizard: () => Promise<unknown>;
   suggestProfileName: (agentType: string | null, workType: TaskMode | null) => string;
 }>) {
+  const instantNoteId = useId();
   const skipAgentStep = agents.length === 1;
   const canProceed = canAdvanceWizard(profileWizard);
   const selectedWizardAgent =
@@ -224,11 +225,8 @@ export function ProfileWizardPanel({
               selected={profileWizard.runtime === 'cf-container'}
               icon={<Zap size={20} />}
               title="Instant container"
-              description={
-                profileWizard.instantAvailable
-                  ? 'Starts a chat workspace in a Cloudflare Container without a VM provisioning step.'
-                  : 'Not available on this installation: it needs Cloudflare Containers.'
-              }
+              description="Starts a chat workspace in a Cloudflare Container without a VM provisioning step."
+              describedBy={profileWizard.instantAvailable === true ? undefined : instantNoteId}
               onClick={() =>
                 onUpdateProfileWizard({
                   runtime: 'cf-container',
@@ -236,7 +234,7 @@ export function ProfileWizardPanel({
                   workType: 'conversation',
                 })
               }
-              disabled={profileWizard.saving || !profileWizard.instantAvailable}
+              disabled={profileWizard.saving || profileWizard.instantAvailable !== true}
             />
             <WorkTypeCard
               selected={profileWizard.runtime === 'vm'}
@@ -246,6 +244,14 @@ export function ProfileWizardPanel({
               onClick={() => onUpdateProfileWizard({ runtime: 'vm' })}
               disabled={profileWizard.saving}
             />
+            {profileWizard.instantAvailable !== true && (
+              // Outside the disabled card, so the reason keeps full contrast and is read in order.
+              <p id={instantNoteId} className="m-0 text-xs text-fg-muted sm:col-span-2">
+                {profileWizard.instantAvailable === false
+                  ? 'Instant is not available on this installation: it needs Cloudflare Containers.'
+                  : 'Checking whether this installation can run Instant…'}
+              </p>
+            )}
           </div>
         )}
 
@@ -380,7 +386,7 @@ export function NoProfilesGate({
         </div>
         <div className="mt-1 break-words text-xs text-fg-muted">
           {quickStart
-            ? `One click creates a profile named "${quickStart.profileName}" with the usual settings. You can change it later.`
+            ? `One click creates a profile named "${quickStart.profileName}"${quickStart.runtimeLabel ? ` that runs ${quickStart.runtimeLabel}` : ''}. You can change it later.`
             : 'Choose an agent and default runtime settings for this project chat.'}
         </div>
         {error && (
@@ -395,6 +401,7 @@ export function NoProfilesGate({
             type="button"
             onClick={() => void handleQuickStart()}
             disabled={creating}
+            aria-busy={creating}
             className={`${GATE_PRIMARY_BUTTON} min-w-0 break-words text-center`}
           >
             {creating ? 'Creating profile…' : `Start chatting with ${quickStart.agentName}`}
@@ -451,6 +458,7 @@ function WorkTypeCard({
   description,
   selected,
   disabled,
+  describedBy,
   onClick,
 }: Readonly<{
   icon: ReactNode;
@@ -458,6 +466,7 @@ function WorkTypeCard({
   description: string;
   selected: boolean;
   disabled?: boolean;
+  describedBy?: string;
   onClick: () => void;
 }>) {
   return (
@@ -465,6 +474,7 @@ function WorkTypeCard({
       type="button"
       onClick={onClick}
       disabled={disabled}
+      aria-describedby={describedBy}
       className={`min-h-[132px] rounded-md border p-3 text-left transition-colors disabled:opacity-50 ${
         selected
           ? 'border-accent bg-accent/10'
