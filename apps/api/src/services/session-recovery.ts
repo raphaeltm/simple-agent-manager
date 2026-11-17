@@ -280,7 +280,10 @@ export async function ensureSessionRecovery(
   // would block the wake again (`holdTaskForProviderLimit`) after the claim spent a slot of the
   // wake budget, so repeated deliveries burnt the budget in seconds (session a4c110be, 2026-11-16).
   // Refuse before the claim. Owner Resume records the wait as `released` first, so it passes.
+  // Eviction recovery is exempt: it claims once per eviction (not a retry loop), and admission's
+  // block is what returns the evicted task to a resumable sleep (`presentBlockedProviderLimitWait`).
   if (
+    !options.evictionFence &&
     context.sourceTask &&
     !TERMINAL_RECOVERY_TASK_STATUSES.has(context.sourceTask.status) &&
     parseProviderLimitWait(context.sourceTask.providerLimitWaitJson)?.phase === 'blocked'

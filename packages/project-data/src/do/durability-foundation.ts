@@ -13,7 +13,10 @@ import * as mailbox from './mailbox';
 import { projectDataPorts } from './ports';
 import * as delivery from './prompt-delivery';
 import { runPromptDeliveryClaim } from './prompt-delivery-runner';
-import { isProviderLimitHoldExpiry } from './provider-limit-delivery-hold';
+import {
+  applyProviderLimitDeliveryHold,
+  isProviderLimitHoldExpiry,
+} from './provider-limit-delivery-hold';
 import { releaseQuestionHold } from './reconciliation-candidate-state';
 import { resetReconciliationEpisode } from './reconciliation-episode';
 import { promptDeliveryToolMetadata } from './sam-notice-metadata';
@@ -53,7 +56,38 @@ export async function acceptPromptDelivery(
     delivery.acceptPromptDeliveryInTransaction(sql, env, input)
   );
   await finalizeAcceptedPromptDelivery(sql, env, hooks, input, accepted);
+  const projectId = hooks.getProjectId();
+  if (accepted.transcriptInserted && input.senderType === 'human' && projectId) {
+    // Only a lane's head is claimed, so a message queued behind a delivery already parked for a
+    // provider-limit hold would never learn of the hold and would expire on its ordinary TTL.
+    // Apply the hold now. Off the send path; a sleeping chat costs one D1 read, an awake one none.
+    hooks.waitUntil(holdAcceptedPromptDelivery(sql, env, hooks, projectId, input.targetSessionId));
+  }
   return accepted;
+}
+
+async function holdAcceptedPromptDelivery(
+  sql: SqlStorage,
+  env: Env,
+  hooks: DurabilityFoundationHooks,
+  projectId: string,
+  sessionId: string
+): Promise<void> {
+  try {
+    const held = await applyProviderLimitDeliveryHold(sql, env.DATABASE, {
+      projectId,
+      sessionId,
+      ttlMs: resolveDurableExecutionConfig(env).ttlMs,
+    });
+    if (!held) return;
+    if (held.closedWakeAsks > 0) hooks.scheduleSummarySync();
+    if (held.rowsChanged > 0) await hooks.recalculateAlarm();
+  } catch (error) {
+    log.error('prompt_delivery.accept_provider_limit_hold_failed', {
+      sessionId,
+      ...serializeError(error),
+    });
+  }
 }
 
 export async function finalizeAcceptedPromptDelivery(

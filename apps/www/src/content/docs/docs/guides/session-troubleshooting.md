@@ -175,8 +175,8 @@ never switches to another model, profile, or credential to get around a limit.
 **A message you send while it waits is kept.** SAM doesn't report **Wake failed** for a chat that
 is waiting for a limit reset, and it doesn't drop your message after the usual hour: it holds the
 message until the reset (plus that hour), then delivers it when the chat wakes. Don't send it
-again. While a task shows **Needs you** (below), a message doesn't wake the chat and is held for
-the usual hour only; it stays in the transcript either way.
+again. While a task shows **Needs you** (below), a message doesn't wake the chat; SAM holds it
+until you resume the task, for as long as the saved workspace is kept, and delivers it then.
 
 - **If Claude Code or Codex didn't say when its limit resets**, the message reads **Waiting for provider
   limit reset (time unknown); bounded retry 1/3 at 14:05 UTC.** SAM tries again after 5 minutes,

@@ -329,7 +329,7 @@ describe('findAnomalies', () => {
     const held = (id: string, deadlineAt: number, phase = 'waiting') => {
       task(`task-${id}`, {
         status: 'queued',
-        admission_state: 'provider_limit_waiting',
+        admission_state: `provider_limit_${phase}`,
         provider_limit_wait_json: JSON.stringify({
           version: 1,
           phase,
@@ -352,6 +352,8 @@ describe('findAnomalies', () => {
     };
     held('s-held', NOW + 3 * 24 * 60 * MIN);
     held('s-held-overdue', NOW - MIN);
+    // A blocked hold has no automatic wake: a claim still `waking` on it is stuck.
+    held('s-blocked', NOW + 3 * 24 * 60 * MIN, 'blocked');
     // Control: the same long wake with no hold is still a stalled wake.
     task('task-plain', { status: 'queued' });
     insert(main, 'session_snapshots', {
@@ -372,10 +374,11 @@ describe('findAnomalies', () => {
       'session_wake_stalled'
     );
     expect(entry.findings.map((f) => f.ids.snapshotId).sort()).toEqual([
+      's-blocked',
       's-held-overdue',
       's-plain',
     ]);
-    expect(entry.total).toBe(2);
+    expect(entry.total).toBe(3);
   });
 
   it('reports a waking row with an unreadable timestamp first instead of dropping it', async () => {

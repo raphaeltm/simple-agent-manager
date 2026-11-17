@@ -60,31 +60,52 @@ phase `waiting`, reset days away) is asleep. When the person writes to it:
 
 ## Implementation checklist
 
-- [ ] `provider-limit-delivery-hold.ts` (project-data DO): read the live task's hold for a chat
-      (one D1 read); for an active `waiting` hold extend human deliveries' expiry to
-      `max(expires_at, nextRetryAt + ttl)` and park active deliveries until `nextRetryAt`; for a
-      `blocked` hold park until expiry; close an open wake-error ask as superseded.
-- [ ] Runner: after an applied `retry`/`not_ready` result to a sleeping chat, apply the hold
-      (isolated try/catch; failure keeps ordinary backoff).
-- [ ] Expiry: skip `raiseSessionWakeFailure` for `ttl_expired` when the chat's task is in a
+- [x] `provider-limit-delivery-hold.ts` (project-data DO): read the live task's hold for a chat
+      (one D1 read, with the snapshot's expiry); for an active `waiting` hold extend human
+      deliveries' expiry to `max(deadlineAt, nextRetryAt + ttl)` and park every active delivery
+      until `nextRetryAt`; for a `blocked` hold (or a waiting one past its deadline) keep human
+      deliveries until the snapshot expires (capped at `maxResetDelayMs`) and park each to its own
+      expiry; close an open wake-error ask as superseded. Fenced on chat status and wake-readiness
+      fence across the awaited read (VM and Instant wakes).
+- [x] Runner: after an applied `retry`/`not_ready` result, apply the hold (never throws).
+- [x] Accept: a person's new message to a sleeping chat applies the hold (only the lane head is
+      ever claimed, so a later message would otherwise keep its ordinary TTL) — review finding.
+- [x] Expiry: skip `raiseSessionWakeFailure` for `ttl_expired` when the chat's task is in a
       provider-limit hold; lookup failure still files (fail visible).
-- [ ] `ensureSessionRecovery`: refuse (`provider_limit_blocked`, retry-class, no claim) while the
-      chat's live task holds a `blocked` wait, so a blocked hold cannot spend the wake budget.
-      Callers enumerated: delivery target (x2), eviction recovery (x2), inbox `wakeChat`, owner
-      Resume (writes `released` first, unaffected).
-- [ ] `stalledWakes`: exclude wakes whose recovery task is in an active `waiting` hold (until the
+- [x] `ensureSessionRecovery`: refuse (`provider_limit_blocked`, retry-class, no claim) while the
+      chat's live task holds a `blocked` wait. Per caller: delivery target (x2) -> retry, parked;
+      inbox `wakeChat` -> conflict naming the reason; owner Resume -> writes `released` first,
+      unaffected; eviction recovery -> exempt (one claim per eviction; admission's block returns
+      the evicted task to a resumable sleep).
+- [x] `stalledWakes`: exclude wakes whose recovery task is in an active `waiting` hold (until the
       hold's `deadlineAt`).
-- [ ] Docs: update architecture/docs that describe delivery TTL or wake failures.
-- [ ] Backlog tasks for the two unrelated findings above.
+- [x] Docs: `session-troubleshooting.md`, `admin-settings.md`.
+- [x] Backlog tasks for the two unrelated findings above.
 
 ## Acceptance criteria
 
-- [ ] A hold longer than the delivery TTL keeps the person's message (real callback park, real
+- [x] A hold longer than the delivery TTL keeps the person's message (real callback park, real
       sleep sweep, real delivery alarm past TTL) and files no wake error; the message is retried
-      at the hold's retry time.
-- [ ] Control: an ordinary stalled wake (no hold) still expires and files one wake error.
-- [ ] A non-human delivery expiring during a hold files no wake error.
-- [ ] A blocked hold does not claim a wake (budget unchanged); control: no hold still claims.
-- [ ] `session_wake_stalled` omits an in-deadline `waiting` hold and still reports a stalled
-      wake without one, and a hold past its deadline.
+      at the hold's retry time and released at once by a committed wake.
+- [x] A second message queued behind a parked one is kept too.
+- [x] Control: an ordinary stalled wake (no hold) still expires and files one wake error.
+- [x] A non-human delivery expiring during a hold keeps its own deadline and files no wake error.
+- [x] A blocked hold keeps the message until the snapshot expires and does not claim a wake
+      (real `ensureSessionRecovery`, budget unchanged); controls: waiting/released/terminal claim.
+- [x] `session_wake_stalled` omits an in-deadline `waiting` hold and still reports a stalled
+      wake without one, a hold past its deadline, and a blocked hold.
 - [ ] Staging: verified end to end.
+
+## Discrimination (each guard removed once)
+
+| Guard removed               | Tests that went red                                                |
+| --------------------------- | ------------------------------------------------------------------ |
+| Accept-time hold            | 5 of 6 integration hold tests                                      |
+| Runner hold                 | "later message queued behind a parked one", blocked-hold test      |
+| `sender_type = 'human'`     | non-human delivery test                                            |
+| Expiry suppression          | non-human delivery test                                            |
+| Blocked keep-until-snapshot | blocked-hold test                                                  |
+| Pre-claim refusal           | blocked-hold test (real wake starts the runner); unit refusal test |
+| Readiness fence             | Instant race unit test                                             |
+| Wake-state re-check         | VM and Instant race unit tests                                     |
+| Anomaly predicate           | anomaly hold test                                                  |
