@@ -33,6 +33,7 @@ import { log } from '../../lib/logger';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import { mapRows, parseRowOrNull } from '../row-validation';
 import { cancelTrackedMission } from './cancel-mission';
+import { pauseTrackedMission, resumeTrackedMission } from './mission-lifecycle';
 import { logDecision, pruneDecisionLog } from './decision-log';
 import { runOrchestratorMigrations } from './migrations';
 import { runSchedulingCycle } from './scheduling';
@@ -139,67 +140,14 @@ export class ProjectOrchestrator extends DurableObject<Env> {
    * Pause a mission — stops scheduling new tasks but running tasks continue.
    */
   async pauseMission(projectId: string, missionId: string): Promise<boolean> {
-    // Workflow steering is not exposed in Phase 0; do not let legacy mission
-    // controls bypass workflow ownership or alter durable step state.
-    if (
-      await this.env.DATABASE.prepare(
-        'SELECT 1 FROM missions WHERE id = ? AND workflow_plan_json IS NOT NULL'
-      )
-        .bind(missionId)
-        .first()
-    )
-      return false;
-    this.projectId = projectId;
-    const sql = this.ctx.storage.sql;
-    const result = sql.exec(
-      `UPDATE orchestrator_missions SET status = 'paused' WHERE mission_id = ? AND status = 'active'`,
-      missionId
-    );
-    if (result.rowsWritten === 0) return false;
-
-    logDecision(sql, missionId, null, 'pause', 'Mission paused by user', Date.now());
-
-    // Update D1 mission status
-    await this.env.DATABASE.prepare('UPDATE missions SET status = ?, updated_at = ? WHERE id = ?')
-      .bind('paused', new Date().toISOString(), missionId)
-      .run();
-
-    log.info('orchestrator.mission_paused', { projectId, missionId });
-    return true;
+    return pauseTrackedMission(this.ctx.storage.sql, this.env, projectId, missionId, () => { this.projectId = projectId; });
   }
 
   /**
    * Resume a paused mission — re-enables scheduling.
    */
   async resumeMission(projectId: string, missionId: string): Promise<boolean> {
-    // Workflow steering is not exposed in Phase 0; do not let legacy mission
-    // controls bypass workflow ownership or alter durable step state.
-    if (
-      await this.env.DATABASE.prepare(
-        'SELECT 1 FROM missions WHERE id = ? AND workflow_plan_json IS NOT NULL'
-      )
-        .bind(missionId)
-        .first()
-    )
-      return false;
-    this.projectId = projectId;
-    const sql = this.ctx.storage.sql;
-    const result = sql.exec(
-      `UPDATE orchestrator_missions SET status = 'active' WHERE mission_id = ? AND status = 'paused'`,
-      missionId
-    );
-    if (result.rowsWritten === 0) return false;
-
-    logDecision(sql, missionId, null, 'resume', 'Mission resumed by user', Date.now());
-
-    // Update D1 mission status
-    await this.env.DATABASE.prepare('UPDATE missions SET status = ?, updated_at = ? WHERE id = ?')
-      .bind('active', new Date().toISOString(), missionId)
-      .run();
-
-    log.info('orchestrator.mission_resumed', { projectId, missionId });
-    await this.armAlarm();
-    return true;
+    return resumeTrackedMission(this.ctx.storage.sql, this.env, projectId, missionId, () => { this.projectId = projectId; }, () => this.armAlarm());
   }
 
   async cancelMission(projectId: string, missionId: string): Promise<boolean> {
