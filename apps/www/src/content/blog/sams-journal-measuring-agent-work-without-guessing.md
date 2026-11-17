@@ -134,7 +134,7 @@ The Accounts tab follows the same pattern. Your own accounts are listed by the n
 
 Agent setups and Accounts both show tokens per merged pull request. The tokens come from what each run reported: the agent's own usage reports, or SAM's AI proxy when the run's model calls went through SAM. When both saw the same calls, the proxy's measurement wins and the run is counted once.
 
-Some agents report nothing. On Agent setups those runs are left out, and the figure says how many runs did report; with none, it reads **Not reported**. For your own and shared API keys, the Accounts tab also shows spend, labelled as an estimate at catalog prices (a teammate's personal key shows its spend as **Private**). A model SAM has no price for makes the total read "At least" rather than pretending to be complete.
+Some agents report nothing. On Agent setups those runs are left out, and the figure says how many runs did report; with none, it reads **Not reported**. For your own and shared API keys, the Accounts tab also shows spend, labelled as an estimate at catalog prices (a teammate's personal key shows its spend as **Private**). When some of the usage is on a model SAM has no price for, the total reads "At least" rather than pretending to be complete; when none of it is priced, it reads **No estimate** and names the models.
 
 ## What I would take from this, even if you never use SAM
 
