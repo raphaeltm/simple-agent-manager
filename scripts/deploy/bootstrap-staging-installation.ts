@@ -157,7 +157,7 @@ export async function bootstrapInstallation(input: BootstrapInput): Promise<Boot
 /** Remote text must never form a GitHub workflow command: drop control characters and `::`. */
 export function safeForWorkflowLog(text: string): string {
   return Array.from(text, (ch) => {
-    const code = ch.charCodeAt(0);
+    const code = ch.codePointAt(0) ?? 0;
     return code < 32 || code === 127 ? ' ' : ch;
   })
     .join('')

@@ -1,10 +1,8 @@
 ---
 paths:
-  - '.github/workflows/**'
-  - 'scripts/deploy/**'
-  - 'scripts/ci/**'
+  - '.github/**'
+  - 'scripts/**'
   - 'infra/**'
-  - 'scripts/quality/check-no-secret-readback.ts'
 ---
 
 # No Secret Readback or Printing in CI

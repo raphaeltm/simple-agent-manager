@@ -190,7 +190,7 @@ export function scanText(
   // Every file type: workflow YAML and shell heredocs carry inline JS.
   const importLines = new Set(decryptImportLines(text).map((line) => line - 1));
   lines.forEach((line, index) => {
-    const marker = line.match(MARKER);
+    const marker = MARKER.exec(line);
     if (marker && !isAllowed(marker[1])) {
       result.invalidMarkers.push({ file, line: index + 1, task: marker[1] });
     }
@@ -217,7 +217,7 @@ function markerTask(
   isAllowed: (task: string) => boolean
 ): string | null {
   for (let i = index; i >= Math.max(0, index - MARKER_REACH); i -= 1) {
-    const marker = lines[i].match(MARKER);
+    const marker = MARKER.exec(lines[i]);
     if (marker && isAllowed(marker[1])) return marker[1];
   }
   return null;
@@ -239,7 +239,7 @@ function listFiles(root: string): string[] {
     const dir = join(root, start);
     if (existsSync(dir) && statSync(dir).isDirectory()) walk(dir);
   }
-  return files.sort();
+  return files.sort((a, b) => a.localeCompare(b));
 }
 
 export function scanRepository(root: string): ScanResult & { files: number; lines: number } {

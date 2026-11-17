@@ -1238,29 +1238,19 @@
       "title": "No Secret Readback or Printing in CI",
       "patterns": [
         {
-          "pattern": ".github/workflows/**",
-          "regex": "^\\.github\\/workflows\\/.*$",
-          "literal": 18
+          "pattern": ".github/**",
+          "regex": "^\\.github\\/.*$",
+          "literal": 8
         },
         {
-          "pattern": "scripts/deploy/**",
-          "regex": "^scripts\\/deploy\\/.*$",
-          "literal": 15
-        },
-        {
-          "pattern": "scripts/ci/**",
-          "regex": "^scripts\\/ci\\/.*$",
-          "literal": 11
+          "pattern": "scripts/**",
+          "regex": "^scripts\\/.*$",
+          "literal": 8
         },
         {
           "pattern": "infra/**",
           "regex": "^infra\\/.*$",
           "literal": 6
-        },
-        {
-          "pattern": "scripts/quality/check-no-secret-readback.ts",
-          "regex": "^scripts\\/quality\\/check-no-secret-readback\\.ts(?:\\/.*)?$",
-          "literal": 43
         }
       ]
     }

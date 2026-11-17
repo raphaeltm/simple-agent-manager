@@ -88,8 +88,8 @@ describe('deterministic quality-program CI wiring', () => {
     expect(quality).toContain('run: pnpm quality:runtime-tunables');
     expect(quality).toContain('check-runtime-tunables.test.ts');
     const changes = jobBlock(ci, 'changes');
-    expect(changes).toContain("- 'scripts/quality/check-runtime-tunables*'");
-    expect(changes).toContain("- 'scripts/quality/runtime-tunables-baseline.json'");
+    // scripts/quality/** covers check-runtime-tunables* and runtime-tunables-baseline.json.
+    expect(changes).toContain("- 'scripts/quality/**'");
   });
 
   it('keeps public-site changes on a narrow CI path', () => {
