@@ -18,12 +18,12 @@ Secret Scan fails closed because the August 19 code-identifier group expired Nov
 - [x] Reproduce all three exact historical digests and inspect full matched bytes safely.
 - [x] Renew only selected group's actual UTC review time, bounded 30-day expiry and specific historical rationale; preserve digests and all other groups.
 - [x] Run real current-tree and PR-range scans, historical range proof, existing fail-closed tests and fresh private-key detection controls.
-- [ ] Complete independent security, constitution and task-completion reviews; address findings.
-- [ ] Record config-only staging exemption and validation in PR.
+- [x] Complete independent security, constitution and task-completion reviews; address findings.
+- [x] Record config-only staging exemption and validation in PR.
 
 ## Acceptance criteria
 
-Only group 5 metadata changes alongside this task record. Three exact verified non-secret digests retained, zero added or removed; no other baseline entries changed. Real scanner modes pass while unreviewed private-key bytes and expired/malformed/replaced findings fail closed. Reviews and current-head CI pass before normal merge. Local state/raw evidence never committed.
+Only groups[5] (sixth group) metadata changes alongside this task record. Three exact verified non-secret digests retained, zero added or removed; no other baseline entries changed. Real scanner modes pass while unreviewed private-key bytes and expired/malformed/replaced findings fail closed. Reviews and current-head CI pass before normal merge. Local state/raw evidence never committed.
 
 ## Release work (pending normal PR gates)
 
@@ -37,3 +37,7 @@ Pre-change real current-tree scan reproduced exact expiry error. This is expecte
 - Real current-tree: 43 reviewed/0 new. Candidate PR-range: 0/0 new. Isolated historical-source replay through the actual PR-range runner: 3 reviewed/0 new. Fresh generated private-key detection controls in isolated repositories: both current-tree and PR-range fail closed, generic output only; ephemeral key/repo deleted.
 - Existing policy and CI-quality tests: 2 files, 35 tests passed, no skips; targeted Prettier and diff whitespace checks pass.
 - Independent security-auditor and constitution-validator: PASS, no findings; exact digest tuple and complete historical spans independently verified.
+
+- Full quality-scripts suite: 74 files, 1327 tests collected; 1324 passed and 3 setup failures because clean worktree lacked the shared-package dependency link. Added local dependency symlink only, then affected ci-test-shards.test.ts rerun: 13/13 passed. Same 13/13 also passed in original checkout. No test/code change required.
+- Independent completion review PASS for implementation archive handoff, with release checklist explicitly pending; all local reviews complete. Archive does not certify overall release.
+- PR: https://github.com/raphaeltm/simple-agent-manager/pull/2825. Normal current-head CI, CodeRabbit request/wait, merge, main gate proof and final notifications remain release gates.
