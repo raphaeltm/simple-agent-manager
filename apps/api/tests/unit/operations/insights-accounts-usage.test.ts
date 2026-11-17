@@ -465,4 +465,170 @@ describe('projectAccounts tokens and spend', () => {
       parseAccountUsageRows([{ ...good, redacted: 'yes' }], { projectId: 'p', maxRows: 10 }).rows
     ).toEqual([]);
   });
+
+  it('prices a long legacy key stored as a digest, and keeps a teammate’s one private', async () => {
+    // A 2026-06 backfill id: its reference is longer than a limit key, so the writers store it as
+    // a sha256 digest that names no credential row.
+    const longOwn = `cc-legacy-${'x'.repeat(180)}`;
+    const longMate = `cc-legacy-${'m'.repeat(180)}`;
+    credential(longOwn, 'owner', 'Legacy key', 'api-key');
+    credential(longMate, 'mate', 'Mate Legacy Key', 'api-key');
+    run('l1', longOwn, { merged: true });
+    run('l2', longMate, { userId: 'mate' });
+    await harness('l1', longOwn, [counts(SONNET, 10_000, 1_000)]);
+    await harness('l2', longMate, [counts(SONNET, 30_000, 3_000)]);
+    // An AI proxy response with no agent session: ownership comes from the run's workspace.
+    for (const [id, cred] of [
+      ['l1', longOwn],
+      ['l2', longMate],
+    ] as const) {
+      await recordProxyRunUsage(
+        env,
+        {
+          projectId: 'p',
+          chatSessionId: `chat-${id}-proxy`,
+          workspaceId: `w-${id}`,
+          agentSessionId: null,
+          agentType: 'claude-code',
+          credentialReference: ref(cred),
+          credentialSource: 'user',
+        },
+        HAIKU,
+        {
+          inputTokens: 4_000,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          reasoningTokens: null,
+        },
+        NOW - DAY
+      );
+    }
+    const stored = sqlite
+      .prepare('SELECT credential_key FROM agent_run_usage ORDER BY chat_session_id')
+      .pluck()
+      .all() as string[];
+    expect(stored.every((key) => key.startsWith('sha256:'))).toBe(true);
+
+    const { result, byKey } = await accounts();
+    const own = byKey[`cred:${longOwn}`];
+    expect(own?.tokens?.total).toBe(15_000);
+    expect(own?.spend).toMatchObject({ state: 'reported', unpricedModels: [] });
+    if (own?.spend?.state !== 'reported') throw new Error('spend not reported');
+    expect(own.spend.costUsd).toBeCloseTo(
+      catalogUsd(SONNET, 10_000, 1_000) + catalogUsd(HAIKU, 4_000, 0),
+      6
+    );
+    // The teammate's long key joins their group by kind, with tokens and no spend.
+    expect(byKey['teammate:claude-code:api_key']).toMatchObject({
+      tokens: { total: 33_000 },
+      spend: { state: 'private' },
+    });
+    expect(JSON.stringify(result)).not.toContain(longMate);
+    // The teammate's session-less proxy row stays hidden: no kind or owner to file it under, so it
+    // is not shown rather than shown as the viewer's.
+    expect(result.accounts.some((a) => a.tokens?.total === 4_000)).toBe(false);
+  });
+
+  it('trusts a session for key visibility only when it belongs to this project', async () => {
+    // A key that names no credential row (deleted) is visible only for a run the viewer started.
+    insert('workspaces', {
+      id: 'w-fx',
+      project_id: 'foreign',
+      user_id: 'owner',
+      name: 'foreign ws',
+      repository: 'acme/app',
+      branch: 'main',
+      status: 'deleted',
+      vm_size: 'small',
+      vm_location: 'fsn1',
+    });
+    insert('agent_sessions', {
+      id: 's-fx',
+      workspace_id: 'w-fx',
+      user_id: 'owner',
+      status: 'stopped',
+      agent_type: 'claude-code',
+    });
+    run('own', 'cc-key');
+    await recordHarnessRunUsage(
+      env,
+      {
+        projectId: 'p',
+        chatSessionId: 'chat-attack',
+        workspaceId: 'w-fx',
+        agentSessionId: 's-fx',
+        agentType: 'claude-code',
+        credentialReference: ref('gone-attack'),
+        credentialSource: 'user',
+      },
+      'epoch-1',
+      [counts(SONNET, 1_000, 0)],
+      NOW - DAY
+    );
+    // Owner control: the same deleted-credential shape on the viewer's own session in p.
+    await recordHarnessRunUsage(
+      env,
+      {
+        projectId: 'p',
+        chatSessionId: 'chat-own',
+        workspaceId: 'w-own',
+        agentSessionId: 's-own',
+        agentType: 'claude-code',
+        credentialReference: ref('gone-own'),
+        credentialSource: 'user',
+      },
+      'epoch-1',
+      [counts(SONNET, 2_000, 0)],
+      NOW - DAY
+    );
+    const statement = accountUsageStatement({
+      projectId: 'p',
+      viewerId: 'owner',
+      sinceMs: NOW - 7 * DAY,
+      maxRows: 50,
+    });
+    const rows = sqlite.prepare(statement.sql).all(...statement.binds) as Array<{
+      ref: string | null;
+      redacted: number;
+      input_tokens: number;
+    }>;
+    expect(rows.find((row) => row.input_tokens === 2_000)).toMatchObject({
+      ref: ref('gone-own'),
+      redacted: 0,
+    });
+    expect(rows.find((row) => row.input_tokens === 1_000)).toMatchObject({
+      ref: null,
+      redacted: 1,
+    });
+  });
+
+  it('a failed usage read marks only tokens, and leaves runs alone', async () => {
+    run('k1', 'cc-key');
+    await harness('k1', 'cc-key', [counts(SONNET, 1_000, 100)]);
+    const real = env.DATABASE;
+    env = {
+      ...env,
+      DATABASE: {
+        ...real,
+        prepare: (sql: string) => {
+          const statement = real.prepare(sql);
+          if (!sql.includes('FROM agent_run_usage r')) return statement;
+          const failing = {
+            all: async () => {
+              throw new Error('D1_ERROR: simulated');
+            },
+          };
+          return { ...statement, bind: () => failing, ...failing };
+        },
+        batch: async () => {
+          throw new Error('D1_ERROR: batch failed');
+        },
+      },
+    } as unknown as Env;
+    const { result, byKey } = await accounts();
+    expect(result.unavailable).toEqual(['tokens']);
+    // Liveness: the runs still load; tokens and spend are absent rather than "not reported".
+    expect(byKey['cred:cc-key']).toMatchObject({ runs: 1, tokens: null, spend: null });
+  });
 });

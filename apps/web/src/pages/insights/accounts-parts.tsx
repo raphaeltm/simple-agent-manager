@@ -14,7 +14,7 @@ import { CircleHelp, KeyRound, PauseCircle, Server, UserRound, UsersRound } from
 import type { ReactNode } from 'react';
 
 import { CredentialLimitChip } from '../../components/credential-limits/CredentialLimitChip';
-import { spendLine, tokensLine, type UsageLine } from './accounts-usage';
+import { NOT_LOADED_LINE, spendLine, tokensLine, type UsageLine } from './accounts-usage';
 import { Empty } from './flow-parts';
 import { bucketLabel, formatDuration } from './format';
 
@@ -135,7 +135,13 @@ function UsageRow({ label, line, testId }: { label: string; line: UsageLine; tes
   return (
     <div className="flex min-w-0 flex-col gap-1" data-testid={testId}>
       <Row label={label}>
-        <span className="whitespace-nowrap">{line.value}</span>
+        <span
+          className={
+            line.muted ? 'whitespace-nowrap font-normal text-fg-muted' : 'whitespace-nowrap'
+          }
+        >
+          {line.value}
+        </span>
         {line.detail && (
           <>
             {' '}
@@ -144,9 +150,7 @@ function UsageRow({ label, line, testId }: { label: string; line: UsageLine; tes
         )}
       </Row>
       {line.note && (
-        <p className="m-0 text-right text-[11.5px] text-fg-muted [overflow-wrap:anywhere]">
-          {line.note}
-        </p>
+        <p className="m-0 text-[11.5px] text-fg-muted [overflow-wrap:anywhere]">{line.note}</p>
       )}
     </div>
   );
@@ -158,6 +162,7 @@ export function AccountCard({
   now,
   stallsUnavailable = false,
   usageLimited = false,
+  tokensUnavailable = false,
 }: {
   account: InsightsAccount;
   color: string;
@@ -166,6 +171,8 @@ export function AccountCard({
   stallsUnavailable?: boolean;
   /** The usage read hit its row cap: tokens and spend are a floor. */
   usageLimited?: boolean;
+  /** The usage read failed: say so rather than leaving the rows out. */
+  tokensUnavailable?: boolean;
 }) {
   const title = accountTitle(account);
   return (
@@ -196,19 +203,27 @@ export function AccountCard({
           note={!stallsUnavailable && account.stalls.ongoing ? 'Paused now' : undefined}
         />
       </div>
-      {account.tokens && (
-        <UsageRow
-          label="Tokens"
-          line={tokensLine(account.tokens, usageLimited)}
-          testId="insights-usage-tokens"
-        />
+      {tokensUnavailable ? (
+        <UsageRow label="Tokens" line={NOT_LOADED_LINE} testId="insights-usage-tokens" />
+      ) : (
+        account.tokens && (
+          <UsageRow
+            label="Tokens"
+            line={tokensLine(account.tokens, usageLimited)}
+            testId="insights-usage-tokens"
+          />
+        )
       )}
-      {account.spend && (
-        <UsageRow
-          label="Spend"
-          line={spendLine(account.spend, usageLimited)}
-          testId="insights-usage-spend"
-        />
+      {tokensUnavailable && account.kind === 'api_key' ? (
+        <UsageRow label="Spend" line={NOT_LOADED_LINE} testId="insights-usage-spend" />
+      ) : (
+        account.spend && (
+          <UsageRow
+            label="Spend"
+            line={spendLine(account.spend, usageLimited)}
+            testId="insights-usage-spend"
+          />
+        )
       )}
       {account.usage && (
         <Row label="Limits now">

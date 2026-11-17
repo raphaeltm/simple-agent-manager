@@ -13,7 +13,7 @@ import type {
   ProjectAccountsResponse,
 } from '@simple-agent-manager/shared';
 
-export type AccountsScene = 'realistic' | 'stress' | 'empty' | 'partial';
+export type AccountsScene = 'realistic' | 'stress' | 'empty' | 'partial' | 'tokens-failed';
 
 const DAY = 86_400_000;
 const MIN = 60_000;
@@ -149,6 +149,15 @@ export function makeAccounts(
       })),
       stallEpisodes: { items: [], total: 0, listed: 10, truncated: false },
       unavailable: ['stalls'],
+    };
+  }
+  if (scene === 'tokens-failed') {
+    // The token usage read failed this time: runs and stalls still show, the rows say "Not loaded".
+    const realistic = makeAccounts(projectId, range, 'realistic', now);
+    return {
+      ...realistic,
+      accounts: realistic.accounts.map((a) => ({ ...a, tokens: null, spend: null })),
+      unavailable: ['tokens'],
     };
   }
   if (scene === 'empty') {

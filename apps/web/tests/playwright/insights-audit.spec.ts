@@ -312,7 +312,11 @@ test.describe('Insights', () => {
         .getByTestId('insights-account-project:openai-codex:api_key')
         .getByTestId('insights-usage-spend')
     ).toContainText('No estimate');
-    await expect(page.getByText(/tokens and spend are a floor/)).toBeVisible();
+    await expect(key.getByTestId('insights-usage-tokens')).toContainText(
+      'Cut at the usage row limit, so this is a floor.'
+    );
+    // A long unpriced list is cut after three names.
+    await expect(key.getByTestId('insights-usage-spend')).not.toContainText(' more.');
     // Untrusted names render as text, never as markup.
     await expect(page.getByText('<script>alert("x")</script> 🔑 key').first()).toBeVisible();
     // Five accounts get a colour; the other three fold into "Other".
@@ -353,6 +357,24 @@ test.describe('Insights', () => {
     await expect(own).toContainText('Not loaded');
     await expect(own).not.toContainText('Never');
     await capture(page, 'insights-accounts-partial');
+  });
+
+  test('accounts with the token read unavailable say "Not loaded", not nothing', async ({
+    page,
+  }) => {
+    await setupScene(page, 'realistic', [], 'tokens-failed');
+    await page.goto(`${BASE}/accounts`);
+    await expect(
+      page.getByText('Some numbers could not be loaded: tokens and spend.')
+    ).toBeVisible();
+    const key = page.getByTestId('insights-account-cred:cc-key');
+    await expect(key.getByTestId('insights-usage-tokens')).toContainText('Not loaded');
+    await expect(key.getByTestId('insights-usage-spend')).toContainText('Not loaded');
+    // A subscription has no spend row to fail; its runs still show (liveness).
+    const own = page.getByTestId('insights-account-cred:cc-max');
+    await expect(own.getByTestId('insights-usage-spend')).toHaveCount(0);
+    await expect(own).toContainText('64');
+    await capture(page, 'insights-accounts-tokens-failed');
   });
 
   test('switching range on accounts keeps the cards on screen until the new range arrives', async ({

@@ -20,8 +20,8 @@
  * per-isolate admin-settings cache); one D1 `batch()` carrying five statements 1; the viewer's own
  * limit windows 0 or 1 (one statement per 100 of their own accounts, so 1 in practice). At most 4;
  * measured at 3 in `insights-accounts.test.ts`. If the batch fails as a whole, each statement is
- * retried on its own so one bad section cannot blank the page; that rare degraded path costs four
- * more (at most 8 on a cold settings cache) and is logged.
+ * retried on its own so one bad section cannot blank the page; that rare degraded path costs five
+ * more (at most 9 on a cold settings cache) and is logged.
  */
 import { parseProviderLimitWait } from '@simple-agent-manager/scheduler-core';
 import {
@@ -410,7 +410,11 @@ function attachTokens(
 ): void {
   if (failed) return;
   const byAccount = new Map<string, AccountUsageRow[]>();
-  for (const row of usageRows) {
+  for (const usage of usageRows) {
+    // A digest-keyed row of the viewer's own long legacy credential names no row in SQL; its kind
+    // comes from the viewer's own credential list, so it prices like its runs.
+    const own = usage.ref ? ownByDigest.get(usage.ref) : undefined;
+    const row = usage.kind === null && own?.kind ? { ...usage, kind: own.kind } : usage;
     const key = usageDisplayKey(row, displayKeyOf, ownByDigest);
     if (!accounts.has(key)) continue;
     const list = byAccount.get(key) ?? [];

@@ -28,6 +28,8 @@ import type { FlowStatement } from './insights-flow-sql';
 
 /** The `cc_credentials` reference prefix stored verbatim in `credential_key` for short keys. */
 const CC_CREDENTIAL_KEY_PREFIX = 'cc_credentials:';
+/** `credentialLimitReferenceKey` stores a reference longer than a key as this digest. */
+const DIGEST_KEY_PREFIX = 'sha256:';
 
 const RUN_USAGE_SQL = `SELECT r.source AS source, r.model AS model, r.credential_key AS credential_key,
     c.kind AS credential_kind, MAX(r.credential_source) AS credential_source,
@@ -247,12 +249,15 @@ export const COUNTED_RUN_USAGE_SQL = `(r.source = 'ai_proxy' OR NOT EXISTS (
 /**
  * Whether the viewer may see a row's credential key: a shared (project or platform) account, the
  * viewer's own credential, or, when the key names no credential row (a deleted credential or a
- * long legacy key stored as a digest), a run the viewer started. Any other member's personal key
- * stays in the database, as `listProjectCredentialLimits` keeps their windows there. Binds:
- * viewer ×2.
+ * long legacy key stored as a digest), a run the viewer started: its session's user, else the
+ * owner of its workspace (an AI proxy row may carry no session; a personal credential resolves for
+ * the workspace's owner). Both are read only through this project's workspaces. Any other
+ * member's personal key stays in the database, as `listProjectCredentialLimits` keeps their
+ * windows there. Every unknown resolves to hidden. Binds: viewer ×2.
  */
+const RUN_USER_SQL = 'COALESCE(s.user_id, rw.user_id)';
 const KEY_VISIBLE_SQL = `COALESCE(r.credential_source IN ('project', 'platform')
-      OR c.owner_id = ? OR (c.id IS NULL AND s.user_id = ?), 0)`;
+      OR c.owner_id = ? OR (c.id IS NULL AND ${RUN_USER_SQL} = ?), 0)`;
 
 /**
  * Measured usage per account and model since `sinceMs`, for Insights · Accounts. One row per
@@ -262,8 +267,11 @@ const KEY_VISIBLE_SQL = `COALESCE(r.credential_source IN ('project', 'platform')
  *
  * Every predicate binds the project: the usage rows (seeking `idx_agent_run_usage_project_updated`
  * by project and `updated_at`), the proxied-run probe (`COUNTED_RUN_USAGE_SQL`), and the session
- * join, which must belong to a workspace of this project. The credential columns read are `kind`
- * and `owner_id`; never the name or the token. Binds: viewer ×4, project, since (ms), cap + 1.
+ * and workspace joins, which must belong to this project. The credential columns read are `kind`
+ * and `owner_id`; never the name or the token. A long legacy reference is stored as its digest,
+ * which names no credential row: its kind (only the kind, never the owner, which decides
+ * visibility) comes from the credential the run's session recorded (`sc`), so the account still
+ * prices and groups like its runs. Binds: viewer ×4, project, since (ms), cap + 1.
  */
 export function accountUsageStatement(input: {
   projectId: string;
@@ -275,8 +283,9 @@ export function accountUsageStatement(input: {
     sql: `WITH u AS (
       SELECT CASE WHEN r.credential_key <> '' THEN ${KEY_VISIBLE_SQL} END AS visible,
              r.credential_key AS key, r.credential_source AS cred_source,
-             COALESCE(r.agent_type, s.agent_type) AS agent, c.kind AS cred_kind, c.id AS cred_id,
-             c.owner_id AS cred_owner, s.user_id AS session_user, r.model AS usage_model,
+             COALESCE(r.agent_type, s.agent_type) AS agent,
+             COALESCE(c.kind, sc.kind) AS cred_kind, c.id AS cred_id,
+             c.owner_id AS cred_owner, ${RUN_USER_SQL} AS session_user, r.model AS usage_model,
              r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_write_tokens,
              r.reasoning_tokens
         FROM agent_run_usage r
@@ -286,6 +295,11 @@ export function accountUsageStatement(input: {
         LEFT JOIN agent_sessions s
           ON s.id = r.agent_session_id
          AND EXISTS (SELECT 1 FROM workspaces w WHERE w.id = s.workspace_id AND w.project_id = r.project_id)
+        LEFT JOIN workspaces rw ON rw.id = r.workspace_id AND rw.project_id = r.project_id
+        LEFT JOIN cc_credentials sc
+          ON r.credential_key LIKE '${DIGEST_KEY_PREFIX}%'
+         AND s.agent_credential_reference LIKE '${CC_CREDENTIAL_KEY_PREFIX}%'
+         AND sc.id = substr(s.agent_credential_reference, ${CC_CREDENTIAL_KEY_PREFIX.length + 1})
        WHERE r.project_id = ? AND r.updated_at >= ? AND ${COUNTED_RUN_USAGE_SQL}
     )
     SELECT CASE WHEN visible = 1 THEN key END AS ref,

@@ -62,6 +62,7 @@ export function AccountsBody({ data }: { data: ProjectAccountsResponse }) {
   const stalled = data.stallEpisodes.total;
   const runsFailed = data.unavailable.includes('runs');
   const stallsFailed = data.unavailable.includes('stalls');
+  const tokensFailed = data.unavailable.includes('tokens');
 
   return (
     <div
@@ -94,6 +95,7 @@ export function AccountsBody({ data }: { data: ProjectAccountsResponse }) {
                 now={now}
                 stallsUnavailable={stallsFailed}
                 usageLimited={data.usageLimited}
+                tokensUnavailable={tokensFailed}
               />
             ))}
           </div>
@@ -134,11 +136,8 @@ export function AccountsBody({ data }: { data: ProjectAccountsResponse }) {
       </div>
 
       <p className="m-0 px-1 text-[12.5px] text-fg-muted">
-        Only your own accounts are named and show their current limits. Tokens are measured per run,
-        and a run through SAM’s AI proxy is counted once. Spend is shown for API keys only, as an
-        estimate at SAM’s model prices; a teammate’s personal key shows its tokens but not its
-        spend.
-        {data.usageLimited && ' Usage was cut at its row limit, so tokens and spend are a floor.'}
+        Only your own accounts are named and show their current limits. Spend is shown for API keys
+        only. A run through SAM’s AI proxy counts its tokens once.
       </p>
     </div>
   );
