@@ -24,6 +24,8 @@ const PORT_MODULES = {
   observability: () =>
     import('../../src/project-data-ports/observability').then((m) => m.observabilityPort),
   operations: () => import('../../src/project-data-ports/operations').then((m) => m.operationsPort),
+  inboxErrors: () =>
+    import('../../src/project-data-ports/inbox-errors').then((m) => m.inboxErrorsPort),
 } as const;
 
 /**

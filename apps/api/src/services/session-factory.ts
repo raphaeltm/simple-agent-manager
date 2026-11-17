@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 
 import { createAuth } from '../auth';
 import type { Env } from '../env';
+import { clientIpFromHeaders } from '../lib/client-ip';
 import { getBetterAuthSecret } from '../lib/secrets';
 import { errors } from '../middleware/error';
 import {
@@ -29,6 +30,8 @@ export interface CreatedSessionCookie {
 }
 
 export interface SessionLifetimeOptions {
+  /** Inbound headers for sessions created outside a BetterAuth request context. */
+  headers?: Headers;
   /**
    * Fixed expiry for this session, applied to both the stored session and the cookie.
    * Omitted: BetterAuth's normal lifetime and API_TOKEN_SESSION_DURATION_SECONDS.
@@ -47,10 +50,17 @@ export async function createSessionCookieForUser(
   const auth = await createAuth(env);
   const ctx = await auth.$context;
   const { expiresAt } = options;
-  const session =
-    expiresAt === undefined
-      ? await ctx.internalAdapter.createSession(userId, false)
-      : await createCappedSession(ctx, userId, expiresAt);
+  const address = options.headers
+    ? { ipAddress: clientIpFromHeaders((name) => options.headers?.get(name)) ?? '' }
+    : {};
+  // No endpoint context exists here, so BetterAuth cannot discover the request headers itself.
+  // Only the bounded lifetime needs overrideAll to replace its default expiry.
+  const session = await ctx.internalAdapter.createSession(
+    userId,
+    false,
+    { ...address, ...(expiresAt ? { expiresAt, [HARD_EXPIRES_AT_FIELD]: expiresAt } : {}) },
+    expiresAt !== undefined
+  );
 
   if (!session) {
     throw errors.badRequest('Failed to create session');
@@ -89,20 +99,6 @@ export async function createSessionCookieForUser(
   return { cookieHeader, sessionCookie, sessionId: session.id, expiresAt: session.expiresAt };
 }
 
-async function createCappedSession(
-  ctx: Awaited<Awaited<ReturnType<typeof createAuth>>['$context']>,
-  userId: string,
-  expiresAt: Date
-) {
-  // overrideAll lets these fields replace BetterAuth's default lifetime.
-  return ctx.internalAdapter.createSession(
-    userId,
-    false,
-    { expiresAt, [HARD_EXPIRES_AT_FIELD]: expiresAt },
-    true
-  );
-}
-
 /**
  * The signed-in user, for routes that grant a credential to another client (device-flow
  * approval). Refuses an agent sign-in session: it must not mint a credential that outlives it.
@@ -127,10 +123,11 @@ export async function getAuthenticatedUser(
 
 export async function buildSessionLoginResponse(
   env: Env,
-  user: SessionFactoryUser
+  user: SessionFactoryUser,
+  headers: Headers
 ): Promise<Response> {
   await assertUserCanCreateSession(env, user);
-  return sessionLoginResponse(user, await createSessionCookieForUser(env, user.id));
+  return sessionLoginResponse(user, await createSessionCookieForUser(env, user.id, { headers }));
 }
 
 /** The login response for a session already created for `user`: JSON plus Set-Cookie. */

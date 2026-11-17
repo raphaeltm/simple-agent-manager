@@ -27,6 +27,17 @@ import {
   handleUpdateIdea,
 } from './idea-tools';
 import {
+  handleInboxAsk,
+  handleInboxAssign,
+  handleInboxAttach,
+  handleInboxCancelItem,
+  handleInboxComment,
+  handleInboxGetItem,
+  handleInboxListItems,
+  handleInboxReview,
+  handleInboxUpdateItem,
+} from './inbox-tools';
+import {
   handleClaimIncident,
   handleGetIncident,
   handleListIncidentQueue,
@@ -199,6 +210,15 @@ export const MCP_TOOL_HANDLERS: ReadonlyMap<string, McpToolHandler> = new Map<
   ['run_ai_model', handleRunAiModel],
   ['update_task_status', handleUpdateTaskStatus],
   ['request_human_input', handleRequestHumanInput],
+  ['inbox_ask', handleInboxAsk],
+  ['inbox_review', handleInboxReview],
+  ['inbox_update_item', handleInboxUpdateItem],
+  ['inbox_cancel_item', handleInboxCancelItem],
+  ['inbox_assign', handleInboxAssign],
+  ['inbox_comment', handleInboxComment],
+  ['inbox_attach', handleInboxAttach],
+  ['inbox_list_items', handleInboxListItems],
+  ['inbox_get_item', handleInboxGetItem],
   ['request_secret', handleRequestSecret],
   ['list_runtime_env', handleListRuntimeEnv],
   ['wait_for_subtasks', handleWaitForSubtasks],

@@ -20,6 +20,8 @@ import type {
   AgentProfile,
   CredentialLimitsResponse,
   InboxItemContext,
+  InboxLink,
+  InstallationLifecycleLatency,
   NotificationResponse,
   NotificationType,
   SessionStateSnapshot,
@@ -33,6 +35,10 @@ import type * as schema from '@simple-agent-manager/worker-core/schema';
 import type { ConnectorAnswerChoice } from './connector-answer-input';
 import type { ConnectorReadSettingName } from './connector-read-settings-definition';
 import type { InboxSettingName } from './inbox-settings-definition';
+import type { OperationInboxTaskPort } from './inbox-task-ports';
+import type { InsightsInstallationSettingName } from './insights-installation-settings-definition';
+import type { InsightsPageSettingName } from './insights-page-settings';
+import type { InsightsReceiptSettingName } from './insights-receipt-settings-definition';
 import type {
   AgentActivityTask,
   LimitKey,
@@ -46,6 +52,7 @@ import type {
   TokenBudget,
   TriggerStatusUpdates,
 } from './port-types';
+import type { ProjectBriefSettingName } from './project-brief-settings-definition';
 import type { OperationProjectDataPort } from './project-data-port';
 import type { OperationContext } from './types';
 
@@ -82,7 +89,11 @@ export type OperationSettingName =
   | 'collaboration.ideaUpdateQuoteMaxLength'
   | 'collaboration.ideaAgentNoteMinIntervalSeconds'
   | 'collaboration.ideaUpdatePageSize'
-  | InboxSettingName;
+  | InboxSettingName
+  | InsightsReceiptSettingName
+  | InsightsPageSettingName
+  | InsightsInstallationSettingName
+  | ProjectBriefSettingName;
 
 export type OperationSettingValue = boolean | number | string | readonly string[] | null;
 
@@ -387,6 +398,15 @@ export interface OperationMissionPort {
   startOrchestration(projectId: string, missionId: string): Promise<void>;
 }
 
+/**
+ * Lifecycle latency over a time range, for Admin Health & cost
+ * (`apps/api/src/services/lifecycle-latency/range-report.ts`). Owned by the lifecycle latency
+ * service, which holds the watched states, their budgets and the percentile code.
+ */
+export interface OperationLifecycleLatencyPort {
+  rangeReport(input: { sinceMs: number; untilMs: number }): Promise<InstallationLifecycleLatency>;
+}
+
 /** A question or permission held as a ProjectData attention marker, with the reader's access. */
 export interface InboxAttentionMarker {
   id: string;
@@ -480,11 +500,61 @@ export interface OperationInboxPort {
    * caller records `notified_at`; a sweep retries a notice that was not queued.
    */
   notifyAsk(row: InboxAskNoticeRow, outcome: InboxAskNoticeOutcome): Promise<boolean>;
+  /**
+   * A system error item's Retry: the existing task retry (`retrySubtask`), with the person's
+   * authority. Throws an `OperationError` when it is refused.
+   */
+  retryTask(userId: string, projectId: string, taskId: string): Promise<{ newTaskId: string }>;
+  /**
+   * A system error item's Wake: the existing chat wake (`authorizeAgentWake`, then
+   * `ensureSessionRecovery`). Throws an `OperationError` when it is refused.
+   */
+  wakeChat(userId: string, projectId: string, sessionId: string): Promise<void>;
+  /**
+   * A system error item's Resume: a paused automation back to active, the same status change
+   * the trigger PATCH route makes (`triggerStatusUpdates`, resetting the failure window). Needs
+   * `task:write`; throws an `OperationError` when it is refused or the trigger is not paused.
+   */
+  resumeTrigger(userId: string, projectId: string, triggerId: string): Promise<void>;
+  /**
+   * An agent filed an ask (`fileAgentAsk`): a blocking question pauses its chat live and pushes
+   * to the person, as `request_human_input` always did; other items reach the person's inbox.
+   * Never throws; false when no notification was scheduled.
+   */
+  announceAsk(input: InboxAskAnnouncement): Promise<{ notificationScheduled: boolean }>;
+  /** The agent cancelled a blocking question: its chat stops showing it as paused. Never throws. */
+  withdrawQuestion(input: { projectId: string; sessionId: string; askId: string }): Promise<void>;
+  /**
+   * Whether each link names a thing of this project, in input order: null when it does, else
+   * a short reason the agent can act on. Read with the platform's access; nothing is copied.
+   */
+  checkLinkTargets(projectId: string, links: readonly InboxLink[]): Promise<Array<string | null>>;
+}
+
+/** What `announceAsk` needs about an ask an agent just filed. */
+export interface InboxAskAnnouncement {
+  projectId: string;
+  sessionId: string;
+  taskId: string;
+  askId: string;
+  kind: 'question' | 'review';
+  blocking: boolean;
+  title: string;
+  /** The agent's full text: the question, or the reason for a review. */
+  body: string;
+  options: string[];
+  category: string | null;
+  createdAt: number;
+  expiresAt: number | null;
+  /** The person the agent works for (the assignee). */
+  userId: string;
 }
 
 export interface OperationPorts {
   config: OperationConfigPort;
   inbox: OperationInboxPort;
+  /** Human tasks (inbox slice H1). */
+  inboxTasks: OperationInboxTaskPort;
   projectData: OperationProjectDataPort;
   settings: OperationSettingsPort;
   access: OperationAccessPort;
@@ -495,4 +565,5 @@ export interface OperationPorts {
   account: OperationAccountPort;
   workspaces: OperationWorkspacePort;
   missions: OperationMissionPort;
+  lifecycleLatency: OperationLifecycleLatencyPort;
 }

@@ -31,6 +31,7 @@ import {
 import { useCancelAgentPrompt } from '../../components/project-message-view/useCancelAgentPrompt';
 import { useCompletionDockWorking } from '../../components/project-message-view/useCompletionDockWorking';
 import { useToolCallGroupRowState } from '../../components/project-message-view/useToolCallGroupRowState';
+import { usePlatformCapabilities } from '../../hooks/usePlatformCapabilities';
 import {
   getChatSession,
   getTranscribeApiUrl,
@@ -148,6 +149,8 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
   // Stable identity: an inline arrow gives Virtuoso a new `itemContent` on every
   // parent render, re-rendering every windowed row and defeating
   // `AcpConversationItemView`'s memo (`.claude/rules/64`).
+  // One capabilities read for the whole list; rows get the primitive (AcpConversationItemView).
+  const { textToSpeech } = usePlatformCapabilities();
   const renderConversationItem = useCallback(
     (_index: number, item: DisplayItem) => (
       <div className="px-4 py-1">
@@ -159,10 +162,11 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
           }
           onToggleGroup={groupRowState.onToggleGroup}
           groupLive={groupRowState.groupLiveFor(item.id)}
+          serverTextToSpeech={textToSpeech}
         />
       </div>
     ),
-    [projectId, groupRowState]
+    [projectId, groupRowState, textToSpeech]
   );
 
   // ── Cancel the current in-flight prompt ──

@@ -18,7 +18,9 @@ import type { ChatMessageResponse } from '../../../src/lib/api';
 // Helpers
 // ---------------------------------------------------------------------------
 
-function msg(overrides: Partial<ChatMessageResponse> & { role: string; content: string }): ChatMessageResponse {
+function msg(
+  overrides: Partial<ChatMessageResponse> & { role: string; content: string }
+): ChatMessageResponse {
   return {
     id: `msg-${Math.random().toString(36).slice(2)}`,
     sessionId: 'sess-1',
@@ -258,7 +260,9 @@ describe('chatMessagesToConversationItems', () => {
   });
 
   it('marks plain tool message content for lazy loading instead of rendering it inline', () => {
-    const input = [msg({ id: 'tool-plain', role: 'tool', content: 'plain output', toolMetadata: null })];
+    const input = [
+      msg({ id: 'tool-plain', role: 'tool', content: 'plain output', toolMetadata: null }),
+    ];
     const items = chatMessagesToConversationItems(input);
 
     expect(items[0]).toMatchObject({
@@ -271,7 +275,13 @@ describe('chatMessagesToConversationItems', () => {
   });
 
   it('uses toolCallId from metadata for tool_call id field', () => {
-    const meta = { toolCallId: 'tc-abc', title: 'Run', kind: 'execute', status: 'completed', content: [] };
+    const meta = {
+      toolCallId: 'tc-abc',
+      title: 'Run',
+      kind: 'execute',
+      status: 'completed',
+      content: [],
+    };
     const input = [msg({ role: 'tool', content: 'done', toolMetadata: meta as unknown as null })];
     const items = chatMessagesToConversationItems(input);
 
@@ -280,7 +290,12 @@ describe('chatMessagesToConversationItems', () => {
 
   it('uses message id as toolCallId fallback when metadata has no toolCallId', () => {
     const meta = { kind: 'read', status: 'completed', content: [] };
-    const m = msg({ id: 'msg-fallback', role: 'tool', content: 'out', toolMetadata: meta as unknown as null });
+    const m = msg({
+      id: 'msg-fallback',
+      role: 'tool',
+      content: 'out',
+      toolMetadata: meta as unknown as null,
+    });
     const items = chatMessagesToConversationItems([m]);
 
     expect(items[0]).toMatchObject({ toolCallId: 'msg-fallback' });
@@ -291,8 +306,20 @@ describe('chatMessagesToConversationItems', () => {
   // -------------------------------------------------------------------------
 
   it('deduplicates tool messages with the same toolCallId', () => {
-    const meta1 = { toolCallId: 'tc-1', title: 'Read', kind: 'read', status: 'in_progress', content: [] };
-    const meta2 = { toolCallId: 'tc-1', title: 'Read done', kind: 'read', status: 'completed', content: [] };
+    const meta1 = {
+      toolCallId: 'tc-1',
+      title: 'Read',
+      kind: 'read',
+      status: 'in_progress',
+      content: [],
+    };
+    const meta2 = {
+      toolCallId: 'tc-1',
+      title: 'Read done',
+      kind: 'read',
+      status: 'completed',
+      content: [],
+    };
     const input = [
       msg({ role: 'tool', content: '(tool call)', toolMetadata: meta1 as unknown as null }),
       msg({ role: 'tool', content: '(tool update)', toolMetadata: meta2 as unknown as null }),
@@ -305,8 +332,20 @@ describe('chatMessagesToConversationItems', () => {
   });
 
   it('updates title on deduplication when update has a non-kind title', () => {
-    const meta1 = { toolCallId: 'tc-2', title: 'Initial', kind: 'read', status: 'in_progress', content: [] };
-    const meta2 = { toolCallId: 'tc-2', title: 'Updated title', kind: 'read', status: 'completed', content: [] };
+    const meta1 = {
+      toolCallId: 'tc-2',
+      title: 'Initial',
+      kind: 'read',
+      status: 'in_progress',
+      content: [],
+    };
+    const meta2 = {
+      toolCallId: 'tc-2',
+      title: 'Updated title',
+      kind: 'read',
+      status: 'completed',
+      content: [],
+    };
     const input = [
       msg({ role: 'tool', content: 'start', toolMetadata: meta1 as unknown as null }),
       msg({ role: 'tool', content: 'end', toolMetadata: meta2 as unknown as null }),
@@ -377,7 +416,9 @@ describe('chatMessagesToConversationItems', () => {
       status: 'completed',
       content: structuredContent,
     };
-    const input = [msg({ role: 'tool', content: 'diff: /src/foo.go', toolMetadata: meta as unknown as null })];
+    const input = [
+      msg({ role: 'tool', content: 'diff: /src/foo.go', toolMetadata: meta as unknown as null }),
+    ];
     const items = chatMessagesToConversationItems(input);
 
     expect(items[0]).toMatchObject({
@@ -390,7 +431,12 @@ describe('chatMessagesToConversationItems', () => {
   });
 
   it('preserves lazy-load metadata from compact update rows merged into an existing tool call', () => {
-    const meta1 = { toolCallId: 'tc-compact-merge', title: 'Search files', kind: 'search', status: 'in_progress' };
+    const meta1 = {
+      toolCallId: 'tc-compact-merge',
+      title: 'Search files',
+      kind: 'search',
+      status: 'in_progress',
+    };
     const meta2 = { toolCallId: 'tc-compact-merge', status: 'completed', contentSize: 1234 };
     const input = [
       toolMsg({ id: 'tool-start', content: '(tool call)', toolMetadata: meta1 }),
@@ -431,7 +477,9 @@ describe('chatMessagesToConversationItems', () => {
   });
 
   it('does not render non-placeholder content inline', () => {
-    const input = [msg({ id: 'tool-output', role: 'tool', content: 'real output here', toolMetadata: null })];
+    const input = [
+      msg({ id: 'tool-output', role: 'tool', content: 'real output here', toolMetadata: null }),
+    ];
     const items = chatMessagesToConversationItems(input);
 
     expect(items[0]).toMatchObject({
@@ -541,7 +589,9 @@ describe('chatMessagesToConversationItems', () => {
 
   it('renders unknown roles with non-null toolMetadata in raw_fallback', () => {
     const meta = { customField: 'value' };
-    const input = [msg({ role: 'exotic_role', content: 'exotic data', toolMetadata: meta as unknown as null })];
+    const input = [
+      msg({ role: 'exotic_role', content: 'exotic data', toolMetadata: meta as unknown as null }),
+    ];
     const items = chatMessagesToConversationItems(input);
 
     expect(items).toHaveLength(1);
@@ -575,7 +625,16 @@ describe('chatMessagesToConversationItems', () => {
       msg({ role: 'user', content: 'start task' }),
       msg({ role: 'thinking', content: 'processing...' }),
       msg({ role: 'plan', content: JSON.stringify(planEntries) }),
-      msg({ role: 'tool', content: '(tool call)', toolMetadata: { toolCallId: 'tc-z', kind: 'read', status: 'completed', content: [] } as unknown as null }),
+      msg({
+        role: 'tool',
+        content: '(tool call)',
+        toolMetadata: {
+          toolCallId: 'tc-z',
+          kind: 'read',
+          status: 'completed',
+          content: [],
+        } as unknown as null,
+      }),
       msg({ role: 'assistant', content: 'Done!' }),
     ];
     const items = chatMessagesToConversationItems(input);
@@ -613,8 +672,18 @@ describe('chatMessagesToConversationItems', () => {
   it('updates lazy-load pointer on deduplication when new content is provided', () => {
     const initialContent = [{ type: 'content', text: 'initial output' }];
     const updatedContent = [{ type: 'content', text: 'final output' }];
-    const meta1 = { toolCallId: 'tc-content-update', kind: 'read', status: 'in_progress', content: initialContent };
-    const meta2 = { toolCallId: 'tc-content-update', kind: 'read', status: 'completed', content: updatedContent };
+    const meta1 = {
+      toolCallId: 'tc-content-update',
+      kind: 'read',
+      status: 'in_progress',
+      content: initialContent,
+    };
+    const meta2 = {
+      toolCallId: 'tc-content-update',
+      kind: 'read',
+      status: 'completed',
+      content: updatedContent,
+    };
     const input = [
       toolMsg({ id: 'initial-content-message', content: 'initial output', toolMetadata: meta1 }),
       toolMsg({ id: 'updated-content-message', content: 'final output', toolMetadata: meta2 }),
@@ -670,7 +739,12 @@ describe('chatMessagesToConversationItems', () => {
   });
 
   it('prefers explicit title over kind when both are available', () => {
-    const meta = { toolCallId: 'tc-both', kind: 'read', title: 'Read /src/main.go', status: 'completed' };
+    const meta = {
+      toolCallId: 'tc-both',
+      kind: 'read',
+      title: 'Read /src/main.go',
+      status: 'completed',
+    };
     const input = [msg({ role: 'tool', content: 'output', toolMetadata: meta as unknown as null })];
     const items = chatMessagesToConversationItems(input);
 
@@ -753,7 +827,12 @@ describe('chatMessagesToConversationItems', () => {
       status: 'completed',
       toolName: 'mcp__sam-mcp__display_from_library',
       rawInput: { fileId: 'file-1', caption: 'the auth doc' },
-      rawOutput: [{ type: 'text', text: '{"fileId":"file-1","filename":"auth.md","mimeType":"text/markdown","sizeBytes":1234}' }],
+      rawOutput: [
+        {
+          type: 'text',
+          text: '{"fileId":"file-1","filename":"auth.md","mimeType":"text/markdown","sizeBytes":1234}',
+        },
+      ],
     };
     const items = chatMessagesToConversationItems([
       toolMsg({ content: '(tool call)', toolMetadata: meta }),
@@ -781,7 +860,12 @@ describe('chatMessagesToConversationItems', () => {
       toolCallId: 'tc-upload',
       status: 'completed',
       toolName: 'mcp__sam-mcp__upload_to_library',
-      rawOutput: [{ type: 'text', text: '{"fileId":"f-9","filename":"auth.md","mimeType":"text/markdown","sizeBytes":900}' }],
+      rawOutput: [
+        {
+          type: 'text',
+          text: '{"fileId":"f-9","filename":"auth.md","mimeType":"text/markdown","sizeBytes":900}',
+        },
+      ],
     };
     const items = chatMessagesToConversationItems([
       toolMsg({ id: 'up-start', content: '(tool call)', toolMetadata: initial }),
@@ -812,7 +896,12 @@ describe('chatMessagesToConversationItems', () => {
       status: 'in_progress',
       toolName: 'mcp__sam-mcp__display_from_library',
       rawInput: { fileId: 'file-keep' },
-      rawOutput: [{ type: 'text', text: '{"fileId":"file-keep","filename":"guide.md","mimeType":"text/markdown","sizeBytes":42}' }],
+      rawOutput: [
+        {
+          type: 'text',
+          text: '{"fileId":"file-keep","filename":"guide.md","mimeType":"text/markdown","sizeBytes":42}',
+        },
+      ],
     };
     const statusOnly = {
       toolCallId: 'tc-keep-card',
@@ -1030,7 +1119,12 @@ describe('chatMessagesToConversationItems', () => {
     const items = chatMessagesToConversationItems([
       toolMsg({
         id: 'codex-empty',
-        content: JSON.stringify({ fileId: 'f-empty', filename: 'e.html', mimeType: 'text/html', sizeBytes: 5 }),
+        content: JSON.stringify({
+          fileId: 'f-empty',
+          filename: 'e.html',
+          mimeType: 'text/html',
+          sizeBytes: 5,
+        }),
         toolMetadata: result,
       }),
     ]);
@@ -1054,5 +1148,55 @@ describe('chatMessagesToConversationItems', () => {
 
     const tool = items[0] as ToolCallItem;
     expect(matchToolCard(tool)).toBeNull();
+  });
+});
+
+describe('canonical tool identity and lazy pointers', () => {
+  it('adopts a legacy start while keeping source-rotated canonical calls distinct', () => {
+    const rows = [
+      toolMsg({
+        id: 'start',
+        content: '',
+        toolMetadata: { toolCallId: 'reuse', title: 'Kept title', status: 'pending' },
+      }),
+      toolMsg({
+        id: 'canonical-a',
+        content: 'result',
+        toolMetadata: {
+          toolCallId: 'reuse',
+          _samToolCanonicalId: 'canonical-a',
+          _samToolRevision: 2,
+          status: 'completed',
+          contentSize: 100,
+        },
+      }),
+      toolMsg({
+        id: 'canonical-b',
+        content: 'new call',
+        toolMetadata: {
+          toolCallId: 'reuse',
+          _samToolCanonicalId: 'canonical-b',
+          _samToolRevision: 1,
+          title: 'Next incarnation',
+          status: 'pending',
+          contentSize: 100,
+        },
+      }),
+    ];
+    const items = chatMessagesToConversationItems(rows).filter(
+      (item): item is ToolCallItem => item.kind === 'tool_call'
+    );
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      title: 'Kept title',
+      toolCallId: 'canonical-a',
+      messageId: 'canonical-a',
+      revision: 2,
+    });
+    expect(items[1]).toMatchObject({
+      toolCallId: 'canonical-b',
+      messageId: 'canonical-b',
+      revision: 1,
+    });
   });
 });

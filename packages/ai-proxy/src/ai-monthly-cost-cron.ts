@@ -10,6 +10,7 @@ import {
 } from '@simple-agent-manager/shared';
 import { log } from '@simple-agent-manager/worker-core';
 
+import { resolveAiGatewayId } from './ai-gateway-availability';
 import {
   type GatewayLogsPorts,
   getGatewayPeriodBounds,
@@ -53,7 +54,7 @@ export async function runMonthlyCostAggregation(
   env: AiProxyEnv,
   ports: GatewayLogsPorts
 ): Promise<MonthlyCostCronResult> {
-  const gatewayId = env.AI_GATEWAY_ID;
+  const gatewayId = resolveAiGatewayId(env);
   if (!gatewayId) {
     return { enabled: false, usersUpdated: 0, totalEntries: 0, errors: 0 };
   }

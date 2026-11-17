@@ -39,11 +39,13 @@ func TestCodexRequestedModelIsSeededBeforeACPProcessStart(t *testing.T) {
 				if !strings.HasPrefix(envVar, "CODEX_CONFIG=") {
 					continue
 				}
-				var config map[string]string
+				var config struct {
+					Model string `json:"model"`
+				}
 				if err := json.Unmarshal([]byte(strings.TrimPrefix(envVar, "CODEX_CONFIG=")), &config); err != nil {
 					return nil, fmt.Errorf("decode CODEX_CONFIG: %w", err)
 				}
-				startupModel = config["model"]
+				startupModel = config.Model
 			}
 			return process, nil
 		},

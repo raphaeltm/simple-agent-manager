@@ -5,6 +5,7 @@ import {
   DEFAULT_AI_PROXY_ANTHROPIC_MODEL,
   DEFAULT_AI_PROXY_MODEL,
   DEFAULT_DEBUG_AGENT_MODEL,
+  DEFAULT_PROJECT_BRIEF_MODEL,
   DEFAULT_SANDBOX_MODEL,
   DEFAULT_TASK_TITLE_MODEL,
   DEFAULT_TTS_CLEANUP_MODEL,
@@ -41,6 +42,19 @@ describe('AI Model Registry', () => {
         intendedRole: 'workspace-agent',
       });
       expect(DEFAULT_AI_PROXY_ALLOWED_MODELS.split(',')).toContain('gpt-6.1-terra');
+    });
+
+    it('registers the SAM DeepSeek default with published pricing and tool support', () => {
+      expect(DEFAULT_SAM_MODEL).toBe('@cf/deepseek-ai/deepseek-v4.1-flash-1017');
+      expect(PLATFORM_AI_MODELS.find((model) => model.id === DEFAULT_SAM_MODEL)).toMatchObject({
+        provider: 'workers-ai',
+        costPer1kInputTokens: 0.0003,
+        costPer1kCachedInputTokens: 0.000006,
+        costPer1kOutputTokens: 0.0012,
+        contextWindow: 1048576,
+        toolCallSupport: 'good',
+      });
+      expect(DEFAULT_AI_PROXY_ALLOWED_MODELS.split(',')).toContain(DEFAULT_SAM_MODEL);
     });
 
     it('has unique model IDs', () => {
@@ -119,6 +133,7 @@ describe('AI Model Registry', () => {
         DEFAULT_AI_PROXY_MODEL,
         DEFAULT_AI_PROXY_ANTHROPIC_MODEL,
         DEFAULT_SAM_MODEL,
+        DEFAULT_PROJECT_BRIEF_MODEL,
       };
       for (const [name, modelId] of Object.entries(defaults)) {
         expect(platformIds.has(modelId), `${name} (${modelId}) missing from PLATFORM_AI_MODELS`).toBe(

@@ -15,7 +15,8 @@ const log = createModuleLogger('project_data.question_asks');
 type Broadcast = (type: string, payload: Record<string, unknown>, sessionId?: string) => void;
 
 /**
- * Close the chat's open questions because the person wrote to the agent in the chat. The message
+ * Close the chat's open blocking questions because the person wrote to the agent in the chat (a
+ * non-blocking ask stays in the inbox until answered there; inbox slice D). The message
  * itself reached the agent, so no notice is queued (`notified_at` is set). Bound to the project
  * and the chat (rule 11). A failure is logged, never thrown: the message is already persisted,
  * and the question still expires on its schedule, where `ProjectData.expireQuestionAsk` sees
@@ -39,7 +40,7 @@ export async function closeQuestionAsksForHumanMessage(
       `UPDATE asks
           SET status = 'answered', answer_json = ?, resolved_at = ?, updated_at = ?, notified_at = ?
         WHERE project_id = ? AND source_session_id = ? AND kind = 'question' AND status = 'open'
-          AND created_at <= ?
+          AND blocking = 1 AND created_at <= ?
         RETURNING id`
     )
       .bind(
@@ -76,6 +77,95 @@ export async function closeQuestionAsksForHumanMessage(
     });
     return 0;
   }
+}
+
+/** The chat-scoped system error items (inbox slice E): their dedupe keys, per source. */
+const CHAT_ERROR_SOURCES = ['wake', 'sleep', 'delivery'] as const;
+type ChatErrorSource = (typeof CHAT_ERROR_SOURCES)[number];
+
+/**
+ * Close a chat's system error items (inbox slice E) as `done` with the given resolution, open or
+ * archived alike, and release their dedupe keys so a later failure files a new item. Bound to the
+ * project and the chat (rule 11). No agent filed them, so no notice is queued (`notified_at`
+ * set). Same write as `@simple-agent-manager/operations` `resolveSystemError`, which this package
+ * cannot import. Returns how many rows changed; never throws.
+ */
+async function closeChatErrorAsks(
+  database: D1Database,
+  input: {
+    projectId: string;
+    sessionId: string;
+    sources: readonly ChatErrorSource[];
+    resolution: 'recovered' | 'superseded';
+    logEvent: string;
+  }
+): Promise<number> {
+  const now = Date.now();
+  const keys = input.sources.map((source) => `error:${source}:${input.sessionId}`);
+  try {
+    const result = await database
+      .prepare(
+        `UPDATE asks
+            SET status = CASE WHEN status = 'open' THEN 'done' ELSE status END,
+                answer_json = CASE WHEN status = 'open' THEN ? ELSE answer_json END,
+                resolved_at = CASE WHEN status = 'open' THEN ? ELSE resolved_at END,
+                notified_at = COALESCE(notified_at, ?), dedupe_key = NULL, updated_at = ?
+          WHERE project_id = ? AND kind = 'error' AND status IN ('open', 'archived')
+            AND dedupe_key IN (${keys.map(() => '?').join(', ')})`
+      )
+      .bind(
+        JSON.stringify({ resolution: input.resolution }),
+        now,
+        now,
+        now,
+        input.projectId,
+        ...keys
+      )
+      .run();
+    return result.meta?.changes ?? 0;
+  } catch (error) {
+    log.error(input.logEvent, {
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      ...serializeError(error),
+    });
+    return 0;
+  }
+}
+
+/**
+ * The person wrote in the chat: the chat's system error items (a failed wake, a sleep that may
+ * have lost work, an answer that never reached the agent) close as recovered. Never throws.
+ */
+export async function closeChatErrorAsksForHumanMessage(
+  env: Env,
+  input: { projectId: string | null; sessionId: string }
+): Promise<number> {
+  if (!input.projectId) return 0;
+  return closeChatErrorAsks(env.DATABASE, {
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    sources: CHAT_ERROR_SOURCES,
+    resolution: 'recovered',
+    logEvent: 'chat_error_asks.close_failed',
+  });
+}
+
+/**
+ * The chat is now blocked on a provider usage limit: its failed-wake item is superseded, as the
+ * `wake_failed` marker it replaced was (`provider-limit-attention.ts`). Waiting for the limit is
+ * not a failure, and the limit's own attention and scheduled wake take over. Never throws.
+ */
+export async function closeWakeErrorAskForProviderLimit(
+  database: D1Database,
+  input: { projectId: string; sessionId: string }
+): Promise<number> {
+  return closeChatErrorAsks(database, {
+    ...input,
+    sources: ['wake'],
+    resolution: 'superseded',
+    logEvent: 'chat_error_asks.provider_limit_close_failed',
+  });
 }
 
 /** Whether the person wrote in the chat after the question was asked (expiry backstop). */

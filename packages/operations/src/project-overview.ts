@@ -9,8 +9,10 @@
  * Round trips: authorization (1, the access port's membership read), then in parallel the
  * running query (1), the merged pull requests (1) and the recent ideas
  * (`listRecentIdeasWithDerivedStatus`: rows, repository, the ProjectData snapshot, and up to four
- * evidence reads, so at most 7). About 10, within the 20 a dashboard read may spend
- * (`.claude/rules/60`).
+ * evidence reads, so at most 7), and the brief (1: its stored row and which of the items it names
+ * are still open, one statement; settings are cached per isolate). About 11, within the 20 a
+ * dashboard read may spend (`.claude/rules/60`). The brief is only read here: making one runs
+ * after the response, in the background (`refreshProjectBriefIfDue`, apps/api).
  */
 import {
   DEFAULT_PROJECT_OVERVIEW_RECENT_LIMIT,
@@ -27,28 +29,30 @@ import * as v from 'valibot';
 
 import { authorizeProjectOperation } from './authorization';
 import { listRecentIdeasWithDerivedStatus } from './idea-list-core';
+import { readProjectBrief } from './project-brief-read';
+import { getProjectBriefSettings } from './project-brief-settings';
+import {
+  OVERVIEW_RUNNING_TASK_STATUSES,
+  OVERVIEW_STARTING_TASK_STATUSES,
+  overviewChatRunningSql,
+  overviewPausedSessionsSql,
+} from './project-overview-statuses';
 import type { OperationContext } from './types';
 
-/**
- * Task statuses whose chat can be running: placed but not started, and started. An allowlist
- * (`.claude/rules/79`): a status added later is not running until someone decides it is.
- * `sleeping` is deliberately absent: a sleeping chat is not running.
- */
-export const OVERVIEW_STARTING_TASK_STATUSES = ['queued', 'delegated'] as const;
-export const OVERVIEW_RUNNING_TASK_STATUSES = [
-  ...OVERVIEW_STARTING_TASK_STATUSES,
-  'in_progress',
-] as const;
+export { OVERVIEW_RUNNING_TASK_STATUSES, OVERVIEW_STARTING_TASK_STATUSES };
 
 const sqlList = (values: readonly string[]) => values.map((value) => `'${value}'`).join(', ');
 
 /**
  * The chat is paused on a person: a ProjectData attention marker (synced to
- * `session_summaries.attention_json`), or an open question held in D1 `asks` (inbox slice G),
- * which is not copied into the summary. `open_questions` is the CTE at the head of `RUNNING_SQL`.
+ * `session_summaries.attention_json`), an open question held in D1 `asks` (inbox slice G), or a
+ * pending secret request from the chat. The inbox lists each of these as a blocking item
+ * ("paused on this", `inboxAgentState`), so Running now keeps the chat too instead of dropping it
+ * when its turn ends (inbox slice F2: the two sections must not contradict each other).
+ * `paused_sessions` is the CTE at the head of `RUNNING_SQL`.
  */
 const PAUSED_ON_PERSON_SQL = `(ss.attention_json IS NOT NULL
-      OR ss.id IN (SELECT session_id FROM open_questions))`;
+      OR ss.id IN (SELECT session_id FROM paused_sessions))`;
 
 /**
  * 1 for a chat paused on a question the viewer must answer (they started it, it is past
@@ -66,16 +70,13 @@ const WAITING_ON_VIEWER_SQL = `(CASE WHEN ${PAUSED_ON_PERSON_SQL} AND ss.created
  * open question. The task join carries `project_id` so a task id cannot reach across projects
  * (rule 11), and a profile name is shown only for this project's profiles or the task creator's
  * own global ones, so a hint naming someone else's global profile reveals nothing. `COUNT(*) OVER ()` gives the total without a second round trip.
- * `open_questions` reads this project's open, unexpired question asks once
- * (`idx_asks_open_question`), bound to the project like every other predicate here.
+ * `paused_sessions` reads this project's open, unexpired question asks (`idx_asks_open_question`)
+ * and its pending, unexpired secret requests (`idx_runtime_secret_requests_status_expires`; few are
+ * ever pending) once, both bound to the project like every other predicate here.
  */
 const RUNNING_SQL = `
-  WITH open_questions AS (
-    SELECT DISTINCT source_session_id AS session_id
-      FROM asks
-     WHERE project_id = ? AND kind = 'question' AND status = 'open'
-       AND source_session_id IS NOT NULL
-       AND (expires_at IS NULL OR expires_at > ?)
+  WITH paused_sessions AS (
+    ${overviewPausedSessionsSql('?')}
   )
   SELECT ss.id, ss.task_id, ss.topic, ss.started_at, ss.created_at, ss.last_message_at,
          ss.agent_completed_at, ss.created_by_user_id,
@@ -90,14 +91,7 @@ const RUNNING_SQL = `
       ON ap.id = t.agent_profile_hint
      AND (ap.project_id = ss.project_id OR (ap.project_id IS NULL AND ap.user_id = t.user_id))
    WHERE ss.project_id = ?
-     AND ss.status = 'active'
-     AND t.status IN (${sqlList(OVERVIEW_RUNNING_TASK_STATUSES)})
-     AND (
-       t.status IN (${sqlList(OVERVIEW_STARTING_TASK_STATUSES)})
-       OR ${PAUSED_ON_PERSON_SQL}
-       OR (ss.agent_completed_at IS NULL
-           AND (t.execution_step IS NULL OR t.execution_step <> 'awaiting_followup'))
-     )
+     AND ${overviewChatRunningSql('SELECT session_id FROM paused_sessions')}
    ORDER BY ${WAITING_ON_VIEWER_SQL} DESC,
             COALESCE(ss.last_message_at, ss.created_at, ss.started_at) DESC, ss.id DESC
    LIMIT ?`;
@@ -171,15 +165,23 @@ function toRunningChat(
   };
 }
 
-async function readRunning(
-  ctx: OperationContext,
+/**
+ * Running now for one viewer. `viewerId` only decides which rows are "waiting on the viewer" (and
+ * ranks them first); pass an id that matches nobody for a viewer-neutral read, as the brief's
+ * facts do (`project-brief-facts.ts`).
+ */
+export async function readRunningChats(
+  db: D1Database,
   projectId: string,
+  viewerId: string,
   limit: number
 ): Promise<ProjectOverviewResponse['running']> {
-  const result = await ctx.env.DATABASE.prepare(RUNNING_SQL)
-    // Placeholders in order: project and clock (open questions), viewer (sum), project,
-    // viewer (ranking), limit.
-    .bind(projectId, Date.now(), ctx.actor.userId, projectId, ctx.actor.userId, limit)
+  const now = Date.now();
+  const result = await db
+    .prepare(RUNNING_SQL)
+    // Placeholders in order: project and clock (open questions), project and clock (pending
+    // secret requests), viewer (sum), project, viewer (ranking), limit.
+    .bind(projectId, now, projectId, now, viewerId, projectId, viewerId, limit)
     .all<Record<string, unknown>>();
   const rows = result.results ?? [];
   const items: OverviewRunningChat[] = [];
@@ -195,7 +197,7 @@ async function readRunning(
       });
       continue;
     }
-    items.push(toRunningChat(parsed.output, ctx.actor.userId));
+    items.push(toRunningChat(parsed.output, viewerId));
   }
   // The window count is the query's, so a skipped row still counts as running.
   const windowTotal = rows[0]?.total;
@@ -288,12 +290,12 @@ export async function projectOverviewGet(
   const recentLimit = clampLimit(input.recentLimit, DEFAULT_PROJECT_OVERVIEW_RECENT_LIMIT);
 
   const unavailable: ProjectOverviewSection[] = [];
-  const [running, ideas, mergedPullRequests] = await Promise.all([
+  const [running, ideas, mergedPullRequests, brief] = await Promise.all([
     section(
       'running',
       projectId,
       { items: [], total: 0, waitingOnViewerTotal: 0 },
-      () => readRunning(ctx, projectId, runningLimit),
+      () => readRunningChats(ctx.env.DATABASE, projectId, ctx.actor.userId, runningLimit),
       unavailable
     ),
     section(
@@ -310,12 +312,25 @@ export async function projectOverviewGet(
       () => readMergedPullRequests(ctx, projectId, recentLimit),
       unavailable
     ),
+    // The brief (inbox slice I): switched off means no read at all. Settings are cached per
+    // isolate, so this section costs one D1 statement.
+    section(
+      'brief',
+      projectId,
+      null,
+      async () =>
+        (await getProjectBriefSettings(ctx)).enabled
+          ? readProjectBrief(ctx.env.DATABASE, projectId, Date.now())
+          : null,
+      unavailable
+    ),
   ]);
 
   return {
     projectId,
     running,
     recent: { ideas, mergedPullRequests },
+    brief,
     unavailable,
     generatedAt: new Date().toISOString(),
   };

@@ -783,7 +783,7 @@ describe('AppShell (immersive chat view)', () => {
       'composer',
     ]);
     expect(shellFrame()).not.toHaveAttribute('data-chat-immersive');
-    expect(shellFrame()!.className).toContain('p-2.5');
+    expect(shellFrame()!.style.getPropertyValue('--sam-shell-frame')).toBe('10px');
 
     fireEvent.click(screen.getByRole('button', { name: 'Show only the conversation' }));
     // Pinned out of the flow and the shell switched in the same commit as the click.
@@ -792,7 +792,7 @@ describe('AppShell (immersive chat view)', () => {
       expect(el.style.position).toBe('fixed');
     }
     expect(shellFrame()).toHaveAttribute('data-chat-immersive', 'on');
-    expect(shellFrame()!.className).toContain('p-1.5');
+    expect(shellFrame()!.style.getPropertyValue('--sam-shell-frame')).toBe('6px');
 
     await untilEntered();
     expect(animations).toHaveLength(4);
@@ -816,7 +816,7 @@ describe('AppShell (immersive chat view)', () => {
       expect(el.style.visibility).toBe('');
     }
     expect(shellFrame()).not.toHaveAttribute('data-chat-immersive');
-    expect(shellFrame()!.className).toContain('p-2.5');
+    expect(shellFrame()!.style.getPropertyValue('--sam-shell-frame')).toBe('10px');
     // A piece's own inline values survive the round trip, React-managed or not.
     expect(document.querySelector<HTMLElement>('aside')!.style.width).toBe('46px');
     expect(

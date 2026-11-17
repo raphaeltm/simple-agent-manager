@@ -2,6 +2,7 @@ import { Dialog, paneClassName } from '@simple-agent-manager/ui';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 
 import { useGlobalAudio } from '../../contexts/GlobalAudioContext';
+import { usePlatformCapabilities } from '../../hooks/usePlatformCapabilities';
 import { getTtsApiUrl } from '../../lib/api';
 import { RenderedMarkdown } from '../MarkdownRenderer';
 
@@ -25,7 +26,8 @@ export const TruncatedSummary: FC<TruncatedSummaryProps> = ({ summary, taskId })
 
   const globalAudio = useGlobalAudio();
 
-  const showSpeaker = !!taskId;
+  const { textToSpeech } = usePlatformCapabilities();
+  const showSpeaker = !!taskId && textToSpeech;
 
   const handlePlayAudio = useCallback(() => {
     if (!taskId) return;

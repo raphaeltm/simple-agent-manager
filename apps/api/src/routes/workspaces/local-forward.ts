@@ -5,6 +5,7 @@ import { Hono } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
+import { clientIpFromHeaders } from '../../lib/client-ip';
 import { log, serializeError } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import { credentialNotAfter, getUserId, requireApproved, requireAuth } from '../../middleware/auth';
@@ -243,7 +244,7 @@ async function handleLocalForwardProxy(c: Context<{ Bindings: Env }>) {
   headers.set('X-SAM-Local-Authority', claims.localAuthority);
   headers.set('X-Forwarded-Host', claims.localAuthority);
   headers.set('X-Forwarded-Proto', 'http');
-  headers.set('X-Forwarded-For', c.req.header('CF-Connecting-IP') ?? '');
+  headers.set('X-Forwarded-For', clientIpFromHeaders((name) => c.req.header(name)) ?? '');
 
   const response = await fetchNodeAgent(
     claims.nodeId,
@@ -257,7 +258,10 @@ async function handleLocalForwardProxy(c: Context<{ Bindings: Env }>) {
       // @ts-expect-error Cloudflare Workers support streaming request bodies.
       duplex: c.req.raw.body ? 'half' : undefined,
     },
-    getNodeAgentRequestTimeoutMs(c.env)
+    getNodeAgentRequestTimeoutMs(c.env),
+    // The local CLI must receive app redirects, but the Worker must never follow
+    // them with its internal forwarding credential.
+    { allowApplicationRedirects: true }
   );
 
   return new Response(response.body, {

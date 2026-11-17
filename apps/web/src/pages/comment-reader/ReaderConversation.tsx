@@ -33,6 +33,7 @@ import {
   USER_SCROLL_EVENTS,
 } from '../../components/project-message-view/comments/quote-highlight';
 import type { DisplayItem } from '../../components/project-message-view/tool-call-groups';
+import { usePlatformCapabilities } from '../../hooks/usePlatformCapabilities';
 
 /** Distance from an edge, in px, at which a reader's own scroll loads more. */
 const EDGE_LOAD_PX = 160;
@@ -201,6 +202,8 @@ export function ReaderConversation({
   const [placement, setPlacement] = useState<'above' | 'visible' | 'below'>('visible');
   const [quoteMissing, setQuoteMissing] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(() => new Set());
+  // One capabilities read for the whole list; rows get the primitive (AcpConversationItemView).
+  const { textToSpeech } = usePlatformCapabilities();
   const pendingLanding = useRef(true);
   const userScrolled = useRef(false);
   const prependFromBottom = useRef<number | null>(null);
@@ -392,6 +395,7 @@ export function ReaderConversation({
                       item.kind === 'tool_call_group' ? expandedGroups.has(item.id) : undefined
                     }
                     onToggleGroup={toggleGroup}
+                    serverTextToSpeech={textToSpeech}
                   />
                 </div>
                 {itemMarkers && itemMarkers.length > 0 && (

@@ -20,17 +20,16 @@ import {
   jsonRpcSuccess,
   type McpTokenData,
 } from './_helpers';
+import type { BudgetedPolicy, InstructionPayloadParts } from './instruction-budget';
 import { buildEventingInstructions } from './instruction-eventing-guidance';
 import {
   buildKnowledgeInstructions,
   buildPolicyInstructions,
-  formatKnowledgeDirectives,
-  formatKnowledgeEntityIndex,
-  formatPolicyDirectives,
-  type PolicyEntry,
   serializeRejection,
 } from './instruction-formatting';
 import { buildInstructionIdeaSlice, type InstructionIdeaContext } from './instruction-idea-context';
+import { INBOX_TURN_END_INSTRUCTION } from './instruction-inbox-guidance';
+import { renderWithinBudgets } from './instruction-payload';
 
 export { handleRequestHumanInput } from './human-input-tool';
 
@@ -164,7 +163,7 @@ export async function handleGetInstructions(
   }[] = [];
   // Retrieve active project policies (Phase 4: Policy Propagation).
   // Policies are dynamic rules and preferences that agents must follow.
-  let policyContext: PolicyEntry[] = [];
+  let policyContext: BudgetedPolicy[] = [];
   let entityIndex: KnowledgeEntityIndexEntry[] = [];
   let totalEntities = 0;
 
@@ -252,6 +251,9 @@ export async function handleGetInstructions(
       confidence: p.confidence,
       scope: p.scope,
       expiresAt: p.expiresAt,
+      // An older DO revision mid-deploy returns rows without these; read them as pinned.
+      injectMode: p.injectMode ?? 'pinned',
+      updatedAt: p.updatedAt,
     }));
   } else {
     log.warn('mcp.get_instructions.policy_retrieval_failed', {
@@ -263,16 +265,6 @@ export async function handleGetInstructions(
     });
   }
 
-  // Format knowledge as actionable directives grouped by entity, not raw JSON.
-  // Agents are more likely to apply knowledge when it reads like instructions.
-  const knowledgeDirectives =
-    [
-      formatKnowledgeDirectives(knowledgeContext),
-      formatKnowledgeEntityIndex(entityIndex, knowledgeContext, totalEntities),
-    ]
-      .filter((section): section is string => section !== null)
-      .join('\n') || null;
-
   // Build knowledge-related instructions based on whether knowledge exists.
   // A project with entities but nothing above the confidence bar still has knowledge —
   // it is reachable by search — so it must not get the "no stored knowledge" bootstrap text.
@@ -281,7 +273,6 @@ export async function handleGetInstructions(
     context.type === 'conversation' || context.task?.taskMode === 'conversation'
   );
 
-  const policyDirectives = formatPolicyDirectives(policyContext);
   const policyInstructions = buildPolicyInstructions(
     policyContext.length > 0,
     context.type === 'conversation' || context.task?.taskMode === 'conversation'
@@ -290,7 +281,7 @@ export async function handleGetInstructions(
   const isConversation =
     context.type === 'conversation' || context.task?.taskMode === 'conversation';
 
-  const result = {
+  const buildResult = (parts: InstructionPayloadParts) => ({
     context: {
       type: context.type,
       chatSessionId: context.chatSessionId ?? undefined,
@@ -349,6 +340,8 @@ export async function handleGetInstructions(
             'Push your changes to the output branch before calling the SAM MCP `complete_task` tool.',
             'If you encounter blockers, report them via the SAM MCP `update_task_status` tool with a clear description.',
           ]),
+      // How to reach a person; the inbox tools need a task-backed agent token.
+      ...(tokenData.taskId ? [INBOX_TURN_END_INSTRUCTION] : []),
       // Event tools need a task-backed agent token.
       ...(tokenData.taskId
         ? buildEventingInstructions({
@@ -362,6 +355,7 @@ export async function handleGetInstructions(
         : []),
       ...knowledgeInstructions,
       ...policyInstructions,
+      ...parts.sizeNotes,
       ...(project.repoProvider === 'artifacts'
         ? [
             'This project uses SAM Git (Cloudflare Artifacts) — NOT GitHub.',
@@ -393,11 +387,29 @@ export async function handleGetInstructions(
     // its titles re-duplicated to be correlatable, costing ~2x the inline form; and callers
     // that need structured policy data already have `list_policies` / `get_policy`.
     ...(operationsPlaybook ? { operationsPlaybook } : {}),
-    ...(knowledgeDirectives ? { knowledgeDirectives } : {}),
-    ...(policyDirectives ? { policyDirectives } : {}),
-  };
-
-  return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+    ...(parts.knowledgeDirectives ? { knowledgeDirectives: parts.knowledgeDirectives } : {}),
+    ...(parts.policyDirectives ? { policyDirectives: parts.policyDirectives } : {}),
   });
+  const render = (parts: InstructionPayloadParts) => JSON.stringify(buildResult(parts), null, 2);
+
+  const text = await renderWithinBudgets({
+    env,
+    projectId: tokenData.projectId,
+    contextType: context.type,
+    policies: policyContext,
+    knowledge: knowledgeContext,
+    entityIndex,
+    totalEntities,
+    taskText: [
+      context.task?.title,
+      context.task?.description,
+      typeof context.session?.topic === 'string' ? context.session.topic : null,
+      ideaSlice?.idea.title,
+    ]
+      .filter((part): part is string => typeof part === 'string')
+      .join('\n'),
+    render,
+  });
+
+  return jsonRpcSuccess(requestId, { content: [{ type: 'text', text }] });
 }

@@ -32,6 +32,19 @@ const CHAT_LOAD_UNTIL_MAX_PAGES =
   Number.parseInt(import.meta.env.VITE_CHAT_LOAD_UNTIL_MAX_PAGES || '', 10) ||
   DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES;
 
+/** Mutation snapshots replace loaded cards; positional pages alone introduce rows. */
+function replaceLoadedTools(
+  messages: ChatMessageResponse[],
+  changes: readonly ChatMessageResponse[]
+) {
+  const loadedIds = new Set(messages.map((message) => message.id));
+  return mergeMessages(
+    messages,
+    changes.filter((message) => loadedIds.has(message.id)),
+    'append'
+  );
+}
+
 /** Cursor for the newest persisted message in `messages`, if one is loaded. */
 export function newestPersistedCursor(
   messages: readonly ChatMessageResponse[]
@@ -101,11 +114,25 @@ export async function refreshCachedTranscript(
   const after = tailRefreshCursor(cached.messages);
   if (!after) return null;
   const { last, newer } = await readForward(sessionId, after, (cursor) =>
-    getChatSession(projectId, sessionId, { signal, after: cursor })
+    getChatSession(projectId, sessionId, {
+      signal,
+      after: cursor,
+      afterToolRevision: cached.toolChanges?.revision,
+    })
   );
+  if (last.toolChanges?.resetRequired) {
+    const fresh = await fetchNewestPage(projectId, sessionId, signal);
+    return {
+      ...fresh,
+      toolChanges: { ...last.toolChanges, messages: fresh.toolChanges?.messages ?? [] },
+    };
+  }
   return {
     ...last,
-    messages: mergeMessages(cached.messages, newer, 'append'),
+    messages: replaceLoadedTools(
+      mergeMessages(cached.messages, newer, 'append'),
+      last.toolChanges?.messages ?? []
+    ),
     // The refresh read forward to the newest row; `hasMore` still describes older history.
     hasMore: cached.hasMore,
   };
@@ -120,18 +147,52 @@ export async function readMessagesAfter(
   projectId: string,
   sessionId: string,
   loaded: readonly ChatMessageResponse[],
-  signal?: AbortSignal
-): Promise<ChatMessageResponse[]> {
+  signal?: AbortSignal,
+  afterToolRevision = 0
+): Promise<{
+  messages: ChatMessageResponse[];
+  resetRequired: boolean;
+  toolChanges?: ChatSessionDetailResponse['toolChanges'];
+  hasMore?: boolean;
+}> {
   const after = tailRefreshCursor(loaded);
-  if (!after) return (await fetchNewestPage(projectId, sessionId, signal)).messages;
-  const { newer } = await readForward(sessionId, after, (cursor) =>
+  if (!after) {
+    const fresh = await fetchNewestPage(projectId, sessionId, signal);
+    return {
+      messages: fresh.messages,
+      resetRequired: true,
+      toolChanges: fresh.toolChanges,
+      hasMore: fresh.hasMore,
+    };
+  }
+  const { newer, last } = await readForward(sessionId, after, (cursor) =>
     listChatMessages(projectId, sessionId, {
       after: cursor,
+      afterToolRevision,
       limit: DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT,
       signal,
     })
   );
-  return newer;
+  if (last.toolChanges?.resetRequired) {
+    const fresh = await fetchNewestPage(projectId, sessionId, signal);
+    return {
+      messages: fresh.messages,
+      resetRequired: true,
+      toolChanges: fresh.toolChanges,
+      hasMore: fresh.hasMore,
+    };
+  }
+  return {
+    messages: mergeMessages(
+      newer,
+      (last.toolChanges?.messages ?? []).filter((message) =>
+        loaded.some((row) => row.id === message.id)
+      ),
+      'append'
+    ),
+    resetRequired: false,
+    toolChanges: last.toolChanges,
+  };
 }
 
 /**
@@ -192,6 +253,16 @@ export async function mergeRecentWindowOrRefresh(
   recent: ChatSessionDetailResponse,
   signal?: AbortSignal
 ): Promise<ChatSessionDetailResponse> {
+  if (
+    recent.toolChanges?.resetRequired ||
+    (current.toolChanges?.revision ?? 0) < (recent.toolChanges?.floor ?? 0)
+  ) {
+    const fresh = await fetchNewestPage(projectId, sessionId, signal);
+    return {
+      ...fresh,
+      toolChanges: { ...(fresh.toolChanges ?? { revision: 0, messages: [] }), resetRequired: true },
+    };
+  }
   const currentNewest = newestPersistedMessage(current.messages);
   const recentOldest = oldestPersistedMessage(recent.messages);
   if (currentNewest && recentOldest && compareMessagePositions(currentNewest, recentOldest) < 0) {
@@ -199,7 +270,10 @@ export async function mergeRecentWindowOrRefresh(
     if (refreshed) {
       return {
         ...recent,
-        messages: mergeMessages(refreshed.messages, recent.messages, 'append'),
+        messages: replaceLoadedTools(
+          mergeMessages(refreshed.messages, recent.messages, 'append'),
+          recent.toolChanges?.messages ?? []
+        ),
         hasMore: refreshed.hasMore,
       };
     }
@@ -207,7 +281,10 @@ export async function mergeRecentWindowOrRefresh(
 
   return {
     ...recent,
-    messages: mergeMessages(current.messages, recent.messages, 'replace'),
+    messages: replaceLoadedTools(
+      mergeMessages(current.messages, recent.messages, 'replace'),
+      recent.toolChanges?.messages ?? []
+    ),
     hasMore: current.hasMore,
   };
 }

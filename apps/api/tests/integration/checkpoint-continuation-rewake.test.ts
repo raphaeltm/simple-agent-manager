@@ -20,7 +20,7 @@ import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { restoredSessionPromptDelivery } from '../../src/services/restored-session-prompt';
 import { SESSION_RECOVERY_CONTINUE_TASK_PROMPT } from '../../src/services/session-sleep-fallback-messages';
-import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
+import { applySqliteMigration, createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 import { createSqlStorage } from '../unit/durable-objects/sql-storage-test-utils';
 
 const recovery = vi.hoisted(() => ({ ensure: vi.fn(), report: vi.fn() }));
@@ -49,6 +49,10 @@ describe('a checkpoint continuation that outlives its wake', () => {
     vi.clearAllMocks();
     d1 = new Database(':memory:');
     createAllSchemaTables(d1, schema);
+    // The shipped inbox migrations: a failed wake files an `asks` row on its dedupe index.
+    d1.exec('DROP TABLE asks');
+    for (const file of ['0245_asks.sql', '0247_asks_questions.sql', '0248_asks_system_errors.sql'])
+      applySqliteMigration(d1, new URL(`../../src/db/migrations/${file}`, import.meta.url));
     // The handoff failed after the prompt was queued and the chat went back to sleep.
     d1.exec(`
       INSERT INTO nodes (id, user_id, status, runtime) VALUES ('node-2', 'user-1', 'running', 'vm');
@@ -101,6 +105,16 @@ describe('a checkpoint continuation that outlives its wake', () => {
   });
 
   function seedTask(status: string) {
+    // The task owner is the person a failed wake's inbox item is addressed to.
+    d1.prepare(
+      `INSERT OR IGNORE INTO users (id, name, email) VALUES ('user-1', 'Dev', 'dev@x.test')`
+    ).run();
+    d1.prepare(
+      `INSERT OR IGNORE INTO projects (id, user_id, name, repository) VALUES (?, 'user-1', 'P', 'o/r')`
+    ).run(PROJECT);
+    d1.prepare(
+      `INSERT OR IGNORE INTO project_members (project_id, user_id, role, status) VALUES (?, 'user-1', 'owner', 'active')`
+    ).run(PROJECT);
     d1.prepare(
       `INSERT INTO tasks (id, project_id, user_id, chat_session_id, workspace_id, status, task_mode)
        VALUES (?, ?, 'user-1', ?, 'workspace-2', ?, 'task')`
@@ -139,10 +153,18 @@ describe('a checkpoint continuation that outlives its wake', () => {
            FROM session_inbox WHERE source_kind = 'checkpoint_continuation'`
       )
       .get();
-  const wakeFailures = () =>
-    doDb
+  // A failed wake is one open inbox error item in D1 (slice E), and no attention marker.
+  const wakeFailures = () => [
+    ...doDb
       .prepare('SELECT session_id AS sessionId FROM session_attention_markers WHERE kind = ?')
-      .all(WAKE_FAILED_ATTENTION_KIND);
+      .all(WAKE_FAILED_ATTENTION_KIND),
+    ...d1
+      .prepare(
+        `SELECT source_session_id AS sessionId FROM asks
+          WHERE kind = 'error' AND dedupe_key LIKE 'error:wake:%' AND status = 'open'`
+      )
+      .all(),
+  ];
 
   it('wakes the chat again only under its own task guard', async () => {
     seedTask('sleeping');

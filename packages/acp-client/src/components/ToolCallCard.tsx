@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 import type { ToolCallContentItem, ToolCallItem } from '../hooks/useAcpMessages';
 import { isJsonRecord } from '../runtime-validation';
@@ -63,9 +63,13 @@ export const ToolCallCard = React.memo(function ToolCallCard({
   className,
 }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const [lazyContent, setLazyContent] = useState<ToolCallContentItem[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [loadFailed, setLoadFailed] = useState(false);
+  const [lazyContent, setLazyContent] = useState<{
+    key: string;
+    content: ToolCallContentItem[];
+  } | null>(null);
+  const [loadState, setLoadState] = useState<{ key: string; status: 'loading' | 'failed' } | null>(
+    null
+  );
 
   const rawOutputFallback = normalizeRawToolOutput(toolCall.rawOutput);
   const needsLazyLoad = toolCall.contentLoaded === false && !!toolCall.messageId && !!onLoadContent;
@@ -74,27 +78,35 @@ export const ToolCallCard = React.memo(function ToolCallCard({
   let fallbackContent: ToolCallContentItem[] = [];
   if (rawOutputFallback) fallbackContent = [rawOutputFallback];
   const persistedOrFallback = toolCall.content.length > 0 ? toolCall.content : fallbackContent;
-  const displayContent = lazyContent ?? persistedOrFallback;
+  const contentKey = JSON.stringify([toolCall.messageId, toolCall.revision ?? 0]);
+  const loading = needsLazyLoad && loadState?.key === contentKey && loadState.status === 'loading';
+  const loadFailed =
+    needsLazyLoad && loadState?.key === contentKey && loadState.status === 'failed';
+  const cached = lazyContent?.key === contentKey ? lazyContent.content : null;
+  const displayContent = cached ?? persistedOrFallback;
 
-  const handleToggle = async () => {
-    if (!hasContent) return;
-
-    const { messageId } = toolCall;
-    if (!expanded && needsLazyLoad && !lazyContent && !loadFailed && onLoadContent && messageId) {
-      setExpanded(true);
-      setLoading(true);
-      setLoadFailed(false);
-      try {
-        const content = await onLoadContent(messageId);
-        setLazyContent(content);
-      } catch {
-        setLoadFailed(true);
-      } finally {
-        setLoading(false);
+  useEffect(() => {
+    if (!expanded || !needsLazyLoad || !onLoadContent || !toolCall.messageId) return;
+    let active = true;
+    setLoadState({ key: contentKey, status: 'loading' });
+    void onLoadContent(toolCall.messageId).then(
+      (content) => {
+        if (active) {
+          setLazyContent({ key: contentKey, content });
+          setLoadState(null);
+        }
+      },
+      () => {
+        if (active) setLoadState({ key: contentKey, status: 'failed' });
       }
-    } else {
-      setExpanded(!expanded);
-    }
+    );
+    return () => {
+      active = false;
+    };
+  }, [expanded, needsLazyLoad, onLoadContent, toolCall.messageId, contentKey]);
+
+  const handleToggle = () => {
+    if (hasContent) setExpanded((value) => !value);
   };
 
   return (

@@ -4,6 +4,7 @@ import * as v from 'valibot';
 import { channelOperations } from './channel-operations';
 import { connectorOperations } from './connector-operations';
 import { inboxOperations } from './inbox-operations';
+import { insightsOperations } from './insights-operations';
 import { operationalOperations } from './operational-operations';
 import { platformOperations } from './platform-operations';
 import { scheduleOperations } from './schedule-operations';
@@ -21,6 +22,7 @@ export const operations = [
   ...scheduleOperations,
   ...channelOperations,
   ...usageOperations,
+  ...insightsOperations,
 ] as const;
 
 export function operationInputJsonSchema(

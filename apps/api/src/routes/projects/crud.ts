@@ -210,6 +210,10 @@ crudRoutes.delete('/:id', async (c) => {
   statements.push(
     db.delete(schema.agentProfiles).where(eq(schema.agentProfiles.projectId, projectId))
   );
+  // Run token usage (Insights slice U) has no FK to cascade from.
+  statements.push(
+    db.delete(schema.agentRunUsage).where(eq(schema.agentRunUsage.projectId, projectId))
+  );
   statements.push(
     db
       .delete(schema.projectGithubRepositories)

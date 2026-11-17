@@ -5,6 +5,8 @@
  *
  * Split out of ai-proxy.ts per .claude/rules/18-file-size-limits.md.
  */
+import type { MeasuredTokenUsage } from '@simple-agent-manager/ai-proxy';
+
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
@@ -30,10 +32,7 @@ type OpenAIProxyCredential = AIProxyCredentialAttribution & {
 };
 
 export function buildProxyMetadata(
-  auth: Pick<
-    AIProxyRequestContext,
-    'userId' | 'workspaceId' | 'projectId' | 'chatSessionId'
-  >,
+  auth: Pick<AIProxyRequestContext, 'userId' | 'workspaceId' | 'projectId' | 'chatSessionId'>,
   body: Record<string, unknown>,
   modelId: string
 ): string {
@@ -143,7 +142,10 @@ export function accountingResponse(
   c: AIProxyContext,
   response: Response,
   userId: string,
-  estimatedInputTokens: number
+  estimatedInputTokens: number,
+  /** Insights run usage hook (`proxyRunUsageRecorder`); receives measured usage only. */
+  onMeasuredUsage?: (usage: MeasuredTokenUsage) => Promise<void>,
+  metering: { costModelId?: string; estimateMissingUsage?: boolean } = {}
 ): Promise<Response> {
   let executionCtx: Pick<ExecutionContext, 'waitUntil'> | undefined;
   try {
@@ -157,5 +159,7 @@ export function accountingResponse(
     format: 'openai',
     fallbackInputTokens: estimatedInputTokens,
     executionCtx,
+    onMeasuredUsage,
+    ...metering,
   });
 }

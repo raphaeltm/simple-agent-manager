@@ -49,13 +49,14 @@ import ShotFrame from '../../components/ShotFrame.astro';
 
   <h2>The admin cost page</h2>
   <p>
-    Admin → Costs shows proxied model spend by model, day and user, with a projection, next to an estimate of
-    compute cost. The compute figure is vCPU-hours times a configured rate, not your cloud invoice. Admin → Usage
-    breaks compute down per user.
+    Admin → Costs shows proxied model spend by model, day and user, with a projection. Admin → Health &amp; cost
+    shows compute spend per provider and week, priced at each machine's recorded provider price and counting a
+    shared machine once. It is an estimate at list prices, not your cloud invoice. Admin → Usage breaks compute
+    down per user.
   </p>
   <ShotFrame
     src="/images/features/sam-admin-costs.png"
-    alt="Admin, Costs: month-to-date model cost, a monthly projection, estimated compute cost from vCPU-hours, a daily cost chart, cost by model and model cost by user."
-    caption="Admin → Costs: proxied model spend with a projection, plus estimated compute cost."
+    alt="Admin, Costs: month-to-date model cost, a monthly projection, a daily cost chart, cost by model and model cost by user."
+    caption="Admin → Costs: proxied model spend with a projection."
   />
 </EnterpriseDetail>

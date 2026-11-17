@@ -11,6 +11,7 @@ import { sessionOwnerLabel } from './session-viewer-access';
 import { SessionHeaderCompletionDialog } from './SessionHeaderCompletionDialog';
 import { SessionShareDialog } from './SessionShareDialog';
 import type { SessionLinkedWork } from './useSessionLinkedWork';
+import type { SessionOverlays } from './useSessionOverlays';
 import type { UseSessionToolsResult } from './useSessionTools';
 
 // Loaded when first opened: the Automation panel's code stays out of the chat's own bundle.
@@ -21,13 +22,19 @@ const SessionAutomationDrawer = lazy(async () => ({
 
 // Same treatment for Related: the chat header already reads the linked-work query, so only
 // the panel's markup is deferred, not the data.
+// The Run receipt panel (Insights slice R), loaded when first opened.
+const SessionReceiptDrawer = lazy(async () => ({
+  default: (await importWithRetry(() => import('../chat/run-receipt/SessionReceiptDrawer')))
+    .SessionReceiptDrawer,
+}));
+
 const SessionLinkedWorkDrawer = lazy(async () => ({
   default: (await importWithRetry(() => import('../chat/SessionLinkedWorkDrawer')))
     .SessionLinkedWorkDrawer,
 }));
 
 /**
- * The overlays the session tool rail opens: automation, related, report, complete and share. They live
+ * The overlays the session tool rail opens: receipt, automation, related, report, complete and share. They live
  * beside the view rather than in `SessionHeader` because the actions that open them do.
  * Split out of `SessionMessageView` (`.claude/rules/18-file-size-limits.md`).
  */
@@ -38,13 +45,9 @@ export function SessionMessageViewDialogs({
   nodeId,
   viewerId,
   sessionTools,
-  showAutomation,
-  onCloseAutomation,
-  showRelated,
-  onCloseRelated,
+  overlays,
+  taskId,
   linkedWork,
-  showShare,
-  onCloseShare,
   onAccessChanged,
 }: Readonly<{
   projectId: string;
@@ -53,24 +56,35 @@ export function SessionMessageViewDialogs({
   nodeId: string | null;
   viewerId: string | null;
   sessionTools: UseSessionToolsResult;
-  showAutomation: boolean;
-  onCloseAutomation: () => void;
-  showRelated: boolean;
-  onCloseRelated: () => void;
+  /** Which rail panel is open (`useSessionOverlays`); memoised, so passing it whole is safe. */
+  overlays: SessionOverlays;
+  /** The run behind this chat, resolved the same way the rail decides to offer Receipt. */
+  taskId: string | null;
   /** The chat's linked work, already loaded by the view — the drawer issues no request. */
   linkedWork: SessionLinkedWork;
-  showShare: boolean;
-  onCloseShare: () => void;
   onAccessChanged: (access: SessionAccessSummary) => void;
 }>) {
+  const { showAutomation, closeAutomation, showRelated, closeRelated, showShare, closeShare } =
+    overlays;
   return (
     <>
+      {overlays.showReceipt && taskId && (
+        <Suspense fallback={null}>
+          <SessionReceiptDrawer
+            projectId={projectId}
+            sessionId={sessionId}
+            taskId={taskId}
+            onClose={overlays.closeReceipt}
+          />
+        </Suspense>
+      )}
+
       {showAutomation && (
         <Suspense fallback={null}>
           <SessionAutomationDrawer
             projectId={projectId}
             sessionId={sessionId}
-            onClose={onCloseAutomation}
+            onClose={closeAutomation}
           />
         </Suspense>
       )}
@@ -80,7 +94,7 @@ export function SessionMessageViewDialogs({
           <SessionLinkedWorkDrawer
             projectId={projectId}
             linkedWork={linkedWork}
-            onClose={onCloseRelated}
+            onClose={closeRelated}
           />
         </Suspense>
       )}
@@ -93,7 +107,7 @@ export function SessionMessageViewDialogs({
           access={session.access}
           viewerUserId={viewerId}
           ownerLabel={sessionOwnerLabel(session)}
-          onClose={onCloseShare}
+          onClose={closeShare}
           onChanged={onAccessChanged}
           canAddPeople={isShareableChatSessionStatus(session.status)}
         />

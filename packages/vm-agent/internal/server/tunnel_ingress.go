@@ -48,7 +48,7 @@ func isTunnelIngress(r *http.Request) bool {
 // after the timeout period.
 func (s *Server) buildHTTPServers(mux *http.ServeMux) {
 	cfg := s.config
-	handler := corsMiddleware(mux, cfg.AllowedOrigins)
+	handler := corsMiddleware(refuseTokenRedirects(mux), cfg.AllowedOrigins)
 	s.httpServer = &http.Server{
 		Addr:        fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
 		Handler:     handler,

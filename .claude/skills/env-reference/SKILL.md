@@ -26,7 +26,7 @@ Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB
 | Variable | `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | No (default: `50`; range: 0–100)                                   |
 | Variable | `D1_MIGRATION_READ_ATTEMPTS`                       | No (default: `3`; range: 1–5; verification reads only)             |
 | Variable | `D1_MIGRATION_READ_RETRY_DELAY_MS`                 | No (default: `10000`; range: 0–60000)                              |
-| Secret   | `CF_API_TOKEN`                                     | Yes (requires Account → SSL and Certificates → Edit for Origin CA) |
+| Secret   | `CF_API_TOKEN`                                     | Yes (requires Account → SSL and Certificates → Edit for Origin CA; optional Account Analytics → Read for Admin Analytics and the Cloudflare cost snapshot) |
 | Secret   | `CF_ACCOUNT_ID`                                    | Yes                                                                |
 | Secret   | `CF_ZONE_ID`                                       | Yes                                                                |
 | Secret   | `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN`          | No (falls back to `CF_API_TOKEN`)                                  |
@@ -103,7 +103,7 @@ Admin setting overrides take precedence over registry defaults. The disabled set
 
 Sources: `apps/api/src/services/operator-settings.ts`, `admin-settings-registry.ts`, and `apps/api/src/durable-objects/sam-session/operator/work.ts`.
 
-The assistant reuses existing `SAM_MODEL` (the deployed `wrangler.toml` value is `@cf/zai-org/glm-5.3-flash`, which needs the Workers Paid plan or prepaid AI Gateway credits, like the rest of SAM; code default `claude-sonnet-5`), context/window, tool-result and model-step limits from `resolveSamConfig`, plus `SAM_LLM_TIMEOUT_MS` (operator fallback `120000`). Operator turn admission uses `SAM_MESSAGE_MAX_LENGTH` with a `16000`-character fallback; legacy subtask-message readers can have a different fallback. No new provider API key is required specifically for enabling the assistant: it uses the installation's supported platform AI configuration and usage gate.
+The assistant reuses existing `SAM_MODEL` (code default `@cf/deepseek-ai/deepseek-v4.1-flash-1017` in `resolveSamConfig`; omitted from Wrangler bindings unless explicitly overridden through the GitHub Environment variable `SAM_MODEL`; this model requires the Workers Paid plan or prepaid AI Gateway credits, like the rest of SAM), context/window, tool-result and model-step limits from `resolveSamConfig`, plus `SAM_LLM_TIMEOUT_MS` (operator fallback `120000`). Operator turn admission uses `SAM_MESSAGE_MAX_LENGTH` with a `16000`-character fallback; legacy subtask-message readers can have a different fallback. No new provider API key is required specifically for enabling the assistant: it uses the installation's supported platform AI configuration and usage gate.
 
 ### How Worker variables are set
 

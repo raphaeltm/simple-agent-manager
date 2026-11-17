@@ -1,8 +1,8 @@
 import type { InboxItem } from '@simple-agent-manager/shared';
 import { Button, IconButton, Pane, Spinner } from '@simple-agent-manager/ui';
 import { Archive, ArrowLeft, ChevronLeft, ChevronRight, MessageSquare } from 'lucide-react';
-import { useEffect, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 
 import { useInboxPermissionDetail } from '../../components/inbox/inbox-actions';
 import { buildRows, hasPinnedControls, stackPosition } from '../../components/inbox/inbox-model';
@@ -22,9 +22,37 @@ import { useInboxCount } from '../../components/inbox/useInbox';
 import { useInboxWalk } from '../../components/inbox/useInboxWalk';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { useMinuteClock } from '../../hooks/useMinuteClock';
-import { projectChatPath } from '../../lib/project-routes';
+import {
+  INBOX_FROM_OVERVIEW,
+  INBOX_FROM_PARAM,
+  OVERVIEW_BEHIND_STATE,
+  projectChatPath,
+  projectOverviewPath,
+} from '../../lib/project-routes';
 
 type Walk = ReturnType<typeof useInboxWalk>;
+
+/**
+ * An item opened from the project Overview's Needs you (`?from=overview`): Back goes to the
+ * Overview, in-app, so the page is not reloaded and shows the reduced count from the shared inbox
+ * queries. When this history entry sits right on top of the Overview's (`OVERVIEW_BEHIND_STATE`:
+ * the Overview pushed it and the walk has only replaced it since), Back pops it; otherwise (a
+ * second item opened from the list, a fresh tab) it replaces this entry with the Overview.
+ */
+function useReturnToOverview(projectId: string | null) {
+  const [params] = useSearchParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const fromOverview = Boolean(projectId) && params.get(INBOX_FROM_PARAM) === INBOX_FROM_OVERVIEW;
+  const overviewBehind =
+    (location.state as Record<string, unknown> | null)?.[OVERVIEW_BEHIND_STATE] === true;
+  const returnToOverview = useCallback(() => {
+    if (!projectId) return;
+    if (overviewBehind) navigate(-1);
+    else navigate(projectOverviewPath(projectId), { replace: true });
+  }, [navigate, overviewBehind, projectId]);
+  return { fromOverview, returnToOverview };
+}
 
 /** The open item: top bar, receipt, scrolling body and pinned answer controls. */
 /** Focus the list row that holds `ref` (the row of its stack), after Back on a phone. */
@@ -45,12 +73,15 @@ function ItemPane({
   item,
   now,
   focusOnMount,
+  onBackToOverview,
 }: {
   walk: Walk;
   item: InboxItem;
   now: number;
   /** An item opened by the person (not desktop's default first item) takes focus at once. */
   focusOnMount: boolean;
+  /** Set when the item was opened from the Overview: Back returns there, on both sizes. */
+  onBackToOverview: (() => void) | null;
 }) {
   const navigate = useNavigate();
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -81,16 +112,27 @@ function ItemPane({
   return (
     <>
       <div className="flex shrink-0 items-center gap-0.5 border-b border-[var(--sam-hairline)] px-1 py-1">
-        <IconButton
-          label="Back to inbox"
-          icon={<ArrowLeft size={20} />}
-          onClick={() => {
-            walk.close();
-            focusRow(item.ref);
-          }}
-          showTooltip={false}
-          className="md:hidden"
-        />
+        {onBackToOverview ? (
+          // Desktop has the header's "Back to Overview" beside the list; one control per screen.
+          <IconButton
+            label="Back to Overview"
+            icon={<ArrowLeft size={20} />}
+            onClick={onBackToOverview}
+            showTooltip={false}
+            className="md:hidden"
+          />
+        ) : (
+          <IconButton
+            label="Back to inbox"
+            icon={<ArrowLeft size={20} />}
+            onClick={() => {
+              walk.close();
+              focusRow(item.ref);
+            }}
+            showTooltip={false}
+            className="md:hidden"
+          />
+        )}
         <span className="flex flex-1 items-center justify-center md:justify-start">
           <IconButton
             label="Previous item"
@@ -266,6 +308,7 @@ export function InboxPage({
   const isMobile = useIsMobile();
   const now = useMinuteClock();
   const walk = useInboxWalk({ projectId, isMobile });
+  const { fromOverview, returnToOverview } = useReturnToOverview(projectId);
   const count = useInboxCount(projectId);
   const { unread } = useInboxUpdates(projectId);
   const showProject = projectId === null;
@@ -297,6 +340,16 @@ export function InboxPage({
           </p>
         </div>
         <h1 className="sr-only md:hidden">Inbox</h1>
+        {fromOverview && (
+          <button
+            type="button"
+            onClick={returnToOverview}
+            className="-my-1 -ml-1 flex min-h-11 w-fit cursor-pointer items-center gap-1 rounded-md border-0 bg-transparent px-1 text-sm text-fg-muted hover:text-fg-primary"
+          >
+            <ArrowLeft size={16} aria-hidden="true" />
+            Back to Overview
+          </button>
+        )}
         <InboxFilterBar value={walk.view} onChange={walk.setView} counts={counts} />
       </Pane>
       <div
@@ -326,6 +379,7 @@ export function InboxPage({
                 item={walk.selected}
                 now={now}
                 focusOnMount={walk.itemParam !== null}
+                onBackToOverview={fromOverview ? returnToOverview : null}
               />
             ) : (
               <NoItemPane

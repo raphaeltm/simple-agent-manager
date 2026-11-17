@@ -387,12 +387,33 @@ describe('ImageResolver', () => {
       ['raw IDN hostname', 'bücher.example'],
       ['userinfo authority', 'https://user:pass@registry.example.com'],
       ['leading-zero port', 'https://registry.example.com:0443'],
+      // Refused since the resolver moved to the shared classifier (classifyHost, L5a); the old
+      // local blocklist let these through.
+      ['single-label name', 'registry'],
+      ['home-network pseudo-TLD', 'registry.lan'],
+      ['home.arpa name', 'registry.home.arpa'],
+      ['Azure WireServer address', '168.63.129.16'],
+      ['6to4 embedding of loopback', '[2002:7f00:1::]'],
+      ['NAT64 embedding of metadata', '[64:ff9b::a9fe:a9fe]'],
+      ['Teredo address', '[2001:0:4136:e378:8000:63bf:3fff:fdd2]'],
     ])('rejects unsafe registry authority: %s', async (_name, registry) => {
       const { fetchFn } = mockRegistryFetch();
       const resolver = createImageResolver({ fetchFn });
 
       await expect(resolver(registry, 'org/app', 'v1.0')).rejects.toThrow(/Unsafe|Insecure/);
       expect(fetchFn).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['Docker Hub', 'docker.io'],
+      ['GitHub Container Registry', 'ghcr.io'],
+      ['public IPv4 registry', '203.0.114.10'],
+    ])('control: a public registry authority is fetched: %s', async (_name, registry) => {
+      const { fetchFn } = mockRegistryFetch();
+      const resolver = createImageResolver({ fetchFn });
+
+      await resolver(registry, 'org/app', 'v1.0').catch(() => undefined);
+      expect(fetchFn).toHaveBeenCalled();
     });
 
     it('manually validates redirects and rejects a private-address pivot before following it', async () => {

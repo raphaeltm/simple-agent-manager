@@ -7,8 +7,8 @@
  * shapes (`MessageCommentThread`, `LibraryFileCommentThread`) lives in the kind adapters,
  * `comments.ts` and `library-file-comments.ts`.
  */
-import type { CommentAnchorKind, CommentMention } from '@simple-agent-manager/shared';
-import { COMMENT_ANCHOR_KINDS, COMMENT_STATUSES } from '@simple-agent-manager/shared';
+import type { CommentMention,StoredCommentAnchorKind } from '@simple-agent-manager/shared';
+import { COMMENT_STATUSES,STORED_COMMENT_ANCHOR_KINDS } from '@simple-agent-manager/shared';
 import { chunk, D1_MAX_BOUND_PARAMETERS } from '@simple-agent-manager/worker-core';
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
@@ -33,11 +33,12 @@ const actorKind = v.nullable(v.picklist(['human', 'agent']));
 
 const ThreadRowSchema = v.object({
   id: v.string(),
-  anchor_kind: v.picklist(COMMENT_ANCHOR_KINDS),
+  anchor_kind: v.picklist(STORED_COMMENT_ANCHOR_KINDS),
   scope_key: v.string(),
   session_id: v.nullable(v.string()),
   message_id: v.nullable(v.string()),
   file_id: v.nullable(v.string()),
+  inbox_item_id: v.nullable(v.string()),
   quote: v.nullable(v.string()),
   body: v.string(),
   author_type: v.picklist(['human', 'agent']),
@@ -101,11 +102,12 @@ export interface CommentReplyRecord {
 
 export interface CommentThreadRecord {
   id: string;
-  anchorKind: CommentAnchorKind;
+  anchorKind: StoredCommentAnchorKind;
   scopeKey: string;
   sessionId: string | null;
   messageId: string | null;
   fileId: string | null;
+  inboxItemId: string | null;
   quote: string | null;
   author: CommentActor;
   body: string;
@@ -126,7 +128,7 @@ export interface CommentThreadRecord {
 }
 
 export const THREAD_SELECT_COLUMNS = `id, anchor_kind, scope_key, session_id, message_id, file_id,
-  quote, body, author_type, author_id, author_name, status, created_at, updated_at, sequence,
+  inbox_item_id, quote, body, author_type, author_id, author_name, status, created_at, updated_at, sequence,
   version, client_mutation_id, sent_at, sent_by_type, sent_by_id, sent_by_name,
   resolved_at, resolved_by_type, resolved_by_id, resolved_by_name,
   reopened_at, reopened_by_type, reopened_by_id, reopened_by_name, mentions_json`;
@@ -234,6 +236,7 @@ export function hydrateThreadRows(sql: SqlStorage, rows: unknown[]): CommentThre
     sessionId: r.session_id,
     messageId: r.message_id,
     fileId: r.file_id,
+    inboxItemId: r.inbox_item_id,
     quote: r.quote,
     author: { kind: r.author_type, id: r.author_id, name: r.author_name },
     body: r.body,
@@ -339,9 +342,9 @@ export function listProjectThreadCandidates(
     after?: ProjectCommentThreadCandidate | null;
   }
 ): ListProjectCommentThreadCandidatesPage {
-  const kindPlaceholders = COMMENT_ANCHOR_KINDS.map(() => '?').join(', ');
+  const kindPlaceholders = STORED_COMMENT_ANCHOR_KINDS.map(() => '?').join(', ');
   const conditions = [`t.anchor_kind IN (${kindPlaceholders})`];
-  const params: Array<string | number> = [...COMMENT_ANCHOR_KINDS];
+  const params: Array<string | number> = [...STORED_COMMENT_ANCHOR_KINDS];
   if (input.status) {
     conditions.push('t.status = ?');
     params.push(input.status);

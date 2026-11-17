@@ -18,7 +18,9 @@ export const chartCursor = {
   opacity: 0.5,
 };
 export const chartTick = { fontSize: 11, fill: 'var(--sam-color-fg-muted)' };
-export const chartCategoryTick = { fontSize: 12, fill: 'var(--sam-color-fg-secondary)' };
+// Category labels are primary content; there is no --sam-color-fg-secondary token, and an
+// undefined var() made SVG fall back to black on the dark panes.
+export const chartCategoryTick = { fontSize: 12, fill: 'var(--sam-color-fg-primary)' };
 
 // Series tokens keep the dark palette unchanged and use darker light-theme
 // overrides for contrast on pale admin surfaces. See theme.css for ratios.

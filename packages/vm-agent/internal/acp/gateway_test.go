@@ -1807,7 +1807,7 @@ func TestWriteAgentStartupConfigCodexStandaloneWritesMcpConfig(t *testing.T) {
 		t.Errorf("config.toml missing SAM MCP bearer env reference: %s", data)
 	}
 	assertCodexStartupTOML(t, data, "https://api.example.com/mcp", "SAM_MCP_TOKEN")
-	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never","model":"gpt-6.1-sol"}`)
+	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never","model":"gpt-6.1-sol","bypass_hook_trust":true}`)
 	assertEnvContains(t, startup.envVars, "INITIAL_AGENT_MODE", "agent-full-access")
 	assertEnvContains(t, startup.envVars, "CODEX_PATH", "codex")
 	if got := countEnvKey(startup.envVars, "CODEX_PATH"); got != 1 {
@@ -1866,7 +1866,7 @@ esac
 		t.Fatalf("container config contract changed: %s", content)
 	}
 	assertCodexStartupTOML(t, data, "https://api.example.com/mcp", "SAM_MCP_TOKEN")
-	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never","model":"gpt-6.1-sol"}`)
+	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never","model":"gpt-6.1-sol","bypass_hook_trust":true}`)
 	assertEnvContains(t, startup.envVars, "INITIAL_AGENT_MODE", "agent-full-access")
 	assertEnvContains(t, startup.envVars, "CODEX_PATH", "codex")
 	if got := countEnvKey(startup.envVars, "CODEX_PATH"); got != 1 {
@@ -1964,7 +1964,7 @@ esac
 				strings.Count(content, `approval_policy = "never"`) != 1 {
 				t.Fatalf("written config does not contain exactly one managed control pair:\n%s", content)
 			}
-			assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never"}`)
+			assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never","bypass_hook_trust":true}`)
 			assertEnvContains(t, startup.envVars, "INITIAL_AGENT_MODE", "agent-full-access")
 			assertEnvContains(t, startup.envVars, "CODEX_PATH", "codex")
 			if got := countEnvKey(startup.envVars, "CODEX_PATH"); got != 1 {

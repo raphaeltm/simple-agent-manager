@@ -143,6 +143,7 @@ function collectTaskTerminalRows(
           workspace_id: candidate.workspace_id ?? null,
           chat_session_id: candidate.chat_session_id ?? null,
           parent_task_id: candidate.parent_task_id ?? null,
+          updated_at: candidate.updated_at,
         });
       }
     }
@@ -615,7 +616,7 @@ describe('recoverStuckTasks', () => {
 
       expect(fetchWithTimeoutMock).toHaveBeenCalledWith(
         'https://node-1.vm.example.test:8443/health',
-        { method: 'GET' },
+        { method: 'GET', redirect: 'manual' },
         DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS
       );
       expect(result.failedInProgress).toBe(0);

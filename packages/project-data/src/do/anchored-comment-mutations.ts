@@ -158,16 +158,17 @@ export function createThreadRecord(
   const isMessage = input.scope.kind === 'message';
   sql.exec(
     `INSERT INTO anchored_comment_threads
-       (id, anchor_kind, scope_key, session_id, message_id, file_id, quote, body,
+       (id, anchor_kind, scope_key, session_id, message_id, file_id, inbox_item_id, quote, body,
         author_type, author_id, author_name, status, created_at, updated_at, sequence, version,
         client_mutation_id, client_mutation_fingerprint, mentions_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, 1, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, 1, ?, ?, ?)`,
     id,
     anchorKind,
     scopeKey,
     isMessage ? scopeKey : null,
     isMessage ? (input.messageId ?? null) : null,
     input.scope.kind === 'library_file' ? scopeKey : null,
+    input.scope.kind === 'inbox_item' ? scopeKey : null,
     quote,
     body,
     actor.kind,

@@ -46,6 +46,8 @@ export const CreateAskInputSchema = v.object({
   category: v.optional(v.picklist(HUMAN_INPUT_CATEGORIES)),
   nextEscalationAt: v.optional(v.pipe(v.number(), v.safeInteger())),
   maxExpiresAt: v.optional(v.pipe(v.number(), v.safeInteger())),
+  /** Most open asks of this kind the source chat may hold (human tasks: inbox.openTasksPerChat). */
+  openOfKindPerChat: v.optional(v.pipe(v.number(), v.safeInteger(), v.minValue(1))),
 });
 export type CreateAskInput = v.InferInput<typeof CreateAskInputSchema>;
 
@@ -114,8 +116,14 @@ export async function createAsk(
           expires_at, source_workspace_id, category, next_escalation_at, max_expires_at,
           created_at, updated_at)
        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?
-        WHERE ? IS NULL
-           OR (SELECT COUNT(*) FROM asks WHERE source_session_id = ? AND project_id = ? AND status = 'open') < ?
+        WHERE (? IS NULL OR ? = 'error'
+           OR (SELECT COUNT(*) FROM asks WHERE source_session_id = ? AND project_id = ? AND status = 'open') < ?)
+          -- The assignee is checked again in the write, so a member removed after the check above
+          -- is never assigned (the departed-member handoff would not see the new row).
+          AND (? IS NULL OR EXISTS (SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?
+            AND status = 'active'))
+          AND (? IS NULL OR (SELECT COUNT(*) FROM asks WHERE source_session_id = ? AND project_id = ?
+            AND status = 'open' AND kind = ?) < ?)
        ON CONFLICT (project_id, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING`
     )
     .bind(
@@ -146,9 +154,20 @@ export async function createAsk(
       now,
       now,
       input.sourceSessionId ?? null,
+      // SAM's own system error items (slice E) are not an agent flooding the chat, and the cap
+      // must not let an agent's items hide a failure from the person.
+      input.kind,
       input.sourceSessionId ?? null,
       input.projectId,
-      limits.openItemsPerChat
+      limits.openItemsPerChat,
+      input.assigneeUserId ?? null,
+      input.projectId,
+      input.assigneeUserId ?? null,
+      input.openOfKindPerChat ?? null,
+      input.sourceSessionId ?? null,
+      input.projectId,
+      input.kind,
+      input.openOfKindPerChat ?? 0
     )
     .run();
   if ((inserted.meta?.changes ?? 0) === 1) return { ref: `ask:${askId}`, id: askId, created: true };
