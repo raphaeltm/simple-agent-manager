@@ -58,8 +58,8 @@ import { parseInsightsRows, runInsightsBatch } from './insights-batch';
 import { bucketStarts, flowWindow } from './insights-flow';
 import { getInsightsPageLimits } from './insights-page-settings';
 import {
-  accountUsageStatement,
   type AccountUsageRow,
+  accountUsageStatement,
   parseAccountUsageRows,
   summarizeAccountUsage,
 } from './insights-run-usage';
