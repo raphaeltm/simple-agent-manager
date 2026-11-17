@@ -21,7 +21,6 @@
  * if Workers AI is slow, retrying immediately wastes more of the Worker's
  * 30-second wall-clock budget.
  */
-
 import {
   DEFAULT_TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH,
   DEFAULT_TASK_TITLE_MAX_LENGTH,
@@ -38,6 +37,7 @@ import {
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { fetchWorkersAIChatCompletion, WorkersAIGatewayError } from './ai-proxy-shared';
+import { LlmUnavailableError } from './llm-chat-target';
 
 /**
  * Build the system instructions for the title generation agent.
@@ -263,6 +263,7 @@ async function fetchTaskTitle(
 ): Promise<string | null> {
   const controls = getTaskTitleModelControls(modelId);
   return fetchWorkersAIChatCompletion(env, {
+    purpose: 'taskTitle',
     modelId,
     maxTokens: maxLength,
     timeoutMs,
@@ -344,6 +345,7 @@ export async function generateTaskTitle(
 
       return truncateTitle(title, maxLength);
     } catch (err) {
+      if (err instanceof LlmUnavailableError) return truncateTitle(message, maxLength);
       const classified = classifyError(err);
       lastError = classified;
 

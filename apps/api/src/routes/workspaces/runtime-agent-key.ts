@@ -1,42 +1,44 @@
-import { AI_PROXY_DEFAULT_MODEL_KV_KEY, type AIProxyConfig, DEFAULT_AI_PROXY_ANTHROPIC_MODEL, DEFAULT_AI_PROXY_MODEL, DEFAULT_AI_PROXY_OPENAI_MODEL, getAgentDefinition, HARNESS_CAPABILITIES, isValidAgentType, resolveHarnessDialect } from '@simple-agent-manager/shared';
+import {
+  AI_PROXY_DEFAULT_MODEL_KV_KEY,
+  type AIProxyConfig,
+  DEFAULT_AI_PROXY_ANTHROPIC_MODEL,
+  DEFAULT_AI_PROXY_MODEL,
+  DEFAULT_AI_PROXY_OPENAI_MODEL,
+  getAgentDefinition,
+  HARNESS_CAPABILITIES,
+  isValidAgentType,
+  resolveHarnessDialect,
+} from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { type Context, Hono } from 'hono';
-
+import { Hono } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-
 import { getCredentialEncryptionKey } from '../../lib/secrets';
-
-
 import { errors } from '../../middleware/error';
 import { AgentTypeBodySchema, jsonValidator } from '../../schemas';
-
-
 import { resolveSessionProfileCredentialContext } from '../../services/composable-credentials/profile-context';
-
-
-
-
-
-
-
-
-
-
 import { extractScalewaySecretKey } from '../../services/provider-credentials';
-
 import { refuseHaltedRunAccount } from '../../services/run-agent-configuration';
-import { isAiProxyEnabled, PROXY_ELIGIBLE_AGENTS, requiresExplicitSamProvider } from '../../services/sam-ai-proxy-fallback';
-
-
+import {
+  isAiProxyEnabled,
+  PROXY_ELIGIBLE_AGENTS,
+  requiresExplicitSamProvider,
+} from '../../services/sam-ai-proxy-fallback';
 import { getDecryptedAgentKey, getDecryptedCredentialRecord } from '../credentials';
-
-import { assertWorkspaceCallbackIdentityCurrent, assertWorkspaceCallbackResourceById, verifyWorkspaceCallbackAuth } from './_helpers';
-import { agentCredentialProviderFallback, credentialAttributionFromData, persistAgentCredentialAttribution, platformProxyAttribution } from './agent-credential-attribution';
-
+import {
+  assertWorkspaceCallbackIdentityCurrent,
+  assertWorkspaceCallbackResourceById,
+  verifyWorkspaceCallbackAuth,
+} from './_helpers';
+import {
+  agentCredentialProviderFallback,
+  credentialAttributionFromData,
+  persistAgentCredentialAttribution,
+  platformProxyAttribution,
+} from './agent-credential-attribution';
 import { callbackJsonWithJit } from './runtime-callback-response';
 function getProxyCapability(agentType: string) {
   const capability = HARNESS_CAPABILITIES.find((entry) => entry.agentType === agentType);
@@ -82,7 +84,6 @@ function buildPlatformInferenceConfig(input: {
 }
 
 const runtimeRoutes = new Hono<{ Bindings: Env }>();
-type RuntimeContext = Context<{ Bindings: Env }>;
 runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
@@ -170,7 +171,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     }
   }
 
-  if (credentialData && opencodeRequiresDedicatedCredential) {
+  if (credentialData && !credentialData.baseUrl && opencodeRequiresDedicatedCredential) {
     const persistedAttribution = await persistAgentCredentialAttribution(c.env, workspace, {
       workspaceId,
       agentSessionId: body.agentSessionId,
@@ -210,7 +211,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
   //   forwarded via auth headers, wstoken in URL path for analytics/rate-limiting)
   // Note: platform proxy fallback requires explicit provider selection.
   // Without it, users with no credential get a 404 (agent not configured).
-  if (PROXY_ELIGIBLE_AGENTS.has(body.agentType) && isAiProxyEnabled(c.env)) {
+  if (PROXY_ELIGIBLE_AGENTS.has(body.agentType) && (await isAiProxyEnabled(c.env))) {
     const baseDomain = c.env.BASE_DOMAIN;
     const isClaudeCode = body.agentType === 'claude-code';
     const isCodex = body.agentType === 'openai-codex';
@@ -425,7 +426,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     });
   }
 
-  if (!credentialData) {
+  if (!credentialData || credentialData.baseUrl) {
     throw errors.notFound('Agent credential');
   }
 

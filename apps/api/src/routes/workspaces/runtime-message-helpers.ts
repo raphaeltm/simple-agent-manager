@@ -1,4 +1,3 @@
-
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { type Context } from 'hono';
@@ -8,41 +7,25 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
-
-
-
 import { errors } from '../../middleware/error';
 import { formatIssues, MessageBatchSchema } from '../../schemas';
-
-
-
-
-
-
-
-
-
 import { nodeStatusTerminatesCallbacks } from '../../services/node-callback-auth';
 import { persistError } from '../../services/observability';
-
-
-
-
-
-
-
-
-
-
 import { safeParseJson, type WorkspaceCallbackIdentitySnapshot } from './_helpers';
-
 
 type RuntimeContext = Context<{ Bindings: Env }>;
 type MessageBatchBody = v.InferOutput<typeof MessageBatchSchema>;
 export const DEFAULT_MAX_MESSAGES_PAYLOAD_BYTES = 256 * 1024;
 export const DEFAULT_MESSAGE_SIZE_THRESHOLD_BYTES = 102400;
 export const ACTIVE_MESSAGE_WORKSPACE_STATUSES = new Set(['creating', 'running', 'recovery']);
-export const VALID_MESSAGE_ROLES = new Set(['user', 'assistant', 'system', 'tool', 'thinking', 'plan']);
+export const VALID_MESSAGE_ROLES = new Set([
+  'user',
+  'assistant',
+  'system',
+  'tool',
+  'thinking',
+  'plan',
+]);
 
 export type MessageWorkspace = WorkspaceCallbackIdentitySnapshot & {
   projectId: string | null;
@@ -78,7 +61,10 @@ export function waitUntilIfAvailable(
   }
 }
 
-export async function readRequestBodyWithLimit(request: Request, maxBytes: number): Promise<string> {
+export async function readRequestBodyWithLimit(
+  request: Request,
+  maxBytes: number
+): Promise<string> {
   const contentLengthHeader = request.headers.get('content-length');
   if (contentLengthHeader) {
     const contentLength = Number.parseInt(contentLengthHeader, 10);
@@ -307,7 +293,10 @@ export function rejectMessageSessionMismatch(
   );
 }
 
-export function rejectWorkspaceWithoutChatSession(c: RuntimeContext, context: MessageRouteContext): never {
+export function rejectWorkspaceWithoutChatSession(
+  c: RuntimeContext,
+  context: MessageRouteContext
+): never {
   const logContext = {
     ...context,
     providedSessionId: context.sessionId,
@@ -373,7 +362,10 @@ export function toProjectDataMessages(body: MessageBatchBody) {
   }));
 }
 
-export function sessionLimitReachedResponse(c: RuntimeContext, context: MessageRouteContext): Response {
+export function sessionLimitReachedResponse(
+  c: RuntimeContext,
+  context: MessageRouteContext
+): Response {
   log.error('message_persistence.session_message_limit_exceeded', {
     ...context,
     action: 'rejected_session_message_limit',
@@ -469,4 +461,3 @@ export function partialSessionLimitResponse(
     409
   );
 }
-

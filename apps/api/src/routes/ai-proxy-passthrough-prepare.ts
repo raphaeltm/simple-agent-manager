@@ -15,24 +15,35 @@
  * from, or returned to, tenant workspaces.
  */
 import type { MeasuredTokenUsage } from '@simple-agent-manager/ai-proxy';
-import { DEFAULT_AI_PROXY_RATE_LIMIT_RPM, DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS, DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES, type Dialect } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
+  DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
+  DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES,
+  type Dialect,
+} from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { type Context } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-
 import { parsePositiveInt } from '../lib/route-helpers';
 import { readRequestJsonRecord, RequestBodyTooLargeError } from '../lib/runtime-validation';
-import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
+import {
+  checkRateLimit,
+  createRateLimitKey,
+  getCurrentWindowStart,
+} from '../middleware/rate-limit';
 import { proxyRunUsageRecorder } from '../services/agent-run-usage';
+import { isAiProxyEnabled } from '../services/ai-proxy-availability';
 import { AIProxyAuthError, verifyAIProxyAuth } from '../services/ai-proxy-shared';
 import { checkAiUsageGate } from '../services/ai-token-budget';
-
-
 import type { PreloadedRuntimeRows } from '../services/workspace-runtime-assets';
-import { anthropicError, anthropicUsageGateError, openaiError, openaiUsageGateError } from './ai-proxy-passthrough-errors';
-
+import {
+  anthropicError,
+  anthropicUsageGateError,
+  openaiError,
+  openaiUsageGateError,
+} from './ai-proxy-passthrough-errors';
 import { type ResolvedProxyUpstream, resolveProxyUpstream } from './ai-proxy-passthrough-upstream';
 
 type ProxyContext = Context<{ Bindings: Env }>;
@@ -163,10 +174,6 @@ export async function prepareProxyRequest(
   c: ProxyContext,
   options: PrepareProxyOptions
 ): Promise<PreparedProxyResult> {
-  if (c.env.AI_PROXY_ENABLED === 'false') {
-    return { ok: false, response: options.disabledResponse() };
-  }
-
   const wstoken = c.req.param('wstoken');
   if (!wstoken) {
     return { ok: false, response: options.invalidTokenResponse() };
@@ -181,6 +188,8 @@ export async function prepareProxyRequest(
     }
     return { ok: false, response: options.invalidTokenResponse() };
   }
+
+  if (!(await isAiProxyEnabled(c.env))) return { ok: false, response: options.disabledResponse() };
 
   const { allowed, remaining, resetAt, limit } = await checkPassthroughRateLimit(
     c.env,
@@ -245,4 +254,3 @@ export async function prepareProxyRequest(
   });
   return { ok: true, value: { ...auth, body, modelId, upstream, recordRunUsage } };
 }
-

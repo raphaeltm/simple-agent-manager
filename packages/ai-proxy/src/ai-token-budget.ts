@@ -1,3 +1,4 @@
+import { hasLocalAiCostMetering } from './ai-gateway-availability';
 /**
  * Per-user daily token budget tracking.
  *
@@ -365,7 +366,13 @@ export async function incrementProviderUsage(
 
   const ttl =
     parseInt(env?.AI_USAGE_BUDGET_TTL_SECONDS || '', 10) || DEFAULT_AI_USAGE_BUDGET_TTL_SECONDS;
-  await kv.put(key, JSON.stringify(existing), { expirationTtl: ttl });
+  // Local monthly caps read these daily rows. Retain them through the end of their month
+  // plus the existing grace TTL; a later BYO write must not shorten a priced row's lifetime.
+  const now = new Date();
+  const monthEnd = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+  const retention =
+    env && hasLocalAiCostMetering(env) ? Math.ceil((monthEnd - now.getTime()) / 1000) + ttl : ttl;
+  await kv.put(key, JSON.stringify(existing), { expirationTtl: retention });
 }
 
 export async function getProviderUsage(
@@ -453,7 +460,7 @@ export async function checkAiUsageGate(
     return { allowed: false, reason: 'daily-token-budget', budget };
   }
 
-  const monthlyCap = await checkMonthlyCostCap(kv, userId);
+  const monthlyCap = await checkMonthlyCostCap(kv, userId, env);
   if (!monthlyCap.allowed) {
     return { allowed: false, reason: 'monthly-cost-cap', monthlyCap };
   }

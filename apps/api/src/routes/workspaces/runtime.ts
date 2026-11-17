@@ -1,49 +1,33 @@
-import { type BootstrapTokenData, DEFAULT_AGENT_PERMISSION_MODE } from '@simple-agent-manager/shared';
+import {
+  type BootstrapTokenData,
+  DEFAULT_AGENT_PERMISSION_MODE,
+} from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { type Context, Hono } from 'hono';
-
+import { Hono } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
-
-
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { ulid } from '../../lib/ulid';
 import { requireApproved, requireAuth } from '../../middleware/auth';
-
 import { AgentTypeBodySchema, BootLogEntrySchema, jsonValidator } from '../../schemas';
 import { appendBootLog } from '../../services/boot-log';
 import { registerBootstrapTokenConsume } from '../../services/bootstrap';
-
-
-
-
-
-
-
-
-
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
-
-
-
-
-
-
 import { getWorkspaceRuntimeAssets } from '../../services/workspace-runtime-assets';
-
-
-import { assertWorkspaceAcceptsCallback, assertWorkspaceCallbackIdentityCurrent, assertWorkspaceCallbackResourceById, verifyWorkspaceCallbackAuth } from './_helpers';
-
-
-import { callbackJsonWithJit } from './runtime-callback-response';
+import {
+  assertWorkspaceAcceptsCallback,
+  assertWorkspaceCallbackIdentityCurrent,
+  assertWorkspaceCallbackResourceById,
+  verifyWorkspaceCallbackAuth,
+} from './_helpers';
 import { agentKeyRoutes } from './runtime-agent-key';
+import { callbackJsonWithJit } from './runtime-callback-response';
 import { gitTokenRoutes } from './runtime-git-token';
 import { messageRoutes } from './runtime-messages';
 export { resolveMaxMessageBytes } from './runtime-message-helpers';
 const runtimeRoutes = new Hono<{ Bindings: Env }>();
-type RuntimeContext = Context<{ Bindings: Env }>;
 runtimeRoutes.route('/', agentKeyRoutes);
 runtimeRoutes.route('/', gitTokenRoutes);
 runtimeRoutes.route('/', messageRoutes);

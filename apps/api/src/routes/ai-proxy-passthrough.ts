@@ -1,3 +1,4 @@
+import { guardedFetch } from '@simple-agent-manager/worker-core';
 /**
  * AI proxy passthrough routes — URL-path-based workspace auth.
  *
@@ -14,27 +15,30 @@
  * workspaceId, and projectId. Upstream provider credentials are never accepted
  * from, or returned to, tenant workspaces.
  */
-
-
-
 import { type Context, Hono } from 'hono';
-
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-
-
-
-
-
-
-import { attachUpstreamTokenUsageAccounting, estimateInputTokensFromMessages, optionalExecutionContext } from '../services/ai-token-usage-accounting';
+import {
+  attachUpstreamTokenUsageAccounting,
+  estimateInputTokensFromMessages,
+  optionalExecutionContext,
+} from '../services/ai-token-usage-accounting';
 import { copyCredentialLimitHeaders } from '../services/credential-limit-events';
-
+import { resolveOutboundMaxRedirects } from '../services/outbound-fetch-settings';
 import { anthropicError, credentialErrorHeaders, openaiError } from './ai-proxy-passthrough-errors';
-import { anthropicProxyOptions, openaiProxyOptions, prepareProxyRequest, retryAfterSeconds } from './ai-proxy-passthrough-prepare';
+import {
+  anthropicProxyOptions,
+  openaiProxyOptions,
+  prepareProxyRequest,
+  retryAfterSeconds,
+} from './ai-proxy-passthrough-prepare';
 import { schedulePassthroughLimitHeaders } from './ai-proxy-passthrough-telemetry';
-import { type ResolvedProxyUpstream, resolveProxyUpstream, trimTrailingSlashes } from './ai-proxy-passthrough-upstream';
+import {
+  type ResolvedProxyUpstream,
+  resolveProxyUpstream,
+  trimTrailingSlashes,
+} from './ai-proxy-passthrough-upstream';
 
 const aiProxyPassthroughRoutes = new Hono<{ Bindings: Env }>();
 type ProxyContext = Context<{ Bindings: Env }>;
@@ -137,11 +141,15 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
   const upstreamUrl = joinUpstreamUrl(upstream.baseUrl, 'v1/messages');
 
   try {
-    const upstreamResponse = await fetch(upstreamUrl, {
-      method: 'POST',
-      headers: upstreamHeaders,
-      body: JSON.stringify(body),
-    });
+    const upstreamResponse = await guardedFetch(
+      upstreamUrl,
+      {
+        method: 'POST',
+        headers: upstreamHeaders,
+        body: JSON.stringify(body),
+      },
+      { maxRedirects: await resolveOutboundMaxRedirects(c.env) }
+    );
 
     log.info('ai_proxy_passthrough.anthropic.response', {
       userId,
@@ -227,11 +235,15 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages/count_tokens', as
   const countTokensUrl = joinUpstreamUrl(upstream.baseUrl, 'v1/messages/count_tokens');
 
   try {
-    const upstreamResponse = await fetch(countTokensUrl, {
-      method: 'POST',
-      headers: upstreamHeaders,
-      body: JSON.stringify(body),
-    });
+    const upstreamResponse = await guardedFetch(
+      countTokensUrl,
+      {
+        method: 'POST',
+        headers: upstreamHeaders,
+        body: JSON.stringify(body),
+      },
+      { maxRedirects: await resolveOutboundMaxRedirects(c.env) }
+    );
 
     if (!upstreamResponse.ok) {
       log.error('ai_proxy_passthrough.anthropic.count_tokens_error', {
@@ -309,11 +321,15 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
   });
 
   try {
-    const upstreamResponse = await fetch(upstreamUrl, {
-      method: 'POST',
-      headers: upstreamHeaders,
-      body: JSON.stringify(body),
-    });
+    const upstreamResponse = await guardedFetch(
+      upstreamUrl,
+      {
+        method: 'POST',
+        headers: upstreamHeaders,
+        body: JSON.stringify(body),
+      },
+      { maxRedirects: await resolveOutboundMaxRedirects(c.env) }
+    );
 
     log.info('ai_proxy_passthrough.openai.response', {
       userId,

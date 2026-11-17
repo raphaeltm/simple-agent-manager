@@ -1,45 +1,32 @@
-
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { type Context, Hono } from 'hono';
-
+import { Hono } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-
-
-
-
 import { errors } from '../../middleware/error';
-
-
-
-
 import { getInstallationToken, getUserInstallationRepositories } from '../../services/github-app';
-import { GitHubCliPolicyError, resolveWorkspaceGitHubTokenOptions } from '../../services/github-cli-policy';
+import {
+  GitHubCliPolicyError,
+  resolveWorkspaceGitHubTokenOptions,
+} from '../../services/github-cli-policy';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
 import { backfillProjectGithubRepoId } from '../../services/github-repo-id-backfill';
 import { getGitHubUserAccessTokenForOwner } from '../../services/github-user-access-token';
-import { getProjectGitLabRepository, requireGitLabUserAccessTokenResultForOwner, verifyGitLabProjectAccess } from '../../services/gitlab';
-
-
-
-
-
-
-
-
-
-
-
+import {
+  getProjectGitLabRepository,
+  requireGitLabUserAccessTokenResultForOwner,
+  verifyGitLabProjectAccess,
+} from '../../services/gitlab';
 import { assertRepositoryAccess } from '../projects/_helpers';
-import { assertWorkspaceAcceptsCallback, assertWorkspaceCallbackIdentityCurrent, verifyWorkspaceCallbackAuth } from './_helpers';
-
-
+import {
+  assertWorkspaceAcceptsCallback,
+  assertWorkspaceCallbackIdentityCurrent,
+  verifyWorkspaceCallbackAuth,
+} from './_helpers';
 import { callbackJsonWithJit } from './runtime-callback-response';
 const runtimeRoutes = new Hono<{ Bindings: Env }>();
-type RuntimeContext = Context<{ Bindings: Env }>;
 async function verifyWorkspaceGitHubOwnerAccess(input: {
   env: Env;
   workspaceId: string;
@@ -467,6 +454,5 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     expiresAt: token.expiresAt,
   });
 });
-
 
 export { runtimeRoutes as gitTokenRoutes };

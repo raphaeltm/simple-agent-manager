@@ -1,45 +1,25 @@
 import { MESSAGE_OUTBOX_INCARNATION_HEADER } from '@simple-agent-manager/shared';
-
-
-import { type Context, Hono } from 'hono';
+import { Hono } from 'hono';
 import * as v from 'valibot';
 
-
 import type { Env } from '../../env';
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 import * as projectDataService from '../../services/project-data';
-
-
-
-
 import { signalWorkspaceDeletionUnconfirmedCallback } from '../../services/workspace-deletion-callback-signal';
-
-
-
 import { sameWorkspaceCallbackIdentity, verifyWorkspaceCallbackAuth } from './_helpers';
-
-
-import { type MessageBatchPersistenceRouteResult, type MessageRouteContext, parseMessageBatchRequest, validateMessageBatch, loadMessageWorkspace, terminalMessagePersistenceResponse, maybeTerminalMessageWorkspaceResponse, assertMessageWorkspaceAcceptsBatch, toProjectDataMessages, handleMessagePersistenceError, partialSessionLimitResponse } from './runtime-message-helpers';
+import {
+  assertMessageWorkspaceAcceptsBatch,
+  handleMessagePersistenceError,
+  loadMessageWorkspace,
+  maybeTerminalMessageWorkspaceResponse,
+  type MessageBatchPersistenceRouteResult,
+  type MessageRouteContext,
+  parseMessageBatchRequest,
+  partialSessionLimitResponse,
+  terminalMessagePersistenceResponse,
+  toProjectDataMessages,
+  validateMessageBatch,
+} from './runtime-message-helpers';
 const runtimeRoutes = new Hono<{ Bindings: Env }>();
-type RuntimeContext = Context<{ Bindings: Env }>;
 runtimeRoutes.post('/:id/messages', async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);

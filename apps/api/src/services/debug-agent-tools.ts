@@ -1,6 +1,5 @@
 import type { Env } from '../env';
 import { readResponseJson } from '../lib/runtime-validation';
-import { buildWorkersAIGatewayUrl } from './ai-proxy-shared';
 import {
   type ChatMessage,
   type Completion,
@@ -11,6 +10,12 @@ import {
 } from './debug-agent-common';
 import { completionSchema, parseDebugToolArgs } from './debug-agent-parsing';
 import { getDiagnosticIncidentByErrorId } from './diagnostic-incidents';
+import {
+  chatTargetHeaders,
+  fetchChatTarget,
+  LlmUnavailableError,
+  resolveWorkersAiChatTargetWithin,
+} from './llm-chat-target';
 import {
   getErrorTrends,
   getHealthSummary,
@@ -196,21 +201,26 @@ export async function complete(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutMs);
   try {
-    const response = await fetch(buildWorkersAIGatewayUrl(env), {
+    const target = await resolveWorkersAiChatTargetWithin(
+      env,
+      'diagnosis',
+      config.model,
+      config.timeoutMs
+    );
+    if (!target) throw new LlmUnavailableError('diagnosis');
+    const response = await fetchChatTarget(target, {
       method: 'POST',
       signal: controller.signal,
-      headers: {
-        Authorization: `Bearer ${env.CF_API_TOKEN}`,
-        'Content-Type': 'application/json',
+      headers: chatTargetHeaders(target, {
         'cf-aig-metadata': JSON.stringify({
           source: featureKey,
           modelId: config.model,
           stream: false,
           hasTools: true,
         }),
-      },
+      }),
       body: JSON.stringify({
-        model: config.model,
+        model: target.model,
         messages,
         tools: TOOLS,
         tool_choice: 'auto',

@@ -1,14 +1,22 @@
 /**
  * The model call for one agent-loop turn, split out of agent-loop.ts (rule 18).
  *
- * Route by model prefix: claude-* to Anthropic (translated at the boundary), @cf/* and @hf/* to
- * Workers AI, both through AI Gateway.
+ * Route order: an admin-configured OpenAI-compatible endpoint when one is set
+ * (services/llm-chat-target.ts), else by model prefix: claude-* to Anthropic (translated at the
+ * boundary), @cf/* and @hf/* to Workers AI through AI Gateway or the REST API.
  */
 import { SAM_ANTHROPIC_VERSION, type SamConfig } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
-import { buildWorkersAIGatewayUrl } from '../../services/ai-proxy-shared';
+import {
+  type ChatCompletionsTarget,
+  chatTargetHeaders,
+  fetchChatTarget,
+  LlmUnavailableError,
+  resolveCloudflareWorkersAiTarget,
+} from '../../services/llm-chat-target';
+import { aiGatewayOnlyHeaders } from '../../services/platform-capabilities';
 import { getPlatformAgentCredential } from '../../services/platform-credentials';
 import {
   buildAnthropicGatewayUrl,
@@ -43,7 +51,8 @@ export async function callLLM(
   userId: string,
   conversationId: string,
   baseSystemPrompt: string,
-  tools: AnthropicToolDef[]
+  tools: AnthropicToolDef[],
+  endpoint: ChatCompletionsTarget | null
 ): Promise<Response> {
   const model = config.model;
   const systemPrompt = config.systemPromptAppend
@@ -65,7 +74,17 @@ export async function callLLM(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    if (isAnthropicModel(model)) {
+    if (endpoint) {
+      return await callOpenAIChatLLM(
+        endpoint,
+        systemPrompt,
+        messages,
+        openAITools,
+        aigMetadata,
+        config.maxTokens,
+        controller.signal
+      );
+    } else if (isAnthropicModel(model)) {
       return await callAnthropicLLM(
         env,
         model,
@@ -78,9 +97,10 @@ export async function callLLM(
         tools
       );
     } else if (isWorkersAIModel(model)) {
-      return await callWorkersAILLM(
-        env,
-        model,
+      const target = resolveCloudflareWorkersAiTarget(env, model);
+      if (!target) throw new LlmUnavailableError('agent');
+      return await callOpenAIChatLLM(
+        target,
         systemPrompt,
         messages,
         openAITools,
@@ -150,7 +170,7 @@ async function callAnthropicLLM(
       'x-api-key': apiKey,
       'anthropic-version': SAM_ANTHROPIC_VERSION,
       'content-type': 'application/json',
-      'cf-aig-metadata': aigMetadata,
+      ...aiGatewayOnlyHeaders(env, { 'cf-aig-metadata': aigMetadata }),
     },
     body: JSON.stringify({
       model,
@@ -163,10 +183,9 @@ async function callAnthropicLLM(
   });
 }
 
-/** Call Workers AI via AI Gateway (OpenAI-compatible). */
-async function callWorkersAILLM(
-  env: Env,
-  model: string,
+/** Call an OpenAI-format chat completions target (Workers AI or an OpenAI-compatible endpoint). */
+async function callOpenAIChatLLM(
+  target: ChatCompletionsTarget,
   systemPrompt: string,
   messages: OpenAIMessage[],
   openAITools: OpenAITool[],
@@ -174,20 +193,14 @@ async function callWorkersAILLM(
   maxTokens: number,
   signal: AbortSignal
 ): Promise<Response> {
-  const url = buildWorkersAIGatewayUrl(env);
-
   const fullMessages: OpenAIMessage[] = [{ role: 'system', content: systemPrompt }, ...messages];
 
-  return fetch(url, {
+  return fetchChatTarget(target, {
     method: 'POST',
     signal,
-    headers: {
-      Authorization: `Bearer ${env.CF_API_TOKEN}`,
-      'Content-Type': 'application/json',
-      'cf-aig-metadata': aigMetadata,
-    },
+    headers: chatTargetHeaders(target, { 'cf-aig-metadata': aigMetadata }),
     body: JSON.stringify({
-      model,
+      model: target.model,
       max_tokens: maxTokens,
       messages: fullMessages,
       tools: openAITools.length > 0 ? openAITools : undefined,
