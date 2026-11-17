@@ -318,6 +318,64 @@ describe('projectOverviewGet', () => {
     expect(result.running.waitingOnViewerTotal).toBe(1);
   });
 
+  /** A pending `request_secret` from a chat: the inbox lists it as a blocking item. */
+  function secretRequest(
+    id: string,
+    sessionId: string,
+    fields: Record<string, string | number | null> = {}
+  ): void {
+    const now = Date.now();
+    insert('runtime_secret_requests', {
+      id,
+      project_id: 'p',
+      env_key: 'STRIPE_KEY',
+      reason: 'Webhooks need it',
+      status: 'pending',
+      requester_user_id: 'owner',
+      requesting_task_id: `task-${sessionId}`,
+      requesting_authority_task_id: `task-${sessionId}`,
+      requesting_chat_session_id: sessionId,
+      expires_at: now + HOUR,
+      created_at: now,
+      updated_at: now,
+      ...fields,
+    });
+  }
+
+  it('keeps a chat paused on a pending secret request in Running now, as waiting (slice F2)', async () => {
+    // The agent ended its turn after asking: without the request the chat is idle and hidden,
+    // while the inbox still calls it "paused on this".
+    const idle = { agent_completed_at: NOW - 120_000, last_message_at: NOW - 10 * HOUR };
+    running('secret-wait', idle);
+    secretRequest('sr-1', 'secret-wait');
+    // Controls: expired and fulfilled requests leave the chat idle (not shown).
+    running('secret-expired', idle);
+    secretRequest('sr-expired', 'secret-expired', { expires_at: Date.now() - 1 });
+    running('secret-done', idle);
+    secretRequest('sr-done', 'secret-done', { status: 'fulfilled' });
+    // Attack: another project's pending request naming this project's chat id.
+    running('secret-foreign', idle);
+    secretRequest('sr-foreign', 'secret-foreign', { project_id: 'foreign' });
+
+    const result = await projectOverviewGet(ctx(), { projectId: 'p' });
+    expect(result.running.items).toEqual([
+      expect.objectContaining({
+        sessionId: 'secret-wait',
+        state: 'waiting',
+        waitingOnViewer: true,
+      }),
+    ]);
+    expect(result.running.total).toBe(1);
+    expect(result.running.waitingOnViewerTotal).toBe(1);
+
+    // A teammate sees the chat as paused too, but not on them: it is the creator's to answer.
+    const mate = await projectOverviewGet(ctx('teammate'), { projectId: 'p' });
+    expect(mate.running.items).toEqual([
+      expect.objectContaining({ sessionId: 'secret-wait', state: 'waiting', waitingOnViewer: false }),
+    ]);
+    expect(mate.running.waitingOnViewerTotal).toBe(0);
+  });
+
   it('skips one malformed row and keeps the rest', async () => {
     running('good');
     running('bad');

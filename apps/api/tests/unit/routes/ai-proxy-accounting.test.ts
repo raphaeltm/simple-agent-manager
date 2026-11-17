@@ -74,11 +74,14 @@ vi.mock('../../../src/lib/logger', () => ({
   createModuleLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }),
 }));
 
+import Database from 'better-sqlite3';
+
 import { aiProxyRoutes } from '../../../src/routes/ai-proxy';
 import { aiProxyAnthropicRoutes } from '../../../src/routes/ai-proxy-anthropic';
+import { applySqliteMigration, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 type TestEnv = {
-  DATABASE: Record<string, never>;
+  DATABASE: Record<string, never> | D1Database;
   KV: { get: ReturnType<typeof vi.fn> };
   AI_PROXY_ENABLED: string;
   AI_PROXY_ALLOWED_MODELS?: string;
@@ -558,5 +561,94 @@ describe('native Anthropic AI proxy token accounting', () => {
     await res.text();
     expect(mockCheckAiUsageGate).toHaveBeenCalledOnce();
     expect(mockIncrementTokenUsage).not.toHaveBeenCalled();
+  });
+});
+
+// Insights slice U: a proxied response's measured usage lands in agent_run_usage, keyed by the
+// workspace's run and the credential the proxy forwarded with (rule 62: through the real route).
+describe('AI proxy run usage', () => {
+  function runUsageDb() {
+    const sqlite = new Database(':memory:');
+    applySqliteMigration(
+      sqlite,
+      new URL('../../../src/db/migrations/0253_agent_run_usage.sql', import.meta.url)
+    );
+    return { sqlite, db: createSqliteD1(sqlite) };
+  }
+
+  function anthropicMessage() {
+    return new Response(
+      JSON.stringify({
+        id: 'msg_1',
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'hello' }],
+        model: 'claude-sonnet-5',
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 18, output_tokens: 5, cache_read_input_tokens: 400 },
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+
+  it('records the run’s measured tokens under the forwarded credential', async () => {
+    const { sqlite, db } = runUsageDb();
+    mockVerifyAIProxyAuth.mockResolvedValueOnce({
+      userId: 'user1',
+      workspaceId: 'ws1',
+      projectId: 'proj1',
+      chatSessionId: 'chat-1',
+      agentSessionId: 'as-1',
+      agentType: 'claude-code',
+    });
+    mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+    mockCheckTokenBudget.mockResolvedValueOnce({ allowed: true });
+    allowAnthropicPlatformAuth();
+    mockIncrementTokenUsage.mockResolvedValueOnce({ inputTokens: 18, outputTokens: 5 });
+    mockFetch.mockResolvedValueOnce(anthropicMessage());
+
+    const res = await postAnthropic(
+      '/messages',
+      { model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] },
+      { DATABASE: db }
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+    await vi.waitFor(() =>
+      expect(sqlite.prepare('SELECT * FROM agent_run_usage').all()).toEqual([
+        expect.objectContaining({
+          project_id: 'proj1',
+          chat_session_id: 'chat-1',
+          workspace_id: 'ws1',
+          source: 'ai_proxy',
+          model: 'claude-sonnet-5',
+          credential_key: 'platform_credentials:anthropic-1',
+          credential_source: 'platform',
+          input_tokens: 18,
+          output_tokens: 5,
+          cache_read_tokens: 400,
+        }),
+      ])
+    );
+    expectUsageIncrement(18, 5);
+  });
+
+  it('records nothing for a workspace with no run bound to it, and still accounts the budget', async () => {
+    const { sqlite, db } = runUsageDb();
+    allowProxyRequest(); // no chatSessionId
+    allowAnthropicPlatformAuth();
+    mockIncrementTokenUsage.mockResolvedValueOnce({ inputTokens: 18, outputTokens: 5 });
+    mockFetch.mockResolvedValueOnce(anthropicMessage());
+
+    const res = await postAnthropic(
+      '/messages',
+      { model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] },
+      { DATABASE: db }
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+    expectUsageIncrement(18, 5);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage').get()).toEqual({ n: 0 });
   });
 });

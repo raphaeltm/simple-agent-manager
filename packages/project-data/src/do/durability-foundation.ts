@@ -353,22 +353,45 @@ export function processPromptDeliveryAlarm(
     if (!config.deliveryEnabled) return;
     const expired = hooks.transactionSync(() => delivery.expireDuePromptDeliveries(sql, config));
     if (expired.expiredWakeFailures.length > 0) {
-      for (const wakeFailure of expired.expiredWakeFailures) {
-        raiseSessionWakeFailure(
-          sql,
-          {
-            sessionId: wakeFailure.targetSessionId,
-            taskId: wakeFailure.sourceTaskId,
-            deliveryId: wakeFailure.deliveryId,
-            reason: wakeFailure.terminalReason,
-            detail:
-              wakeFailure.lastError ??
-              'SAM retried the wake until the delivery expired, but the session did not wake.',
-          },
-          hooks.broadcastEvent
-        );
-      }
-      hooks.scheduleSummarySync();
+      // Filing the inbox item is a D1 write, so it runs after this synchronous alarm step.
+      hooks.waitUntil(
+        (async () => {
+          // One raise per chat: several deliveries expiring together are one visible failure,
+          // and each costs several D1 round trips. Each chat is isolated, so one throw cannot
+          // cost the others their signal (these deliveries are already expired; nothing retries).
+          const seen = new Set<string>();
+          for (const wakeFailure of expired.expiredWakeFailures) {
+            if (seen.has(wakeFailure.targetSessionId)) continue;
+            seen.add(wakeFailure.targetSessionId);
+            try {
+              await raiseSessionWakeFailure(
+                sql,
+                env,
+                hooks.getProjectId(),
+                {
+                  sessionId: wakeFailure.targetSessionId,
+                  taskId: wakeFailure.sourceTaskId,
+                  deliveryId: wakeFailure.deliveryId,
+                  reason: wakeFailure.terminalReason,
+                  detail:
+                    wakeFailure.lastError ??
+                    'SAM retried the wake until the delivery expired, but the session did not wake.',
+                },
+                hooks.broadcastEvent
+              );
+            } catch (error) {
+              log.error('alarm.wake_failure_failed', {
+                sessionId: wakeFailure.targetSessionId,
+                deliveryId: wakeFailure.deliveryId,
+                ...serializeError(error),
+              });
+            }
+          }
+          hooks.scheduleSummarySync();
+        })().catch((error) => {
+          log.error('alarm.wake_failure_failed', serializeError(error));
+        })
+      );
     }
     const claims = hooks.transactionSync(() => delivery.claimDuePromptDeliveries(sql, config));
     const adapter = projectDataPorts().runtime.createPromptDeliveryAdapter(env);

@@ -8,6 +8,7 @@
 import type { ProjectDataPorts } from '@simple-agent-manager/project-data';
 
 import { credentialsPort } from './credentials';
+import { inboxErrorsPort } from './inbox-errors';
 import { noticesPort } from './notices';
 import { notificationsPort } from './notifications';
 import { observabilityPort } from './observability';
@@ -27,4 +28,5 @@ export const workerProjectDataPorts: ProjectDataPorts = {
   notifications: notificationsPort,
   observability: observabilityPort,
   operations: operationsPort,
+  inboxErrors: inboxErrorsPort,
 };

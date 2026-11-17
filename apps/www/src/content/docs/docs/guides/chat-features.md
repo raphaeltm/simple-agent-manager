@@ -419,24 +419,39 @@ phone. It is built from records SAM already keeps (`runReceipt`,
 `packages/operations/src/insights-receipt.ts`), and it says when it has nothing to measure from
 rather than guessing.
 
-- **Outcome**: the pull request the run opened, whether it merged, and the state of its checks on
-  the latest commit.
+- **Outcome**: the pull request the run opened, whether it merged, the state of its checks on
+  the latest commit, and whether the first push passed CI (**first push passed** or **first push
+  failed**, by the same rule as [Insights](/docs/guides/insights/)). Nothing is said while those
+  checks run, or when SAM did not see the pull request from its first commit.
 - **Where the time went**: a bar split into waiting for a machine, setup, agent working, waiting on
   a person (the agent's open questions and the inbox items it filed), and CI (from the agent's last
   message until the pull request's last check finished). While the run is live, the phases it has
   not reached read **not yet**.
-- **Tiles**: tokens (shown as **Not reported** for now; SAM never estimates them), the account the
-  agent ran on (its name only for the person who ran it; everyone else sees which kind of account),
-  peak memory against what the run requested, and tool calls by kind. A count with `+` is a floor:
-  the run had more tool calls than one receipt reads.
+- **Tiles**: tokens, the account the agent ran on (its name only for the person who ran it;
+  everyone else sees which kind of account), peak memory against what the run requested, and tool
+  calls by kind. A count with `+` is a floor: the run had more tool calls than one receipt reads.
+- **Tokens by model**: the tokens the run used per model, split into fresh input, output, cache and
+  reasoning (where the agent reports reasoning on its own). SAM never estimates tokens. They come
+  from SAM's AI proxy when the run used it (it measures every model call), otherwise from the agent
+  itself through the VM agent (`agent_run_usage`, `packages/operations/src/insights-run-usage.ts`):
+  - Claude Code reports each turn, per model.
+  - OpenCode reports each turn, credited to the session's model.
+  - Codex reports its running total for the conversation, read from its session file.
+  - Other agents report nothing, and the tile says **Not reported**.
+
+  Background work Claude Code starts on its own between turns is not counted. A Codex thread's
+  total is credited to the session's model. Tokens cover the whole chat, so every task in one chat
+  shows the same totals. For an API-key account the list also shows spend, labelled as an estimate
+  from SAM's model prices (cache writes are priced as input, so it reads low for Anthropic). Only
+  the person who ran the session sees spend on their own personal key. Subscription accounts show
+  tokens only.
 - **CPU**: the run's CPU per minute, with a marker on each minute in which the agent started tool
   calls, from the same history as **Resources**.
 - **What slowed it down**: up to three items, largest first. A machine wait or setup is listed only
   when it was clearly slower than recent runs of the same skill (or profile) in the project. Time
   spent waiting for an answer, failing checks, and memory near the limit are listed too.
 
-Whether CI passed on the first push is not shown: SAM keeps check results for a pull request's
-latest commit only. Admins can tune the receipt's limits under **Chat** in
+Admins can tune the receipt's limits under **Chat** in
 [Admin settings](/docs/guides/admin-settings/#run-receipt).
 
 ## File Browsing

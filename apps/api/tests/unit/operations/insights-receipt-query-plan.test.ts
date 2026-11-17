@@ -120,6 +120,44 @@ describe('run receipt query plans', { timeout: 30_000 }, () => {
     expect(taskPlan).not.toMatch(/SCAN (asks|task_status_events|workspace_resource_summaries)/);
   });
 
+  it('reads the pull request’s opening-commit verdict by primary key, never by scanning', async () => {
+    const { ctx, statements } = setup();
+    const insertPr = sqlite!.prepare(
+      `INSERT INTO pull_requests (id, project_id, repository, number, url, title, state, head_sha,
+         created_at, updated_at)
+       VALUES (?, 'p', 'acme/app', ?, ?, 'PR', 'open', ?, '2026-11-01', '2026-11-01')`
+    );
+    const insertHead = sqlite!.prepare(
+      `INSERT INTO pull_request_heads (project_id, repository, pr_number, head_sha, first_seen_at, from_open)
+       VALUES ('p', 'acme/app', ?, ?, '2026-11-01', 1)`
+    );
+    const insertCheck = sqlite!.prepare(
+      `INSERT INTO pull_request_checks (project_id, repository, head_sha, check_key, state, updated_at)
+       VALUES ('p', 'acme/app', ?, ?, 'success', '2026-11-01')`
+    );
+    // Many pull requests with heads and checks, so an unindexed read would walk them all.
+    sqlite!.transaction(() => {
+      for (let n = 1; n <= 2_000; n += 1) {
+        const sha = n.toString(16).padStart(40, '0');
+        insertPr.run(`pr-${n}`, n, `https://github.com/acme/app/pull/${n}`, sha);
+        insertHead.run(n, sha);
+        for (const key of ['lint', 'test', 'build']) insertCheck.run(sha, key);
+      }
+    })();
+    sqlite!.exec(
+      `UPDATE tasks SET output_pr_url = 'https://github.com/acme/app/pull/1234' WHERE id = 't-0'`
+    );
+
+    const receipt = await runReceipt(ctx, { projectId: 'p', taskId: 't-0' });
+    expect(receipt.outcome.ciFirstTry).toBe('passed');
+    const pullRequest = statements.find((query) => query.includes('AS first_try'));
+    expect(pullRequest, 'the pull request statement ran').toBeDefined();
+    const pullRequestPlan = plan(pullRequest!).join('\n');
+    expect(pullRequestPlan).toMatch(/SEARCH h USING/);
+    expect(pullRequestPlan).toMatch(/SEARCH c USING/);
+    expect(pullRequestPlan).not.toMatch(/SCAN (h|c|pr|pull_request_heads|pull_request_checks)\b/);
+  });
+
   it('finds comparable runs of the same profile by index when the run has no skill', async () => {
     const { ctx, statements } = setup();
     sqlite!.exec(

@@ -475,6 +475,23 @@ export interface NotificationsPort {
   resendPush(env: Env, userId: string, notificationId: string): Promise<void>;
 }
 
+/** Inbox system error items (slice E) the ProjectData object files in D1 `asks`. */
+export interface InboxErrorsPort {
+  /**
+   * File the chat's failed-wake inbox item, or update the open one. Null when it could not be
+   * filed (logged by the worker). Never throws.
+   */
+  fileWakeFailure(
+    env: Env,
+    input: {
+      projectId: string;
+      sessionId: string;
+      createdByUserId: string | null;
+      topic: string | null;
+    }
+  ): Promise<{ ref: string; id: string; created: boolean } | null>;
+}
+
 export interface CredentialsPort {
   /** Collision-free key for a credential reference, as provider-limit events store it. */
   limitReferenceKey(reference: string | null | undefined): Promise<string | null>;
@@ -492,6 +509,7 @@ export interface ProjectDataPorts {
   notifications: NotificationsPort;
   observability: ObservabilityPort;
   operations: OperationsPort;
+  inboxErrors: InboxErrorsPort;
 }
 
 /**

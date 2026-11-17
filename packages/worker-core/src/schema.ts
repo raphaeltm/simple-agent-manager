@@ -828,6 +828,8 @@ export const asks = sqliteTable(
     escalationCount: integer('escalation_count').notNull().default(0),
     /** Hard limit on how long an undelivered ask may be extended. */
     maxExpiresAt: integer('max_expires_at'),
+    /** Kind 'error' (slice E, migration 0248): times the thing failed while the item was open. */
+    failureCount: integer('failure_count').notNull().default(1),
   },
   (table) => ({
     openEscalationIdx: index('idx_asks_open_escalation')
@@ -853,6 +855,13 @@ export const asks = sqliteTable(
     unnotifiedIdx: index('idx_asks_unnotified')
       .on(table.resolvedAt)
       .where(sql`notified_at IS NULL AND status IN ('answered', 'done', 'archived', 'expired')`),
+    // System error items (migration 0248).
+    errorTaskIdx: index('idx_asks_error_task')
+      .on(table.sourceTaskId, table.createdAt)
+      .where(sql`kind = 'error'`),
+    errorKeyIdx: index('idx_asks_error_key')
+      .on(table.dedupeKey)
+      .where(sql`kind = 'error' AND dedupe_key IS NOT NULL`),
     projectDedupeIdx: uniqueIndex('idx_asks_project_dedupe')
       .on(table.projectId, table.dedupeKey)
       .where(sql`dedupe_key IS NOT NULL`),
@@ -1302,6 +1311,10 @@ export const tasks = sqliteTable(
       table.priority,
       table.updatedAt
     ),
+    // Inbox system error sweep (migration 0248): recently failed tasks.
+    failedUpdatedIdx: index('idx_tasks_failed_updated')
+      .on(table.updatedAt)
+      .where(sql`status = 'failed'`),
     activeUpdatedIdIdx: index('idx_tasks_active_updated_id')
       .on(table.updatedAt, table.id)
       .where(sql`status IN ('queued', 'delegated', 'in_progress')`),
@@ -3487,6 +3500,14 @@ export const triggerExecutions = sqliteTable(
       .on(table.triggerId, table.status)
       .where(sql`status IN ('queued', 'running')`),
     triggerIdIdx: index('idx_trigger_executions_trigger_id').on(table.triggerId),
+    // Inbox system error sweep (migration 0248): recently failed runs.
+    failedCompletedIdx: index('idx_trigger_executions_failed_completed')
+      .on(table.completedAt)
+      .where(sql`status = 'failed'`),
+    // Inbox automation sweep (migration 0248): an automation's newest finished run.
+    finishedSequenceIdx: index('idx_trigger_executions_trigger_finished')
+      .on(table.triggerId, table.sequenceNumber)
+      .where(sql`status IN ('completed', 'failed')`),
     queueExpiryIdx: index('idx_trigger_queue_expiry')
       .on(table.queueExpiresAt)
       .where(sql`status IN ('waiting','queued')`),
@@ -5975,5 +5996,48 @@ export const lifecyclePhaseTimings = sqliteTable(
       .on(table.projectId, table.agentProfileId, table.phase, table.createdAt)
       .where(sql`agent_profile_id IS NOT NULL`),
     createdIdx: index('idx_lifecycle_phase_timings_created').on(table.createdAt),
+  })
+);
+
+/**
+ * Insights slice U: measured token usage per run (chat session) x model x credential key.
+ * Migration 0253. Writers: `apps/api/src/services/agent-run-usage.ts`. Reads:
+ * `packages/operations/src/insights-run-usage.ts`. Counters are cumulative; see the migration.
+ */
+export const agentRunUsage = sqliteTable(
+  'agent_run_usage',
+  {
+    id: integer('id').primaryKey(),
+    projectId: text('project_id').notNull(),
+    chatSessionId: text('chat_session_id').notNull(),
+    workspaceId: text('workspace_id'),
+    agentSessionId: text('agent_session_id'),
+    source: text('source').notNull(),
+    usageEpoch: text('usage_epoch').notNull(),
+    model: text('model').notNull().default(''),
+    credentialKey: text('credential_key').notNull().default(''),
+    credentialSource: text('credential_source'),
+    agentType: text('agent_type'),
+    inputTokens: integer('input_tokens').notNull().default(0),
+    outputTokens: integer('output_tokens').notNull().default(0),
+    cacheReadTokens: integer('cache_read_tokens').notNull().default(0),
+    cacheWriteTokens: integer('cache_write_tokens').notNull().default(0),
+    reasoningTokens: integer('reasoning_tokens'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    keyIdx: uniqueIndex('idx_agent_run_usage_key').on(
+      table.projectId,
+      table.chatSessionId,
+      table.source,
+      table.usageEpoch,
+      table.model,
+      table.credentialKey
+    ),
+    projectUpdatedIdx: index('idx_agent_run_usage_project_updated').on(
+      table.projectId,
+      table.updatedAt
+    ),
   })
 );

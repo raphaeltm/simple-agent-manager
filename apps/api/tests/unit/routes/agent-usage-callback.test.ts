@@ -1,9 +1,12 @@
 import { Hono } from 'hono';
+import * as v from 'valibot';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import contractFixture from '../../../../../packages/shared/tests/fixtures/vm-agent-usage-report-token-usage.json';
 import type { Env } from '../../../src/env';
 import { log } from '../../../src/lib/logger';
 import { agentUsageCallbackRoute } from '../../../src/routes/projects/agent-usage-callback';
+import { AcpSessionUsageReportSchema } from '../../../src/schemas';
 import { handleAcpUsageCallback } from '../../../src/services/acp-usage-callback-handler';
 
 vi.mock('../../../src/services/acp-usage-callback-handler', () => ({
@@ -148,5 +151,25 @@ describe('agent usage callback route', () => {
 
     expect(response.status).toBe(400);
     expect(handleAcpUsageCallback).not.toHaveBeenCalled();
+  });
+});
+
+// Rule 54: a new VM agent's token report must still be accepted by a control plane that predates
+// `tokenUsage`. The schema before slice U is this one without the field; Valibot's `v.object`
+// strips unknown keys, and `rateLimits: []` is a valid (empty) list.
+describe('token report against the pre-slice-U control plane', () => {
+  it('parses the Go contract payload with tokenUsage stripped', () => {
+    const legacySchema = v.omit(AcpSessionUsageReportSchema, ['tokenUsage']);
+    const parsed = v.safeParse(legacySchema, contractFixture);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.output).not.toHaveProperty('tokenUsage');
+    expect(parsed.output.rateLimits).toEqual([]);
+  });
+
+  it('parses it with tokenUsage on the current control plane', () => {
+    const parsed = v.safeParse(AcpSessionUsageReportSchema, contractFixture);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.output.tokenUsage?.models).toHaveLength(2);
   });
 });

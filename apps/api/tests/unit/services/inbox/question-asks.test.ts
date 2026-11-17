@@ -131,6 +131,10 @@ beforeEach(() => {
     sqlite,
     new URL('../../../../src/db/migrations/0247_asks_questions.sql', import.meta.url)
   );
+  applySqliteMigration(
+    sqlite,
+    new URL('../../../../src/db/migrations/0248_asks_system_errors.sql', import.meta.url)
+  );
   env = { DATABASE: createSqliteD1(sqlite) } as unknown as Env;
   for (const id of ['owner', 'outsider'])
     insert('users', { id, email: `${id}@x.test`, name: id, role: 'user', status: 'active' });

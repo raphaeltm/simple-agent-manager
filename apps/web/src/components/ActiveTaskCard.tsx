@@ -3,6 +3,7 @@ import { EXECUTION_STEP_LABELS } from '@simple-agent-manager/shared';
 import { Card, StatusBadge } from '@simple-agent-manager/ui';
 import { useNavigate } from 'react-router';
 
+import { projectChatPath, projectPath } from '../lib/project-routes';
 import { ConnectorChip } from './ConnectorChip';
 import { ProviderLimitResume } from './ProviderLimitResume';
 
@@ -85,9 +86,10 @@ export function ActiveTaskCard({ task }: ActiveTaskCardProps) {
   const navigate = useNavigate();
   const providerBlocked = task.providerLimitReason?.startsWith('Blocked:');
 
+  // No chat yet: the project's Overview, where the task shows in Running now (inbox slice F2).
   const chatPath = task.sessionId
-    ? `/projects/${task.projectId}/chat/${task.sessionId}`
-    : `/projects/${task.projectId}/chat`;
+    ? projectChatPath(task.projectId, task.sessionId)
+    : projectPath(task.projectId);
 
   const stepLabel = getStepLabel(task);
   const glowClass = getTaskGlowClass(task);

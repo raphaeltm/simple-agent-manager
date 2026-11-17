@@ -83,4 +83,25 @@ describe('GET /api/projects/:projectId/tasks/:taskId/receipt', () => {
     expect([403, 404]).toContain(response.status);
     expect(JSON.stringify(await response.json())).not.toContain('Own run');
   });
+
+  // Slice U: the receipt reads the run's token rows for its own project only.
+  it('reports token usage for the task’s chat session, never another project’s rows', async () => {
+    sqlite.exec(`
+      UPDATE tasks SET chat_session_id = 'chat-shared' WHERE id = 'task-own';
+      INSERT INTO agent_run_usage (project_id, chat_session_id, source, usage_epoch, model,
+        credential_key, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+        created_at, updated_at) VALUES
+        ('p', 'chat-shared', 'harness', 'e1', 'claude-opus-5-5', '', 120, 30, 4000, 0, 1, 1),
+        ('foreign', 'chat-shared', 'harness', 'e1', 'claude-opus-5-5', '', 999999, 999999, 0, 0, 1, 1);
+    `);
+    const response = await get('p', 'task-own');
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { tokens: unknown };
+    expect(body.tokens).toMatchObject({
+      state: 'reported',
+      source: 'harness',
+      total: { input: 120, output: 30, cacheRead: 4000 },
+      models: [{ model: 'claude-opus-5-5', input: 120 }],
+    });
+  });
 });

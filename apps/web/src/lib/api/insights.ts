@@ -1,4 +1,8 @@
-import type { InsightsRange, ProjectFlowResponse } from '@simple-agent-manager/shared';
+import type {
+  InsightsRange,
+  ProjectAccountsResponse,
+  ProjectFlowResponse,
+} from '@simple-agent-manager/shared';
 
 import { request } from './client';
 
@@ -9,5 +13,15 @@ export function getProjectFlow(
 ): Promise<ProjectFlowResponse> {
   return request<ProjectFlowResponse>(
     `/api/projects/${encodeURIComponent(projectId)}/insights/flow?range=${range}`
+  );
+}
+
+/** Insights · Accounts for one project (`GET /api/projects/:projectId/insights/accounts`). */
+export function getProjectAccounts(
+  projectId: string,
+  range: InsightsRange
+): Promise<ProjectAccountsResponse> {
+  return request<ProjectAccountsResponse>(
+    `/api/projects/${encodeURIComponent(projectId)}/insights/accounts?range=${range}`
   );
 }

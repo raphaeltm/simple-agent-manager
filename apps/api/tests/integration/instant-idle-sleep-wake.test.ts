@@ -57,7 +57,7 @@ import {
   type SessionSnapshotManifest,
 } from '../../src/services/session-snapshots';
 import { markVmAgentContainerActiveWorkEndedBestEffort } from '../../src/services/vm-agent-container';
-import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
+import { applySqliteMigration, createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 import {
   acceptedPromptResponse,
   versionedPromptCapabilities,
@@ -525,13 +525,22 @@ describe('Instant session wake after idle sleep', () => {
 
   function wakeFailures() {
     return {
-      markers: projectDataSql()
-        .exec(
-          `SELECT kind, reason FROM session_attention_markers
-            WHERE session_id = ? AND resolved_at IS NULL`,
-          CHAT_SESSION_ID
-        )
-        .toArray(),
+      // A failed wake is one open inbox error item in D1 (slice E), never a marker.
+      markers: [
+        ...projectDataSql()
+          .exec(
+            `SELECT kind, reason FROM session_attention_markers
+              WHERE session_id = ? AND resolved_at IS NULL`,
+            CHAT_SESSION_ID
+          )
+          .toArray(),
+        ...d1
+          .prepare(
+            `SELECT kind, assignee_user_id AS assignee, answer_spec_json AS spec FROM asks
+              WHERE dedupe_key = ? AND status = 'open'`
+          )
+          .all(`error:wake:${CHAT_SESSION_ID}`),
+      ],
       messages: projectDataSql()
         .exec(
           `SELECT content FROM chat_messages
@@ -649,6 +658,10 @@ describe('Instant session wake after idle sleep', () => {
   beforeEach(async () => {
     d1 = new Database(':memory:');
     createAllSchemaTables(d1, schema);
+    // The shipped inbox migrations: a failed wake files an `asks` row on its dedupe index.
+    d1.exec('DROP TABLE asks');
+    for (const file of ['0245_asks.sql', '0247_asks_questions.sql', '0248_asks_system_errors.sql'])
+      applySqliteMigration(d1, new URL(`../../src/db/migrations/${file}`, import.meta.url));
     d1.exec(
       'CREATE UNIQUE INDEX idx_session_snapshots_chat_session_id ON session_snapshots(chat_session_id)'
     );
@@ -1219,7 +1232,17 @@ describe('Instant session wake after idle sleep', () => {
       terminalReason: 'wake_refused',
     });
     expect(wakeFailures()).toEqual({
-      markers: [{ kind: 'wake_failed', reason: 'wake_refused' }],
+      markers: [
+        {
+          kind: 'error',
+          assignee: USER_ID,
+          // An Instant chat wakes when it gets a message: no Wake button.
+          spec: JSON.stringify({
+            type: 'actions',
+            actions: [{ id: 'open_chat', label: 'Open chat' }],
+          }),
+        },
+      ],
       messages: [
         {
           content:

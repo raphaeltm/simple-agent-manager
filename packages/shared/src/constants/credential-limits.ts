@@ -66,6 +66,15 @@ export const DEFAULT_CREDENTIAL_LIMIT_SUPPORTED_WINDOW_TYPES = [
 /** Maximum credential-limit observations accepted from one usage callback/report. */
 export const DEFAULT_CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT = 16;
 
+/**
+ * Most models one run-usage report may carry (Insights slice U). A Claude Code turn lists each
+ * model it used (main model plus subagent/haiku helpers), so a handful is normal.
+ */
+export const RUN_USAGE_MAX_MODELS_PER_REPORT = 16;
+
+/** Largest value one token counter in a run-usage report may carry (schema bound). */
+export const RUN_USAGE_MAX_TOKENS_PER_COUNTER = 1_000_000_000_000;
+
 /** Maximum predecessor-CAS recomputes for one credential-limit observation. */
 export const DEFAULT_CREDENTIAL_LIMIT_TRANSITION_RECOMPUTE_ATTEMPTS = 4;
 

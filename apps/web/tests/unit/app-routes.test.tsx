@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const mockUseAuth = vi.fn(() => ({ isSuperadmin: false }));
@@ -159,8 +159,12 @@ vi.mock('../../src/pages/Project', async () => {
   };
 });
 
-vi.mock('../../src/pages/ProjectOverview', () => ({
+vi.mock('../../src/pages/project-overview', () => ({
   ProjectOverview: () => <div data-testid="project-overview-page" />,
+}));
+
+vi.mock('../../src/pages/project-chat', () => ({
+  ProjectChat: () => <div data-testid="project-chat-page" />,
 }));
 
 vi.mock('../../src/pages/ProjectTasks', () => ({
@@ -321,6 +325,20 @@ describe('App routes', () => {
   it('routes /tools/cli to the CLI download page', async () => {
     renderAt('/tools/cli');
     expect(await screen.findByTestId('tools-cli-page')).toBeInTheDocument();
+  });
+
+  it('lands a project on its Overview, not on chat (inbox slice F2)', async () => {
+    renderAt('/projects/proj-1');
+
+    expect(await screen.findByTestId('project-overview-page')).toBeInTheDocument();
+    await waitFor(() => expect(window.location.pathname).toBe('/projects/proj-1/overview'));
+    expect(screen.queryByTestId('project-chat-page')).not.toBeInTheDocument();
+  });
+
+  it('still routes the project chat, one tap from the Overview', async () => {
+    renderAt('/projects/proj-1/chat');
+    expect(await screen.findByTestId('project-chat-page')).toBeInTheDocument();
+    expect(screen.queryByTestId('project-overview-page')).not.toBeInTheDocument();
   });
 
   it('routes /projects/:id/tasks/:taskId to the task redirect (redirects to chat session)', async () => {
