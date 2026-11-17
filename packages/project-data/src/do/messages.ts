@@ -5,6 +5,7 @@
 import type { MessageCursor } from '@simple-agent-manager/shared';
 import { log } from '@simple-agent-manager/worker-core';
 
+import { messageBoundsClause } from './message-cursor';
 import {
   insertNewMessage,
   nextSequence,
@@ -17,11 +18,11 @@ import {
   parseCount,
 } from './row-schemas';
 import { assertSessionIdentityGuard, type SessionIdentityGuard } from './sessions';
-import { messageBoundsClause } from './message-cursor';
 import { assertTranscriptWriteAllowed } from './transcript-write-fence';
 import type { Env } from './types';
 import { generateId } from './types';
 
+export { persistMessageBatch } from './message-batch';
 export type { MessageSearchBounds, MessageSearchWithCoverage } from './message-search';
 export {
   buildFtsQuery,
@@ -34,17 +35,19 @@ export {
   DEFAULT_MAX_MESSAGES_PER_SESSION,
   nextSequence,
   resolveMaxMessagesPerSession,
-  SessionMessageLimitExceededError,
   SESSION_MESSAGE_LIMIT_EXCEEDED,
+  SessionMessageLimitExceededError,
 } from './messages-persist-helpers';
 export {
   boundToolMetadataForStorage,
   DEFAULT_PROJECT_DATA_TOOL_METADATA_MAX_BYTES,
   resolveCompactMessageOptions,
 } from './tool-metadata-storage';
-
-export { PROJECT_DATA_TRANSCRIPT_WRITE_FENCED, ProjectDataTranscriptWriteFencedError, assertTranscriptWriteAllowed } from './transcript-write-fence';
-export { persistMessageBatch } from './message-batch';
+export {
+  assertTranscriptWriteAllowed,
+  PROJECT_DATA_TRANSCRIPT_WRITE_FENCED,
+  ProjectDataTranscriptWriteFencedError,
+} from './transcript-write-fence';
 
 export function persistMessage(
   sql: SqlStorage,

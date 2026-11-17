@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 import type { ToolCallContentItem, ToolCallItem } from '../hooks/useAcpMessages';
 import { isJsonRecord } from '../runtime-validation';
@@ -63,7 +63,10 @@ export const ToolCallCard = React.memo(function ToolCallCard({
   className,
 }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const [lazyContent, setLazyContent] = useState<ToolCallContentItem[] | null>(null);
+  const [lazyContent, setLazyContent] = useState<{
+    key: string;
+    content: ToolCallContentItem[];
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
 
@@ -74,27 +77,34 @@ export const ToolCallCard = React.memo(function ToolCallCard({
   let fallbackContent: ToolCallContentItem[] = [];
   if (rawOutputFallback) fallbackContent = [rawOutputFallback];
   const persistedOrFallback = toolCall.content.length > 0 ? toolCall.content : fallbackContent;
-  const displayContent = lazyContent ?? persistedOrFallback;
+  const contentKey = JSON.stringify([toolCall.messageId, toolCall.revision ?? 0]);
+  const cached = lazyContent?.key === contentKey ? lazyContent.content : null;
+  const displayContent = cached ?? persistedOrFallback;
 
-  const handleToggle = async () => {
-    if (!hasContent) return;
+  useEffect(() => {
+    if (!expanded || !needsLazyLoad || !onLoadContent || !toolCall.messageId) return;
+    let active = true;
+    setLoading(true);
+    setLoadFailed(false);
+    void onLoadContent(toolCall.messageId)
+      .then(
+        (content) => {
+          if (active) setLazyContent({ key: contentKey, content });
+        },
+        () => {
+          if (active) setLoadFailed(true);
+        }
+      )
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [expanded, needsLazyLoad, onLoadContent, toolCall.messageId, contentKey]);
 
-    const { messageId } = toolCall;
-    if (!expanded && needsLazyLoad && !lazyContent && !loadFailed && onLoadContent && messageId) {
-      setExpanded(true);
-      setLoading(true);
-      setLoadFailed(false);
-      try {
-        const content = await onLoadContent(messageId);
-        setLazyContent(content);
-      } catch {
-        setLoadFailed(true);
-      } finally {
-        setLoading(false);
-      }
-    } else {
-      setExpanded(!expanded);
-    }
+  const handleToggle = () => {
+    if (hasContent) setExpanded((value) => !value);
   };
 
   return (

@@ -1,10 +1,21 @@
 import { log } from '@simple-agent-manager/worker-core';
+
 import { countIngestRole, type MessageIngestMetrics, refuseMerge } from './message-ingest-metrics';
-import { type MessageIngestSource, type MessageMergeConfig, MessageStreamBatch, readMessageIngestState } from './message-stream-ingest';
-import { nextSequence, resolveMaxMessagesPerSession, SessionMessageLimitExceededError } from './messages-persist-helpers';
+import {
+  type MessageIngestSource,
+  type MessageMergeConfig,
+  MessageStreamBatch,
+  readMessageIngestState,
+} from './message-stream-ingest';
+import {
+  nextSequence,
+  resolveMaxMessagesPerSession,
+  SessionMessageLimitExceededError,
+} from './messages-persist-helpers';
 import { parseMessageCount, parseWorkspaceId } from './row-schemas';
 import { markRuntimeReported, withoutSamNotice } from './sam-notice-metadata';
 import { assertSessionIdentityGuard } from './sessions';
+import { canonicalToolRowId, persistCanonicalTool } from './tool-call-merge';
 import { boundToolMetadataForStorage } from './tool-metadata-storage';
 import { assertTranscriptWriteAllowed } from './transcript-write-fence';
 import type { Env } from './types';
@@ -26,6 +37,7 @@ export function persistMessageBatch(
     source?: MessageIngestSource;
     config: MessageMergeConfig;
     metrics?: MessageIngestMetrics;
+    hydration?: ReadonlyMap<string, import('./tool-call-hydration').HydratedToolPayload>;
   }
 ): {
   persisted: number;
@@ -75,12 +87,13 @@ export function persistMessageBatch(
   if (!context?.config.enabled) refuseMerge(metrics, 'setting_disabled');
   else if (!context.source?.outboxIncarnation) refuseMerge(metrics, 'missing_incarnation');
   const previousStream = readMessageIngestState(session.stream_ingest_state);
-  if (context?.source && (context.config.enabled || previousStream))
+  const merging = context?.config.enabled || context?.config.toolUpdatesEnabled === true;
+  if (context?.source && (merging || previousStream))
     assertSessionIdentityGuard(sql, sessionId, 'persist message batch', {
       workspaceId: context.source.workspaceId,
     });
   const latest =
-    previousStream?.open || (context?.config.enabled && context.source?.outboxIncarnation)
+    previousStream?.open || (merging && context?.source?.outboxIncarnation)
       ? sql
           .exec(
             'SELECT id, created_at, sequence FROM chat_messages WHERE session_id = ? ORDER BY created_at DESC, sequence DESC, id DESC LIMIT 1',
@@ -89,7 +102,7 @@ export function persistMessageBatch(
           .toArray()[0]
       : null;
   const stream =
-    context && (previousStream || (context.config.enabled && context.source?.outboxIncarnation))
+    context && (previousStream || (merging && context.source?.outboxIncarnation))
       ? new MessageStreamBatch(
           sessionId,
           context.config,
@@ -142,6 +155,7 @@ export function persistMessageBatch(
   // Track user message content seen within this batch to avoid redundant
   // DB queries when the same user content appears multiple times in one batch.
   const seenUserContent = new Set<string>();
+  const tools = new Map<string, import('./message-stream-ingest').StoredBatchMessage>();
 
   for (const msg of messages) {
     const origin = msg.origin ?? null;
@@ -218,12 +232,50 @@ export function persistMessageBatch(
         storedBytes: boundedToolMetadata.storedBytes,
       });
     }
-    const storedToolMetadata =
+    let storedToolMetadata =
       msg.role === 'system'
         ? markRuntimeReported(boundedToolMetadata.value)
         : boundedToolMetadata.value;
+    if (
+      msg.role === 'tool' &&
+      context?.source?.outboxIncarnation &&
+      !stream?.canMergeTools &&
+      (context.config.toolUpdatesEnabled || (previousStream?.toolRevision ?? 0) > 0)
+    ) {
+      const metadata = storedToolMetadata ? JSON.parse(storedToolMetadata) : null;
+      if (metadata && typeof metadata.toolCallId === 'string') {
+        storedToolMetadata = boundToolMetadataForStorage(
+          JSON.stringify({
+            ...metadata,
+            _samToolCanonicalId: canonicalToolRowId(sessionId, context.source, metadata.toolCallId),
+          }),
+          env
+        ).value;
+      }
+    }
     let canonicalId = msg.messageId;
-    if (stream) {
+    const input = {
+      id: msg.messageId,
+      role: msg.role,
+      content: msg.content,
+      toolMetadata: storedToolMetadata ? JSON.parse(storedToolMetadata) : null,
+      createdAt,
+      sequence,
+      origin,
+    };
+    const tool =
+      stream?.canMergeTools && context?.source
+        ? persistCanonicalTool(sql, env, sessionId, context.source, input, context.hydration)
+        : null;
+    if (tool && stream) {
+      canonicalId = tool.message.id;
+      tools.set(canonicalId, tool.message);
+      stream.reserveTool(input);
+      stream.recordToolChange(canonicalId);
+      stream.consume(msg.messageId, msg.sequence);
+      if (metrics && tool.inserted) countIngestRole(metrics.inserted, 'tool');
+      else if (metrics) metrics.toolUpdatedRows++;
+    } else if (stream) {
       canonicalId = stream.stage(
         {
           id: msg.messageId,
@@ -251,6 +303,17 @@ export function persistMessageBatch(
         sequence,
         origin
       );
+    if (metrics && msg.role === 'tool' && !tool) {
+      const reason =
+        stream?.toolMergeRefusal ??
+        (stream?.canMergeTools
+          ? 'missing_tool_id'
+          : context?.config.toolUpdatesEnabled
+            ? 'missing_incarnation'
+            : 'setting_disabled');
+      if (reason) metrics.toolRefused[reason] = (metrics.toolRefused[reason] ?? 0) + 1;
+    }
+    if (msg.role === 'tool' && !tool) stream?.sealToolFallback();
     if (metrics) {
       countIngestRole(metrics.accepted, msg.role);
       if (msg.role === 'assistant' && storedToolMetadata === null) metrics.eligible++;
@@ -342,8 +405,10 @@ export function persistMessageBatch(
     limitReached,
     maxMessages,
     remainingCapacity,
-    broadcastMessages: staged?.broadcastMessages ?? persistedMessages,
+    broadcastMessages:
+      tools.size > 0
+        ? [...(staged?.broadcastMessages ?? []), ...tools.values()]
+        : (staged?.broadcastMessages ?? persistedMessages),
     appends: staged?.appends ?? [],
   };
 }
-

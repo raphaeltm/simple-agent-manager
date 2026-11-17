@@ -960,6 +960,7 @@ describe('useChatWebSocket (behavioral)', () => {
     expect(onCatchUp).toHaveBeenLastCalledWith(
       expect.arrayContaining([expect.objectContaining({ id: 'msg-catchup-1' })]),
       expect.any(Object),
+      undefined,
       undefined
     );
   });

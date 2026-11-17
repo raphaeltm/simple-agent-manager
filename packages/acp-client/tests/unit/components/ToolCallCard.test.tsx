@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+
 import { ToolCallCard } from '../../../src/components/ToolCallCard';
 import type { ToolCallItem } from '../../../src/hooks/useAcpMessages';
 
@@ -288,5 +289,54 @@ describe('ToolCallCard', () => {
       expect(contentDiv).not.toBeNull();
       expect(contentDiv!.textContent).toContain(longContent);
     });
+  });
+});
+
+describe('canonical tool revisions', () => {
+  it('replaces cached lazy content when the same canonical ID advances revision', async () => {
+    const onLoadContent = vi
+      .fn()
+      .mockResolvedValueOnce([{ type: 'content', text: 'old output' }])
+      .mockResolvedValueOnce([{ type: 'content', text: 'new output' }]);
+    const base = createToolCall({
+      messageId: 'canonical-tool',
+      revision: 1,
+      contentLoaded: false,
+      contentSize: 20,
+    });
+    const { rerender } = render(<ToolCallCard toolCall={base} onLoadContent={onLoadContent} />);
+    fireEvent.click(screen.getByRole('button', { name: /terminal execute/i }));
+    await screen.findByText('old output');
+    rerender(<ToolCallCard toolCall={{ ...base, revision: 2 }} onLoadContent={onLoadContent} />);
+    await screen.findByText('new output');
+    expect(screen.queryByText('old output')).toBeNull();
+    expect(onLoadContent).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores an old lazy request completing after a newer revision', async () => {
+    let finishOld!: (content: unknown) => void;
+    const onLoadContent = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishOld = resolve;
+          })
+      )
+      .mockResolvedValueOnce([{ type: 'content', text: 'current output' }]);
+    const base = createToolCall({
+      messageId: 'canonical-tool',
+      revision: 1,
+      contentLoaded: false,
+      contentSize: 20,
+    });
+    const { rerender } = render(<ToolCallCard toolCall={base} onLoadContent={onLoadContent} />);
+    fireEvent.click(screen.getByRole('button', { name: /terminal execute/i }));
+    await waitFor(() => expect(onLoadContent).toHaveBeenCalledTimes(1));
+    rerender(<ToolCallCard toolCall={{ ...base, revision: 2 }} onLoadContent={onLoadContent} />);
+    await screen.findByText('current output');
+    finishOld([{ type: 'content', text: 'stale output' }]);
+    await waitFor(() => expect(screen.queryByText('stale output')).toBeNull());
+    expect(screen.getByText('current output')).toBeTruthy();
   });
 });

@@ -1,13 +1,27 @@
+import { BASE_RECONNECT_DELAY, MAX_RECONNECT_DELAY, MAX_RETRIES } from './chat-websocket-config';
+import type {
+  ChatConnectionState,
+  SessionUpdatedFields,
+  UseChatWebSocketOptions,
+  UseChatWebSocketReturn,
+} from './chat-websocket-types';
+import { useChatSocketKeepAlive } from './useChatSocketKeepAlive';
+export type {
+  ChatConnectionState,
+  SessionUpdatedFields,
+  UseChatWebSocketReturn,
+  WakeProgressUpdate,
+} from './chat-websocket-types';
 import {
   CHAT_MESSAGE_APPEND_CAPABILITY,
+  CHAT_TOOL_REPLACE_CAPABILITY,
   type ChatMessageAppend,
   DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
   isTaskExecutionStep,
-  type TaskExecutionStep,
 } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { ChatMessageResponse, ChatSessionResponse, SessionStateSnapshot } from '../lib/api';
+import type { ChatMessageResponse } from '../lib/api';
 import { getChatSession } from '../lib/api';
 import {
   mapBackendMessageCommentThread,
@@ -15,18 +29,8 @@ import {
 } from '../lib/api/comments';
 import { mergeMessages } from '../lib/merge-messages';
 import { fetchHistoryUntil } from '../lib/message-paging';
-import {
-  parsePromptDeliveryUpdate,
-  type PromptDeliveryUpdate,
-} from '../lib/prompt-delivery-update';
+import { parsePromptDeliveryUpdate } from '../lib/prompt-delivery-update';
 import { maybeJsonRecord } from '../lib/runtime-validation';
-
-export type ChatConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
-
-/** Fields a `session.updated` push may change on the open session. */
-export type SessionUpdatedFields = Partial<
-  Pick<ChatSessionResponse, 'topic' | 'workspaceId' | 'agentSessionId' | 'status'>
->;
 
 /**
  * The statuses the DO pushes in `session.updated` (`applySessionSleep`, `wakeSession`).
@@ -34,80 +38,6 @@ export type SessionUpdatedFields = Partial<
  */
 const PUSHED_SESSION_STATUSES: readonly string[] = ['active', 'sleeping'];
 
-const BASE_RECONNECT_DELAY = 1000;
-const MAX_RECONNECT_DELAY = 30000;
-const MAX_RETRIES = 10;
-const PING_INTERVAL_MS = parseInt(import.meta.env.VITE_WS_PING_INTERVAL_MS || '30000');
-const PONG_TIMEOUT_MS = parseInt(import.meta.env.VITE_WS_PONG_TIMEOUT_MS || '10000');
-
-interface UseChatWebSocketOptions {
-  projectId: string;
-  sessionId: string;
-  /** Only connect when the session is active. */
-  enabled: boolean;
-  /** Called when a new message arrives via WebSocket (single or from batch). */
-  onMessage: (msg: ChatMessageResponse) => void;
-  /** False requests recovery of a missing canonical base or revision gap. */
-  onMessageAppend?: (append: ChatMessageAppend) => boolean;
-  /** Called when the session is stopped server-side. */
-  onSessionStopped: () => void;
-  /**
-   * Called when the socket opens with no earlier connection to catch up from: on a page load,
-   * and when a chat that was asleep wakes. The consumer's last REST read can predate this
-   * subscription, and a row persisted in between reached no socket, so the consumer reads
-   * forward from the newest row it holds and merges what it finds.
-   */
-  onSubscribed?: () => void;
-  /** Called when we catch up with missed messages after reconnect. */
-  onCatchUp: (
-    messages: ChatMessageResponse[],
-    session: ChatSessionResponse,
-    state?: SessionStateSnapshot | null
-  ) => void | Promise<void>;
-  /** Called when the agent completes on the session. */
-  onAgentCompleted?: (agentCompletedAt: number) => void;
-  /** A durable delivery changed state (`mailbox.delivery_updated`); names the transcript row. */
-  onDeliveryUpdate?: (update: PromptDeliveryUpdate) => void;
-  /** Called when a session.activity event arrives (prompting/idle). */
-  onAgentActivity?: (
-    activity: 'prompting' | 'idle' | 'recovering' | 'error',
-    promptStartedAt?: number | null,
-    /** Whether the agent's adapter can steer; absent when the server has no report yet. */
-    steeringSupported?: boolean
-  ) => void;
-  /** Called when the session metadata or lifecycle status changes server-side. */
-  onSessionUpdated?: (updates: SessionUpdatedFields) => void;
-  /**
-   * Called when the replacement TaskRunner waking this sleeping session advances a
-   * phase. Pushed so the wake banner updates without waiting for the fallback poll.
-   */
-  onWakeProgress?: (progress: WakeProgressUpdate) => void;
-  /** Called for server-authoritative message-comment events carried over the session socket. */
-  onCommentEvent?: (event: MessageCommentRealtimeEvent) => void;
-  /** Called when someone shares this session or removes access, so the viewer re-checks theirs. */
-  onSessionAccessChanged?: () => void;
-}
-
-/** Live wake phase delta broadcast by the ProjectData DO (`session.wake_progress`). */
-export interface WakeProgressUpdate {
-  recoveryStatus: 'waking' | 'restored' | 'failed';
-  wakePhase: TaskExecutionStep | null;
-  /** The wake claim the push belongs to; null or absent from a server that predates it. */
-  wakeAttemptId?: string | null;
-}
-
-export interface UseChatWebSocketReturn {
-  connectionState: ChatConnectionState;
-  wsRef: React.RefObject<WebSocket | null>;
-  retry: () => void;
-}
-
-/**
- * WebSocket hook for chat sessions with exponential backoff reconnection
- * and message catch-up on reconnect (TDF-8).
- *
- * Follows the same pattern as useAdminLogStream for consistency.
- */
 export function useChatWebSocket({
   projectId,
   sessionId,
@@ -202,7 +132,9 @@ export function useChatWebSocket({
     const wsUrl =
       API_URL.replace(/^http/, 'ws') +
       `/api/projects/${projectId}/sessions/ws?sessionId=${encodeURIComponent(sessionId)}` +
-      (onMessageAppendRef.current ? `&messageAppend=${CHAT_MESSAGE_APPEND_CAPABILITY}` : '');
+      (onMessageAppendRef.current
+        ? `&messageAppend=${CHAT_MESSAGE_APPEND_CAPABILITY}&toolReplace=${CHAT_TOOL_REPLACE_CAPABILITY}`
+        : '');
 
     try {
       const ws = new WebSocket(wsUrl);
@@ -445,7 +377,7 @@ export function useChatWebSocket({
           limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
         });
         if (!mountedRef.current || wsRef.current !== socket) return;
-        await onCatchUpRef.current(data.messages, data.session, data.state);
+        await onCatchUpRef.current(data.messages, data.session, data.state, data.toolChanges);
         if (!mountedRef.current || wsRef.current !== socket) return;
         // Keep entries queued until applied: rejected history requests and socket
         // replacement must leave every unprocessed delta available for retry.
@@ -498,35 +430,7 @@ export function useChatWebSocket({
     return flight;
   }, [projectId, sessionId]);
 
-  // Ping keep-alive with pong timeout detection.
-  // Sends a JSON ping every PING_INTERVAL_MS. After each ping, starts a
-  // PONG_TIMEOUT_MS timer — if no pong arrives before it fires, the connection
-  // is considered dead and force-closed to trigger the reconnect path.
-  useEffect(() => {
-    if (!enabled) return;
-    const interval = setInterval(() => {
-      const ws = wsRef.current;
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'ping' }));
-
-        // Start pong deadline — if the server doesn't respond within
-        // PONG_TIMEOUT_MS, the connection is silently dead (e.g. Cloudflare
-        // proxy dropped it). Force-close with a non-1000 code to trigger
-        // the reconnect path in onclose.
-        clearTimeout(pongTimeoutRef.current);
-        pongTimeoutRef.current = setTimeout(() => {
-          const current = wsRef.current;
-          if (current && current.readyState === WebSocket.OPEN) {
-            current.close(4000, 'pong timeout');
-          }
-        }, PONG_TIMEOUT_MS);
-      }
-    }, PING_INTERVAL_MS);
-    return () => {
-      clearInterval(interval);
-      clearTimeout(pongTimeoutRef.current);
-    };
-  }, [enabled]);
+  useChatSocketKeepAlive(enabled, wsRef, pongTimeoutRef);
 
   // Connection lifecycle
   useEffect(() => {
