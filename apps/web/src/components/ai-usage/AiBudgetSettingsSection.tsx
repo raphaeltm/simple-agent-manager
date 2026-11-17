@@ -129,9 +129,9 @@ export function BudgetSettingsSection() {
 
   const cap = budget?.monthlyCostCap;
   const ceilingUsd = cap?.ceilingUsd ?? null;
-  // The installation ceiling, not the user's own cap, is what binds.
+  // Equal caps remain administrator-bound: removing the personal cap cannot raise the limit.
   const savedCapUsd = budget?.settings.monthlyCostCapUsd ?? null;
-  const capFromCeiling = ceilingUsd !== null && (savedCapUsd === null || savedCapUsd > ceilingUsd);
+  const capFromCeiling = ceilingUsd !== null && (savedCapUsd === null || savedCapUsd >= ceilingUsd);
   const monthlyExceeded = (budget?.utilization.monthlyCostPercent ?? 0) >= 100;
 
   if (loading) {

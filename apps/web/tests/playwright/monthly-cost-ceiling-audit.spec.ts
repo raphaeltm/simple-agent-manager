@@ -190,6 +190,21 @@ for (const desktop of [false, true]) {
       await shot(page, `user-cap-${viewportName(page)}`);
     });
 
+    test('equal personal and administrator caps remain administrator-bound', async ({ page }) => {
+      await setup(page, { userCap: 25, ceilingUsd: 25, available: true, monthCostUsd: 31 });
+      await expect(
+        page.getByRole('meter', { name: 'Monthly Cost Cap (administrator limit)' })
+      ).toHaveAttribute('aria-valuetext', '$31.00 of $25.00 (100%)');
+      await expect(page.getByRole('alert')).toContainText('set by your administrator');
+      await expect(page.getByRole('alert')).not.toContainText('Clear the monthly cap');
+      await checkLayout(page);
+      await page.getByRole('alert').scrollIntoViewIfNeeded();
+      await page.waitForTimeout(600);
+      await page.screenshot({
+        path: `../../.tmp/playwright-screenshots/monthly-ceiling-equal-${viewportName(page)}.png`,
+      });
+    });
+
     test('exceeded at the ceiling shows the exceeded alert', async ({ page }) => {
       await setup(page, { userCap: null, ceilingUsd: 25, available: true, monthCostUsd: 31 });
       await expect(page.getByRole('alert')).toContainText('Budget Exceeded');
