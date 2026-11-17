@@ -4,10 +4,10 @@ import {
   applyInfomaniakBootVolumeSize,
   assertInfomaniakRequestedBootVolumeAllowed,
   INFOMANIAK_BOOT_VOLUME_LIMITS,
+  INFOMANIAK_SERVER_READ_HEADERS,
   infomaniakBootVolumeMapping,
   infomaniakDefaultBootVolumeGb,
   infomaniakObservedResources,
-  INFOMANIAK_SERVER_READ_HEADERS,
   infomaniakServerMetadata,
   resolveInfomaniakBootVolumeSizeGb,
 } from './infomaniak-boot-volume';
