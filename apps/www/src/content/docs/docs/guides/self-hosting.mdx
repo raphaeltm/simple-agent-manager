@@ -338,7 +338,7 @@ stop routing to them) or `D1_SESSION_MODE=disabled` to keep the replicas but rou
 query at the primary. Replication needs no extra API-token permission beyond the
 **Account → Cloudflare Workers: D1 → Edit** grant the deploy token already requires.
 
-The reviewed default churning selectors are `DATABASE.deployment_releases`, `DATABASE.github_webhook_deliveries`, `DATABASE.project_files`, `DATABASE.registry_credential_rate_limits`, `DATABASE.session_snapshots`, `DATABASE.sessions`, `DATABASE.trigger_executions`, `DATABASE.verifications`, `DATABASE.webhook_deliveries`, and `OBSERVABILITY_DATABASE.platform_errors`. All other application tables retain zero row-decrease tolerance. Leave `D1_MIGRATION_CHURNING_TABLES` unset to use the complete reviewed default list.
+The reviewed default churning selectors are listed in the [configuration reference](/docs/reference/configuration/) (`DEFAULT_D1_MIGRATION_CHURNING_TABLES` in `scripts/deploy/d1-migration-churning-tables.ts`). All other application tables retain zero row-decrease tolerance. Leave `D1_MIGRATION_CHURNING_TABLES` unset to use the complete reviewed default list.
 
 The guided setup generates `RESOURCE_PREFIX` from `BASE_DOMAIN` as `s` plus the
 first six hex characters of the domain's SHA-256 hash. Use that generated value
