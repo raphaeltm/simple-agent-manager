@@ -326,9 +326,9 @@ describe('findAnomalies', () => {
   it('omits a wake held by a provider usage limit until the hold deadline, then reports it', async () => {
     // Production 2026-11-17: six chats held until a weekly reset showed as "waking for 700 min".
     const claimed = iso(700 * MIN);
-    const held = (id: string, deadlineAt: number, phase = 'waiting') => {
+    const held = (id: string, deadlineAt: number, phase = 'waiting', status = 'queued') => {
       task(`task-${id}`, {
-        status: 'queued',
+        status,
         admission_state: `provider_limit_${phase}`,
         provider_limit_wait_json: JSON.stringify({
           version: 1,
@@ -354,6 +354,8 @@ describe('findAnomalies', () => {
     held('s-held-overdue', NOW - MIN);
     // A blocked hold has no automatic wake: a claim still `waking` on it is stuck.
     held('s-blocked', NOW + 3 * 24 * 60 * MIN, 'blocked');
+    // A task cancelled mid-hold keeps its wait JSON: its claim is dead and must stay visible.
+    held('s-cancelled', NOW + 3 * 24 * 60 * MIN, 'waiting', 'cancelled');
     // Control: the same long wake with no hold is still a stalled wake.
     task('task-plain', { status: 'queued' });
     insert(main, 'session_snapshots', {
@@ -375,10 +377,14 @@ describe('findAnomalies', () => {
     );
     expect(entry.findings.map((f) => f.ids.snapshotId).sort()).toEqual([
       's-blocked',
+      's-cancelled',
       's-held-overdue',
       's-plain',
     ]);
-    expect(entry.total).toBe(3);
+    expect(entry.total).toBe(4);
+    expect(entry.findings.find((f) => f.ids.snapshotId === 's-cancelled')?.reason).toContain(
+      'dead claim'
+    );
   });
 
   it('reports a waking row with an unreadable timestamp first instead of dropping it', async () => {

@@ -2,7 +2,10 @@
  * Session snapshot anomaly classes for `ops_find_anomalies`: failed sleeps, captures and
  * wakes in the lookback window, and wakes that have stayed `waking` too long.
  */
-import { isLiveWakeTaskStatus } from '../session-snapshot-recovery-conditions';
+import {
+  isLiveWakeTaskStatus,
+  LIVE_WAKE_TASK_STATUS_SQL,
+} from '../session-snapshot-recovery-conditions';
 import {
   type AnomalyClassResult,
   int,
@@ -68,8 +71,11 @@ export async function snapshotFailures(ctx: SweepContext): Promise<AnomalyClassR
 /**
  * Binds the current time in epoch ms. Reads the `provider_limit_wait_json` TaskRunner admission
  * writes. NULL-safe at the call site: a wake with no task (LEFT JOIN) must still be reported.
+ * Only a live wake task is held: a cancelled or failed task keeps its wait JSON, and its claim is
+ * a dead claim that must stay visible.
  */
-const HELD_BY_PROVIDER_LIMIT_SQL = `t.admission_state = 'provider_limit_waiting'
+const HELD_BY_PROVIDER_LIMIT_SQL = `t.status IN (${LIVE_WAKE_TASK_STATUS_SQL})
+  AND t.admission_state = 'provider_limit_waiting'
   AND json_valid(t.provider_limit_wait_json)
   AND json_extract(t.provider_limit_wait_json, '$.phase') = 'waiting'
   AND json_extract(t.provider_limit_wait_json, '$.deadlineAt') > ?`;
