@@ -7,6 +7,7 @@ import {
   infomaniakBootVolumeMapping,
   infomaniakDefaultBootVolumeGb,
   infomaniakObservedResources,
+  INFOMANIAK_SERVER_READ_HEADERS,
   infomaniakServerMetadata,
   resolveInfomaniakBootVolumeSizeGb,
 } from './infomaniak-boot-volume';
@@ -424,7 +425,12 @@ export class InfomaniakProvider implements Provider {
   async getVM(id: string, context?: ProviderRequestContext): Promise<VMInstance | null> {
     throwIfProviderRequestAborted(context);
     const s = await this.authenticate(false, context);
-    const r = await this.request(`${s.endpoints.compute}/servers/${id}`, {}, true, context);
+    const r = await this.request(
+      `${s.endpoints.compute}/servers/${id}`,
+      { headers: INFOMANIAK_SERVER_READ_HEADERS },
+      true,
+      context
+    );
     return r ? this.vm(asRecord(await r.json(), 'root').server) : null;
   }
   async listVMs(
@@ -433,7 +439,12 @@ export class InfomaniakProvider implements Provider {
   ): Promise<VMInstance[]> {
     throwIfProviderRequestAborted(context);
     const s = await this.authenticate(false, context);
-    const r = await this.request(`${s.endpoints.compute}/servers/detail`, {}, false, context);
+    const r = await this.request(
+      `${s.endpoints.compute}/servers/detail`,
+      { headers: INFOMANIAK_SERVER_READ_HEADERS },
+      false,
+      context
+    );
     const values = asArray(asRecord(await r?.json(), 'root').servers, 'servers').map((value) =>
       this.vm(value)
     );

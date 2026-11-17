@@ -94,13 +94,11 @@ function stubOpenStack(): number[] {
           name: 'node-1',
           status: 'ACTIVE',
           addresses: { 'ext-net1': [{ version: 4, addr: '203.0.113.10' }] },
-          flavor: {
-            id: 'flavor-1',
-            original_name: 'a4-ram8-disk20-perf1',
-            vcpus: 4,
-            ram: 8192,
-            disk: 20,
-          },
+          // Nova embeds flavor resources only when the read asks for microversion 2.47.
+          flavor:
+            new Headers(init?.headers).get('X-OpenStack-Nova-API-Version') === '2.47'
+              ? { original_name: 'a4-ram8-disk20-perf1', vcpus: 4, ram: 8192, disk: 20 }
+              : { id: 'flavor-1', links: [] },
           image: '',
           created: '2026-11-17T00:00:00Z',
           metadata: lastMetadata,

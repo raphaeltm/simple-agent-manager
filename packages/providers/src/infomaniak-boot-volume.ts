@@ -11,9 +11,10 @@
  * server, so placement reserves against the disk the node actually has. The size is the admin
  * setting `infomaniak.bootVolumeGb`, resolved by the API and passed to the provider.
  *
- * Nova compatibility: SAM sends no microversion header, so requests use the base 2.1 API, which
- * accepts every field below. `volume_type` inside a mapping needs microversion 2.67 and is
- * deliberately not sent: the volume gets the project's default Cinder type.
+ * Nova compatibility: the create request sends no microversion header, so it uses the base 2.1 API,
+ * which accepts every field below. `volume_type` inside a mapping needs microversion 2.67 and is
+ * deliberately not sent: the volume gets the project's default Cinder type. Server reads request
+ * 2.47 (`INFOMANIAK_SERVER_READ_HEADERS`) so the response embeds the flavor's resources.
  */
 
 import {
@@ -38,6 +39,19 @@ export {
  * read correctly too.
  */
 export const INFOMANIAK_ROOT_DISK_METADATA_KEY = 'sam-root-disk-gb';
+
+/**
+ * Headers for server reads (`GET /servers/{id}`, `GET /servers/detail`). Without a microversion Nova
+ * answers as 2.1, where `server.flavor` carries only `id` and `links`; from 2.47 it embeds the
+ * flavor's `original_name`, `vcpus`, `ram` and `disk`, which observed hardware needs. Every change
+ * to these responses between 2.1 and 2.47 adds fields except that one. Create requests keep the
+ * base API.
+ */
+export const INFOMANIAK_NOVA_SERVER_READ_MICROVERSION = '2.47';
+export const INFOMANIAK_SERVER_READ_HEADERS: Readonly<Record<string, string>> = Object.freeze({
+  'OpenStack-API-Version': `compute ${INFOMANIAK_NOVA_SERVER_READ_MICROVERSION}`,
+  'X-OpenStack-Nova-API-Version': INFOMANIAK_NOVA_SERVER_READ_MICROVERSION,
+});
 
 export const INFOMANIAK_BOOT_VOLUME_LIMITS = Object.freeze({
   min: INFOMANIAK_BOOT_VOLUME_MIN_GB,

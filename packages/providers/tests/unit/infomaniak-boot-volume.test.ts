@@ -53,6 +53,17 @@ function server(overrides: Record<string, unknown> = {}): Record<string, unknown
   };
 }
 
+/**
+ * Nova's embedded flavor depends on the requested microversion: 2.1 (no header) carries only id and
+ * links; 2.47+ carries the flavor's name and resources and drops the id.
+ */
+function flavorFor(headers: Headers): Record<string, unknown> {
+  return headers.get('X-OpenStack-Nova-API-Version') === '2.47' &&
+    headers.get('OpenStack-API-Version') === 'compute 2.47'
+    ? { original_name: 'a4-ram8-disk20-perf1', vcpus: 4, ram: 8192, disk: 20 }
+    : { id: 'flavor-1', links: [] };
+}
+
 interface FakeNova {
   createBodies: Array<{ server: Record<string, unknown> }>;
   requests: Array<{ method: string; url: string; headers: Headers }>;
@@ -87,6 +98,7 @@ function fakeNova(): FakeNova {
         server: server({
           image: created?.block_device_mapping_v2 ? '' : { id: 'image-1' },
           metadata: created?.metadata ?? {},
+          flavor: flavorFor(new Headers(init?.headers)),
         }),
       });
     }
@@ -141,10 +153,15 @@ describe('Infomaniak boot volume (#2842)', () => {
       value: { vcpuCount: 4, memoryMb: 8192, diskGb: 80 },
       source: 'observed',
     });
-    for (const request of nova.requests) {
-      expect(request.headers.has('OpenStack-API-Version')).toBe(false);
+    // The create uses the base API; only server reads ask for 2.47 (embedded flavor resources).
+    const create = nova.requests.find((r) => r.method === 'POST' && r.url === `${COMPUTE}/servers`);
+    expect(create?.headers.has('OpenStack-API-Version')).toBe(false);
+    expect(create?.headers.has('X-OpenStack-Nova-API-Version')).toBe(false);
+    const reads = nova.requests.filter((r) => r.url === `${COMPUTE}/servers/server-1`);
+    expect(reads.length).toBeGreaterThan(0);
+    for (const read of reads) expect(read.headers.get('X-OpenStack-Nova-API-Version')).toBe('2.47');
+    for (const request of nova.requests.filter((r) => r !== create && !reads.includes(r)))
       expect(request.headers.has('X-OpenStack-Nova-API-Version')).toBe(false);
-    }
   });
 
   it('uses the configured size for the catalog, legacy requests and the observed disk alike', async () => {
@@ -364,6 +381,29 @@ describe('Infomaniak observed root disk', () => {
       value: 'a4-ram8-disk20-perf1',
       source: 'observed',
     });
+  });
+
+  it('reports unknown resources, not a guess, for a 2.1 flavor without resource fields', async () => {
+    const vm = await listOne({
+      image: '',
+      flavor: { id: 'flavor-1', links: [] },
+      metadata: { [INFOMANIAK_ROOT_DISK_METADATA_KEY]: '80' },
+    });
+    expect(vm.observedHardware.resources).toMatchObject({ source: 'unknown', value: null });
+    expect(vm.serverType).toBe('flavor-1');
+  });
+
+  it('lists servers with the 2.47 read microversion', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(authResponse())
+      .mockResolvedValueOnce(json({ servers: [] }));
+    const provider = new InfomaniakProvider('id', 'secret', { authUrl: AUTH_URL });
+    await provider.listVMs();
+    const headers = new Headers(fetchMock.mock.calls[1]?.[1]?.headers);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(`${COMPUTE}/servers/detail`);
+    expect(headers.get('OpenStack-API-Version')).toBe('compute 2.47');
+    expect(headers.get('X-OpenStack-Nova-API-Version')).toBe('2.47');
   });
 
   it('reports unknown disk when the response omits the boot source', async () => {
