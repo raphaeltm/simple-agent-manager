@@ -62,6 +62,8 @@ const POSITIVE: Array<[string, RuleId]> = [
   ['RUN set -eux; \\\\', 'xtrace'],
   ['        shell: bash -x {0}', 'xtrace'],
   ['bash -x scripts/deploy/configure-secrets.sh staging', 'xtrace'],
+  ['        run: /bin/bash -x script.sh', 'xtrace'],
+  ['/usr/bin/bash -x script.sh', 'xtrace'],
   ['          env', 'env-dump'],
   ['env | sort', 'env-dump'],
   ['export -p', 'env-dump'],
@@ -70,6 +72,9 @@ const POSITIVE: Array<[string, RuleId]> = [
   ['        run: env', 'env-dump'],
   ['env -0', 'env-dump'],
   ['env -u PATH', 'env-dump'],
+  ['        run: /usr/bin/env', 'env-dump'],
+  ['/usr/bin/env -0', 'env-dump'],
+  ['/usr/bin/printenv', 'env-dump'],
   ['export', 'env-dump'],
   ['declare -x', 'env-dump'],
   ['typeset -px | sort', 'env-dump'],
@@ -120,6 +125,8 @@ const NEGATIVE = [
   'trap cleanup EXIT',
   'env -u HOME node deploy.mjs',
   'env -i PATH="$PATH" bash run.sh',
+  '/usr/bin/env node scripts/deploy/run.mjs',
+  'bash scripts/ci/x.sh -x-ray-mode',
 ];
 
 describe('check-no-secret-readback rules', () => {

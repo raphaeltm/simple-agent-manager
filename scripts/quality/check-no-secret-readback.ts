@@ -72,6 +72,9 @@ const SAME_COMMAND = String.raw`[^#\n;|&]*?`;
  */
 const COMMAND_START = String.raw`(?:^\s*(?:-\s*)?(?:run:\s*|RUN\s+)?|[;&|]\s*)`;
 
+/** An optional directory before a command name: `/bin/bash`, `/usr/bin/env`. */
+const EXECUTABLE_PATH = String.raw`(?:\S*/)?`;
+
 export const RULES: readonly Rule[] = [
   { id: 'show-secrets', pattern: /--show-secrets\b/ },
   // Any use of the Automation API flag other than an explicit `false`, shorthand included.
@@ -97,11 +100,11 @@ export const RULES: readonly Rule[] = [
     id: 'xtrace',
     pattern: new RegExp(String.raw`\b(?:set|(?:ba|z)?sh)\b${SAME_COMMAND}\s-[A-Za-z]*o\s+xtrace\b`),
   },
-  // `bash -x`, `bash -e -x script.sh`, `shell: bash -x {0}`.
+  // `bash -x`, `bash -e -x script.sh`, `shell: bash -x {0}`, `/bin/bash -x script.sh`.
   {
     id: 'xtrace',
     pattern: new RegExp(
-      String.raw`(?:^|[\s;&|(])(?:ba|z)?sh\b${SAME_COMMAND}\s-[A-Za-z]*x[A-Za-z]*(?=\s|$)`
+      String.raw`(?:^|[\s;&|(])${EXECUTABLE_PATH}(?:ba|z)?sh\b${SAME_COMMAND}\s-[A-Za-z]*x[A-Za-z]*(?=\s|$)`
     ),
     shellOnly: true,
   },
@@ -112,11 +115,15 @@ export const RULES: readonly Rule[] = [
     pattern: new RegExp(
       // Options only, no command or names after them: `env -0`, `env -u NAME`, a bare `export`
       // or `declare -x` all print the (exported) environment.
-      String.raw`${COMMAND_START}(?:env(?:\s+(?:-u\s+\S+|--unset=\S+|-[-\w]+))*|printenv|export(?:\s+-p)?|(?:declare|typeset)(?:\s+-[A-Za-z]+)*)\s*(?:$|[|>;&])`
+      String.raw`${COMMAND_START}${EXECUTABLE_PATH}(?:env(?:\s+(?:-u\s+\S+|--unset=\S+|-[-\w]+))*|printenv|export(?:\s+-p)?|(?:declare|typeset)(?:\s+-[A-Za-z]+)*)\s*(?:$|[|>;&])`
     ),
     shellOnly: true,
   },
-  { id: 'env-dump', pattern: new RegExp(String.raw`${COMMAND_START}printenv\b`), shellOnly: true },
+  {
+    id: 'env-dump',
+    pattern: new RegExp(String.raw`${COMMAND_START}${EXECUTABLE_PATH}printenv\b`),
+    shellOnly: true,
+  },
 ];
 
 const SHELL_FILE = /\.(?:ya?ml|sh|bash)$/;
