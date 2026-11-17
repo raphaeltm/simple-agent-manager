@@ -754,12 +754,17 @@ describe('hardening', () => {
     const firstHeld = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
+    let markFirstReached!: () => void;
+    const firstReached = new Promise<void>((resolve) => {
+      markFirstReached = resolve;
+    });
     let batches = 0;
     let firstRan: Promise<unknown> = Promise.resolve();
     env.DATABASE.batch = (async (statements: D1PreparedStatement[]) => {
       batches += 1;
       if (batches === 1) {
         firstRan = firstHeld.then(() => realBatch(statements));
+        markFirstReached();
         return firstRan;
       }
       // Second submit: both have now passed every pre-check. Run the first transaction, then this.
@@ -768,10 +773,11 @@ describe('hardening', () => {
       return realBatch(statements);
     }) as typeof env.DATABASE.batch;
 
-    const [first, second] = await Promise.all([
-      fulfill(request.id, { value: SENTINEL }),
-      fulfill(request.id, { value: OTHER_SENTINEL }),
-    ]);
+    const firstSubmit = fulfill(request.id, { value: SENTINEL });
+    // Async encryption can reorder arrivals; establish which submit owns the held batch.
+    await firstReached;
+    const secondSubmit = fulfill(request.id, { value: OTHER_SENTINEL });
+    const [first, second] = await Promise.all([firstSubmit, secondSubmit]);
     expect(batches).toBe(2);
     // The first batch to run claims; the second finds the request answered and writes nothing.
     expect(first.status).toBe(200);
