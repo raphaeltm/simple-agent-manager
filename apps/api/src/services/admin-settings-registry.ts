@@ -49,20 +49,56 @@ const definitions = [
   ...OVERVIEW_BRIEF_SETTINGS,
 ];
 
+function frozenDefinition(definition: AdminSettingDefinition): AdminSettingDefinition {
+  return Object.freeze({
+    ...definition,
+    ...(definition.range ? { range: Object.freeze(definition.range) } : {}),
+    ...(definition.choices ? { choices: Object.freeze(definition.choices) } : {}),
+    ...(definition.credential ? { credential: Object.freeze(definition.credential) } : {}),
+  });
+}
+
+/** Settings every build has. */
 export const ADMIN_SETTINGS_REGISTRY: readonly AdminSettingDefinition[] = Object.freeze(
-  definitions.map((definition) =>
-    Object.freeze({
-      ...definition,
-      ...(definition.range ? { range: Object.freeze(definition.range) } : {}),
-      ...(definition.choices ? { choices: Object.freeze(definition.choices) } : {}),
-      ...(definition.credential ? { credential: Object.freeze(definition.credential) } : {}),
-    })
-  )
+  definitions.map(frozenDefinition)
 );
+
+let registry: readonly AdminSettingDefinition[] = ADMIN_SETTINGS_REGISTRY;
+let installed = new WeakSet<AdminSettingDefinition>();
+
+/**
+ * Adds settings only a separately built entry has (the self-host build's speech endpoints,
+ * selfhost/speech/). Called once at entry initialization, before any request. The Cloudflare
+ * Worker installs nothing, so its registry is exactly `ADMIN_SETTINGS_REGISTRY`. Installing the
+ * same definition objects again is a no-op; a name that is already registered otherwise throws.
+ */
+export function installAdminSettingDefinitions(added: readonly AdminSettingDefinition[]): void {
+  const fresh = added.filter((definition) => !installed.has(definition));
+  const names = new Set(registry.map((definition) => definition.name));
+  for (const definition of fresh) {
+    if (names.has(definition.name)) {
+      throw new Error(`Admin setting ${definition.name} is already registered`);
+    }
+    names.add(definition.name);
+  }
+  for (const definition of fresh) installed.add(definition);
+  registry = Object.freeze([...registry, ...fresh.map(frozenDefinition)]);
+}
+
+/** Test seam: back to the settings every build has. */
+export function resetInstalledAdminSettingDefinitionsForTests(): void {
+  registry = ADMIN_SETTINGS_REGISTRY;
+  installed = new WeakSet();
+}
+
+/** Every setting this build has: the shared registry plus any installed by the build's entry. */
+export function adminSettingsRegistry(): readonly AdminSettingDefinition[] {
+  return registry;
+}
 
 /** Never resolve untrusted names through inherited object properties. */
 export function findAdminSetting(name: string): AdminSettingDefinition | undefined {
-  return ADMIN_SETTINGS_REGISTRY.find((definition) => definition.name === name);
+  return registry.find((definition) => definition.name === name);
 }
 
 /** Metadata only. Secret effective values must be separately projected to configured/source. */
