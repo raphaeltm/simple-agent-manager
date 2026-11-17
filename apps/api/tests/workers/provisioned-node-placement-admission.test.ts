@@ -309,6 +309,13 @@ function placementNotes(placement: string | null): string[] {
 describe('a node provisioned for a task admits that task', () => {
   afterEach(async () => {
     await setMaxRejections(null);
+    // This workerd pool shares D1 within a file. Completed fixtures must not become
+    // alternative capacity for a later test's explicitly controlled placement episode.
+    await env.DATABASE.batch([
+      env.DATABASE.prepare('DELETE FROM workspaces WHERE user_id = ?').bind(USER_ID),
+      env.DATABASE.prepare('DELETE FROM tasks WHERE user_id = ?').bind(USER_ID),
+      env.DATABASE.prepare('DELETE FROM nodes WHERE user_id = ?').bind(USER_ID),
+    ]);
   });
 
   it('resolves the shared defaults through the real resolver', () => {
@@ -489,64 +496,80 @@ describe('a node provisioned for a task admits that task', () => {
     expect(await warmSince(nodeId)).toBeNull();
   });
 
-  it.each([1, 5])('spends one real fallback then exhausts the replacement budget (%i)', async (limit) => {
-    await setMaxRejections(limit);
-    const nodeId = `node-first-fallback-${limit}`;
-    const replacementId = `node-second-fallback-${limit}`;
-    const taskId = `task-real-fallback-budget-${limit}`;
-    await seedProvisionedCx23(nodeId, taskId, { memoryPercent: 60 });
-    await startAtWorkspaceCreation(taskId, nodeId, DOCUMENTED_CAP_MEMORY_MB);
-    let state: TaskRunnerState | undefined;
-    for (let i = 0; i < 40; i++) {
-      state = (await fireAlarm(taskId)).state;
-      if (state.rejectedAutoProvisionedNodeId || state.completed) break;
+  it.each([1, 5])(
+    'spends one real fallback then exhausts the replacement budget (%i)',
+    async (limit) => {
+      await setMaxRejections(limit);
+      const nodeId = `node-first-fallback-${limit}`;
+      const replacementId = `node-second-fallback-${limit}`;
+      const taskId = `task-real-fallback-budget-${limit}`;
+      await seedProvisionedCx23(nodeId, taskId, { memoryPercent: 60 });
+      await startAtWorkspaceCreation(taskId, nodeId, DOCUMENTED_CAP_MEMORY_MB);
+      let state: TaskRunnerState | undefined;
+      for (let i = 0; i < 40; i++) {
+        state = (await fireAlarm(taskId)).state;
+        if (state.rejectedAutoProvisionedNodeId || state.completed) break;
+      }
+      expect(state?.completed).toBe(false);
+      expect(state?.rejectedAutoProvisionedNodeId).toBe(nodeId);
+      expect(state?.workspacePlacementRejections).toBe(0);
+      // Simulate the provider/readiness boundary for the normally admitted replacement; no
+      // paid provider is involved. Its measured pressure still cannot admit the owner.
+      await seedProvisionedCx23(replacementId, `finished-replacement-owner-${limit}`, {
+        memoryPercent: 60,
+      });
+      await env.DATABASE.prepare("UPDATE tasks SET status = 'failed' WHERE id = ?")
+        .bind(`finished-replacement-owner-${limit}`)
+        .run();
+      await env.DATABASE.prepare('UPDATE tasks SET auto_provisioned_node_id = ? WHERE id = ?')
+        .bind(replacementId, taskId)
+        .run();
+      await withPausedAlarms(taskId, async (instance) => {
+        const persisted = (await instance.ctx.storage.get<TaskRunnerState>('state'))!;
+        expect(persisted.rejectedAutoProvisionedNodeId).toBe(nodeId);
+        persisted.stepResults.nodeId = replacementId;
+        persisted.stepResults.autoProvisioned = true;
+        persisted.currentStep = 'workspace_creation';
+        await instance.ctx.storage.put('state', persisted);
+      });
+      const result = await runToCompletion(taskId);
+      expect(result.state.completed).toBe(true);
+      expect(result.state.rejectedAutoProvisionedNodeId).toBe(nodeId);
+      expect(result.ran.filter((step) => step === 'workspace_creation')).toHaveLength(limit);
+      expect((await taskRow(taskId))?.errorMessage).toContain(`refused ${limit} times in a row`);
+      expect(
+        await env.DATABASE.prepare('SELECT COUNT(*) FROM nodes WHERE user_id = ?')
+          .bind(USER_ID)
+          .first('COUNT(*)')
+      ).toBe(2);
     }
-    expect(state?.completed).toBe(false);
-    expect(state?.rejectedAutoProvisionedNodeId).toBe(nodeId);
-    expect(state?.workspacePlacementRejections).toBe(0);
-    // Simulate the provider/readiness boundary for the normally admitted replacement; no
-    // paid provider is involved. Its measured pressure still cannot admit the owner.
-    await seedProvisionedCx23(replacementId, `finished-replacement-owner-${limit}`, { memoryPercent: 60 });
-    await env.DATABASE.prepare("UPDATE tasks SET status = 'failed' WHERE id = ?").bind(`finished-replacement-owner-${limit}`).run();
-    await env.DATABASE.prepare('UPDATE tasks SET auto_provisioned_node_id = ? WHERE id = ?').bind(replacementId, taskId).run();
-    await withPausedAlarms(taskId, async (instance) => {
-      const persisted = (await instance.ctx.storage.get<TaskRunnerState>('state'))!;
-      expect(persisted.rejectedAutoProvisionedNodeId).toBe(nodeId);
-      persisted.stepResults.nodeId = replacementId;
-      persisted.stepResults.autoProvisioned = true;
-      persisted.currentStep = 'workspace_creation';
-      await instance.ctx.storage.put('state', persisted);
-    });
-    const result = await runToCompletion(taskId);
-    expect(result.state.completed).toBe(true);
-    expect(result.state.rejectedAutoProvisionedNodeId).toBe(nodeId);
-    expect(result.ran.filter((step) => step === 'workspace_creation')).toHaveLength(limit);
-    expect((await taskRow(taskId))?.errorMessage).toContain(`refused ${limit} times in a row`);
-    expect(await env.DATABASE.prepare('SELECT COUNT(*) FROM nodes WHERE user_id = ?').bind(USER_ID).first('COUNT(*)')).toBe(2);
-  });
+  );
 
-  it.each([false, true])('does not re-adopt a rejected node from a stale D1 pointer (rejected: %s)', async (rejected) => {
-    const nodeId = `node-crash-readoption-${rejected}`;
-    const taskId = `task-crash-readoption-${rejected}`;
-    await seedProvisionedCx23(nodeId, taskId, { memoryPercent: 14 });
-    await startAtWorkspaceCreation(taskId, nodeId, DOCUMENTED_CAP_MEMORY_MB);
-    await withPausedAlarms(taskId, async (instance) => {
-      const persisted = (await instance.ctx.storage.get<TaskRunnerState>('state'))!;
-      persisted.currentStep = 'node_provisioning';
-      persisted.stepResults.nodeId = null;
-      persisted.stepResults.autoProvisioned = false;
-      if (rejected) persisted.rejectedAutoProvisionedNodeId = nodeId;
-      await instance.ctx.storage.put('state', persisted);
-    });
-    const { state } = await fireAlarm(taskId);
-    if (rejected) {
-      expect(state.stepResults.nodeId).toBeNull();
-      expect(state.completed).toBe(true); // No alternative or cloud credential in this fixture.
-    } else {
-      expect(state.stepResults.nodeId).toBe(nodeId);
-      expect(state.completed).toBe(false);
+  it.each([false, true])(
+    'does not re-adopt a rejected node from a stale D1 pointer (rejected: %s)',
+    async (rejected) => {
+      const nodeId = `node-crash-readoption-${rejected}`;
+      const taskId = `task-crash-readoption-${rejected}`;
+      await seedProvisionedCx23(nodeId, taskId, { memoryPercent: 14 });
+      await startAtWorkspaceCreation(taskId, nodeId, DOCUMENTED_CAP_MEMORY_MB);
+      await withPausedAlarms(taskId, async (instance) => {
+        const persisted = (await instance.ctx.storage.get<TaskRunnerState>('state'))!;
+        persisted.currentStep = 'node_provisioning';
+        persisted.stepResults.nodeId = null;
+        persisted.stepResults.autoProvisioned = false;
+        if (rejected) persisted.rejectedAutoProvisionedNodeId = nodeId;
+        await instance.ctx.storage.put('state', persisted);
+      });
+      const { state } = await fireAlarm(taskId);
+      if (rejected) {
+        expect(state.stepResults.nodeId).toBeNull();
+        expect(state.completed).toBe(true); // No alternative or cloud credential in this fixture.
+      } else {
+        expect(state.stepResults.nodeId).toBe(nodeId);
+        expect(state.completed).toBe(false);
+      }
     }
-  });
+  );
 
   it('hands an empty rejected host to warm retention and keeps lifetime/cleanup provenance after replacement', async () => {
     const nodeId = 'node-empty-rejected';

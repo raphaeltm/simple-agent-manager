@@ -26,17 +26,26 @@ Preflight classes: cross-component-change, business-logic-change, docs-sync-chan
 ## Checklist / acceptance
 
 - [x] Read and link existing ideas, recheck active work/upstream PRs, review fork critically.
-- [ ] Reproduce A/B boot interleaving pre-fix using SQL and workerd.
-- [ ] Shared whole-node hold at ranked/reusable/pinned/warm selection and atomic INSERT/ATTACH/restart; owner still admissible subject to all safety guards.
-- [ ] Release on placement/failure/cancellation and stale selection refusal; exclusive/nonexclusive controls.
-- [ ] One crash-safe fallback episode with no rejected-host re-adoption, normal queue/pool limits, bounded exhaustion, and no occupied-node teardown.
-- [ ] Preserve teardown provenance/lifetime guards for abandoned provisioned nodes.
+- [x] Reproduce A/B boot interleaving pre-fix using SQL and workerd.
+- [x] Shared whole-node hold at ranked/reusable/pinned/warm selection and atomic INSERT/ATTACH/restart; owner still admissible subject to all safety guards.
+- [x] Release on placement/failure/cancellation and stale selection refusal; exclusive/nonexclusive controls.
+- [x] One crash-safe fallback episode with no rejected-host re-adoption, normal queue/pool limits, bounded exhaustion, and no occupied-node teardown.
+- [x] Preserve teardown provenance/lifetime guards for abandoned provisioned nodes.
 - [ ] Full relevant validation, local specialist reviews and task-completion validation.
 - [ ] Reserve/cooperate with staging, deploy branch, verify live behavior, clean up and release.
 - [ ] Draft PR with attribution, `Closes #2848`, CI/evidence and preserved constraint; ideas stay open.
 
 ## Validation / post-mortem
 
-Pending. First targeted test command found missing dependencies (`vitest` unavailable); installing with the locked repository dependencies before running the pre-fix tests. No live reproduction on the external installation.
+Draft [PR #2855](https://github.com/raphaeltm/simple-agent-manager/pull/2855) opened at cc7fb3fb9 with attribution. Both ideas linked to it and remain open. SAM associate_pull_request timed out after300s; PR exists and is draft.
+
+- Final controlled harness against upstream base e5c5aa4f: SQL **7 failed /98 passed /105 total** (active owner selection, warm discovery-to-claim race, stale INSERT/ATTACH/restart); workerd **9 failed /16 skipped /25 total** (ranked/pinned/warm × exclusive/nonexclusive boot interleaving plus normal/intent/released fallback). Only final tests and additive test schema column copied into detached base worktree; base runtime unchanged.
+- Fixed SQL **108 passed** across3files including100k-task indexed query plan,125-host bind chunking and post-fallback real pool trigger. Fixed workerd **89 passed** across4files including real TaskRunner lifecycle, new-wake reset, VM admission and capacity races. Recovery-retry **36 passed** after the NULL fixture compatibility correction.
+- Initial full lint22/typecheck36/build18 tasks passed. Full local test reconciliation and final checks running.
+- Cloudflare final runtime review PASS: exact-owner atomic release/proof, guarded replay, per-attempt budget reset and occupied-host safety. Test-engineer, task-completion-validator, constitution-validator and doc-sync-validator final reviews also PASS; no remaining implementation findings. New fallback-admission3/3 tests retain original pool/user queue deadlines and serialize two fallback owners through one provider request; isolated guard removals failed exactly the queue/deadline assertions.
+- Primary staging reservation [run44058419401](https://github.com/raphaeltm/simple-agent-manager/actions/runs/44058419401) succeeded; expected turn11:03:58Z. Durable schedule5be53e12-3498-4fe6-8884-8cb0884b5a77 wakes this chat. No deploy during another branch’s turn/lease.
+- CodeRabbit requested once via trusted main workflow [run44059649679](https://github.com/raphaeltm/simple-agent-manager/actions/runs/44059649679), retaining draft status. CodeRabbit returned review rate limited; no review arrived and no retrigger is planned. Full manual CI pending final test push.
+
+No live reproduction on the external installation. Staging checks remain required; draft status, no merge and no production deployment remain explicit constraints.
 
 Class: state-interaction race; advisory and atomic admission omitted durable provisioning ownership. Existing tests covered workspace reservations without a second TaskRunner selecting during the boot window. Process fix is discriminating SQL/workerd tests through production selection/admission, plus crash-boundary controls; existing rules 44/62/69 already require this coverage.
