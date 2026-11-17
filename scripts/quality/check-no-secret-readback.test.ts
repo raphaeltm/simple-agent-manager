@@ -64,6 +64,8 @@ const POSITIVE: Array<[string, RuleId]> = [
   ['bash -x scripts/deploy/configure-secrets.sh staging', 'xtrace'],
   ['        run: /bin/bash -x script.sh', 'xtrace'],
   ['/usr/bin/bash -x script.sh', 'xtrace'],
+  ['dash -x deploy.sh', 'xtrace'],
+  ['/bin/ksh -x deploy.sh', 'xtrace'],
   ['          env', 'env-dump'],
   ['env | sort', 'env-dump'],
   ['export -p', 'env-dump'],
@@ -77,6 +79,9 @@ const POSITIVE: Array<[string, RuleId]> = [
   ['/usr/bin/printenv', 'env-dump'],
   ['export', 'env-dump'],
   ['command env', 'env-dump'],
+  ['sudo -E env', 'env-dump'],
+  ['        run: sudo -u runner printenv', 'env-dump'],
+  ['sudo --preserve-env env | sort', 'env-dump'],
   ['env ADDED=1', 'env-dump'],
   ['        run: env -i ADDED=1 | sort', 'env-dump'],
   ['        run: command printenv', 'env-dump'],
@@ -140,6 +145,7 @@ const NEGATIVE = [
   'set +e',
   'command -v node',
   'sudo env FOO=1 make deploy',
+  'sudo -u runner make deploy',
 ];
 
 describe('check-no-secret-readback rules', () => {
@@ -221,6 +227,12 @@ describe('statements split across lines', () => {
     ],
     [
       'x.sh',
+      "node --input-type=module <<'JS'\nconst p = await crypto.subtle\n  ['decrypt'](a, b, c);\nJS",
+      'decryption',
+      2,
+    ],
+    [
+      'x.sh',
       'pulumi stack output \\\n  --stack staging \\\n  --show-secrets encryptionKey',
       'show-secrets',
       1,
@@ -236,6 +248,7 @@ describe('statements split across lines', () => {
     ['x.ts', 'const ciphertext = await crypto.subtle\n  .encrypt(params, key, data);'],
     ['x.sh', 'pulumi stack output \\\n  --stack staging \\\n  r2Name'],
     ['x.sh', 'set -e\n-x is a flag name in this heredoc'],
+    ['x.sh', 'echo crypto.subtle\n[ "$x" = env ]'],
   ])('does not report %s %j', (file, text) => {
     expect(scanText(file, text, isOpen).findings).toEqual([]);
   });

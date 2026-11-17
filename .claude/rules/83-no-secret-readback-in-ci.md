@@ -62,6 +62,9 @@ masked, and one stray `echo`, `set -x` or error message prints it.
   tracing and environment dumps in `.github/`, `scripts/` and `infra/`. It accepts a marked line
   only when the file and task are pinned in its `ALLOWED_LEGACY_READS` and the task is still
   open. Coverage and noise measurements are in `scripts/quality/README.md`.
+- **The check catches ordinary shapes, not deliberate evasion.** It is a tripwire for the
+  forms people write by habit; an obfuscated read (indirection, `eval`, encoded commands) is
+  a review finding, not a gap to chase with more patterns.
 - **Judgment, in review:** printing a variable that holds a secret, transformed secrets (base64,
   JSON, HMAC or derived keys), secrets in step outputs, summaries or artifacts, and secrets on
   command lines. The check cannot tell which variables are secret.

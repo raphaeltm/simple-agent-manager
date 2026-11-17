@@ -70,8 +70,10 @@ const SAME_COMMAND = String.raw`[^#\n;|&]*?`;
  * The start of a shell command: line start, a YAML `run:` value, a Dockerfile `RUN`, or after
  * `;`, `&&`, `||`, `|`.
  */
-// Wrappers that still run the named command: `command env`, `sudo printenv`, `exec env`.
-const COMMAND_START = String.raw`(?:^\s*(?:-\s*)?(?:run:\s*|RUN\s+)?|[;&|]\s*)(?:(?:command|builtin|exec|sudo|nohup|time)\s+)*`;
+// Wrappers that still run the named command, with their own options: `command env`,
+// `sudo -E env`, `sudo -u runner printenv`, `exec env`.
+const WRAPPER = String.raw`(?:command|builtin|exec|sudo|nohup|time)(?:\s+(?:-[A-Za-z]+(?:\s+[^\s-]\S*)?|--[\w-]+(?:=\S+)?))*`;
+const COMMAND_START = String.raw`(?:^\s*(?:-\s*)?(?:run:\s*|RUN\s+)?|[;&|]\s*)(?:${WRAPPER}\s+)*`;
 
 /** An optional directory before a command name: `/bin/bash`, `/usr/bin/env`. */
 const EXECUTABLE_PATH = String.raw`(?:\S*/)?`;
@@ -103,13 +105,15 @@ export const RULES: readonly Rule[] = [
   // ...and the same option on a shell invocation: `bash -o xtrace script.sh`.
   {
     id: 'xtrace',
-    pattern: new RegExp(String.raw`\b(?:set|(?:ba|z)?sh)\b${SAME_COMMAND}\s-[A-Za-z]*o\s+xtrace\b`),
+    pattern: new RegExp(
+      String.raw`\b(?:set|(?:ba|z|da|k)?sh)\b${SAME_COMMAND}\s-[A-Za-z]*o\s+xtrace\b`
+    ),
   },
   // `bash -x`, `bash -e -x script.sh`, `shell: bash -x {0}`, `/bin/bash -x script.sh`.
   {
     id: 'xtrace',
     pattern: new RegExp(
-      String.raw`(?:^|[\s;&|(])${EXECUTABLE_PATH}(?:ba|z)?sh\b${SAME_COMMAND}\s-[A-Za-z]*x[A-Za-z]*(?=\s|$)`
+      String.raw`(?:^|[\s;&|(])${EXECUTABLE_PATH}(?:ba|z|da|k)?sh\b${SAME_COMMAND}\s-[A-Za-z]*x[A-Za-z]*(?=\s|$)`
     ),
     shellOnly: true,
   },
@@ -195,7 +199,7 @@ export function isScannedPath(path: string): boolean {
 }
 
 /** A shebang that turns on tracing (`#!/bin/bash -x`, `#!/usr/bin/env -S bash -ex`). */
-const XTRACE_SHEBANG = /^#!.*\b(?:ba|z)?sh\s+-[A-Za-z]*x/;
+const XTRACE_SHEBANG = /^#!.*\b(?:ba|z|da|k)?sh\s+-[A-Za-z]*x/;
 
 function isCommentLine(line: string): boolean {
   return /^\s*(?:#|\/\/|\/\*|\*)/.test(line);
@@ -263,7 +267,9 @@ export function scanText(
  */
 function continuesChain(text: string, next: string, shell: boolean): boolean {
   if (/^\s*\??\.[A-Za-z_$]/.test(next) || /[\w$)\]]\.\s*$/.test(text)) return true;
-  return !shell && /^\s*\[/.test(next);
+  // In shell, `[ ... ]` is a test; only a bracket immediately followed by a quoted key
+  // (`['decrypt']`) is JS member access.
+  return shell ? /^\s*(?:\?\.)?\[['"`]/.test(next) : /^\s*\[/.test(next);
 }
 
 /** Physical lines a logical line may span, so a pathological file cannot make the scan quadratic. */
