@@ -57,6 +57,29 @@ function goTokenReport(session: Session, credentialReference: string) {
   };
 }
 
+async function withUsageCap(
+  maxRows: number,
+  run: (session: Session, report: ReturnType<typeof goTokenReport>, suffix: string) => Promise<void>
+) {
+  await testEnv.DATABASE.prepare(
+    "INSERT INTO platform_settings (key, value, updated_at) VALUES ('insights.runUsageMaxRowsPerSession', ?, ?)"
+  )
+    .bind(String(maxRows), new Date().toISOString())
+    .run();
+  invalidateAdminSettings(testEnv);
+  try {
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const reference = `cc_credentials:capped-${suffix}`;
+    const session = await seedClaudeSession(suffix, reference);
+    await run(session, goTokenReport(session, reference), suffix);
+  } finally {
+    await testEnv.DATABASE.prepare(
+      "DELETE FROM platform_settings WHERE key = 'insights.runUsageMaxRowsPerSession'"
+    ).run();
+    invalidateAdminSettings(testEnv);
+  }
+}
+
 async function storedRows(projectId: string) {
   const result = await testEnv.DATABASE.prepare(
     `SELECT chat_session_id, source, model, input_tokens, output_tokens, cache_read_tokens,
@@ -130,18 +153,7 @@ describe('run token usage from the VM agent callback to the receipt', () => {
   });
 
   it('bounds fresh callback epochs without blocking an admitted epoch update', async () => {
-    await testEnv.DATABASE.prepare(
-      "INSERT INTO platform_settings (key, value, updated_at) VALUES ('insights.runUsageMaxRowsPerSession', '2', ?)"
-    )
-      .bind(new Date().toISOString())
-      .run();
-    invalidateAdminSettings(testEnv);
-    try {
-      const suffix = crypto.randomUUID().slice(0, 8);
-      const credentialReference = `cc_credentials:cred-run-usage-cap-${suffix}`;
-      const session = await seedClaudeSession(suffix, credentialReference);
-      const report = goTokenReport(session, credentialReference);
-
+    await withUsageCap(2, async (session, report) => {
       expect((await postUsage(session, report)).status).toBe(204);
       expect(
         (
@@ -176,26 +188,11 @@ describe('run token usage from the VM agent callback to the receipt', () => {
         })
       );
       expect(rows).not.toContainEqual(expect.objectContaining({ model: 'new-model' }));
-    } finally {
-      await testEnv.DATABASE.prepare(
-        "DELETE FROM platform_settings WHERE key = 'insights.runUsageMaxRowsPerSession'"
-      ).run();
-      invalidateAdminSettings(testEnv);
-    }
+    });
   });
 
   it('concurrent fresh epochs compete for the final row slot through real callbacks', async () => {
-    await testEnv.DATABASE.prepare(
-      "INSERT INTO platform_settings (key, value, updated_at) VALUES ('insights.runUsageMaxRowsPerSession', '3', ?)"
-    )
-      .bind(new Date().toISOString())
-      .run();
-    invalidateAdminSettings(testEnv);
-    try {
-      const suffix = crypto.randomUUID().slice(0, 8);
-      const credentialReference = `cc_credentials:race-${suffix}`;
-      const session = await seedClaudeSession(suffix, credentialReference);
-      const report = goTokenReport(session, credentialReference);
+    await withUsageCap(3, async (session, report, suffix) => {
       expect((await postUsage(session, report)).status).toBe(204); // two rows, one slot remains
       const responses = await Promise.all(
         Array.from({ length: 17 }, (_, index) =>
@@ -270,12 +267,7 @@ describe('run token usage from the VM agent callback to the receipt', () => {
       expect(await receipt.json()).toMatchObject({
         tokens: { state: 'reported', total: { input: 1711, output: 403 } },
       });
-    } finally {
-      await testEnv.DATABASE.prepare(
-        "DELETE FROM platform_settings WHERE key = 'insights.runUsageMaxRowsPerSession'"
-      ).run();
-      invalidateAdminSettings(testEnv);
-    }
+    });
   });
 
   it('keeps the token-report callback within the mutation I/O budget', async () => {

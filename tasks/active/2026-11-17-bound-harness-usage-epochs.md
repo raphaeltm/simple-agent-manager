@@ -10,12 +10,12 @@ Data flow: combined projects callback router → callback JWT/schema/lifecycle/s
 
 ## Implementation checklist
 
-- [ ] Verify exploit through real callback and realSQL, prove tests fail without guard.
+- [x] Verify exploit through real callback and realSQL, prove tests fail without guard.
 - [x] Atomic bounded novel-row admission across epochs/models/credentials, preserving retries/reordering and existing counters even in mixed rejected reports.
 - [x] Bound existing-row scan on legacy over-cap runs; no history deletion or retention migration.
 - [x] Use canonical typed admin setting and cached resolver, no redundant env knobs.
-- [ ] Cover multi-model, whitespace alias, credential switch, cross-project/chat, default cap, lowered cap and concurrent final-slot callbacks.
-- [ ] Prove credential-limit reporting and receipt remain functional at cap.
+- [x] Cover multi-model, whitespace alias, credential switch, cross-project/chat, default cap, lowered cap and concurrent final-slot callbacks.
+- [x] Prove credential-limit reporting and receipt remain functional at cap.
 - [x] Document bounds, I/O budget and throughput; preserve residual retention in existingIdea.
 - [ ] Complete full local checks and independent security/Cloudflare/test/constitution/docs/completion reviews.
 - [ ] Ready original PR and request CodeRabbit, verify exact-headCI; leased real staging checks and cleanup; merge only after all gates; basic production health.
@@ -30,6 +30,8 @@ PR2863; existingIdea01M7JPRW3JPBE0C3CPMR95WAZB; rules28,31,35,60,62,69,81; no-se
 
 ## Implementation evidence (in progress)
 
-Original mainwriter independently reproduced1024fresh epochs/1024rows. Candidate preserves existing10001-row legacy history while blocking growth and allowing cumulative updates; query-plan regression requires materialized count/admission and covering index. Surgical removal of the admission WHERE produced6unit failures/20total and2Workers failures/6total; restored guarded source. Unit+admin44PASS including admin update/range/reset/cache and failclosedcap1outage. Workers6PASS before final fullcredential-I/O/receipt enhancement (rerun pending). Independent security/CF review found accidental existingregistryargument and wideningoutage fallback; fixed both. Testreview gaps addressed via largelegacyplanfixture/adminmutation/fullI/O/atcapreceipt; rereview pending.
+Original mainwriter independently reproduced1024fresh epochs/1024rows. Candidate preserves existing10001-row legacy history while blocking growth and allowing cumulative updates; query-plan regression requires materialized count/admission and covering index. Surgical removal of the admission WHERE produced6unit failures/20total and2Workers failures/6total; restored guarded source. Unit+admin44PASS including admin update/range/reset/cache and failclosedcap1outage. Expanded Workers6PASS including fullcredential-I/O and owner receipt after cap/mixed rejection. Independent security/CF review found accidental existingregistryargument and wideningoutage fallback; fixed both. Final runtimehead94836719 security/Cloudflare/test/constitution/docs reviews PASS; completion A-F found no omitted code. Release gates remain pending.
 
 Taskplan-only mainpush was refused by branchprotectionGH013 requiredWorkers after normal integration of concurrentmain. Plan carried in originalfeaturePR instead; no bypass. No user-facing retention selected and no history deleted.
+
+SonarCloud currenthead94836719 reports only duplicate test setup (29newlines/5.5% overall), zero issues/security findings. Shared withUsageCap fixture now owns cap seeding/session creation/cleanup for both capped tests; identical assertions and real trigger preserved, Workers6/6 rerun PASS. No quality threshold or exclusion changed. Full local lint/typecheck PASS; test/build still pending.
