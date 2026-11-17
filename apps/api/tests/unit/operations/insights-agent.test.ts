@@ -287,6 +287,7 @@ describe('agentAccounts', () => {
           merged: 3,
           runsByBucket: [5],
           stalls: { episodes: 1, totalMs: 120_000, ongoing: false },
+          tokens: { total: 50_000, perMergedPullRequest: 16_667 },
           usage: {
             credentialReference: `cc_credentials:${SECRET}-id`,
             credentialId: `${SECRET}-id`,
@@ -361,6 +362,7 @@ describe('agentAccounts', () => {
     ]);
     expect(view.accounts[0]?.limits?.windows[0]).toMatchObject({ utilizationPercent: 86 });
     expect(view.stallEpisodes.items[0]?.accountKey).toBe('account-1');
+    expect(view.accounts[0]?.tokens).toEqual({ total: 50_000, perMergedPullRequest: 16_667 });
   });
 });
 

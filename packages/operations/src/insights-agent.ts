@@ -241,6 +241,7 @@ export function agentAccounts(accounts: ProjectAccountsResponse) {
             })),
           }
         : null,
+      tokens: account.tokens,
       spend: account.spend,
     })),
     stallEpisodes: {
@@ -258,6 +259,7 @@ export function agentAccounts(accounts: ProjectAccountsResponse) {
       })),
     },
     totals: accounts.totals,
+    usageLimited: accounts.usageLimited,
     unavailable: accounts.unavailable,
   };
 }
