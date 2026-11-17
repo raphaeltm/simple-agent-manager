@@ -331,6 +331,51 @@ describe('CredentialSetupSession teardown — interrupted after the DO claim', (
 });
 
 describe('CredentialSetupSession teardown — recovery alarm', () => {
+  it('finishes cancellation even when arming its recovery alarm fails', async () => {
+    const fixture = createFixture();
+    const handle = await startSession(fixture, true);
+    handle.storage.setAlarm.mockRejectedValue(new Error('storage unavailable'));
+
+    await expect(handle.instance.cancel()).resolves.toMatchObject({ status: 'cancelled' });
+
+    expect(d1Status(fixture.d1)).toBe('cancelled');
+    expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+    expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), LEASE_ID);
+    expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0 });
+  });
+
+  it('finishes interrupted cleanup even when re-arming its recovery alarm fails', async () => {
+    const fixture = createFixture();
+    await interruptTeardown(fixture);
+    vi.mocked(destroySandboxInstance).mockReset().mockResolvedValue(undefined);
+    const restarted = createInstance(fixture.doDb, fixture.env);
+    restarted.storage.setAlarm.mockRejectedValue(new Error('storage unavailable'));
+
+    await expect(restarted.instance.alarm()).resolves.toBeUndefined();
+
+    expect(d1Status(fixture.d1)).toBe('cancelled');
+    expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+    expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), LEASE_ID);
+    expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0, cleanup_attempts: 1 });
+  });
+
+  it('retains unresolved cleanup when both destruction and its failure re-arm fail', async () => {
+    const fixture = createFixture();
+    const handle = await startSession(fixture, true);
+    // The initial alarm succeeds; only the post-failure re-arm rejects.
+    handle.storage.setAlarm
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValue(new Error('storage unavailable'));
+    vi.mocked(destroySandboxInstance).mockRejectedValueOnce(new Error('destroy unavailable'));
+
+    await expect(handle.instance.cancel()).resolves.toMatchObject({ status: 'cancelled' });
+
+    expect(d1Status(fixture.d1)).toBe('cancelled');
+    expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), LEASE_ID);
+    expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1 });
+    expect(handle.storage.deleteAlarm).not.toHaveBeenCalled();
+  });
+
   it('scrubs on recovery after a cancellation interrupted during provisioning', async () => {
     const fixture = createFixture();
     const first = await startSession(fixture, false);

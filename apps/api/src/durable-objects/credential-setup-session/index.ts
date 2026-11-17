@@ -626,7 +626,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
   ): Promise<void> {
     // Arm the recovery alarm before any I/O (it replaces any pending poll alarm);
     // the cleanup deletes it when it finishes.
-    await this.ctx.storage.setAlarm(Date.now() + claimed.capture_poll_ms);
+    await this.armCleanupAlarmBestEffort(claimed);
     // D1 terminal FIRST: the create route's one-active lookup reads D1, so an isolate
     // death during the sandbox I/O must not leave this row active.
     await this.updateD1Status(claimed.id, finalStatus, {
@@ -693,7 +693,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
 
   private async resumeClaimedCleanup(row: SetupSessionRow): Promise<void> {
     // Re-arm before I/O so a death during this run is retried as well.
-    await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
+    await this.armCleanupAlarmBestEffort(row);
     await this.runCleanup(row, true);
   }
 
@@ -703,7 +703,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
         env: this.env,
         sql: this.sql,
         deleteAlarm: () => this.deleteAlarmBestEffort(),
-        rearmAlarm: () => this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms),
+        rearmAlarm: () => this.armCleanupAlarmBestEffort(row),
       },
       row,
       resumed
@@ -717,6 +717,16 @@ export class CredentialSetupSession extends DurableObject<Env> {
     });
     this.cleanupInFlight = flight;
     return flight;
+  }
+
+  private async armCleanupAlarmBestEffort(row: SetupSessionRow): Promise<void> {
+    try {
+      await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
+    } catch {
+      // Recovery scheduling must never prevent D1 terminalization or inline cleanup.
+      // The pending marker remains authoritative if cleanup also fails.
+      log.error('credential_setup.cleanup_alarm_failed', { sessionId: row.id });
+    }
   }
 
   private async deleteAlarmBestEffort(): Promise<void> {

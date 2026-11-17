@@ -104,3 +104,5 @@ COLUMN` would ship unscanned. Fix: move all DO-SQLite DDL into
 - [ ] Observe coordinator's production #2841 merge-hold-lifted message before normal merge.
 
 - [x] Later Codex P2: persist successful sandbox destruction before pool/D1 I/O; recovery skips scrub and destroy once proven, so it cannot recreate a destroyed container. Nullable additive `cleanup_sandbox_destroyed` column is migration-scanned; interrupted-release regression was red before fix. Legacy NULL retains conservative scrub/destroy behavior.
+
+- [x] Late Codex P2: alarm arming is best-effort at initial teardown, resumed cleanup and failed-cleanup rearm. A scheduling rejection never prevents inline D1/resource cleanup; three boundary regressions failed before fix and now pass (teardown suite27/27).
