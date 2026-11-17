@@ -119,6 +119,21 @@ describe('insights phase timings reads', () => {
     ]);
   });
 
+  it('summarises every stored phase when phases is omitted, still within the project', async () => {
+    insert({ project: 'p', phase: 'git_clone', durationMs: 40 });
+    insert({ project: 'p', phase: 'devcontainer_up', durationMs: 900 });
+    insert({ project: 'p', phase: 'sam_env', durationMs: 3, skill: 'skill-2' });
+    // Attack: another project's rows under the same skill id and a phase p never stored.
+    insert({ project: 'foreign', phase: 'git_clone', durationMs: 1_000_000 });
+    insert({ project: 'foreign', phase: 'volume_create', durationMs: 5 });
+
+    const result = await phaseDurationStats(db, { projectId: 'p', skillId: 'skill-1', now: NOW });
+    expect(result.stats).toEqual([
+      { operation: 'workspace', phase: 'devcontainer_up', count: 1, medianMs: 900, p90Ms: 900 },
+      { operation: 'workspace', phase: 'git_clone', count: 1, medianMs: 40, p90Ms: 40 },
+    ]);
+  });
+
   it('groups by operation, filters by profile and operation, and reports truncation', async () => {
     insert({ project: 'p', phase: 'workspace_ready', durationMs: 7, operation: 'runner_start' });
     insert({ project: 'p', phase: 'workspace_ready', durationMs: 9, operation: 'runner_wake' });

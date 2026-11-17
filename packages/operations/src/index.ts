@@ -156,6 +156,19 @@ export {
 } from './inbox-write-core';
 export { projectAccounts, type ProjectAccountsInput } from './insights-accounts';
 export {
+  PROJECT_INSIGHTS_METHODS,
+  projectInsights,
+  type ProjectInsightsInput,
+  ProjectInsightsInputSchema,
+  type ProjectInsightsMethod,
+} from './insights-agent';
+export {
+  getInsightsAgentRateLimit,
+  INSIGHTS_AGENT_SETTINGS,
+  type InsightsAgentRateLimit,
+  type InsightsAgentSettingName,
+} from './insights-agent-settings';
+export {
   INSIGHTS_CLOUDFLARE_COST_SETTINGS,
   type InsightsCloudflareCostSettingName,
 } from './insights-cloudflare-cost-settings-definition';
@@ -166,10 +179,7 @@ export {
   type InstallationHealthInput,
   utcWeekStart,
 } from './insights-installation';
-export {
-  readCloudflareCost,
-  summarizeCloudflareCost,
-} from './insights-installation-cloudflare';
+export { readCloudflareCost, summarizeCloudflareCost } from './insights-installation-cloudflare';
 export {
   densityFromRuns,
   newMachineReasonsFor,

@@ -66,9 +66,16 @@ export interface RunReceiptInput {
   taskId: string;
 }
 
+export interface RunReceiptOptions {
+  /** Read the viewer's own account name (one statement). The agent view (`insights-agent.ts`)
+   *  never shows it, so it skips the read and keeps its rate-limit check inside the budget. */
+  accountName?: boolean;
+}
+
 export async function runReceipt(
   ctx: OperationContext,
-  input: RunReceiptInput
+  input: RunReceiptInput,
+  options: RunReceiptOptions = {}
 ): Promise<RunReceipt> {
   const projectId = typeof input.projectId === 'string' ? input.projectId.trim() : '';
   const taskId = typeof input.taskId === 'string' ? input.taskId.trim() : '';
@@ -137,7 +144,7 @@ export async function runReceipt(
     'account',
     context,
     null,
-    () => readAccount(ctx, row, facts),
+    () => readAccount(ctx, row, facts, options.accountName ?? true),
     unavailable
   );
 

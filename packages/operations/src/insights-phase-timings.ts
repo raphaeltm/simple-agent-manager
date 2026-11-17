@@ -33,8 +33,8 @@ export interface PhaseDurationStatsInput {
   /** Exactly one of skillId / agentProfileId. */
   skillId?: string;
   agentProfileId?: string;
-  /** Phases to summarise, e.g. `['git_clone', 'devcontainer_up']`. */
-  phases: readonly string[];
+  /** Phases to summarise, e.g. `['git_clone', 'devcontainer_up']`. Omitted: every stored phase. */
+  phases?: readonly string[];
   /** Restrict to one operation (`workspace`, `wake`, `runner_start`, ...). Default: all. */
   operation?: string;
   /** Rows older than `lifecycleLatency.retentionDays` (default 30) are purged, so a longer window
@@ -139,8 +139,8 @@ export async function phaseDurationStats(
   }
   const byColumn = input.skillId !== undefined ? 'skill_id' : 'agent_profile_id';
   const byId = requireId(input.skillId ?? input.agentProfileId, byColumn);
-  const phases = [...new Set(input.phases)];
-  if (phases.length === 0 || phases.length > MAX_PHASE_STATS_PHASES) {
+  const phases = input.phases === undefined ? null : [...new Set(input.phases)];
+  if (phases !== null && (phases.length === 0 || phases.length > MAX_PHASE_STATS_PHASES)) {
     throw new OperationError(
       'invalid_input',
       `Pass between 1 and ${MAX_PHASE_STATS_PHASES} phases`
@@ -158,7 +158,8 @@ export async function phaseDurationStats(
   );
   const since = (input.now ?? Date.now()) - windowDays * DAY_MS;
   const operationFilter = input.operation !== undefined ? 'AND operation = ?' : '';
-  const bindings: Array<string | number> = [projectId, byId, ...phases];
+  const phaseFilter = phases === null ? '' : `AND phase IN (${phases.map(() => '?').join(', ')})`;
+  const bindings: Array<string | number> = [projectId, byId, ...(phases ?? [])];
   if (input.operation !== undefined) bindings.push(input.operation);
   bindings.push(since, sampleLimit);
 
@@ -168,7 +169,7 @@ export async function phaseDurationStats(
          FROM lifecycle_phase_timings
         WHERE project_id = ?
           AND ${byColumn} = ?
-          AND phase IN (${phases.map(() => '?').join(', ')})
+          ${phaseFilter}
           ${operationFilter}
           AND outcome = 'success'
           AND created_at >= ?
