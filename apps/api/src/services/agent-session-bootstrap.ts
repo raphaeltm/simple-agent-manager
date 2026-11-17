@@ -11,6 +11,7 @@ import { buildSamBootstrapInstructions } from './agent-bootstrap-prompt';
 import {
   createAcpSessionWithLogging,
   type FreshStartReason,
+  persistFreshStartNotice,
   prepareAcpSessionForFreshStart,
   runMaybePhased,
   transitionAcpSessionToRunning,
@@ -348,6 +349,11 @@ export async function startSamAwareAgentSession(
             input,
             agentSessionId,
             restoreOutcome
+          );
+        } else {
+          // ACP bookkeeping failed (logged); the chat must still learn what was not restored.
+          await runMaybePhased(input, 'persist_fresh_start_notice', () =>
+            persistFreshStartNotice(env, input, agentSessionId, restoreOutcome)
           );
         }
       }

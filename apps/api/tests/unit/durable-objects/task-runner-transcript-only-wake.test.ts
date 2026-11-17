@@ -86,6 +86,8 @@ let freshStarts: Array<{ id: string; reason: unknown; metadata: unknown }>;
 let messagesById: Map<string, { role: string; content: string }>;
 /** The ACP session's first `running` transition finds it already failed, as after a crash. */
 let failFirstRunningTransition: boolean;
+/** ProjectData refuses to create the chat's ACP session (logged and skipped by the bootstrap). */
+let failAcpCreation: boolean;
 
 function seed(): TaskRunnerState {
   const now = new Date().toISOString();
@@ -176,6 +178,7 @@ beforeEach(() => {
   freshStarts = [];
   messagesById = new Map();
   failFirstRunningTransition = false;
+  failAcpCreation = false;
   chat = { id: 'chat', status: 'sleeping', workspaceId: 'original', taskId: 'source' };
   const acp = new Map<string, { id: string; chatSessionId: string; status: string }>();
   const projectData = {
@@ -190,6 +193,7 @@ beforeEach(() => {
     repairSessionForSnapshotRecovery: vi.fn(async () => false),
     getAcpSession: vi.fn(async (id: string) => acp.get(id) ?? null),
     createAcpSession: vi.fn(async (input: { id: string; chatSessionId: string }) => {
+      if (failAcpCreation) throw new Error('ProjectData unavailable');
       const session = { ...input, status: 'pending' };
       acp.set(input.id, session);
       return session;
@@ -378,6 +382,21 @@ describe('waking a VM chat whose sleep fell back to transcript-only', () => {
       expect.stringContaining('transcript-only sleep fallback'),
     ]);
     expect(systemMessages.filter((message) => /transcript/.test(message))).toHaveLength(1);
+    expect(taskStatus()).toEqual({ status: 'in_progress' });
+  });
+
+  it('still tells the chat nothing was restored when ACP bookkeeping is unavailable', async () => {
+    const state = seed();
+    vm.restore.mockResolvedValue(structuredClone(CONTRACT.vmAgentRestoreResponse));
+    failAcpCreation = true;
+
+    await handleAgentSession(state, rc);
+
+    expect(vm.start).toHaveBeenCalledOnce();
+    expect(freshStarts).toEqual([]);
+    const wakeNotices = systemMessages.filter((message) => /transcript/.test(message));
+    expect(wakeNotices).toHaveLength(1);
+    expect(wakeNotices[0]).toContain('were not restored');
     expect(taskStatus()).toEqual({ status: 'in_progress' });
   });
 

@@ -51,6 +51,30 @@ const FRESH_START_NOTICES: Record<FreshStartReason, string> = {
     "SAM could not restore this conversation's workspace: its last sleep saved no snapshot or Git recovery point. The agent is starting fresh in a new checkout and will read the persisted transcript before continuing. Files and uncommitted work from the previous workspace were not restored.",
 };
 
+/**
+ * Tell the chat the agent is starting fresh. The id is stable per agent session, so a retry
+ * re-persists the same entry instead of adding one; the same id with different text is refused.
+ * The bootstrap calls this directly when the chat has no ACP session to reset, so the notice
+ * never depends on ACP bookkeeping succeeding.
+ */
+export async function persistFreshStartNotice(
+  env: Env,
+  input: SamAwareAgentStartInput,
+  agentSessionId: string,
+  reason: FreshStartReason
+): Promise<void> {
+  if (!input.chatSessionId) return;
+  await projectDataService.persistMessage(
+    env,
+    input.projectId,
+    input.chatSessionId,
+    'system',
+    FRESH_START_NOTICES[reason],
+    null,
+    `degraded-wake-${agentSessionId}`
+  );
+}
+
 export async function prepareAcpSessionForFreshStart(
   env: Env,
   input: SamAwareAgentStartInput,
@@ -58,17 +82,7 @@ export async function prepareAcpSessionForFreshStart(
   reason: FreshStartReason = 'degraded_restore'
 ): Promise<string> {
   try {
-    if (input.chatSessionId) {
-      await projectDataService.persistMessage(
-        env,
-        input.projectId,
-        input.chatSessionId,
-        'system',
-        FRESH_START_NOTICES[reason],
-        null,
-        `degraded-wake-${agentSessionId}`
-      );
-    }
+    await persistFreshStartNotice(env, input, agentSessionId, reason);
     const session = await runMaybePhased(input, 'prepare_acp_session_fresh_start', () =>
       projectDataService.prepareAcpSessionForFreshStart(env, input.projectId, agentSessionId, {
         actorType: input.actor.type,
