@@ -26,6 +26,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { chunk } from '../lib/d1-limits';
 import { log } from '../lib/logger';
+import { releaseArrayBuffer } from '../lib/release-array-buffer';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import type { AppDb } from '../middleware/project-auth';
@@ -282,10 +283,16 @@ export async function uploadFile(
   const now = new Date().toISOString();
 
   // Store encrypted data in R2 with encryption metadata
-  await r2.put(r2Key, ciphertext, {
-    customMetadata: metadataToR2CustomMetadata(metadata),
-    httpMetadata: { contentType: 'application/octet-stream' },
-  });
+  try {
+    await r2.put(r2Key, ciphertext, {
+      customMetadata: metadataToR2CustomMetadata(metadata),
+      httpMetadata: { contentType: 'application/octet-stream' },
+    });
+  } finally {
+    // R2 has consumed the ciphertext. Release this owned buffer before another
+    // whole-file write; bounded memory must not depend on the next GC cycle.
+    releaseArrayBuffer(ciphertext);
+  }
 
   // Insert D1 metadata
   const fileRow: schema.NewProjectFile = {
@@ -372,10 +379,16 @@ export async function replaceFile(
   const now = new Date().toISOString();
 
   // Upload new encrypted data to R2 (overwrites existing object — key is stable)
-  await r2.put(r2Key, ciphertext, {
-    customMetadata: metadataToR2CustomMetadata(metadata),
-    httpMetadata: { contentType: 'application/octet-stream' },
-  });
+  try {
+    await r2.put(r2Key, ciphertext, {
+      customMetadata: metadataToR2CustomMetadata(metadata),
+      httpMetadata: { contentType: 'application/octet-stream' },
+    });
+  } finally {
+    // R2 has consumed the ciphertext. Release this owned buffer before another
+    // whole-file write; bounded memory must not depend on the next GC cycle.
+    releaseArrayBuffer(ciphertext);
+  }
 
   // Update D1
   await db

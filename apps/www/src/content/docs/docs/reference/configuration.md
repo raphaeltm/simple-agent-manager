@@ -336,6 +336,33 @@ and saved plans; do not drop columns or recreate tables as a rollback step.
 
 Activity coalescing and binding caches are per Worker isolate, so burst reduction scales with the number of active isolates for the same session. Delayed flushes carry their original observed event time, and ProjectData rejects stale writes so a delayed intermediate report cannot overwrite a newer idle/error state from another isolate.
 
+### Browser Library upload limits
+
+Browser Library uploads and replacements accept one file of up to 50 MiB by default.
+Their effective file limit is the smaller of `LIBRARY_UPLOAD_MAX_BYTES` and
+`library.multipartFileMaxBytes` in **Admin → Settings**. The browser limit cannot
+exceed 50 MiB, including when the legacy environment override is higher: whole-file
+AES-GCM retains plaintext and ciphertext concurrently. Existing encrypted objects,
+metadata and download compatibility are unchanged.
+
+| Runtime setting                     | Default             | Purpose                                                                     |
+| ----------------------------------- | ------------------- | --------------------------------------------------------------------------- |
+| `library.multipartFileMaxBytes`     | `52428800` (50 MiB) | Browser file ceiling; may be lowered, maximum 50 MiB.                       |
+| `library.multipartOverheadMaxBytes` | `65536` (64 KiB)    | Additional wire bytes above the file ceiling, and aggregate metadata bytes. |
+| `library.multipartMaxParts`         | `16`                | Parts per request, including ignored fields.                                |
+| `library.multipartMaxHeaderBytes`   | `8192`              | Header bytes per part.                                                      |
+| `library.multipartReadTimeoutMs`    | `120000`            | Total ingress and parsing deadline, in milliseconds.                        |
+
+The 120-second ingress budget permits a full 50 MiB file at about 427 KiB/s;
+metadata consumes a small additional portion. Parsing uses 64 KiB allocation chunks
+(at most 802 buffers at the default wire limit) and releases them before encryption.
+Only one browser upload or replacement materializes per Worker isolate at a time;
+an overlapping write receives `429` and may retry after the active write completes.
+There is no in-memory request queue. Parsing failure, timeout and write failure release
+admission. These controls are implemented by
+`apps/api/src/routes/library-upload-request.ts:withLibraryUpload` and apply to both
+browser write routes; shared agent Library operations retain their existing limits.
+
 ### Project file library cleanup
 
 | Variable                                    | Default | Description                                                                                                                                          |

@@ -1135,6 +1135,7 @@ replay, duplicate count and fingerprint-conflict behavior in either mode. A skip
 event has no delivery-key ledger; a later redelivery is evaluated against the
 subscriptions active at that later admission. GitHub trigger execution remains
 independent of canonical project-event storage (`routes/github-webhook.ts`).
+
 ## Use an OpenAI-compatible model server
 
 Under **AI models**, set `llm.openAICompatible.baseUrl`, the model ID and optional API key.
@@ -1148,3 +1149,13 @@ for all keys, budgets, proxy availability and accounting limits.
 
 <!-- Verified: services/llm-endpoint-settings.ts, services/llm-chat-target.ts,
      services/platform-capabilities.ts:resolveLlmEndpointCapability. -->
+
+## Library browser uploads
+
+Search for **library.multipart** in **Admin → Settings** to lower the browser file
+ceiling or adjust multipart overhead, part/header limits and ingress time. The default
+file ceiling is 50 MiB and cannot be raised above that memory-safe ceiling. Existing
+`LIBRARY_UPLOAD_MAX_BYTES` overrides may lower it further. A concurrent upload or
+replacement in the same Worker isolate receives `429`; retry after the active write
+finishes. See [Browser Library upload limits](/docs/reference/configuration/#browser-library-upload-limits)
+for defaults and throughput.
