@@ -44,7 +44,7 @@
     "@simple-agent-manager/shared": "workspace:*",
     "@simple-agent-manager/worker-core": "workspace:*",
     "@valibot/to-json-schema": "catalog:",
-    "ai": "7.0.137",
+    "ai": "7.0.173",
     "better-auth": "catalog:",
     "better-auth-cloudflare": "0.3.1",
     "drizzle-orm": "catalog:",
