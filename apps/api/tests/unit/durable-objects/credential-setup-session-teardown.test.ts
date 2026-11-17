@@ -1,4 +1,5 @@
 /**
+ * FILE SIZE EXCEPTION: lifecycle regression fixtures and tests share one real SQLite harness.
  * Teardown ordering and recovery for the CredentialSetupSession DO
  * (apps/api/src/durable-objects/credential-setup-session/index.ts).
  *
@@ -841,9 +842,81 @@ describe('CredentialSetupSession teardown — never-started container', () => {
   });
 });
 
+describe('CredentialSetupSession teardown — recovery I/O budget', () => {
+  it('never starts a late scrub after acquisition outlives its recovery deadline', async () => {
+    const fixture = createFixture({ SANDBOX_EXEC_TIMEOUT_MS: '30000' });
+    await interruptTeardown(fixture);
+    const config = await import('../../../src/services/credential-setup-config');
+    // Prove the cleanup consumer uses its configurable recovery budget.
+    const budget = vi
+      .spyOn(config, 'getSetupSessionCleanupRecoveryStepTimeoutMs')
+      .mockResolvedValue(750);
+    let acquired: ((sandbox: ReturnType<typeof createFakeSandbox>) => void) | undefined;
+    const acquisition = new Promise<ReturnType<typeof createFakeSandbox>>((resolve) => {
+      acquired = resolve;
+    });
+    vi.mocked(getSandboxInstance)
+      .mockReset()
+      .mockImplementation(() => acquisition as never);
+    vi.mocked(destroySandboxInstance).mockReset().mockResolvedValue(undefined);
+    fixture.sandbox.exec.mockClear();
+    const restarted = createInstance(fixture.doDb, fixture.env);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const recovery = restarted.instance.alarm();
+      await vi.waitFor(() => expect(getSandboxInstance).toHaveBeenCalledTimes(1));
+      await vi.advanceTimersByTimeAsync(750);
+      await recovery;
+      expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0 });
+      expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+      expect(
+        fixture.doDb.prepare('SELECT cleanup_sandbox_destroyed FROM setup_session').get()
+      ).toEqual({ cleanup_sandbox_destroyed: 1 });
+      acquired?.(fixture.sandbox);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fixture.sandbox.exec).not.toHaveBeenCalled();
+    } finally {
+      budget.mockRestore();
+    }
+  });
+
+  it('bounds stalled recovery scrub and destroy separately below the interactive timeout', async () => {
+    const fixture = createFixture({ SANDBOX_EXEC_TIMEOUT_MS: '30000' });
+    await interruptTeardown(fixture);
+    vi.mocked(destroySandboxInstance)
+      .mockReset()
+      .mockImplementation(() => new Promise(() => {}));
+    fixture.sandbox.exec.mockClear().mockImplementation(() => new Promise(() => {}));
+    const restarted = createInstance(fixture.doDb, fixture.env);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let finished = false;
+    const recovery = restarted.instance.alarm().then(() => {
+      finished = true;
+    });
+    await vi.waitFor(() => expect(scrubCalls(fixture.sandbox)).toHaveLength(1));
+
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(destroySandboxInstance).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+    expect(finished).toBe(false);
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(finished).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await recovery;
+
+    expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), LEASE_ID);
+    expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1 });
+    expect(
+      fixture.doDb.prepare('SELECT cleanup_sandbox_destroyed FROM setup_session').get()
+    ).toEqual({ cleanup_sandbox_destroyed: null });
+    expect(restarted.storage.deleteAlarm).not.toHaveBeenCalled();
+  });
+});
+
 describe('CredentialSetupSession teardown — scrub timeout', () => {
   it('abandons a scrub exec that never settles after SANDBOX_EXEC_TIMEOUT_MS and still destroys', async () => {
-    const fixture = createFixture({ SANDBOX_EXEC_TIMEOUT_MS: '5000' });
+    const fixture = createFixture({ SANDBOX_EXEC_TIMEOUT_MS: '30000' });
     const { instance } = await startSession(fixture, true);
     fixture.sandbox.exec.mockImplementation(() => new Promise(() => undefined));
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
@@ -853,7 +926,7 @@ describe('CredentialSetupSession teardown — scrub timeout', () => {
       settled = true;
     });
     await vi.waitFor(() => expect(scrubCalls(fixture.sandbox)).toHaveLength(1));
-    await vi.advanceTimersByTimeAsync(4_000);
+    await vi.advanceTimersByTimeAsync(29_000);
     expect(destroySandboxInstance).not.toHaveBeenCalled();
     expect(settled).toBe(false);
 

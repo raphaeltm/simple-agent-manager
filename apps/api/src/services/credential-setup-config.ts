@@ -1,9 +1,17 @@
 /**
  * Configuration readers for guided agent-credential setup
- * (Cloudflare Sandbox). All values are env-configurable with a `DEFAULT_*`
+ * (Cloudflare Sandbox). Values use environment or admin settings with a `DEFAULT_*`
  * constant fallback (Constitution Principle XI — no hardcoded limits/timeouts).
  */
 import type { Env } from '../env';
+import { resolveAdminSetting } from './admin-settings';
+import { DEFAULT_SETUP_SESSION_CLEANUP_RECOVERY_STEP_TIMEOUT_MS } from './admin-settings-credential-setup-definitions';
+
+/** Only recovery pays this cached settings read; inline teardown retains the interactive timeout. */
+export async function getSetupSessionCleanupRecoveryStepTimeoutMs(env: Env): Promise<number> {
+  const value = await resolveAdminSetting(env, 'credentialSetup.cleanupRecoveryStepTimeoutMs');
+  return typeof value === 'number' ? value : DEFAULT_SETUP_SESSION_CLEANUP_RECOVERY_STEP_TIMEOUT_MS;
+}
 
 /** Concurrency sub-cap for simultaneous setup sessions (below the Sandbox container max_instances). */
 export const DEFAULT_MAX_CONCURRENT_SETUP_SESSIONS = 2;

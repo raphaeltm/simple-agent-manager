@@ -45,12 +45,12 @@ COLUMN` would ship unscanned. Fix: move all DO-SQLite DDL into
 - `index.ts` is 754 lines; the port adds ~200 → over the 800 hard limit (rule 18). Split: schema
   - row types into `schema.ts`, D1 status writer into `d1-status.ts`, sandbox/pool cleanup steps
     into `cleanup.ts`.
-- New Env scalars fail `pnpm quality:runtime-tunables`. Timings in the port reuse existing
+- New Env scalars fail `pnpm quality:runtime-tunables`. The initial port reused existing
   tunables: recovery alarm delay = `SETUP_SESSION_CAPTURE_POLL_MS` (per-session
   `capture_poll_ms`), scrub bound = `SANDBOX_EXEC_TIMEOUT_MS`. The recovery-attempt cap (3) is a
   crash-loop circuit breaker, exported as `DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS`.
 - Rule 81: the monitor poll is not ported, so the per-start cost on Cloudflare is zero. Recovery
-  cost: at most 3 extra alarm runs per failed/interrupted teardown, each one bounded scrub + destroy + release + D1 repair, followed on exhaustion by one quarantine/observability write. No new per-start I/O.
+  cost: at most 3 extra alarm runs per failed/interrupted teardown, each one cached/bounded settings read, scrub + destroy (default5s each, max10s each), release + D1 repair, followed on exhaustion by one quarantine/observability write. No new per-start I/O.
 
 ## Implementation checklist
 
@@ -106,3 +106,7 @@ COLUMN` would ship unscanned. Fix: move all DO-SQLite DDL into
 - [x] Later Codex P2: persist successful sandbox destruction before pool/D1 I/O; recovery skips scrub and destroy once proven, so it cannot recreate a destroyed container. Nullable additive `cleanup_sandbox_destroyed` column is migration-scanned; interrupted-release regression was red before fix. Legacy NULL retains conservative scrub/destroy behavior.
 
 - [x] Late Codex P2: alarm arming is best-effort at initial teardown, resumed cleanup and failed-cleanup rearm. A scheduling rejection never prevents inline D1/resource cleanup; three boundary regressions failed before fix and now pass (teardown suite27/27).
+
+- [x] Sixth Codex P2: dedicated admin setting `credentialSetup.cleanupRecoveryStepTimeoutMs` (default5s, max10s per sandbox step) for recovery scrub/destroy, including SDK acquisition. Inline retains30s. Recovery alone adds cached settings read, max3attempts. Timer regression proves old30s behavior fails at5s; late acquisition must not start a fresh exec after timeout/destruction.
+
+Final continuation local evidence: full API run completed1093passingfiles/16715passingtests; its12failures were3intentional pre-fix alarm regressions plus9old fake-SQL destruction-marker misclassifications, all subsequently green in teardown/nativefocusedruns. Native route suite12/12passes. Final timeout/config/teardown suites62/62pass with two discriminating red proofs. Root lint22/typecheck36/build18passed; final APItypecheck/scopedlint/runtime-tunablespass. Two unrelated webfiles39/39pass isolated after broad-loadtimeouts; infra75/75pass isolated. CI and live staging remain binding.

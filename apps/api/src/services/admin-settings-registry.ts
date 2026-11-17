@@ -1,5 +1,6 @@
 import type { AdminSettingDefinition } from './admin-setting-definitions';
 import { CORE_SETTINGS } from './admin-settings-core-definitions';
+import { CREDENTIAL_SETUP_SETTINGS } from './admin-settings-credential-setup-definitions';
 import { DEPLOYMENT_PUBLISH_SETTINGS } from './admin-settings-deployment-publish-definitions';
 import { FEATURE_SETTINGS } from './admin-settings-features-definitions';
 import { GCP_CATALOG_SETTINGS } from './admin-settings-gcp-catalog-definitions';
@@ -37,6 +38,7 @@ const definitions = [
   ...PROJECT_EVENT_SETTINGS,
   ...DEPLOYMENT_PUBLISH_SETTINGS,
   ...CORE_SETTINGS,
+  ...CREDENTIAL_SETUP_SETTINGS,
   ...NODE_TUNNEL_SETTINGS,
   ...FEATURE_SETTINGS,
   ...GCP_CATALOG_SETTINGS,

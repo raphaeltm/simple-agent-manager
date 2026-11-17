@@ -7,7 +7,10 @@
  */
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import type { SetupSessionStatus } from '../../services/credential-setup-config';
+import {
+  getSetupSessionCleanupRecoveryStepTimeoutMs,
+  type SetupSessionStatus,
+} from '../../services/credential-setup-config';
 import {
   destroySandboxInstance,
   getSandboxConfig,
@@ -50,7 +53,12 @@ export async function runSetupSessionCleanup(
   resumed: boolean
 ): Promise<void> {
   const { env, sql } = context;
-  const execTimeoutMs = getSandboxConfig(env).execTimeoutMs;
+  const interactiveTimeoutMs = getSandboxConfig(env).execTimeoutMs;
+  // Recovery is a control loop: at most three attempts, two bounded sandbox steps
+  // per attempt (10s total by default), plus settings/pool/D1 bookkeeping.
+  const execTimeoutMs = resumed
+    ? Math.min(interactiveTimeoutMs, await getSetupSessionCleanupRecoveryStepTimeoutMs(env))
+    : interactiveTimeoutMs;
 
   // 1. Delete the captured credential file and scrub the setup dir (bounded).
   if (skipsScrub(row, resumed)) {
@@ -62,14 +70,20 @@ export async function runSetupSessionCleanup(
           : 'never_left_provisioning',
     });
   } else {
+    let scrubAllowed = true;
     try {
-      const sandbox = await getSandboxInstance(env, row.id);
       // Variable (not inline): avoids the SQL-injection AST check's false positive.
       const scrubCmd = `rm -rf ${shellQuote(row.codex_home)}`;
       // Bounded here too: the exec's own timeout covers the command, not the container
       // start the SDK may perform before it.
       await withTimeout(
-        sandbox.exec(scrubCmd, { timeout: execTimeoutMs }),
+        (async () => {
+          const sandbox = await getSandboxInstance(env, row.id);
+          // A timed-out acquisition can resolve after destruction. Do not begin
+          // a new exec then: it would restart the sandbox we just removed.
+          if (!scrubAllowed) return;
+          return sandbox.exec(scrubCmd, { timeout: execTimeoutMs });
+        })(),
         execTimeoutMs,
         `Setup dir scrub timed out after ${execTimeoutMs}ms`
       );
@@ -78,13 +92,24 @@ export async function runSetupSessionCleanup(
         sessionId: row.id,
         error: err instanceof Error ? err.message : String(err),
       });
+    } finally {
+      scrubAllowed = false;
     }
   }
   let cleanupSucceeded = true;
   // 2. Destroy the sandbox container (bounded inside destroySandboxInstance).
   if (row.cleanup_sandbox_destroyed !== 1) {
     try {
-      await destroySandboxInstance(env, row.id, { sandboxId: row.id });
+      const destruction = destroySandboxInstance(env, row.id, { sandboxId: row.id });
+      if (resumed) {
+        await withTimeout(
+          destruction,
+          execTimeoutMs,
+          `Setup sandbox destroy timed out after ${execTimeoutMs}ms`
+        );
+      } else {
+        await destruction;
+      }
       // Commit proof before the next await: a death during pool/D1 cleanup must
       // never make recovery exec against (and recreate) the destroyed sandbox.
       sql.exec(`UPDATE setup_session SET cleanup_sandbox_destroyed = 1 WHERE id = ?`, row.id);

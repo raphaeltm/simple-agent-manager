@@ -1135,6 +1135,7 @@ replay, duplicate count and fingerprint-conflict behavior in either mode. A skip
 event has no delivery-key ledger; a later redelivery is evaluated against the
 subscriptions active at that later admission. GitHub trigger execution remains
 independent of canonical project-event storage (`routes/github-webhook.ts`).
+
 ## Use an OpenAI-compatible model server
 
 Under **AI models**, set `llm.openAICompatible.baseUrl`, the model ID and optional API key.
@@ -1148,3 +1149,16 @@ for all keys, budgets, proxy availability and accounting limits.
 
 <!-- Verified: services/llm-endpoint-settings.ts, services/llm-chat-target.ts,
      services/platform-capabilities.ts:resolveLlmEndpointCapability. -->
+
+## Guided-login cleanup recovery
+
+`credentialSetup.cleanupRecoveryStepTimeoutMs` (Operations) limits each sandbox scrub and
+destruction step when a guided credential-login cleanup is retried by its recovery alarm.
+The default is 5,000 ms per step (range 1–10,000 ms), capped by `SANDBOX_EXEC_TIMEOUT_MS`.
+The alarm makes at most three recovery attempts: sandbox work takes at most 10 seconds per
+attempt by default, plus the bounded settings read and pool/D1 bookkeeping. Only recovery
+reads this setting; inline cancellation keeps the interactive sandbox timeout.
+
+A deadline stops waiting; it does not cancel the underlying SDK operation. A timed-out
+destruction never records destruction proof. Unfinished cleanup remains marked pending;
+after the recovery cap it is quarantined and reported as an operator-visible platform error.

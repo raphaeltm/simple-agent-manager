@@ -38,6 +38,7 @@ export type AdminSettingName =
   | LlmEndpointSettingName
   | AiProxySettingName
   | DeploymentPublishJobSettingName
+  | 'credentialSetup.cleanupRecoveryStepTimeoutMs'
   | 'deployments.publishCallbackMaxBodyBytes'
   | 'events.skipUnsubscribedGitHubCi'
   | 'chat.messageMergingEnabled'
