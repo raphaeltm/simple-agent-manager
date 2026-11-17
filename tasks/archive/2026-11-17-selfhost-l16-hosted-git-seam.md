@@ -51,7 +51,7 @@ working exactly as today.
 
 - Cloudflare Artifacts create / clone / push / browse / delete unchanged (staging).
 - GitHub project clone unchanged (staging).
-- A registered fallback backend is used only when Artifacts is enabled and no binding exists (unit).
+- A registered fallback backend serves repositories only when Artifacts is enabled and no binding exists (unit). Deletion cleanup remains available after disabling the flag, matching the Cloudflare binding.
 - An Artifacts project whose remote is not `*.artifacts.cloudflare.net` gets cloneUrl + repositoryHost; the VM agent
   attaches the token only to that bound host (unit, Go).
 - No D1 read added to any workspace-creation path.
@@ -69,3 +69,11 @@ working exactly as today.
 - Old agent + new control plane on a self-hosted install cannot clone a hosted repository (no token attached): not
   reachable on Cloudflare, and self-host placement already rejects nodes whose agent build differs from the required
   release (rule 54), so hosted projects only land on agents with this change.
+
+## Takeover validation
+
+- Merged safe deploy main including #2841 (`0c672ddbf`); `quality:no-secret-readback` passes.
+- Codex comment 4598971932 addressed: cleanup-only backend resolution preserves disabled-feature deletion without widening serving, creation or token access. Surgical revert: disabled/absent DELETE cases fail, 13 controls pass; restored suite passes.
+- Consolidated copied Artifacts creation test setup (Sonar); tests still enter the real production route/schema.
+- Focused Cloudflare/security/completion reviews PASS; Go implementation unchanged, prior review retained.
+- Staging fresh VM/clone/push and GitHub clone remain pending; production merge hold remains until coordinator lifts it.

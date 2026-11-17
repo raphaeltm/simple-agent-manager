@@ -11,7 +11,8 @@
  * hosted-git implementation.
  *
  * Every caller that needs the backend goes through `resolveArtifactsBackend`, so the capability
- * flag, project creation, browsing, git tokens and deletion cannot disagree.
+ * flag, project creation, browsing and git tokens cannot disagree. Deletion uses the same
+ * selection without the enable flag, so disabling the feature cannot orphan existing repositories.
  */
 import type { Env } from '../../env';
 
@@ -33,8 +34,12 @@ export function registerArtifactsBackendFallback(factory: ArtifactsBackendFallba
 /** The backend this install uses for SAM-native repositories, or null when it has none. */
 export function resolveArtifactsBackend(env: Env): ArtifactsBackend | null {
   if (env.ARTIFACTS_ENABLED !== 'true') return null;
-  if (env.ARTIFACTS) return env.ARTIFACTS;
-  return fallback?.(env) ?? null;
+  return resolveArtifactsBackendForCleanup(env);
+}
+
+/** Existing repositories still need cleanup after the feature is disabled. Never use for serving. */
+export function resolveArtifactsBackendForCleanup(env: Env): ArtifactsBackend | null {
+  return env.ARTIFACTS ?? fallback?.(env) ?? null;
 }
 
 /** Whether this install can create and serve SAM-native (Artifacts) repositories. */

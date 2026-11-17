@@ -17,7 +17,7 @@ import {
   deleteProjectLibraryObjects,
   getProjectDeleteCleanupBatchSize,
 } from '../../services/file-library';
-import { resolveArtifactsBackend } from '../../services/hosted-git/backend';
+import { resolveArtifactsBackendForCleanup } from '../../services/hosted-git/backend';
 import { getRuntimeLimits } from '../../services/limits';
 import { deleteWorkspaceResourceHistoryObjectsForProject } from '../../services/workspace-resource-history';
 import { registerProjectCreateRoute } from './project-create';
@@ -43,9 +43,8 @@ async function cleanupArtifactsRepoOnProjectDelete(
     action: 'orphaned_artifacts_repo_on_delete',
   };
 
-  // The Cloudflare binding even when ARTIFACTS_ENABLED was turned off after creation (unchanged),
-  // else the backend the self-host build registered.
-  const artifacts = env.ARTIFACTS ?? resolveArtifactsBackend(env);
+  // Disabling Artifacts stops serving, but must not prevent cleanup of existing repositories.
+  const artifacts = resolveArtifactsBackendForCleanup(env);
   if (!artifacts || typeof artifacts.delete !== 'function') {
     log.warn('project_delete.artifacts_delete_unavailable', orphanDetails);
     return;

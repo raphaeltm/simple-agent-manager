@@ -4,7 +4,8 @@
  * `resolveArtifactsBackend` is the one answer to "which Artifacts backend does this install use?".
  * On Cloudflare it is the binding or nothing; a self-host build may register a fallback that is
  * used only when Artifacts is enabled and no binding exists. Every caller (capability flag,
- * project creation and deletion, git tokens, repository browsing) goes through it.
+ * project creation, git tokens, repository browsing) goes through it. Deletion uses
+ * cleanup-only resolution so disabling the flag cannot orphan existing repositories.
  */
 import { repoHostingPorts } from '@simple-agent-manager/repo-hosting/ports';
 import { afterEach, describe, expect, it, vi } from 'vitest';

@@ -3,7 +3,8 @@ import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
-import { projectsRoutes } from '../../../src/routes/projects';
+import { AppError } from '../../../src/middleware/error';
+import { registerProjectCreateRoute } from '../../../src/routes/projects/project-create';
 import { registerArtifactsBackendFallback } from '../../../src/services/hosted-git/backend';
 
 /**
@@ -20,17 +21,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('drizzle-orm/d1');
-vi.mock('../../../src/middleware/auth', () => ({
-  rejectAgentSignInSession: () => async (_c: unknown, next: () => Promise<void>) => next(),
-  assertNotAgentSignInSession: () => undefined,
-  requireAuth: () => vi.fn((c: any, next: any) => next()),
-  requireApproved: () => vi.fn((c: any, next: any) => next()),
-  getUserId: () => 'user-1',
-}));
+vi.mock('../../../src/middleware/auth', () => ({ getUserId: () => 'user-1' }));
 vi.mock('../../../src/middleware/project-auth', () => ({
   createOwnerProjectMembership: mocks.createOwnerProjectMembership,
-  requireProjectAccess: mocks.requireProjectAccess,
-  requireProjectCapability: mocks.requireProjectCapability,
 }));
 vi.mock('../../../src/services/artifacts/seed-readme', () => ({
   seedArtifactsReadme: mocks.seedArtifactsReadme,
@@ -79,19 +72,15 @@ describe('POST /api/projects — Artifacts provider through the hosted-git seam'
     insertedRows = [];
     deletedProjectIds = [];
 
-    const makeSelectBuilder = () => {
-      const fromBuilder = {
-        where: vi.fn(() =>
-          Object.assign(Promise.resolve(whereResponses.shift() ?? []), {
-            limit: vi.fn(() => Promise.resolve(limitResponses.shift() ?? [])),
-          })
-        ),
-      };
-      return { from: vi.fn(() => fromBuilder) };
-    };
-
     const mockDB = {
-      select: vi.fn(() => makeSelectBuilder()),
+      select: vi.fn(() => ({
+        from: () => ({
+          where: () =>
+            Object.assign(Promise.resolve(whereResponses.shift() ?? []), {
+              limit: () => Promise.resolve(limitResponses.shift() ?? []),
+            }),
+        }),
+      })),
       insert: vi.fn(() => ({
         values: vi.fn((row: unknown) => {
           insertedRows.push(row);
@@ -111,14 +100,14 @@ describe('POST /api/projects — Artifacts provider through the hosted-git seam'
     mocks.createOwnerProjectMembership.mockResolvedValue(undefined);
 
     app = new Hono<{ Bindings: Env }>();
-    app.onError((err, c) => {
-      const appError = err as { statusCode?: number; error?: string; message?: string };
-      if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
-        return c.json({ error: appError.error, message: appError.message }, appError.statusCode);
-      }
-      return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
-    });
-    app.route('/api/projects', projectsRoutes);
+    app.onError((err, c) =>
+      err instanceof AppError
+        ? c.json(err.toJSON(), err.statusCode)
+        : c.json({ error: 'INTERNAL_ERROR' }, 500)
+    );
+    const createRoute = new Hono<{ Bindings: Env }>();
+    registerProjectCreateRoute(createRoute);
+    app.route('/api/projects', createRoute);
   });
 
   afterEach(() => registerArtifactsBackendFallback(null));
