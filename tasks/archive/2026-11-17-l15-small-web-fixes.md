@@ -46,7 +46,7 @@ SAM task 01M7M9EWWHSFH09VE6ZN1S27WJ. Self-host landing slice L15 (idea 01M72M9AE
 - [x] Copy: email trigger (two places), onboarding hosted repo
 - [x] Unit tests (gate click creates one profile; no auto-create; fit warning with overrides)
 - [x] Playwright audit 375/1280
-- [ ] Staging verification
+- [x] Staging verification (coordinator-approved hybrid substitutions documented below)
 
 ## Acceptance criteria
 
@@ -61,3 +61,16 @@ SAM task 01M7M9EWWHSFH09VE6ZN1S27WJ. Self-host landing slice L15 (idea 01M72M9AE
 - PR #2857. Fit warning lives in the read-only overview only (as on the integration branch).
 - Desktop gate squeeze with long agent names found in screenshots and fixed (text on its own row).
 - Personal pool page fallback notice said "This project uses..." with no project; now "Your work uses...".
+
+## Takeover completion evidence (2026-11-17)
+
+- Main merged normally, including #2841 secret-readback removal and #2840. Conflict-free; binary feature diff before/after #2840 merge identical. Secret guard: zero findings, one tracked masked legacy read.
+- Gated staging run [44186398487](https://github.com/raphaeltm/simple-agent-manager/actions/runs/44186398487), attempt 2, SUCCESS on `2b4f3b30dd274bdcae1c4f29d71a58e8eb626e0f`. One plain failed-job retry resolved transient Pulumi R2 metadata HTTP500 after rollout gate passed; every deploy gate retained.
+- Playwright375/1280 screenshots opened: unmocked multi-agent gate; wizard Instant card matches real config; real wizard profile and project/chat creation; chat responded `L15 VERIFIED`; From-allowlist-only email copy; real pool resolved defaults (2vCPU/4GB/15GB) and1024MB host reserve match fit positive control.
+- Coordinator-approved hybrid: only agent-list response filtered to one real configured agent. No creation before click; click makes exactly one real `Claude Code Chat` profile, verified API readback and focused composer, then deleted; both widths. No single-agent staging principal exists.
+- Coordinator-approved onboarding hybrid: only read-only project-list response returns empty to expose repository question; correct SAM-hosted copy at both widths, no writes.
+- No sanctioned installation-default settings writer exists. Coordinator explicitly approved live resolved-default positive control plus real-SQL override cases: `reports the selected validated settings sources and diagnoses invalid persisted values` and `changes placement snapshot generations when effective settings or credential source changes` (2 PASS). No persisted staging override was mutated.
+- Cleanup: profiles deleted; session stopped200/workspaceDeleted true; project deleted200; project/workspace/node GET404. Sign-out200. No settings changed or VMs created. Release44193421578 SUCCESS; authoritative22:51UTC lease holder null, next task turn, peer notified.
+- Coordinator approved carrying staging evidence over a conflict-free main merge with identical feature patch, task archive as the only extra change, and full CI passing on final head. PR body contains screenshot links and current gate status.
+- Independent focused UI review PASS (4/4/4/4/5); completion checks A-F PASS after final evidence review; cleared for archive. Original specialists PASS/ADDRESSED and all automated findings resolved; incremental reviews cover takeover fixes.
+- Unrelated CI repairs: bounded virtual-row reveal readiness in visual helper, and relative future TTL in SecretRequestCard success fixture; assertions and dedicated expiry cases preserved.
