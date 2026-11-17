@@ -7,6 +7,7 @@ import type { Env } from '../env';
 import { clientIpFromHeaders } from '../lib/client-ip';
 import { log } from '../lib/logger';
 import { createNodeBackendDNSRecord, updateDNSRecord } from '../services/dns';
+import { nodeHasTunnelIngress } from '../services/node-transport-extension';
 
 const NODE_DNS_ERROR_MESSAGE_MAX_LENGTH = 500;
 const NODE_BACKEND_DNS_ERROR_PREFIX = 'Backend DNS record creation failed:';
@@ -48,22 +49,24 @@ function selectHeartbeatIp(
 ): string | undefined {
   // Tunnel-transport nodes are reached via a proxied CNAME → cloudflared, NOT a public-IP A record,
   // and their CF-Connecting-IP is the tunnel/NAT egress. Suppress ALL IP/A-record backfill for them
-  // server-side (keyed on tunnelId presence, NOT nodeClass — a future public-IP BYO mode still wants
+  // server-side (keyed on stored transport or tunnelId, NOT nodeClass — a future public-IP BYO mode still wants
   // backfill) so a heartbeat can never create an A record that conflicts with the enrollment CNAME.
   // See security-critique #8 / architecture-critique #7.
   // One exception: a deployment-role tunnel node whose provider reported no IP at create. Its
   // app routes are grey-cloud A records to the node's public IP (services/dns-app-routes.ts),
   // so it records the heartbeat's IPv4 egress as `ip_address` only. It never gets a backend A
   // record: `effectiveNodeIp` stays null for every tunnel node.
+  const hasTunnelIngress = nodeHasTunnelIngress(node);
   const deploymentTunnelIpBackfill =
-    !!node.tunnelId &&
+    hasTunnelIngress &&
+    node.transport !== 'reverse-tunnel' &&
     node.nodeRole === 'deployment' &&
     node.nodeClass === 'managed' &&
     !node.ipAddress;
-  if (node.tunnelId && !deploymentTunnelIpBackfill) {
+  if (hasTunnelIngress && !deploymentTunnelIpBackfill) {
     log.debug('heartbeat.ip_backfill_skipped_tunnel_node', { nodeId, action: 'skipped' });
   }
-  if (!node.tunnelId || (deploymentTunnelIpBackfill && isValidIPv4Address(connectingIp))) {
+  if (!hasTunnelIngress || (deploymentTunnelIpBackfill && isValidIPv4Address(connectingIp))) {
     return connectingIp;
   }
   return undefined;
@@ -144,6 +147,7 @@ export async function applyHeartbeatIp(params: HeartbeatIpParams): Promise<void>
   const heartbeatIp = selectHeartbeatIp(node, nodeId, connectingIp);
   backfillNodeIp(node, nodeId, heartbeatIp, updatePayload);
   // A tunnel's app-route IP may be recorded, but its CNAME must never get a backend A record.
-  const effectiveNodeIp = node.tunnelId ? null : node.ipAddress || heartbeatIp;
+  const tunnelIngress = nodeHasTunnelIngress(node);
+  const effectiveNodeIp = tunnelIngress ? null : node.ipAddress || heartbeatIp;
   if (effectiveNodeIp) await reconcileHeartbeatDns(params, heartbeatIp, effectiveNodeIp);
 }

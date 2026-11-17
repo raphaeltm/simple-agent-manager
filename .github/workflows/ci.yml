@@ -131,6 +131,7 @@ jobs:
               - 'scripts/deploy/deploy-signing-keys.ts'
               - 'scripts/deploy/types.ts'
               - 'scripts/deploy/vapid-keys.ts'
+              - 'scripts/selfhost/reverse-tunnel-migrations.ts'
               - 'scripts/quality/node-pool-boundary.ts'
               - 'scripts/quality/node-pool-boundary/**'
               - 'tests/fixtures/acp-activity-report-v1.json'

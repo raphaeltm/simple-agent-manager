@@ -1,8 +1,6 @@
 /**
  * Insights (Insights slice F, idea 01M7HTS38KX2G78JD0ESAGMKKH): a project page with four tabs,
- * Flow, Agent setups, Accounts and People. Flow, Agent setups (slice S) and Accounts (slice A) are
- * live; People says it is coming until its slice (P in the spec) ships, which is the one
- * placeholder the spec allows.
+ * Flow, Agent setups, Accounts and People, all live (Insights slices F, S, A and P).
  *
  * The header slab carries the range (7, 30 or 90 days, kept in `?range=` so a link keeps it)
  * and the tabs. Each tab is its own route under `/projects/:id/insights/`.

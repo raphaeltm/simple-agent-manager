@@ -9,6 +9,50 @@ This guide walks you through deploying Simple Agent Manager to your own infrastr
 
 If you'd rather not fork and configure a repository, the [installer](/docs/guides/installer/) builds and deploys a complete SAM in your Cloudflare account from your browser, and updates it later (check [who can use the hosted installer today](/docs/guides/installer/)). This guide is the fork-based path: more steps, and full control over every setting.
 
+## Single-box transport foundation
+
+The single-box deployment is being landed in separate slices. Its reverse-tunnel API foundation
+is build-specific: lease allocation and frps authorization live under `apps/api/src/selfhost/`
+and are absent from the Cloudflare Worker entry. Setting `VM_AGENT_TRANSPORT=reverse-tunnel`
+on a Cloudflare deployment does not install that transport and fails before VM allocation.
+
+The self-host build supplies the frpc boot renderer and installs its transport adapter before
+requests or Durable Object dispatch. It appends the migration manifest from
+`apps/api/src/selfhost/reverse-tunnel-migrations.ts` to the **same database's** flat migration
+projection after the shared migrations, rejecting filename collisions. Cloudflare databases do
+not receive the reverse-tunnel lease table. Existing boxes keep the additive table created by
+the earlier migration number.
+
+The transport setting admits new leases. Existing allocations adopt their original lease only
+while its exact stored owner remains live. Cleanup and the backstop follow the installed
+self-host driver, so changing the setting cannot strand an old lease. A build without that
+driver performs no reverse-lease SQL.
+
+Lease credentials and frps session IDs use separate HKDF-derived HMAC keys. One pinned frps
+instance owns session replacement. Its Login plugin must apply the server-selected `run_id`
+with `unchange: false`, and every subsequent operation checks that session against the lease.
+Credential-key rotation recovery is tracked separately. Changing the root key rejects stale
+resume derivation and old session IDs, but a credential matching the stored lease hash can
+still log in and obtain the new session ID; root-key rotation alone does not revoke that lease. Full gateway, cloud-init and installer packaging follow this foundation.
+
+The self-host build supplies these bootstrap settings; they are not Cloudflare Worker bindings:
+
+| Setting | Default and contract |
+| --- | --- |
+| `REVERSE_TUNNEL_GATEWAY_SECRET` | Required random secret, at least 32 characters, shared with the frps/plugin gateway. |
+| `REVERSE_TUNNEL_GATEWAY_SECRET_ALTERNATE` | Unset; optional second gateway secret during a coordinated rotation. |
+| `REVERSE_TUNNEL_PORT_RANGE_START` / `REVERSE_TUNNEL_PORT_RANGE_END` | `20000` / `29999`; ports 1024–65535, at most 20,000 ports; must match frps `allowPorts`. |
+| `REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS` | `90`; 60–3600 seconds; the build must supply the same timeout to frps. |
+| `REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS` | `180`; cannot be shorter than twice the heartbeat timeout; maximum 86400 seconds. |
+
+Allocation considers the whole bounded port range in one atomic SQL statement, with indexed
+history lookups. Release checks all active leases in one local statement, without network calls
+or pagination. At the outer normal limit of 20,000 active leases, one backstop pass releases all
+eligible leases; the later gateway slice schedules that backstop every five minutes. A newly
+freed port still waits for its cooling interval. A full range and a cooling range have distinct
+errors so operators can distinguish capacity exhaustion from a wait for safe reuse.
+
+
 ## Prerequisites
 
 | Requirement              | Purpose                   | Tier                 |

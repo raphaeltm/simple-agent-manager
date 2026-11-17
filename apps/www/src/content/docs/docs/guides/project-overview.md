@@ -1,6 +1,6 @@
 ---
 title: Project Overview
-description: The page a project opens on. See what needs you, what is running, how this week went, how much your agent accounts have left, which automations need fixing and what happened recently, and start a task without leaving the page.
+description: The page a project opens on. Read a short brief, see what needs you, what is running, how this week went, how much your agent accounts have left, which automations need fixing and what happened recently, and start a task without leaving the page.
 ---
 
 The **Overview** is where a project opens, and the first item in its navigation on a desktop and on
@@ -21,12 +21,40 @@ the right of the app bar on a phone. Links that point at one chat (a notificatio
 
 ## Layout
 
-- **On a phone**, top to bottom: **Needs you**, **Running now**, **This week**, **Budgets**,
-  **Automations** and **Recently**, with the task box pinned at the bottom.
-- **On a desktop**: **Needs you** on the left with the task box under it, and the other sections in
-  a column on the right.
+- **On a phone**, top to bottom: **Needs you**, the **brief** folded to one line, **Running now**,
+  **This week**, **Budgets**, **Automations** and **Recently**, with the task box pinned at the
+  bottom.
+- **On a desktop**: the **brief** and **Needs you** on the left with the task box under them, and
+  the other sections in a column on the right.
 
 ## What it shows
+
+### The brief
+
+A few generated sentences on how the project is advancing and what is in the way, most important
+first: what is waiting on a person, what is failing or stuck, then what moved. Every item it
+mentions (an inbox item, a chat, an automation, an account, a pull request or an idea) is a link to
+that item. It never contains numbers: the counts are on the sections below it.
+
+- **On a phone** it is one line under **Needs you**. Tap the arrow to read the first two sentences
+  in place. **On a desktop** it shows up to three sentences above **Needs you**.
+- It is written from what every member of the project can see: open inbox items addressed to the
+  whole team (or, in a one-person project, to you), running and recently failed chats, failing
+  automations, shared accounts running low, and recent pull requests and ideas. It never reads chat
+  messages. **Needs you** stays your own.
+- It is not rewritten on every visit. SAM checks after a page view whether something that matters
+  changed (an item opened, answered or archived; a chat started, finished or failed; an automation
+  started failing or recovered; an account crossed a usage level) and writes a new one in the
+  background, at most once per interval and a limited number of times a day.
+- While the facts have moved on, the old text stays, dimmed, with when it was written. A sentence
+  about an item that has since closed (for example a question you just answered) disappears at
+  once.
+- It is not shown when there is nothing to say (nothing waiting and nothing running), when the
+  brief could not be written, or when an administrator has switched it off. The rest of the page is
+  the same either way.
+
+Administrators control it in **Admin → Settings → AI models** (`overviewBrief.*`, see
+[Admin settings](/docs/guides/admin-settings/#project-overview-brief)).
 
 ### Needs you
 

@@ -4,6 +4,7 @@ import type {
   InsightsInstallationSettingName,
   InsightsPageSettingName,
   InsightsReceiptSettingName,
+  ProjectBriefSettingName,
 } from '@simple-agent-manager/operations';
 
 import type { Env } from '../env';
@@ -50,6 +51,7 @@ export type AdminSettingName =
   | InsightsPageSettingName
   | InsightsInstallationSettingName
   | InsightsCloudflareCostSettingName
+  | ProjectBriefSettingName
   | RuntimeSecretRequestSettingName
   | AgentEmailSettingName
   | FleetOpsSettingName
