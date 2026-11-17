@@ -167,6 +167,8 @@ Project event pull loop: create a subscription with the narrowest useful filter,
 ## Administration (Superadmin Only)
 
 - `GET|PUT|DELETE /api/admin/ai-allowance/:userId` — Per-user AI allowance: budget ceilings plus `allowedModelTiers` (`null` = every tier, else a subset of `low-cost`/`standard`/`premium`; unknown names are `400`). The AI proxy enforces the tiers on every platform-credential route (`packages/ai-proxy/src/ai-model-tier-gate.ts`): out-of-tier or untiered models get `403 permission_error`, an unreadable allowance fails closed; BYO-key passthrough is not restricted
+- `GET /api/admin/health-cost?range=7d|30d|month` — Superadmin Admin Health & cost read (`installationHealth` in `packages/operations`): compute spend per currency, reuse, density, new-machine reasons, lifecycle latency, and `cloudflare` (the Cloudflare account's estimated USD cost this month from the daily snapshot)
+- `POST /api/admin/health-cost/cloudflare/refresh` — Superadmin "Refresh now": runs the Cloudflare cost snapshot (`runCloudflareCostSnapshot`); `429` inside `insights.cloudflareCostRefreshMinSeconds`; Cloudflare failures return `200` with a recorded status
 - `GET /api/admin/tasks/stuck` — List tasks currently in transient states
 - `GET /api/admin/tasks/:taskId/reconciliation-diagnostics` — Read the TaskRunner probe, task-scoped runtime liveness, eligibility threshold, reconciliation decision, and whether/where the bounded cursor page selects the task, without mutating task state
 - `GET /api/admin/tasks/recent-failures` — List recent failed tasks with error details

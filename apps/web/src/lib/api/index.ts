@@ -34,9 +34,6 @@ export type {
   AnalyticsEventsResponse,
   AnalyticsFeatureAdoptionResponse,
   AnalyticsForwardStatusResponse,
-  AnalyticsFunnelResponse,
-  AnalyticsGeoResponse,
-  AnalyticsRetentionResponse,
   AnalyticsWebsiteTrafficResponse,
   WebsiteTrafficHost,
   WebsiteTrafficSection,
@@ -78,9 +75,6 @@ export {
   fetchAnalyticsEvents,
   fetchAnalyticsFeatureAdoption,
   fetchAnalyticsForwardStatus,
-  fetchAnalyticsFunnel,
-  fetchAnalyticsGeo,
-  fetchAnalyticsRetention,
   fetchAnalyticsWebsiteTraffic,
   fetchSignupApprovalConfig,
   getAdminLogStreamUrl,
@@ -100,7 +94,7 @@ export {
   updatePlatformCredential,
   updateSignupApprovalConfig,
 } from './admin';
-export { getInstallationHealth } from './admin-health-cost';
+export { getInstallationHealth, refreshCloudflareCost } from './admin-health-cost';
 export {
   decideOperationsApproval,
   fetchOperationsApproval,

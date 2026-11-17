@@ -12,7 +12,9 @@
  *   1  running intervals
  *   3  lifecycle latency (`ports.lifecycleLatency.rangeReport`: episodes, stuck rows,
  *      incidents; its settings read hits the cache the limits read just filled)
- * 9 here, plus 3 in the REST route's session middleware: 12. `admin-health-cost.test.ts` counts
+ *   1  Cloudflare cost snapshot rows and sync status, one D1 batch
+ *      (`insights-installation-cloudflare.ts`, Insights slice CF)
+ * 10 here, plus 3 in the REST route's session middleware: 13. `admin-health-cost.test.ts` counts
  * them. Each section is isolated: one that fails is null and named in `unavailable`, and the
  * others still render (`.claude/rules/53`).
  */
@@ -26,6 +28,7 @@ import {
 import { log } from '@simple-agent-manager/worker-core';
 
 import { OperationError } from './errors';
+import { readCloudflareCost } from './insights-installation-cloudflare';
 import { type HealthWindowBounds, readComputeSpend } from './insights-installation-compute';
 import { readMachineDensity, readPlacementSections } from './insights-installation-placements';
 import {
@@ -143,7 +146,7 @@ export async function installationHealth(
   const bounds = installationHealthBounds(range, nowMs, limits['insights.healthSpendWeeks']);
 
   const unavailable: InstallationHealthSection[] = [];
-  const [compute, placements, density, latency] = await Promise.all([
+  const [compute, placements, density, latency, cloudflare] = await Promise.all([
     section(
       'compute',
       () => readComputeSpend(ctx, bounds, limits['insights.healthMaxNodes']),
@@ -174,6 +177,16 @@ export async function installationHealth(
         ctx.ports.lifecycleLatency.rangeReport({ sinceMs: bounds.rangeStartMs, untilMs: nowMs }),
       unavailable
     ),
+    section(
+      'cloudflare',
+      () =>
+        readCloudflareCost(ctx, {
+          seriesDays: limits['insights.healthCloudflareSeriesDays'],
+          topLines: limits['insights.healthCloudflareTopLines'],
+          projectionDays: limits['insights.healthCloudflareProjectionDays'],
+        }),
+      unavailable
+    ),
   ]);
 
   return {
@@ -188,6 +201,7 @@ export async function installationHealth(
     density,
     newMachines: placements?.newMachines ?? null,
     latency,
+    cloudflare,
     unavailable,
   };
 }

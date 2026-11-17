@@ -1,5 +1,6 @@
 import type { DeploymentPublishJobSettingName } from '@simple-agent-manager/app-deployment';
 import type {
+  InsightsCloudflareCostSettingName,
   InsightsInstallationSettingName,
   InsightsPageSettingName,
   InsightsReceiptSettingName,
@@ -45,6 +46,7 @@ export type AdminSettingName =
   | InsightsReceiptSettingName
   | InsightsPageSettingName
   | InsightsInstallationSettingName
+  | InsightsCloudflareCostSettingName
   | RuntimeSecretRequestSettingName
   | AgentEmailSettingName
   | FleetOpsSettingName

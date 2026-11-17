@@ -12,11 +12,14 @@ import {
   type InstallationHealthRange,
 } from '@simple-agent-manager/shared';
 import { Button, Pane, SegmentedControl, Spinner } from '@simple-agent-manager/ui';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { useQueryScope } from '../hooks/useQueryScope';
-import { adminHealthCostQueryOptions } from '../lib/query-options';
+import { useToast } from '../hooks/useToast';
+import { refreshCloudflareCost } from '../lib/api';
+import { adminHealthCostQueryKeys, adminHealthCostQueryOptions } from '../lib/query-options';
+import { CloudflarePane } from './admin-health-cost/CloudflarePane';
 import { rangeLabel } from './admin-health-cost/format';
 import { ReasonsPane, SpendPane, StatTiles } from './admin-health-cost/HealthCostSections';
 import { LatencyPane } from './admin-health-cost/LatencyPane';
@@ -33,6 +36,7 @@ const SECTION_NAMES: Record<string, string> = {
   density: 'agents per machine',
   newMachines: 'new-machine reasons',
   latency: 'lifecycle latency',
+  cloudflare: 'Cloudflare cost',
 };
 
 export function AdminHealthCost() {
@@ -44,6 +48,28 @@ export function AdminHealthCost() {
   });
   const data = query.data;
   const refreshing = query.isFetching && data !== undefined;
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  // "Refresh now" runs the Cloudflare snapshot, then refetches the page in the background: the
+  // current numbers stay on screen until the new ones arrive (`.claude/rules/48`).
+  const refreshCloudflare = useMutation({
+    mutationFn: refreshCloudflareCost,
+    onSuccess: async (result) => {
+      if (result.status === 'ok') toast.success('Cloudflare cost updated');
+      else if (result.status === 'not_configured')
+        toast.error('Cloudflare cost is not set up: see the Cloudflare card');
+      else
+        toast.error(
+          `Cloudflare cost could not be fetched: ${result.error ?? result.status.replace('_', ' ')}`
+        );
+      await queryClient.invalidateQueries({ queryKey: adminHealthCostQueryKeys.all(scope ?? '') });
+    },
+    onError: (error) => {
+      toast.error(
+        `Could not refresh Cloudflare cost: ${error instanceof Error ? error.message : String(error)}`
+      );
+    },
+  });
 
   return (
     <div
@@ -62,7 +88,7 @@ export function AdminHealthCost() {
           </h2>
           <p className="m-0 mt-1 text-sm text-fg-muted">
             This installation · {data ? rangeLabel(data.window) : '…'} · compute costs are estimates
-            at each machine&apos;s recorded provider price
+            at each machine&apos;s recorded provider price; Cloudflare is month to date
           </p>
         </div>
         <SegmentedControl
@@ -110,11 +136,17 @@ export function AdminHealthCost() {
             compute={data.compute}
             reuse={data.reuse}
             density={data.density}
+            cloudflare={data.cloudflare}
           />
           <div className="grid grid-cols-1 gap-[var(--sam-space-gutter)] lg:grid-cols-2">
             <LatencyPane latency={data.latency} />
             <SpendPane compute={data.compute} />
             <ReasonsPane newMachines={data.newMachines} />
+            <CloudflarePane
+              cloudflare={data.cloudflare}
+              onRefresh={() => refreshCloudflare.mutate()}
+              refreshing={refreshCloudflare.isPending}
+            />
           </div>
         </>
       )}
