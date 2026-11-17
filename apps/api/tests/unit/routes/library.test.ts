@@ -224,6 +224,10 @@ describe('library routes', () => {
       const res = await app.fetch(
         new Request(`${BASE_URL}/projects/test-project-id/library/upload`, {
           method: 'POST',
+          headers: {
+            Origin: 'https://app.test.example.com',
+            'Sec-Fetch-Site': 'same-site',
+          },
           body: formData,
         }),
         env
@@ -232,6 +236,27 @@ describe('library routes', () => {
       expect(res.status).toBe(201);
       const json = (await res.json()) as Record<string, unknown>;
       expect(json['id']).toBe('file-123');
+    });
+
+    it('rejects a same-site workspace upload before persistence', async () => {
+      const { app, env } = makeApp(makeEnv());
+      const formData = new FormData();
+      formData.append('file', new File(['forged'], 'forged.txt'));
+
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/upload`, {
+          method: 'POST',
+          headers: {
+            Origin: 'https://ws-attacker--3000.test.example.com',
+            'Sec-Fetch-Site': 'same-site',
+          },
+          body: formData,
+        }),
+        env
+      );
+
+      expect(res.status).toBe(403);
+      expect(mockUploadFile).not.toHaveBeenCalled();
     });
 
     it('returns 400 when file field is missing', async () => {

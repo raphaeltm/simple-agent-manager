@@ -4,6 +4,8 @@
  * also admits the marketing and docs hosts, and same-site workspace hosts still receive the
  * session cookie, so an origin check is the boundary rather than CORS alone.
  */
+import type { MiddlewareHandler } from 'hono';
+
 import type { Env } from '../env';
 import { errors } from '../middleware/error';
 import { getTrustedApiOrigin } from './trusted-origins';
@@ -28,4 +30,23 @@ export function requireExactBrowserOrigin(
   if (!origin || origin !== exactAppOrigin(c.env)) {
     throw errors.forbidden(`Untrusted ${what} write origin`);
   }
+}
+
+/**
+ * Guard a cookie-authenticated write that is also available to non-browser API clients.
+ * Browsers attach Origin to unsafe cross-origin requests and modern browsers also attach Fetch
+ * Metadata; if either signal is present, require the exact app origin. Clients with neither
+ * browser-controlled header retain their authenticated API path.
+ */
+export function requireTrustedWriteOrigin(
+  what = 'state-changing'
+): MiddlewareHandler<{ Bindings: Env }> {
+  return async (c, next) => {
+    const origin = c.req.header('Origin');
+    const fetchSite = c.req.header('Sec-Fetch-Site');
+    if (origin || fetchSite) {
+      requireExactBrowserOrigin(c, what);
+    }
+    await next();
+  };
 }

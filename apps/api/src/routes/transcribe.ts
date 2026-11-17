@@ -1,6 +1,7 @@
 import { Hono, type MiddlewareHandler } from 'hono';
 
 import type { Env } from '../env';
+import { requireTrustedWriteOrigin } from '../lib/browser-write-origin';
 import { createModuleLogger, serializeError } from '../lib/logger';
 import { requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
@@ -46,122 +47,127 @@ const limitTranscription: MiddlewareHandler<{ Bindings: Env }> = (c, next) =>
  *
  * Response: { text: string }
  */
-transcribeRoutes.post('/', limitTranscription, async (c) => {
-  const startTime = Date.now();
-  // Whisper runs on Workers AI. Without the binding, refuse before reading the upload so the
-  // client gets a clear answer instead of a 500.
-  const ai = getWorkersAiBindingOrNull(c.env);
-  if (!ai) {
-    throw errors.featureUnavailable(
-      'speechToText',
-      'Speech-to-text is not available on this installation'
+transcribeRoutes.post(
+  '/',
+  requireTrustedWriteOrigin('transcription'),
+  limitTranscription,
+  async (c) => {
+    const startTime = Date.now();
+    // Whisper runs on Workers AI. Without the binding, refuse before reading the upload so the
+    // client gets a clear answer instead of a 500.
+    const ai = getWorkersAiBindingOrNull(c.env);
+    if (!ai) {
+      throw errors.featureUnavailable(
+        'speechToText',
+        'Speech-to-text is not available on this installation'
+      );
+    }
+    log.info('request_received');
+
+    const maxAudioSizeBytes = parseInt(
+      c.env.MAX_AUDIO_SIZE_BYTES || String(DEFAULT_MAX_AUDIO_SIZE_BYTES),
+      10
     );
-  }
-  log.info('request_received');
 
-  const maxAudioSizeBytes = parseInt(
-    c.env.MAX_AUDIO_SIZE_BYTES || String(DEFAULT_MAX_AUDIO_SIZE_BYTES),
-    10
-  );
+    // Parse multipart form data
+    let formData: Record<string, string | File>;
+    try {
+      formData = await c.req.parseBody();
+      log.info('form_data_parsed', { fields: Object.keys(formData).join(', ') });
+    } catch (parseErr) {
+      log.error('form_data_parse_failed', serializeError(parseErr));
+      throw errors.badRequest('Failed to parse multipart form data');
+    }
 
-  // Parse multipart form data
-  let formData: Record<string, string | File>;
-  try {
-    formData = await c.req.parseBody();
-    log.info('form_data_parsed', { fields: Object.keys(formData).join(', ') });
-  } catch (parseErr) {
-    log.error('form_data_parse_failed', serializeError(parseErr));
-    throw errors.badRequest('Failed to parse multipart form data');
-  }
+    const audioFile = formData['audio'];
 
-  const audioFile = formData['audio'];
+    if (!audioFile || typeof audioFile === 'string') {
+      log.error('missing_or_invalid_audio_field', {
+        hasAudioKey: 'audio' in formData,
+        audioType: typeof audioFile,
+      });
+      throw errors.badRequest('Missing "audio" field in multipart form data');
+    }
 
-  if (!audioFile || typeof audioFile === 'string') {
-    log.error('missing_or_invalid_audio_field', {
-      hasAudioKey: 'audio' in formData,
-      audioType: typeof audioFile,
-    });
-    throw errors.badRequest('Missing "audio" field in multipart form data');
-  }
-
-  log.info('audio_file_received', {
-    name: audioFile.name,
-    type: audioFile.type,
-    size: audioFile.size,
-    sizeKB: Math.round(audioFile.size / 1024),
-  });
-
-  // Validate file size > 0
-  if (audioFile.size === 0) {
-    log.error('audio_file_empty');
-    throw errors.badRequest('Audio file is empty');
-  }
-
-  // Validate file size within limit
-  if (audioFile.size > maxAudioSizeBytes) {
-    log.error('audio_file_too_large', {
+    log.info('audio_file_received', {
+      name: audioFile.name,
+      type: audioFile.type,
       size: audioFile.size,
-      maxSize: maxAudioSizeBytes,
+      sizeKB: Math.round(audioFile.size / 1024),
     });
-    throw errors.badRequest(
-      `Audio file too large. Maximum size is ${Math.round(maxAudioSizeBytes / 1_048_576)}MB`,
-      { maxBytes: maxAudioSizeBytes, actualBytes: audioFile.size }
-    );
-  }
 
-  // Convert audio to base64 for Workers AI Whisper input
-  const audioBuffer = await audioFile.arrayBuffer();
-  const audioBase64 = arrayBufferToBase64(audioBuffer);
-  log.info('audio_converted_to_base64', {
-    bufferBytes: audioBuffer.byteLength,
-    base64Length: audioBase64.length,
-  });
+    // Validate file size > 0
+    if (audioFile.size === 0) {
+      log.error('audio_file_empty');
+      throw errors.badRequest('Audio file is empty');
+    }
 
-  // Determine model ID (configurable via env var, per Constitution Principle XI)
-  const modelId = (c.env.WHISPER_MODEL_ID || DEFAULT_WHISPER_MODEL) as
-    '@cf/openai/whisper-large-v3-turbo';
-  log.info('calling_workers_ai', { model: modelId });
+    // Validate file size within limit
+    if (audioFile.size > maxAudioSizeBytes) {
+      log.error('audio_file_too_large', {
+        size: audioFile.size,
+        maxSize: maxAudioSizeBytes,
+      });
+      throw errors.badRequest(
+        `Audio file too large. Maximum size is ${Math.round(maxAudioSizeBytes / 1_048_576)}MB`,
+        { maxBytes: maxAudioSizeBytes, actualBytes: audioFile.size }
+      );
+    }
 
-  // Call Workers AI Whisper model
-  let result: { text?: string } | undefined;
-  try {
-    const aiStartTime = Date.now();
-    result = await ai.run(modelId, {
-      audio: audioBase64,
+    // Convert audio to base64 for Workers AI Whisper input
+    const audioBuffer = await audioFile.arrayBuffer();
+    const audioBase64 = arrayBufferToBase64(audioBuffer);
+    log.info('audio_converted_to_base64', {
+      bufferBytes: audioBuffer.byteLength,
+      base64Length: audioBase64.length,
     });
-    const aiDurationMs = Date.now() - aiStartTime;
-    log.info('workers_ai_response_received', {
-      durationMs: aiDurationMs,
-      hasResult: !!result,
-      hasText: !!result?.text,
-      textLength: result?.text?.length ?? 0,
-      textPreview: result?.text?.substring(0, 100) ?? '(empty)',
-    });
-  } catch (aiErr) {
+
+    // Determine model ID (configurable via env var, per Constitution Principle XI)
+    const modelId = (c.env.WHISPER_MODEL_ID || DEFAULT_WHISPER_MODEL) as
+      '@cf/openai/whisper-large-v3-turbo';
+    log.info('calling_workers_ai', { model: modelId });
+
+    // Call Workers AI Whisper model
+    let result: { text?: string } | undefined;
+    try {
+      const aiStartTime = Date.now();
+      result = await ai.run(modelId, {
+        audio: audioBase64,
+      });
+      const aiDurationMs = Date.now() - aiStartTime;
+      log.info('workers_ai_response_received', {
+        durationMs: aiDurationMs,
+        hasResult: !!result,
+        hasText: !!result?.text,
+        textLength: result?.text?.length ?? 0,
+        textPreview: result?.text?.substring(0, 100) ?? '(empty)',
+      });
+    } catch (aiErr) {
+      const totalDurationMs = Date.now() - startTime;
+      log.error('workers_ai_call_failed', {
+        ...serializeError(aiErr),
+        model: modelId,
+        audioSizeBytes: audioFile.size,
+        totalDurationMs,
+      });
+      throw aiErr;
+    }
+
+    // Extract transcribed text from result
+    const text = result?.text ?? '';
     const totalDurationMs = Date.now() - startTime;
-    log.error('workers_ai_call_failed', {
-      ...serializeError(aiErr),
-      model: modelId,
-      audioSizeBytes: audioFile.size,
+
+    log.info('request_complete', {
       totalDurationMs,
+      inputSizeKB: Math.round(audioFile.size / 1024),
+      inputType: audioFile.type,
+      outputLength: text.trim().length,
+      outputText: text.trim().substring(0, 200),
+      success: text.trim().length > 0,
     });
-    throw aiErr;
+
+    return c.json({ text: text.trim() });
   }
-
-  // Extract transcribed text from result
-  const text = result?.text ?? '';
-  const totalDurationMs = Date.now() - startTime;
-
-  log.info('request_complete', {
-    totalDurationMs,
-    inputSizeKB: Math.round(audioFile.size / 1024),
-    inputType: audioFile.type,
-    outputLength: text.trim().length,
-    outputText: text.trim().substring(0, 200),
-    success: text.trim().length > 0,
-  });
-
-  return c.json({ text: text.trim() });
-});
+);
 
 export { transcribeRoutes };
