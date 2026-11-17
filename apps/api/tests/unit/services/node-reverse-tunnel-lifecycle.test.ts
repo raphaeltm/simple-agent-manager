@@ -7,11 +7,11 @@ import { ProviderError } from '@simple-agent-manager/providers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ensureReverseTunnelLease, releaseNonLiveReverseTunnelLeases, releaseUnallocatedReverseTunnelLease, runReverseTunnelLeaseSweep } from '../../../src/selfhost/reverse-tunnel/leases';
-import * as transportRegistry from '../../../src/services/node-transport-extension';
-import { releaseTerminatedNodeIngress } from '../../../src/services/node-provisioning-ingress';
 import { installReverseTunnelTransport } from '../../../src/selfhost/reverse-tunnel/transport';
 import { buildNodeProviderLabels } from '../../../src/services/node-provider-labels';
+import { releaseTerminatedNodeIngress } from '../../../src/services/node-provisioning-ingress';
 import { deleteCreatedProviderVmDirectly } from '../../../src/services/node-provisioning-race-cleanup';
+import * as transportRegistry from '../../../src/services/node-transport-extension';
 import { provisionNode } from '../../../src/services/nodes';
 import { deleteNodeResourcesStrict } from '../../../src/services/strict-node-deletion';
 import { applySqliteMigration } from '../../helpers/sqlite-d1';

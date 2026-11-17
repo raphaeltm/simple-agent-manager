@@ -1,8 +1,8 @@
 import * as v from 'valibot';
 
 import { log, serializeError } from '../../lib/logger';
-import { LIVE_INCARNATION_SQL } from '../../services/node-tunnel-journal';
 import { nodeTransportExtension } from '../../services/node-transport-extension';
+import { LIVE_INCARNATION_SQL } from '../../services/node-tunnel-journal';
 import {
   deriveReverseTunnelCredential,
   hashReverseTunnelCredential,
