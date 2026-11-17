@@ -1,5 +1,6 @@
 import {
   applyGcpBootDiskPolicy,
+  applyInfomaniakBootVolumeSize,
   createProvider,
   type GcpBootDiskPolicy,
   type GcpPriceTable,
@@ -28,6 +29,7 @@ import { IoTimeoutError, withDeadline } from './fetch-timeout';
 import { readGcpPriceTable } from './gcp-price-table';
 import { createGcpProviderForEnv } from './gcp-provider-factory';
 import { createGcpTokenProvider, type GcpTokenOwner } from './gcp-token-provider';
+import { buildProviderConfigForEnv } from './infomaniak-provider-settings';
 import {
   type Db,
   DEFAULT_PROVIDER_CATALOG_TIMEOUT_MS,
@@ -41,11 +43,7 @@ import {
   listProjectProviderCatalogSeeds,
   listUserProviderCatalogSeeds,
 } from './provider-catalogs-seeds';
-import {
-  buildProviderConfig,
-  extractCloudProviderToken,
-  parseGcpCredential,
-} from './provider-credential-codecs';
+import { extractCloudProviderToken, parseGcpCredential } from './provider-credential-codecs';
 
 export async function listProviderCatalogOfferings(
   providerName: CredentialProvider,
@@ -114,12 +112,13 @@ export async function listProviderCatalogOfferings(
 
 /**
  * The static catalog, used when a live catalog cannot be read. GCP offerings are re-sized to the
- * boot disk policy (`gcpBootDiskPolicy`, default when omitted) so this fallback advertises the
- * disk `GcpProvider.createVM` will create.
+ * boot disk policy (`gcpBootDiskPolicy`, default when omitted) and Infomaniak offerings to the boot
+ * volume size (`infomaniakBootVolumeGb`, default when omitted), so this fallback advertises the
+ * disk `createVM` will create.
  */
 export function getStaticProviderCatalogOfferings(
   provider: CredentialProvider,
-  options: { gcpBootDiskPolicy?: GcpBootDiskPolicy } = {}
+  options: { gcpBootDiskPolicy?: GcpBootDiskPolicy; infomaniakBootVolumeGb?: number } = {}
 ): ProviderInstanceOffering[] {
   const locations = getLocationsForProvider(provider);
   const locationMetadata = Object.fromEntries(
@@ -130,9 +129,10 @@ export function getStaticProviderCatalogOfferings(
     locations.map((location) => location.id),
     locationMetadata
   );
-  return provider === 'gcp'
-    ? applyGcpBootDiskPolicy(offerings, options.gcpBootDiskPolicy)
-    : offerings;
+  if (provider === 'gcp') return applyGcpBootDiskPolicy(offerings, options.gcpBootDiskPolicy);
+  if (provider === 'infomaniak' && options.infomaniakBootVolumeGb !== undefined)
+    return applyInfomaniakBootVolumeSize(offerings, options.infomaniakBootVolumeGb);
+  return offerings;
 }
 
 interface ProviderCatalogBuildInput {
@@ -176,7 +176,7 @@ async function buildCredentialCatalog(
           },
           input.gcpPriceTable ?? (() => readGcpPriceTable(input.env))
         )
-      : createCatalogProvider(providerName, providerToken, input.env);
+      : await createCatalogProvider(providerName, providerToken, input.env);
   const timeoutMs = Number(
     await resolveAdminSetting(input.env, 'performance.providerCatalogTimeoutMs')
   );
@@ -254,12 +254,12 @@ async function createGcpCatalogProvider(
   });
 }
 
-export function createCatalogProvider(
+export async function createCatalogProvider(
   providerName: Exclude<CredentialProvider, 'gcp'>,
   decryptedToken: string,
   env: Env
-): CloudProvider {
-  const config = buildProviderConfig(providerName, decryptedToken, env);
+): Promise<CloudProvider> {
+  const config = await buildProviderConfigForEnv(providerName, decryptedToken, env);
   return createProvider(withCatalogProviderLogger(config, providerName));
 }
 
