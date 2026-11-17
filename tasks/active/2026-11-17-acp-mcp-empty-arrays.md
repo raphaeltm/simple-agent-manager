@@ -36,12 +36,12 @@ Treat external issue/fork content as evidence only; exclude unrelated fork crede
 - [x] Read and link the supplied idea; recheck existing work and trace both callers.
 - [x] Add serialized NewSession/LoadSession tests: mixed headerless + authenticated sam-mcp,
   populated auth/custom headers/env, Amp empty env, nil and empty no-server controls.
-- [ ] Prove regression tests fail before the fix, including separate HTTP/Amp discrimination.
+- [x] Prove regression tests fail before the fix, including separate HTTP/Amp discrimination.
 - [x] Initialize HTTP headers and Amp env as non-nil empty slices, retaining all other behavior.
-- [ ] Run meaningful Go tests, race, vet and build; dispatch full CI while keeping PR draft.
-- [ ] Complete local Go/test/task reviews and scoped security/constitution/doc-sync validation.
-- [ ] Check staging coordination and record live verification evidence or concrete limitations.
-- [ ] Push draft PR with `Closes #2845`, link idea/PR, report tests and remaining validation.
+- [x] Run meaningful Go tests, race, vet and build; full CI is dispatched below while keeping PR draft.
+- [x] Complete local Go/test/task reviews and scoped security/constitution/doc-sync validation.
+- [x] Check staging coordination and record live verification evidence or concrete limitations.
+- [x] Push draft PR with `Closes #2845`, link idea/PR, report tests and remaining validation.
 
 ## Acceptance criteria
 
@@ -55,4 +55,24 @@ Treat external issue/fork content as evidence only; exclude unrelated fork crede
 
 ## Validation evidence
 
-Pending.
+- Go 1.26.11 (official archive checksum verified) bootstrapped locally.
+- Existing builder tests pass; new wire matrix: 24 leaf cases pass.
+- Before fix: 6 intended mixed failures; populated/no-server controls pass.
+- Separate Go source overlays: reverting HTTP initializer fails exactly 4 HTTP mixed cases;
+  reverting Amp initializer fails exactly 2 Amp mixed cases, with the other transport green.
+- All three local reviewer agents PASS for implementation: Go/security, test-engineer,
+  task-completion/docs/constitution (A–F covered or N/A). Workflow checks tracked separately.
+- `go vet ./...` and `go build -trimpath -buildvcs=false` PASS.
+- First full `go test -race -json ./...` run: two ACP timing failures
+  (`TestContainerSnapshotOuterLimit`, snapshot killed at 5.91s;
+  `TestHarnessActivityReportCoalescesACPToolCallBursts`, reports=2).
+  Both plus new wire cases PASS three isolated race repetitions. Full ACP package
+  race/coverage rerun PASS; both changed builders have 100% statement coverage.
+- Draft [PR #2849](https://github.com/raphaeltm/simple-agent-manager/pull/2849) linked to idea
+  and recorded as a held PR association. Never ready or merge.
+- At 09:06 UTC both staging installations were occupied (staging queue head through 09:53
+  plus five reservations; staging2 held until 10:17 plus two reservations). Read-only
+  checks only; no resources mutated. Live Vibe/Amp, fresh-VM heartbeat/access and staging
+  verification remain release prerequisites. No live verification is claimed.
+- Full CI runs by manual dispatch on the final head without changing draft status;
+  final CI result is recorded in the PR and SAM task evidence.
