@@ -381,6 +381,7 @@ export function ProjectChat() {
               onCloseProfileWizard={state.closeProfileWizard}
               onUpdateProfileWizard={state.updateProfileWizard}
               onCreateProfileFromWizard={state.createProfileFromWizard}
+              onCreateDefaultChatProfile={state.createDefaultChatProfile}
               suggestProfileName={state.suggestProfileName}
               slashCommands={state.slashCommands}
               attachments={state.chatAttachments}

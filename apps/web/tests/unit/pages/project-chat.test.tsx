@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   listAgents: vi.fn(),
   listAgentProfiles: vi.fn(),
+  getInstantRuntimeEnabled: vi.fn().mockResolvedValue(true),
   listSkills: vi.fn().mockResolvedValue([]),
   createAgentProfile: vi
     .fn()
@@ -87,6 +88,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   listAgentProfiles: mocks.listAgentProfiles,
   listSkills: mocks.listSkills,
   createAgentProfile: mocks.createAgentProfile,
+  getInstantRuntimeEnabled: mocks.getInstantRuntimeEnabled,
   getProfilePickerState: mocks.getProfilePickerState,
   updateProfilePicker: mocks.updateProfilePicker,
   listChatSessions: mocks.listChatSessions,
@@ -433,7 +435,16 @@ async function openProfilePicker() {
   return screen.findByRole('dialog', { name: 'Choose a profile' });
 }
 
-async function openProfileWizardFromGate() {
+/**
+ * Opens the wizard from the no-profiles gate. With one configured agent the gate offers the
+ * one-click profile, and the wizard sits behind "Customize"; with several it is "Create profile".
+ */
+async function openProfileWizardFromGate(entry: 'single-agent' | 'multi-agent' = 'single-agent') {
+  if (entry === 'single-agent') {
+    await waitFor(() => expect(screen.getByText('Ready to chat')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /^Customize/ }));
+    return;
+  }
   await waitFor(() => expect(screen.getByText('Create a profile to start')).toBeInTheDocument());
   fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
 }
@@ -502,7 +513,7 @@ async function createProfileFromWizard({
 }
 
 async function openWizardVmStep(agentName = /Claude Code/i, workType = /Chat and explore/i) {
-  await openProfileWizardFromGate();
+  await openProfileWizardFromGate('multi-agent');
   chooseAgent(agentName);
   chooseWorkType(workType);
   chooseRuntime(/Cloud VM/i);
@@ -510,6 +521,7 @@ async function openWizardVmStep(agentName = /Claude Code/i, workType = /Chat and
 describe('ProjectChat new chat button', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getInstantRuntimeEnabled.mockResolvedValue(true);
     mocks.listCredentials.mockResolvedValue([]);
     mocks.getTrialStatus.mockResolvedValue({ available: false });
     mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
@@ -1460,6 +1472,7 @@ describe('ProvisioningIndicator', () => {
 describe('ProjectChat voice input', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getInstantRuntimeEnabled.mockResolvedValue(true);
     mocks.listCredentials.mockResolvedValue([]);
     mocks.getTrialStatus.mockResolvedValue({ available: false });
     mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
@@ -1515,6 +1528,7 @@ describe('ProjectChat voice input', () => {
 describe('ProjectChat profile setup wizard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getInstantRuntimeEnabled.mockResolvedValue(true);
     mocks.listCredentials.mockResolvedValue([
       { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
     ]);
@@ -1538,15 +1552,27 @@ describe('ProjectChat profile setup wizard', () => {
     });
   });
 
-  it('gates a single agent behind the setup wizard instead of auto-creating a profile', async () => {
+  it('gates a single agent behind a one-click choice instead of auto-creating a profile', async () => {
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
 
     renderProjectChat();
 
-    await expectCreateProfileGate();
+    await waitFor(() => expect(screen.getByText('Ready to chat')).toBeInTheDocument());
+    expect(screen.getByPlaceholderText('Create a profile to start chatting...')).toBeDisabled();
+    expect(
+      screen.getByText(/One click creates a profile named "Claude Code Chat"/)
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Start chatting with Claude Code/ })
+    ).toBeInTheDocument();
     expect(screen.queryByText(/Using/)).not.toBeInTheDocument();
+    // Nothing is created until the person clicks (fresh installs never get seeded profiles).
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(mocks.createAgentProfile).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^Customize/ }));
 
     await waitFor(() => {
       expect(screen.getByText('What kind of work?')).toBeInTheDocument();
@@ -1653,12 +1679,103 @@ describe('ProjectChat profile setup wizard', () => {
     await waitFor(() => expect(getProfileControl()).toHaveTextContent('Fast Chat'));
   });
 
+  it('one click creates exactly one Instant chat profile and unlocks the composer', async () => {
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    mocks.getInstantRuntimeEnabled.mockResolvedValue(true);
+    renderProjectChat();
+
+    const quickStart = await screen.findByRole('button', {
+      name: /Start chatting with Claude Code/,
+    });
+    // The server has the profile once the create succeeds, so its list returns it.
+    mocks.listAgentProfiles.mockResolvedValue([
+      makeAgentProfile({
+        id: 'created-profile',
+        name: 'Claude Code Chat',
+        runtime: 'cf-container',
+        workspaceProfile: 'lightweight',
+        taskMode: 'conversation',
+      }),
+    ]);
+    fireEvent.click(quickStart);
+
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Claude Code Chat'));
+    expect(mocks.createAgentProfile).toHaveBeenCalledTimes(1);
+    expect(mocks.createAgentProfile).toHaveBeenCalledWith(
+      PROJECT_ID,
+      expect.objectContaining({
+        name: 'Claude Code Chat',
+        agentType: 'claude-code',
+        runtime: 'cf-container',
+        workspaceProfile: 'lightweight',
+        taskMode: 'conversation',
+      })
+    );
+    expect(screen.queryByText('Ready to chat')).not.toBeInTheDocument();
+    expect(screen.queryByText('What kind of work?')).not.toBeInTheDocument();
+    expect(
+      await screen.findByPlaceholderText('Describe what you want the agent to do...')
+    ).not.toBeDisabled();
+  });
+
+  it('one click creates a Cloud VM chat profile where Instant is unavailable', async () => {
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    mocks.getInstantRuntimeEnabled.mockResolvedValue(false);
+    renderProjectChat();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Start chatting with Claude Code/ })
+    );
+
+    await waitFor(() => expect(mocks.createAgentProfile).toHaveBeenCalledTimes(1));
+    expect(mocks.createAgentProfile).toHaveBeenCalledWith(
+      PROJECT_ID,
+      expect.objectContaining({
+        name: 'Claude Code Chat',
+        runtime: 'vm',
+        workspaceProfile: 'lightweight',
+        taskMode: 'conversation',
+      })
+    );
+  });
+
+  it('shows the error and creates nothing more when the one-click create fails', async () => {
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    mocks.createAgentProfile.mockRejectedValueOnce(new Error('Profile limit reached'));
+    renderProjectChat();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Start chatting with Claude Code/ })
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Profile limit reached');
+    expect(mocks.createAgentProfile).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Ready to chat')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Create a profile to start chatting...')).toBeDisabled();
+  });
+
+  it('disables the Instant card in the wizard where Instant is unavailable', async () => {
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    mocks.getInstantRuntimeEnabled.mockResolvedValue(false);
+    renderProjectChat();
+
+    await openProfileWizardFromGate();
+    chooseWorkType(/Chat and explore/i);
+
+    const instant = screen.getByRole('button', { name: /Instant container/i });
+    await waitFor(() => expect(instant).toBeDisabled());
+    expect(instant).toHaveTextContent(/Not available on this installation/);
+    expect(screen.getByRole('button', { name: /Cloud VM/i })).not.toBeDisabled();
+  });
+
   it('gates multiple agents behind the setup wizard and creates a profile', async () => {
     mocks.listAgents.mockResolvedValue(AGENTS_MULTI);
 
     renderProjectChat();
 
     await expectCreateProfileGate();
+    // Two agents is a real choice, so there is no one-click profile.
+    expect(screen.queryByRole('button', { name: /Start chatting with/ })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
     chooseAgent(/OpenAI Codex/i);
@@ -1793,6 +1910,7 @@ describe('ProjectChat close conversation button', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getInstantRuntimeEnabled.mockResolvedValue(true);
     mocks.listCredentials.mockResolvedValue([]);
     mocks.getTrialStatus.mockResolvedValue({ available: false });
     mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
@@ -1986,6 +2104,7 @@ describe('ProjectChat close conversation button', () => {
 describe('ProjectChat realtime sidebar updates (capability test)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getInstantRuntimeEnabled.mockResolvedValue(true);
     mocks.listCredentials.mockResolvedValue([]);
     mocks.getTrialStatus.mockResolvedValue({ available: false });
     mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
@@ -2128,6 +2247,7 @@ describe('ProjectChat agent profile selection', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getInstantRuntimeEnabled.mockResolvedValue(true);
     mocks.listCredentials.mockResolvedValue([
       { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
     ]);
@@ -2759,6 +2879,7 @@ describe('ProjectChat agent profile selection', () => {
 describe('ProjectChat no longer executes ideas', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getInstantRuntimeEnabled.mockResolvedValue(true);
     mocks.listCredentials.mockResolvedValue([]);
     mocks.getTrialStatus.mockResolvedValue({ available: false });
     mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
@@ -2832,6 +2953,7 @@ describe('ProjectChat compute gate (installation machines, AI proxy off)', () =>
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getInstantRuntimeEnabled.mockResolvedValue(true);
     // No cloud account of the user's own.
     mocks.listCredentials.mockResolvedValue([]);
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);

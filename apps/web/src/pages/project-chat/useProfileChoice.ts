@@ -6,6 +6,7 @@ import type {
   UpdateAgentProfileRequest,
   VMSize,
 } from '@simple-agent-manager/shared';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useState } from 'react';
 
 import { selectProfileId } from '../../components/project-chat/profile-picker/model';
@@ -16,6 +17,7 @@ import {
 } from '../../components/resource-requirements';
 import { useAgentProfiles } from '../../hooks/useAgentProfiles';
 import { useProfilePicker } from '../../hooks/useProfilePicker';
+import { instantRuntimeEnabledQueryOptions } from '../../lib/query-options';
 import {
   resolveWizardRuntime,
   resolveWizardTaskMode,
@@ -35,6 +37,8 @@ export interface ProfileWizardState {
   profileName: string;
   saving: boolean;
   error: string | null;
+  /** Whether Instant can run on this installation; the runtime step offers it only then. */
+  instantAvailable: boolean;
 }
 
 /** Where the picker sheet opens: above its trigger, or centered when anchor is null. */
@@ -54,6 +58,7 @@ const CLOSED_WIZARD: ProfileWizardState = {
   profileName: '',
   saving: false,
   error: null,
+  instantAvailable: true,
 };
 
 /**
@@ -86,6 +91,14 @@ export function useProfileChoice({
     anchor: null,
   });
   const [profileWizard, setProfileWizard] = useState<ProfileWizardState>(CLOSED_WIZARD);
+  const queryClient = useQueryClient();
+  // Whether this installation can run Instant (Cloudflare Containers). Unknown counts as
+  // available in the wizard, as before; the one-click profile below waits for the answer.
+  const instantQuery = useQuery({
+    ...instantRuntimeEnabledQueryOptions(queryScope),
+    enabled: Boolean(queryScope),
+  });
+  const instantAvailable = instantQuery.data !== false;
 
   // Fill in a default once profiles and picker state are known. Guarded on the current
   // selection, so it never overrides a profile the person picked
@@ -126,8 +139,9 @@ export function useProfileChoice({
       open: true,
       step: soleAgent ? 'work-type' : 'agent',
       selectedAgentType: initialAgentType,
+      instantAvailable,
     });
-  }, [configuredAgents, selectedAgentType]);
+  }, [configuredAgents, instantAvailable, selectedAgentType]);
 
   const closeProfileWizard = useCallback(() => {
     setProfileWizard((current) => ({ ...current, open: false, saving: false, error: null }));
@@ -148,6 +162,29 @@ export function useProfileChoice({
     [createProfileMutation]
   );
 
+  /**
+   * One click on the no-profiles gate when the project has exactly one configured agent: create
+   * the single chat profile the wizard would have suggested. Never runs on its own (policy:
+   * fresh installs do not get seeded profiles). Instant only where this installation can run
+   * it, read at click time so a cold cache cannot pick the wrong runtime.
+   */
+  const createDefaultChatProfile = useCallback(async () => {
+    const soleAgent = configuredAgents.length === 1 ? configuredAgents[0] : null;
+    if (!soleAgent) return null;
+    const instantEnabled = await queryClient.fetchQuery(
+      instantRuntimeEnabledQueryOptions(queryScope)
+    );
+    const runtime = resolveWizardRuntime('conversation', null, instantEnabled);
+    return createProfile({
+      name: suggestProfileName(soleAgent.id, 'conversation'),
+      description: 'Chat and explore with a lightweight workspace',
+      agentType: soleAgent.id,
+      runtime,
+      workspaceProfile: resolveWizardWorkspaceProfile(runtime, 'conversation'),
+      taskMode: resolveWizardTaskMode(runtime, 'conversation'),
+    });
+  }, [configuredAgents, createProfile, queryClient, queryScope, suggestProfileName]);
+
   const createProfileFromWizard = useCallback(async () => {
     const name = profileWizard.profileName.trim();
     if (!name) {
@@ -167,7 +204,7 @@ export function useProfileChoice({
       return null;
     }
     const workType = profileWizard.workType ?? 'conversation';
-    const runtime = resolveWizardRuntime(workType, profileWizard.runtime);
+    const runtime = resolveWizardRuntime(workType, profileWizard.runtime, instantAvailable);
     setProfileWizard((current) => ({ ...current, saving: true, error: null }));
     try {
       const resourceJson =
@@ -200,6 +237,7 @@ export function useProfileChoice({
     agentProfiles,
     configuredAgents,
     createProfile,
+    instantAvailable,
     profileWizard.profileName,
     profileWizard.runtime,
     profileWizard.selectedAgentType,
@@ -223,6 +261,7 @@ export function useProfileChoice({
     closeProfileWizard,
     updateProfileWizard,
     createProfileFromWizard,
+    createDefaultChatProfile,
     suggestProfileName,
   };
 }

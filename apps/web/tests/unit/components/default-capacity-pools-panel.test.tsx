@@ -154,6 +154,82 @@ describe('DefaultCapacityPoolsPanel', () => {
     }
   );
 
+  describe('default workspace fit warning', () => {
+    /**
+     * The installation's resolved placement settings, as the pool response carries them
+     * (`resolveSafeCapacityPoolPlacementSettingsSummary()`). The fixture pool allows a 2 vCPU /
+     * 4 GB and a 4 vCPU / 8 GB machine.
+     */
+    function withInstallationSettings(
+      platformDefaults: { minVcpu: number; minMemoryGb: number },
+      hostMemoryReserveMb: number
+    ) {
+      const base = response('installation', summary('installation'));
+      return {
+        ...base,
+        placementSettings: {
+          version: 1,
+          sourceGeneration: 1,
+          legacyWorkloadAdapterVersion: 1,
+          selectionWeights: { priority: 1, price: 1, fit: 1, capacity: 1, candidateOrder: 1 },
+          rolloutCohortPercent: 100,
+          source: {
+            legacyWorkloadMapping: 'default' as const,
+            platformDefaults: 'persisted' as const,
+            selection: 'default' as const,
+          },
+          resourceDefaults: {
+            legacyWorkloadMapping: {} as never,
+            platformDefaults: { ...platformDefaults, minDiskGb: 15, exclusiveNode: false },
+          },
+          hostMemoryReserveMb,
+        },
+      };
+    }
+
+    it('warns on the personal page when the shared pool cannot fit the installation default', async () => {
+      // Installation override: default workspaces ask for 8 GB. The 8 GB machine keeps 1 GB
+      // for its host, so nothing allowed can place one.
+      mocks.fetchUserDefaultCapacityPools.mockResolvedValue(
+        withInstallationSettings({ minVcpu: 2, minMemoryGb: 8 }, 1024)
+      );
+
+      renderPanel({ scope: 'user' });
+
+      const warning = await screen.findByText(/No allowed machine can run a default workspace/);
+      expect(warning).toHaveTextContent('It needs 2 vCPU and 8 GB of memory');
+      expect(warning).toHaveTextContent('keeps 1 GB for itself');
+      expect(warning).toHaveTextContent('at least 2 vCPU and 9 GB of memory');
+      expect(screen.getByText(/This project uses|the shared compute pool/)).toBeInTheDocument();
+    });
+
+    it('warns when the installation host reserve leaves too little memory', async () => {
+      mocks.fetchUserDefaultCapacityPools.mockResolvedValue(
+        withInstallationSettings({ minVcpu: 2, minMemoryGb: 4 }, 5120)
+      );
+
+      renderPanel({ scope: 'user' });
+
+      expect(
+        await screen.findByText(/No allowed machine can run a default workspace/)
+      ).toHaveTextContent('keeps 5 GB for itself');
+    });
+
+    it('stays quiet when an allowed machine fits the installation default', async () => {
+      mocks.fetchUserDefaultCapacityPools.mockResolvedValue(
+        withInstallationSettings({ minVcpu: 2, minMemoryGb: 4 }, 1024)
+      );
+
+      renderPanel({ scope: 'user' });
+
+      // Liveness: the pool rendered, so the absence below is not a page that never loaded.
+      expect(await screen.findByText('Allowed machines (2)')).toBeInTheDocument();
+      expect(
+        screen.queryByText(/No allowed machine can run a default workspace/)
+      ).not.toBeInTheDocument();
+    });
+  });
+
   it('shows the personal pool read-only on a project without its own pool', async () => {
     mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('user', summary('user')));
 

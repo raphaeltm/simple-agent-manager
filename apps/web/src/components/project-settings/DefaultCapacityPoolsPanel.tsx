@@ -269,6 +269,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
                 groups={groups}
                 sources={sources}
                 projectId={projectId}
+                placementSettings={query.data.placementSettings}
                 notice={
                   fallbackScope && fallbackScope !== scope ? (
                     <FallbackNotice fallbackScope={fallbackScope} projectId={projectId} />

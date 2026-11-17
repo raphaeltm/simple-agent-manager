@@ -492,6 +492,7 @@ export function useProjectChatState() {
     closeProfileWizard: profileChoice.closeProfileWizard,
     updateProfileWizard: profileChoice.updateProfileWizard,
     createProfileFromWizard: profileChoice.createProfileFromWizard,
+    createDefaultChatProfile: profileChoice.createDefaultChatProfile,
     suggestProfileName: profileChoice.suggestProfileName,
     handleUpdateProfile: profileChoice.handleUpdateProfile,
     slashCommands,
