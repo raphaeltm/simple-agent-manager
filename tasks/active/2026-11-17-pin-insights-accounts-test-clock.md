@@ -9,7 +9,7 @@ On 2026-11-17 after noon UTC, main and PR #2836 API shard2 failed `projectAccoun
 - [x] Pin Date.now to fixture NOW in shared beforeEach so all fixture dates have the same clock.
 - [x] Restore mocks after each test.
 - [x] Add a control advancing only wall-clock beyond reset and assert utilization becomes0.
-- [ ] Run focused suite, lint and formatting.
+- [x] Run focused suite, lint and formatting.22/22PASS; targeted eslint and Prettier PASS; API dependency build12/12PASS.
 - [x] Independent test/completion review. PASS/no findings; A-C covered, D-F not applicable to test-only scope.
 - [ ] Green exact-head CI and CodeRabbit request/wait, then merge.
 
