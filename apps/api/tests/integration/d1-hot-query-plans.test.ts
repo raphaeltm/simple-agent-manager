@@ -16,7 +16,7 @@ const migration = readFileSync(
   'utf8'
 );
 const recoveryScanMigration = readFileSync(
-  new URL('0243_provider_limit_recovery_scan_index.sql', migrationDirectory),
+  new URL('0254_provider_limit_recovery_scan_index.sql', migrationDirectory),
   'utf8'
 );
 describe('incident hot queries on representative SQLite cardinality', () => {
