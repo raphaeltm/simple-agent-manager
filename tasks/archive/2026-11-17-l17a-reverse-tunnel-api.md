@@ -1,14 +1,17 @@
 # L17a: reverse tunnel API foundation
 
 ## Problem
+
 Land the integration branch's leases, frps authorization and provisioning on main without shipping self-host-only code in the Cloudflare Worker. Task 01M7KNAMFQC7M8EPZN6HNGT3EF; parent 01M7JMXS2JRW6QQMB1356ENPM3. Source origin/sam/selfhost-pass-2; fresh base origin/main 60a11bb27. No cherry-picks. Merge authorized after every /do gate.
 
 ## Research and preflight
+
 Classes: cross-component, business logic, security sensitive, infrastructure and docs sync. Existing Cloudflare tunnel lifecycle is canonical; L6 redirect hardening is merged. H1 #2752 is merged into integration only, with self-host entry/config owning HostedGitRepo. Main has no celld packager. celld flat migration projection can append a self-host migration set, so no empty lease table belongs on Cloudflare. Placement posted feature.selfhost-landing event b096a4da-cc2c-4403-b86e-78111eaa8939 before code.
 
 Data flow: provisionNode -> transport driver -> ownership SQL before provider create -> boot renderer -> provider VM; strict deletion -> termination proof -> driver release. Pre-create failure/direct provider deletion release exact incarnation; failed best-effort release remains discoverable by callable backstop. Authz verifies claimed node/incarnation/credential against stored lease and managed VM, plus session and exact proxy port. Stored transport (including NULL tunnel_id) controls heartbeat DNS suppression. L17b owns routing, gateway and scheduled sweep mounting; L18 owns frpc cloud-init; L22 owns full self-host packaging. Missing renderer must fail before provider create.
 
 ## Checklist
+
 - [x] Shared typed transport lifecycle seam exercised by existing Cloudflare provisioning/compensation/termination.
 - [x] Self-host-only lease config, allocation, release and callable backstop; self-host-only additive migration renumbered 0255 and packaging manifest.
 - [x] HMAC purpose subkey; frps duplicate-session fence and ownership/lifecycle validation; track credential rotation in a SAM Idea.
@@ -22,17 +25,21 @@ Data flow: provisionNode -> transport driver -> ownership SQL before provider cr
 - [ ] CI/CodeRabbit gates, merge, idea update PR+commit, production smoke and coordinator completion.
 
 ## Acceptance
+
 Every item above has automated or documented live evidence. Self-host code is absent from Worker graph; no lease-table UPDATE executes on CF. Existing live nodes and foreign identities cannot lose their lease; confirmed teardown releases only the exact non-live incarnation. Allocation is atomic and never reuses a cooling port. Duplicate controls cannot serve one lease concurrently. All migration work is additive with fresh/upgrade tests. Non-test code target about 1,000 lines.
 
 ## References
+
 Idea 01M72M9AEB933ZY8269D376DKC landing plan parts 2–7; rules 11,31,34,74,81; H1 #2752; L6 #2819.
 
 ## Work bounds and throughput
+
 Allocation owns one non-compressible loopback port per active lease. One atomic CTE considers at most 20,000 configured ports (default10,000), with indexed active-port/history lookups; the SQL statement processes the entire range, not a batch deferred to another tick. At the outer probable limit20,000 ports and20,001 historical releases, a real SQL entry-point test exhausts the range, diagnoses cooling and reuses the first eligible port in the same attempt. Retained history is unbounded, but the `(port,released_at)` index serves MAX/age lookups without scanning all installation history per candidate. Allocation has no network I/O; provider creation follows only after lease/config and boot validation.
 
 Release/backstop is one local indexed UPDATE over all active leases with a primary-key node lookup per lease, never external network calls and never a count-limited page. Normal maximum active ownership is the configured20k-port range; even ranges changed across upgrades cannot exceed65,535 active rows because of the physical-port unique index. One pass releases all eligible rows; at L17b's existing5-minute cron cadence a missed synchronous release is retried within one tick, without multi-page starvation. Port reuse waits at least2× the configured frps heartbeat timeout (default180seconds), independently of deletion labels. A live incarnation with a fresh heartbeat remains owned regardless of its lifecycle label; a hard-deleted/replaced/proven-terminated incarnation is releasable. Cooling and full range have separate errors and recovery actions.
 
 ## Current verification
+
 PR [2831](https://github.com/raphaeltm/simple-agent-manager/pull/2831), implementation head `5f6ad367dbe2600fcf0f0ef440ca5f959b5addeb`. Fresh branch from main; normal merge of main665ac863f preserves shared0256. The already-applied self-host0255 filename remains stable in its own migration set, without a filename collision.
 
 Root lint22/22, typecheck36/36 and build18/18 pass after the main merge. API JSON reporter: success=true,16,494 passed/4 skipped. Final65 focused lifecycle/authz/placement tests pass; existing provisioning/failure/Cloudflare134 regressions pass. Full CI [44018545249](https://github.com/raphaeltm/simple-agent-manager/actions/runs/44018545249) passes every job, seven Workers shards and required aggregate. No source changes since that head.
@@ -42,11 +49,13 @@ All required independent source reviews PASS: security-auditor, cloudflare-speci
 CodeRabbit requested at readiness, reviewed one valid resume finding, fixed in cacc99782 and thread resolved with reply4595034588. One trusted incremental request44012765753 received rate limit03:49:47UTC; automatic review skipped bot eligibility. No unresolved finding, repeated trigger or waiver. The SQLite `plsql:S1192` issue AaHnfqh6jf_tJyvZU1Yz is a false positive: SQLite requires the canonical active literal separately in DEFAULT, CHECK and partial index; it has no cross-DDL constant. Six TypeScript findings fixed; quality gate passes with zero security hotspots.
 
 ## Self-host box evidence — complete
+
 Normal merges of this slice onto integration tip, not cherry-picks. Final runtime validation merge5568c40c5 contains the installed-driver cleanup fix; later661edea56 only sorts imports. Own0255 applied/replayed alongside old0232 without lease loss. Package/adoption/health/fence checks pass. Real pinned frps0.72/two-frpc test proves canonical session replacement closes the old stream before the new owner serves; broken gateway serializer fails, correct serializer passes. L17b must serialize replacementContent as unchange:false/content. Credential recovery/rotation follow-up: idea01M7KPNV3B28WPEVJRNRAM2X1D; root-key rotation alone does not revoke stored credential hashes.
 
 Two sequential GCPe2-medium(2CPU4GB) nodes connected over reverse transport with NULL tunnel_id and the expected agent build pin. Final node01M7KSWAX5SKH8V9S0TXMQGHSF heartbeat03:49:36.859Z, real system-info03:49:40.244Z; exact leaseb3b38aa6-b1a2-41ee-b503-0b3e60b42845 released runtime_terminated03:52:35.338Z, provider40403:52:56.557Z. Both VMs and temporary credentials deleted, pool restored, sessions signed out; zero test nodes/credentials. Temporary SSH user, instance metadata key, firewall and local private credentials removed. BOX FREE posted event824422e2 at04:06UTC. Existing box key provider remains gcp-kms; no bootstrap/KMS/IAM changes. Box screenshots were obscured by onboarding, so no box UI-quality claim.
 
 ## Staging evidence — complete
+
 Both leases checked before deployment; primary acquired06:48:49, self-host-only migration adds no Worker/DO migration. Default deployment [44033242342](https://github.com/raphaeltm/simple-agent-manager/actions/runs/44033242342) SUCCESS. Actual Worker setting read back vm-public-dns. Node01M7M52DK9Z2NQ82P84PJGZYQ3(Hetznercx23nbg1,2CPU4GB) heartbeat07:05:40.534Z and real proxied system-info PASS. Node deleted, D1 row absent and active_vm_nodes=0. Another task's sleeping Instant container was preserved.
 
 Temporary shared GitHub staging Environment VM_AGENT_TRANSPORT changed to vm-public-dns for the default deployment, then restored cloudflare-tunnel07:01UTC and read back. Secondary owner coordinated the window and was notified when restored. No further flip planned. Normal Cloudflare deployment [44036362571](https://github.com/raphaeltm/simple-agent-manager/actions/runs/44036362571) SUCCESS on the same implementation head, automated smoke PASS; live Worker setting cloudflare-tunnel verified. Node01M7M6YSJB0A4M937EEDHX3JKN(Hetznercx23nbg1,2CPU4GB) fresh heartbeat07:38:45.541Z and real proxied system-info PASS. D1 independently recorded07:39:46.441Z heartbeat and actual tunnel_id f855d465-436c-492d-9803-7ae861974840. Node deleted and active_vm_nodes=0; owned session signed out/private identity files removed. Normal lease release44040642590 SUCCESS;07:45 status holder=null, next queued task on turn and notified directly. No further staging writes.
