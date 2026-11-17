@@ -19,13 +19,14 @@ import { isWorkingActivity } from '../../components/project-message-view/types';
 import { useActivityVerifyTimer } from '../../components/project-message-view/useActivityVerifyTimer';
 import { useSessionAccessSync } from '../../components/project-message-view/useSessionAccessSync';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
+import type { ToolSnapshotChanges } from '../../lib/api/session-transcript-types';
 import type {
   ChatMessageResponse,
   ChatSessionResponse,
   SessionStateSnapshot,
 } from '../../lib/api/sessions';
 import { mergeMessages } from '../../lib/merge-messages';
-import { readMessagesAfter } from '../../lib/message-paging';
+import { mergeRecentWindowOrRefresh, readMessagesAfter } from '../../lib/message-paging';
 
 /** Seconds of silence after last agent row before returning to idle. */
 const IDLE_TIMEOUT_MS = 3000;
@@ -107,6 +108,7 @@ export function useWorkspaceChatSocket({
   // A teammate's queued prompt cancelled by Revoke now or by expiry is labelled from the access
   // summary, which the server re-sends on every access change: the project chat's own hook.
   const chatSocketLive = useRef(false);
+  const toolRevision = useRef(0);
   const { onSessionAccessChanged } = useSessionAccessSync(
     projectId,
     sessionId,
@@ -124,9 +126,19 @@ export function useWorkspaceChatSocket({
     // newest row. The view's load has finished before the socket opens (the socket waits for
     // its status), and the cursor is taken now, before this socket delivers anything newer.
     onSubscribed: useCallback(() => {
-      void readMessagesAfter(projectId, sessionId, messagesRef.current)
+      void readMessagesAfter(
+        projectId,
+        sessionId,
+        messagesRef.current,
+        undefined,
+        toolRevision.current
+      )
         .then((found) => {
-          if (found.length > 0) setMessages((prev) => mergeMessages(prev, found, 'append'));
+          toolRevision.current = found.toolChanges?.revision ?? toolRevision.current;
+          if (found.messages.length > 0 || found.resetRequired)
+            setMessages((prev) =>
+              found.resetRequired ? found.messages : mergeMessages(prev, found.messages, 'append')
+            );
         })
         .catch((err: unknown) => {
           console.warn('Failed to read messages persisted before the chat socket opened', err);
@@ -167,13 +179,31 @@ export function useWorkspaceChatSocket({
       (
         catchUpMsgs: ChatMessageResponse[],
         catchUpSession: ChatSessionResponse,
-        state?: SessionStateSnapshot | null
+        state?: SessionStateSnapshot | null,
+        toolChanges?: ToolSnapshotChanges
       ) => {
         setSession(catchUpSession);
-        setMessages((prev) => mergeMessages(prev, catchUpMsgs, 'replace'));
         hydrateActivity(state);
+        return mergeRecentWindowOrRefresh(
+          projectId,
+          sessionId,
+          {
+            session: catchUpSession,
+            messages: messagesRef.current,
+            hasMore: true,
+            toolChanges: { revision: toolRevision.current, resetRequired: false, messages: [] },
+          },
+          { session: catchUpSession, messages: catchUpMsgs, hasMore: true, state, toolChanges }
+        ).then((merged) => {
+          toolRevision.current = merged.toolChanges?.revision ?? toolRevision.current;
+          setMessages((prev) =>
+            merged.toolChanges?.resetRequired
+              ? merged.messages
+              : mergeMessages(prev, merged.messages, 'replace')
+          );
+        });
       },
-      [hydrateActivity]
+      [hydrateActivity, projectId, sessionId, setMessages, setSession]
     ),
     onAgentCompleted: useCallback((agentCompletedAt: number) => {
       setSession((prev) =>

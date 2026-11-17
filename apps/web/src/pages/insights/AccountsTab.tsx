@@ -26,6 +26,7 @@ const SECTION_NAMES: Record<InsightsAccountsSection, string> = {
   runs: 'runs',
   stalls: 'limit stalls',
   usage: 'usage limits',
+  tokens: 'tokens and spend',
 };
 
 export function AccountsTab() {
@@ -61,6 +62,7 @@ export function AccountsBody({ data }: { data: ProjectAccountsResponse }) {
   const stalled = data.stallEpisodes.total;
   const runsFailed = data.unavailable.includes('runs');
   const stallsFailed = data.unavailable.includes('stalls');
+  const tokensFailed = data.unavailable.includes('tokens');
 
   return (
     <div
@@ -92,6 +94,8 @@ export function AccountsBody({ data }: { data: ProjectAccountsResponse }) {
                 color={colorOf.get(account.key) ?? 'var(--sam-person-auto)'}
                 now={now}
                 stallsUnavailable={stallsFailed}
+                usageLimited={data.usageLimited}
+                tokensUnavailable={tokensFailed}
               />
             ))}
           </div>
@@ -132,8 +136,8 @@ export function AccountsBody({ data }: { data: ProjectAccountsResponse }) {
       </div>
 
       <p className="m-0 px-1 text-[12.5px] text-fg-muted">
-        Only your own accounts are named and show their current limits. Spend is not reported yet:
-        SAM does not record per-run token use for API keys.
+        Only your own accounts are named and show their current limits. Spend is shown for API keys
+        only. A run through SAM’s AI proxy counts its tokens once.
       </p>
     </div>
   );
