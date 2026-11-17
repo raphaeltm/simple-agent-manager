@@ -145,11 +145,18 @@ async function checkLayout(page: Page) {
   await assertNoClippedOverflow(page);
 }
 
-/** The budget section itself: the app pane scrolls inside the shell, so a page shot cuts it off. */
+/**
+ * A viewport shot with the part under test scrolled into view: the cap field when the form is
+ * open, else the utilization card. The app pane scrolls inside the shell, so full-page and
+ * element shots cut it off.
+ */
 async function shot(page: Page, name: string) {
-  const section = page.getByTestId('budget-settings-section');
-  await section.scrollIntoViewIfNeeded();
-  await section.screenshot({
+  const field = page.locator('#monthlyCapCeiling, #monthlyCap, #dailyInput').first();
+  const target = (await field.count())
+    ? field
+    : page.getByText('Current Utilization', { exact: true });
+  await target.scrollIntoViewIfNeeded();
+  await page.screenshot({
     path: `../../.codex/tmp/playwright-screenshots/monthly-ceiling-${name}.png`,
   });
 }
@@ -221,6 +228,7 @@ for (const desktop of [false, true]) {
       await page.getByRole('button', { name: 'Configure' }).click();
       await expect(page.getByLabel('Monthly Cost Cap (USD)')).toHaveCount(0);
       await expect(page.getByLabel('Daily Input Token Limit')).toBeVisible();
+      await expect(page.getByText('Clear the monthly cap')).toHaveCount(0);
       await checkLayout(page);
       await shot(page, `unavailable-${viewportName(page)}`);
     });

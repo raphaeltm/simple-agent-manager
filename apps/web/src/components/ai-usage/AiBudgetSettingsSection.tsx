@@ -1,5 +1,5 @@
 import type { UserAiBudgetResponse } from '@simple-agent-manager/shared';
-import { Body, Card, CardTitle, SectionHeading, Spinner } from '@simple-agent-manager/ui';
+import { Body, Button, Card, CardTitle, SectionHeading, Spinner } from '@simple-agent-manager/ui';
 import { Settings2, ShieldAlert } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
@@ -238,10 +238,11 @@ export function BudgetSettingsSection() {
         <Card className="p-4 space-y-4">
           <CardTitle>Budget Settings</CardTitle>
           <Body className="text-fg-muted text-sm m-0">
-            Leave fields empty to use platform defaults.{' '}
-            {ceilingUsd === null
-              ? 'Clear the monthly cap to remove it.'
-              : 'The monthly cap can be lowered, not removed.'}
+            Leave fields empty to use platform defaults.
+            {cap?.available !== false &&
+              (ceilingUsd === null
+                ? ' Clear the monthly cap to remove it.'
+                : ' The monthly cap can be lowered, not removed.')}
           </Body>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -332,21 +333,14 @@ export function BudgetSettingsSection() {
           </div>
 
           <div className="flex gap-2 justify-end pt-2">
-            <button
-              type="button"
-              onClick={() => setEditing(false)}
-              className="px-4 py-2.5 min-h-[44px] rounded-md text-sm font-medium bg-surface text-fg-muted hover:bg-surface-hover border border-border-default transition-colors"
-            >
+            <Button type="button" variant="raised" onClick={() => setEditing(false)}>
               Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saving}
-              className="px-4 py-2.5 min-h-[44px] rounded-md text-sm font-medium bg-accent-emphasis text-fg-on-accent hover:bg-accent-emphasis/90 transition-colors disabled:opacity-50"
-            >
-              {saving ? 'Saving\u2026' : 'Save'}
-            </button>
+            </Button>
+            {/* Shared Button: the old local `bg-accent-emphasis` is not a defined token, so Save
+                had no background and was unreadable in the light theme. */}
+            <Button type="button" variant="accent" onClick={handleSave} loading={saving}>
+              Save
+            </Button>
           </div>
         </Card>
       )}
