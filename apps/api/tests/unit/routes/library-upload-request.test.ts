@@ -7,6 +7,9 @@ const mocks = vi.hoisted(() => ({
   upload: vi.fn(),
   replace: vi.fn(),
   settings: vi.fn(),
+  download: vi.fn(),
+  getFile: vi.fn(),
+  downloadTimeout: vi.fn(),
 }));
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => (_c: unknown, next: () => Promise<void>) => next(),
@@ -25,6 +28,9 @@ vi.mock('../../../src/services/file-library', async (original) => ({
   ...(await original<typeof import('../../../src/services/file-library')>()),
   uploadFile: mocks.upload,
   replaceFile: mocks.replace,
+  downloadFile: mocks.download,
+  getFile: mocks.getFile,
+  getDownloadTimeoutMs: mocks.downloadTimeout,
 }));
 
 import type { Env } from '../../../src/env';
@@ -101,6 +107,27 @@ function settings(file = 32, overhead = 1024, parts = 16, headers = 256, timeout
 beforeEach(() => {
   vi.resetAllMocks();
   capturedUploads.length = 0;
+  mocks.downloadTimeout.mockReturnValue(1000);
+  mocks.getFile.mockResolvedValue({
+    file: {
+      id: 'file-1',
+      filename: 'report.png',
+      directory: '/',
+      mimeType: 'image/png',
+      sizeBytes: 5,
+    },
+    tags: [],
+  });
+  mocks.download.mockImplementation(async () => ({
+    data: encoder.encode('hello').buffer,
+    file: {
+      id: 'file-1',
+      filename: 'report.txt',
+      directory: '/',
+      mimeType: 'text/plain',
+      sizeBytes: 5,
+    },
+  }));
   settings();
   for (const [operation, dataIndex] of [
     [mocks.upload, 8],
@@ -455,6 +482,118 @@ describe('Library multipart request memory and admission bounds', () => {
       201
     );
   });
+
+  it('rejects download before storage read while an upload owns memory', async () => {
+    let enter!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mocks.upload.mockImplementationOnce(async () => {
+      enter();
+      await pending;
+      return { id: 'file-1', filename: 'report.txt', sizeBytes: 5 };
+    });
+    const first = app().fetch(request(multipart(filePart('hello'))).request, env);
+    await entered;
+    try {
+      expect((await app().fetch(new Request(base + '/file-1/download'), env)).status).toBe(429);
+      expect(mocks.download).not.toHaveBeenCalled();
+    } finally {
+      release();
+      await first;
+    }
+    const response = await app().fetch(new Request(base + '/file-1/download'), env);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('hello');
+  });
+
+  it.each(['download', 'preview'])(
+    'holds %s response memory through slow consumption and cancellation',
+    async (route) => {
+      const content = 'x'.repeat(128 * 1024 + 1);
+      mocks.download.mockImplementationOnce(async () => ({
+        data: encoder.encode(content).buffer,
+        file: {
+          id: 'file-1',
+          filename: 'report.txt',
+          directory: '/',
+          mimeType: 'text/plain',
+          sizeBytes: content.length,
+        },
+      }));
+      const response = await app().fetch(new Request(`${base}/file-1/${route}`), env);
+      expect(response.status).toBe(200);
+      const reader = response.body!.getReader();
+      try {
+        expect((await app().fetch(new Request(`${base}/file-1/download`), env)).status).toBe(429);
+        expect(mocks.download).toHaveBeenCalledOnce();
+        const ingress = request(multipart(filePart('hello')));
+        expect((await app().fetch(ingress.request, env)).status).toBe(429);
+        expect(ingress.read).not.toHaveBeenCalled();
+        expect(mocks.upload).not.toHaveBeenCalled();
+        const first = await reader.read();
+        expect(first.done).toBe(false);
+        expect(first.value!.byteLength).toBe(64 * 1024);
+        const secondIngress = request(multipart(filePart('hello')));
+        expect((await app().fetch(secondIngress.request, env)).status).toBe(429);
+        expect(secondIngress.read).not.toHaveBeenCalled();
+      } finally {
+        await reader.cancel();
+        reader.releaseLock();
+      }
+      expect((await app().fetch(request(multipart(filePart('hello'))).request, env)).status).toBe(
+        201
+      );
+    }
+  );
+
+  it.each(['download', 'preview'])(
+    'retains memory after %s timeout until actual late storage completion',
+    async (route) => {
+      mocks.downloadTimeout.mockReturnValue(10);
+      let complete!: () => void;
+      let lateBuffer!: ArrayBuffer;
+      const pending = new Promise<void>((resolve) => {
+        complete = resolve;
+      });
+      mocks.download.mockImplementationOnce(async () => {
+        await pending;
+        lateBuffer = encoder.encode('hello').buffer;
+        return {
+          data: lateBuffer,
+          file: {
+            id: 'file-1',
+            filename: 'report.txt',
+            directory: '/',
+            mimeType: 'text/plain',
+            sizeBytes: 5,
+          },
+        };
+      });
+      try {
+        const response = await app().fetch(new Request(`${base}/file-1/${route}`), env);
+        expect(response.status).toBe(500);
+        expect(await response.text()).toContain('timed out');
+        const ingress = request(multipart(filePart('hello')));
+        expect((await app().fetch(ingress.request, env)).status).toBe(429);
+        expect(ingress.read).not.toHaveBeenCalled();
+        expect(mocks.upload).not.toHaveBeenCalled();
+      } finally {
+        complete();
+        await pending;
+        // Flush the real late-completion owner; do not release admission from a mock.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+      expect(lateBuffer.byteLength).toBe(0);
+      expect((await app().fetch(request(multipart(filePart('hello'))).request, env)).status).toBe(
+        201
+      );
+    }
+  );
 
   it('releases admission after a storage failure', async () => {
     mocks.upload.mockRejectedValueOnce(new Error('R2 failed'));

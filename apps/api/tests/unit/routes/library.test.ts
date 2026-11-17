@@ -1,7 +1,7 @@
 /**
  * Tests for project file library routes.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockUploadFile = vi.hoisted(() => vi.fn());
 const mockReplaceFile = vi.hoisted(() => vi.fn());
@@ -54,7 +54,7 @@ vi.mock('../../../src/services/file-library', () => ({
   replaceFile: mockReplaceFile,
   listFiles: mockListFiles,
   getFile: mockGetFile,
-  downloadFile: mockDownloadFile,
+  downloadFile: (...args: unknown[]) => copyDownload(...args),
   deleteFile: mockDeleteFile,
   updateTags: mockUpdateTags,
   listDirectories: mockListDirectories,
@@ -95,6 +95,18 @@ vi.mock('../../../src/lib/logger', async (importOriginal) => ({
   log: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
 }));
 
+// A download transfers ownership to its response. Fixtures remain reusable across calls.
+async function copyDownload(...args: unknown[]) {
+  const result = await mockDownloadFile(...args);
+  return { ...result, data: result.data.slice(0) };
+}
+
+const responses = new Set<Response>();
+afterEach(async () => {
+  await Promise.all([...responses].map((response) => response.body?.cancel().catch(() => {})));
+  responses.clear();
+});
+
 /** The only origin allowed to frame a preview: the app, never the API itself. */
 const FRAME_ANCESTORS = 'frame-ancestors https://app.test.example.com';
 
@@ -108,6 +120,12 @@ function makeApp(env: Env) {
     return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
   });
   app.route('/projects/:projectId/library', libraryRoutes);
+  const fetch = app.fetch;
+  app.fetch = async (...args: Parameters<typeof fetch>) => {
+    const response = await fetch(...args);
+    responses.add(response);
+    return response;
+  };
   return { app, env };
 }
 
@@ -570,6 +588,7 @@ describe('library routes', () => {
         const open = await fetchPreview({ Range: 'bytes=7-' });
         expect(open.status).toBe(206);
         expect(open.headers.get('Content-Range')).toBe('bytes 7-9/10');
+        await open.body?.cancel();
         const suffix = await fetchPreview({ Range: 'bytes=-2' });
         expect(suffix.headers.get('Content-Range')).toBe('bytes 8-9/10');
         expect(Array.from(new Uint8Array(await suffix.arrayBuffer()))).toEqual([8, 9]);
@@ -592,6 +611,7 @@ describe('library routes', () => {
           const res = await fetchPreview({ Range: range });
           expect(res.status).toBe(200);
           expect(res.headers.get('Content-Length')).toBe('10');
+          await res.body?.cancel();
         }
       });
     });

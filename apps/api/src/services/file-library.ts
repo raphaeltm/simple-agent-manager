@@ -675,7 +675,12 @@ export async function downloadFile(
 
   // Decrypt
   const ciphertext = await r2Object.arrayBuffer();
-  const plaintext = await decryptFile(ciphertext, encMeta, encryptionKey);
+  let plaintext: ArrayBuffer;
+  try {
+    plaintext = await decryptFile(ciphertext, encMeta, encryptionKey);
+  } finally {
+    releaseArrayBuffer(ciphertext);
+  }
 
   return {
     data: plaintext,

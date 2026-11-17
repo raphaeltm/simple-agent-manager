@@ -5,8 +5,8 @@ import { releaseArrayBuffer } from '../lib/release-array-buffer';
 import { errors } from '../middleware/error';
 import { resolveAdminSettingDetailsMany } from '../services/admin-settings';
 import { getUploadMaxBytes } from '../services/file-library-config';
+import { acquireLibraryMemory } from '../services/library-memory';
 
-let uploadInProgress = false;
 const TEXT_FIELDS = new Set(['filename', 'mimeType', 'description', 'tags', 'directory']);
 
 interface MultipartUpload {
@@ -24,12 +24,9 @@ export async function withLibraryUpload<T>(
   env: Env,
   operation: (upload: MultipartUpload) => Promise<T>
 ): Promise<T> {
-  if (uploadInProgress) {
-    void request.body?.cancel().catch(() => {});
-    throw errors.tooManyRequests('Another library upload is in progress. Please retry shortly.');
-  }
-  uploadInProgress = true;
+  let release: (() => void) | undefined;
   try {
+    release = acquireLibraryMemory();
     // Resolve together: one cached settings snapshot, not a query per limit or part.
     const settings = await resolveAdminSettingDetailsMany(env, [
       'library.multipartFileMaxBytes',
@@ -65,7 +62,7 @@ export async function withLibraryUpload<T>(
     if (request.body && !request.body.locked) void request.body.cancel().catch(() => {});
     throw error;
   } finally {
-    uploadInProgress = false;
+    release?.();
   }
 }
 

@@ -356,12 +356,23 @@ metadata and download compatibility are unchanged.
 The 120-second ingress budget permits a full 50 MiB file at about 427 KiB/s;
 metadata consumes a small additional portion. Parsing uses 64 KiB allocation chunks
 (at most 802 buffers at the default wire limit) and releases them before encryption.
-Only one browser upload or replacement materializes per Worker isolate at a time;
-an overlapping write receives `429` and may retry after the active write completes.
-There is no in-memory request queue. Parsing failure, timeout and write failure release
-admission. These controls are implemented by
-`apps/api/src/routes/library-upload-request.ts:withLibraryUpload` and apply to both
-browser write routes; shared agent Library operations retain their existing limits.
+One Library transfer materializes per Worker isolate at a time. Browser writes,
+HTTP downloads/previews, agent transfers and diagnostic-package capture share this
+permit; a competing transfer receives `429` (or the MCP retry error) without queuing
+file buffers. The permit follows the file through encryption/storage or its actual
+consumer. HTTP reads copy at most 64 KiB per response pull and retain the permit until
+consumption, cancellation or the egress deadline. Decrypted plaintext and ciphertext
+are released after their consumers finish. A load timeout keeps the permit until the
+underlying load settles, so late work cannot overlap a new transfer.
+
+`LIBRARY_DOWNLOAD_TIMEOUT_MS` (default 60000) bounds loading and HTTP egress separately;
+a full 50 MiB response needs about 854 KiB/s to meet the egress deadline. Awaited agent
+transfers use their existing VM transfer deadline and retain admission through request-body
+termination and exposed transport settlement. An opaque container RPC may retain bounded
+chunk copies after its existing timeout; it never receives a view of the whole plaintext. Multipart settings apply to browser writes; existing agent file-size limits
+remain in place. The canonical ownership implementation is
+`apps/api/src/services/library-memory.ts`; multipart parsing is in
+`apps/api/src/routes/library-upload-request.ts`.
 
 ### Project file library cleanup
 

@@ -49,6 +49,7 @@ import {
   getPreviewUrlTtlSeconds,
   mintPreviewPath,
 } from '../services/interactive-preview';
+import { loadLibraryDownload } from '../services/library-memory';
 import { getEncryptionKey, requireParam, validateSearchLength } from './library-route-helpers';
 import { withLibraryUpload } from './library-upload-request';
 
@@ -236,25 +237,27 @@ libraryRoutes.get('/:fileId/download', requireAuth(), requireApproved(), async (
 
   const encryptionKey = getEncryptionKey(c.env);
   const timeoutMs = getDownloadTimeoutMs(c.env);
-  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-  const { data, file } = await Promise.race([
-    downloadFile(db, c.env.R2, encryptionKey, projectId, fileId),
-    new Promise<never>((_, reject) => {
-      timeoutHandle = setTimeout(() => reject(errors.internal('Download timed out')), timeoutMs);
-    }),
-  ]).finally(() => clearTimeout(timeoutHandle));
-  assertDebugPackageVisibleTo(auth.user.role, file.directory);
-
-  return new Response(data, {
-    status: 200,
-    headers: {
-      'Content-Type': downloadContentType(file.mimeType),
-      'Content-Length': String(data.byteLength),
-      'Content-Disposition': `attachment; filename="${contentDispositionFilename(file.filename)}"`,
-      'Cache-Control': 'private, no-store',
-      'X-Content-Type-Options': 'nosniff',
-    },
-  });
+  const owned = await loadLibraryDownload(
+    () => downloadFile(db, c.env.R2, encryptionKey, projectId, fileId),
+    timeoutMs
+  );
+  try {
+    const { data, file } = owned.value;
+    assertDebugPackageVisibleTo(auth.user.role, file.directory);
+    return new Response(owned.stream(), {
+      status: 200,
+      headers: {
+        'Content-Type': downloadContentType(file.mimeType),
+        'Content-Length': String(data.byteLength),
+        'Content-Disposition': `attachment; filename="${contentDispositionFilename(file.filename)}"`,
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    });
+  } catch (error) {
+    owned.dispose();
+    throw error;
+  }
 });
 
 libraryRoutes.post(
@@ -334,37 +337,40 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
 
   const encryptionKey = getEncryptionKey(c.env);
   const timeoutMs = getDownloadTimeoutMs(c.env);
-  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-  const { data } = await Promise.race([
-    downloadFile(db, c.env.R2, encryptionKey, projectId, fileId),
-    new Promise<never>((_, reject) => {
-      timeoutHandle = setTimeout(() => reject(errors.internal('Preview timed out')), timeoutMs);
-    }),
-  ]).finally(() => clearTimeout(timeoutHandle));
-  if (!hasPreviewableContent(effectiveMime, data)) {
-    throw errors.badRequest('File type is not supported for inline preview');
-  }
+  const owned = await loadLibraryDownload(
+    () => downloadFile(db, c.env.R2, encryptionKey, projectId, fileId),
+    timeoutMs
+  );
+  try {
+    const { data } = owned.value;
+    if (!hasPreviewableContent(effectiveMime, data)) {
+      throw errors.badRequest('File type is not supported for inline preview');
+    }
 
-  const { contentType, contentSecurityPolicy } = previewHeaders(effectiveMime, c.env);
-  const headers: Record<string, string> = {
-    'Content-Type': contentType,
-    'Content-Disposition': `inline; filename="${contentDispositionFilename(file.filename)}"`,
-    'Cache-Control': 'private, no-store',
-    'X-Content-Type-Options': 'nosniff',
-    'Content-Security-Policy': contentSecurityPolicy,
-    'Accept-Ranges': 'bytes',
-  };
-  // Video elements fetch in byte ranges to seek, and Safari plays nothing without them.
-  const range = parseByteRange(c.req.header('Range'), data.byteLength);
-  if (range === 'unsatisfiable') {
-    headers['Content-Range'] = `bytes */${data.byteLength}`;
-    return new Response(null, { status: 416, headers });
+    const { contentType, contentSecurityPolicy } = previewHeaders(effectiveMime, c.env);
+    const headers: Record<string, string> = {
+      'Content-Type': contentType,
+      'Content-Disposition': `inline; filename="${contentDispositionFilename(file.filename)}"`,
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': contentSecurityPolicy,
+      'Accept-Ranges': 'bytes',
+    };
+    const range = parseByteRange(c.req.header('Range'), data.byteLength);
+    if (range === 'unsatisfiable') {
+      headers['Content-Range'] = `bytes */${data.byteLength}`;
+      owned.dispose();
+      return new Response(null, { status: 416, headers });
+    }
+    const start = range ? range.start : 0;
+    const end = range ? range.end + 1 : data.byteLength;
+    headers['Content-Length'] = String(end - start);
+    if (range) headers['Content-Range'] = `bytes ${range.start}-${range.end}/${data.byteLength}`;
+    return new Response(owned.stream(start, end), { status: range ? 206 : 200, headers });
+  } catch (error) {
+    owned.dispose();
+    throw error;
   }
-  // A view, not a copy: the decrypted file can be up to the preview ceiling.
-  const body = range ? new Uint8Array(data, range.start, range.end - range.start + 1) : data;
-  headers['Content-Length'] = String(body.byteLength);
-  if (range) headers['Content-Range'] = `bytes ${range.start}-${range.end}/${data.byteLength}`;
-  return new Response(body, { status: range ? 206 : 200, headers });
 });
 
 // ---------------------------------------------------------------------------

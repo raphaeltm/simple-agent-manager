@@ -129,6 +129,24 @@ describe('Library multipart outer-limit compatibility', () => {
       'x-enc-wrapped-dek',
     ]);
     expect(object?.size).toBe(MAX_FILE_BYTES + 16);
+    // Keep a real 50 MiB response unread: a write must refuse before materializing.
+    const held = await SELF.fetch(`${API}/api/projects/${projectId}/library/${file.id}/download`, {
+      headers: { Cookie: cookie },
+    });
+    expect(held.status).toBe(200);
+    const reader = held.body!.getReader();
+    const first = await reader.read();
+    expect(first.value?.byteLength).toBeLessThanOrEqual(64 * 1024);
+    const overlap = await SELF.fetch(`${API}/api/projects/${projectId}/library/upload`, {
+      method: 'POST',
+      ...multipart(1, 9),
+    });
+    expect(overlap.status).toBe(429);
+    // SELF's native service-binding cancellation does not propagate to the producer.
+    // Drain here; external HTTP cancellation is verified separately against the real stream.
+    while (!(await reader.read()).done) {
+      /* consume without retaining file-sized copies */
+    }
     for (const value of [3, 7]) {
       if (value === 7) {
         const replaced = await SELF.fetch(
