@@ -42,20 +42,20 @@ existing skill update API.
 
 ## Checklist
 
-- [ ] Shared types `packages/shared/src/types/insights-setups.ts` + exports
-- [ ] Settings: run scan cap, suggestion minimum runs, gap, memory headroom
-- [ ] `runsCte({ setup: true })` columns; `run_prs` carries the URL; shared same-branch rework SQL
-- [ ] `insights-setups-sql.ts` (one statement), `insights-setups-compute.ts` (groups),
+- [x] Shared types `packages/shared/src/types/insights-setups.ts` + exports
+- [x] Settings: run scan cap, suggestion minimum runs, gap, memory headroom
+- [x] `runsCte({ setup: true })` columns; `run_prs` carries the URL; shared same-branch rework SQL
+- [x] `insights-setups-sql.ts` (one statement), `insights-setups-compute.ts` (groups),
       `insights-setups-suggestions.ts`, `insights-setups.ts` (`projectSetups`)
-- [ ] DO RPC `countRunNudges` + client + port + operation-ports wiring
-- [ ] REST `GET /api/projects/:projectId/insights/setups?range&groupBy`
-- [ ] Tests: real-SQL foreign-project attack + owner control, malformed rows, round-trip budget,
+- [x] DO RPC `countRunNudges` + client + port + operation-ports wiring
+- [x] REST `GET /api/projects/:projectId/insights/setups?range&groupBy`
+- [x] Tests: real-SQL foreign-project attack + owner control, malformed rows, round-trip budget,
       suggestions thresholds, DO nudges (workers), route
-- [ ] Web: AgentSetupsTab, group-by control in `?groupBy=`, table/cards, Compared, suggestions
+- [x] Web: AgentSetupsTab, group-by control in `?groupBy=`, table/cards, Compared, suggestions
       applied via `updateSkill`; remove agent-setups from ComingSoonTab
-- [ ] Playwright visual audit 375/1280 realistic/empty/stress
-- [ ] Docs: Insights section of the project guide
-- [ ] Staging: real runs across ≥2 profiles or skills; one suggestion end to end if data allows
+- [x] Playwright visual audit 375/1280 realistic/empty/stress
+- [x] Docs: Insights section of the project guide
+- [ ] Staging (Phase 6, pending): real runs across ≥2 profiles or skills; one suggestion end to end if data allows
 
 ## Acceptance criteria
 
@@ -63,3 +63,19 @@ existing skill update API.
 - Every metric is measured or marked missing (tokens "not reported", nudges/memory "not recorded").
 - Suggestions only appear above the stated minimum sample and apply through PATCH skill.
 - Agent setups tab live on staging with real data; production deploy succeeds.
+
+## Notes
+
+- Deviation: rework counts the same-branch half of Flow's rule only. The idea-linked half needs
+  `ideaItemsWithPullRequests` (up to 6 round trips), over the setups budget; disclosed in the
+  response (`rework.rule = 'same_branch'`), the page footnote and the guide.
+- Review (5 local reviewers) fixed: free-text profile hint no longer echoed (security), project
+  profiles only as a skill default, nudges read once per chat with per-chat isolation, the setups
+  statement restructured (14.4 s → 159 ms at 9,000 runs / 30,000 PRs, plan pinned by
+  `insights-setups-query-plan.test.ts`), partial/few-runs labels, named compare bars, cards below
+  `lg`, 44px mobile buttons, skill list invalidated after applying.
+- Deferred (MEDIUM, performance): switching the grouping refetches the same runs. `groupBy` is
+  the interface the spec defines; each read is cached 5 minutes and costs ~4 round trips.
+- Discrimination proofs: deleting each project predicate (memory, usage, later PRs, profile join,
+  skill join) reddens exactly the attack tests; the key-hiding branch reddens both leak tests;
+  reverting `CROSS JOIN` reddens the plan test.
