@@ -143,7 +143,9 @@ function requestSizeSuggestion(
   const maxBytes = peaks[peaks.length - 1] ?? 0;
   const oomKills = measured.reduce((sum, run) => sum + run.oomKills, 0);
   const wanted = (p90Bytes / GIB) * (1 + limits.memoryHeadroomPercent / 100);
-  const suggestedGb = Math.max(MIN_SUGGESTED_GB, Math.ceil(wanted / STEP_GB) * STEP_GB);
+  // Rounded to a millionth of a step first, so 4.0000001 GB (bytes are whole numbers) stays 4.
+  const steps = Math.ceil(Math.round((wanted / STEP_GB) * 1e6) / 1e6);
+  const suggestedGb = Math.max(MIN_SUGGESTED_GB, steps * STEP_GB);
 
   const explicit = requirements.minMemoryGb;
   const requestedMb = medianOf(
