@@ -1171,7 +1171,25 @@ items the caller may open. Returns `ProjectPeopleResponse`
 - `firstPerson`: `{ closed, firstPerson, share }`, `share` `null` when nothing closed.
 - `unavailable`: sections whose read failed this time (`waiting`, `reviews`, `first_person`).
 
-### `POST /api/projects/:id/tasks`
+### Insights for agents: MCP `project_insights` / Connector `sam_project_insights`
+
+The same Insights reads, for agents, as one tool with a `method` (`projectInsights`,
+`packages/operations/src/insights-agent.ts`; catalog operation `sam_project_insights`, which the SAM
+Connector lists; sam-mcp tool `project_insights`, `apps/api/src/routes/mcp/project-insights-tool.ts`).
+
+- `receipt` (`taskId`): `runReceipt`. `flow` (`range`): `projectFlow`. `setups` (`range`,
+  `groupBy`): `projectSetups`. `accounts` (`range`): `projectAccounts`. `phases` (`skillId` or
+  `agentProfileId`, optional `operation` and `windowDays`): median and p90 per lifecycle phase from
+  `phaseDurationStats`. An argument the method does not read is `invalid_input`.
+- Numbers only: no task, pull request or idea titles, no idea notes, no agent questions, no account
+  names or credential references, no names of a teammate's profiles. Accounts are keyed
+  `account-1`, `account-2`, ... in the order the page lists them.
+- On sam-mcp the project always comes from the MCP token; a different `projectId` is refused with
+  `Project does not match workspace token`. Each chat may call it `insights.agentToolCallsPerWindow`
+  times per `insights.agentToolWindowSeconds` (see [admin settings](/docs/guides/admin-settings/));
+  the next call returns JSON-RPC error `-32000` with the retry time.
+- Round trips are the page read's, plus one rate-limit RPC on sam-mcp: receipt at most 8 (it skips
+  the account-name read), flow at most 11, setups at most 6, accounts at most 5, phases 3.
 
 Create a task record.
 
