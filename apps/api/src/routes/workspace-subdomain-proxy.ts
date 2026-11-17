@@ -393,6 +393,8 @@ export async function workspaceSubdomainProxy(
   headers.delete('x-sam-node-id');
   headers.delete('x-sam-workspace-id');
   headers.delete('x-forwarded-host');
+  // The self-host gateway secret authenticates Caddy/frps to the API; it never goes to a node.
+  headers.delete('x-sam-gateway-secret');
   headers.set('X-SAM-Node-Id', workspace.nodeId || workspaceId);
   headers.set('X-SAM-Workspace-Id', workspaceId);
 
