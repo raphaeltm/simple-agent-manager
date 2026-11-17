@@ -704,6 +704,23 @@ describe('D1 migration safety gates', () => {
     ).not.toThrow();
   });
 
+  it('allows webhook pruning of pull request checks while a migration is applied', () => {
+    // Production run 44010648016: an additive migration was applied while GitHub webhooks
+    // pruned orphaned check observations, and the gate refused the deploy.
+    const runner = new FakeRunner(
+      { main: ['d1_migrations', 'pull_request_checks', 'users'] },
+      { 'main:pull_request_checks': [28243, 28201], 'main:users': [2, 2] }
+    );
+
+    expect(() =>
+      runSafeRemoteMigrations({
+        environment: 'production',
+        databases: [{ binding: 'DATABASE', name: 'main' }],
+        runner,
+      })
+    ).not.toThrow();
+  });
+
   it('blocks protected-business-table loss and prints recovery timestamp and commands', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const runner = new FakeRunner(
