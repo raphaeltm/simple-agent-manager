@@ -14,7 +14,6 @@
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
 import { transcribeRoutes } from '../../../src/routes/transcribe';
@@ -32,7 +31,7 @@ import {
   resolvePublicPlatformCapabilities,
 } from '../../../src/services/speech-backend';
 import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
-import { createSchemaTables } from '../../helpers/sqlite-d1';
+import { applySqliteMigration } from '../../helpers/sqlite-d1';
 
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => async (c: any, next: any) => {
@@ -78,8 +77,11 @@ function boxEnv(overrides: Partial<Env> = {}) {
     TTS_RETRY_ATTEMPTS: '1',
     ...overrides,
   });
-  // The transcribe route's existing per-user spend limit (middleware/rate-limit.ts).
-  createSchemaTables(fixture.sqlite, [schema.aiSpendRateLimits]);
+  fixture.sqlite.exec(`CREATE TABLE users (id TEXT PRIMARY KEY);
+    INSERT INTO users VALUES ('user-speech-1'), ('other-user');`);
+  for (const filename of ['0174_ai_spend_rate_limits.sql', '0259_speech_synthesis_rate_limits.sql']) {
+    applySqliteMigration(fixture.sqlite, new URL(`../../../src/db/migrations/${filename}`, import.meta.url));
+  }
   return fixture;
 }
 
@@ -496,6 +498,76 @@ describe('server read-aloud through an OpenAI-compatible endpoint', () => {
     );
     expect(exact.status).toBe(200);
     expect([...stored.values()][0]?.byteLength).toBe(12);
+  });
+
+  it('atomically admits only the configured number of concurrent paid requests', async () => {
+    const { env } = boxEnv();
+    await configure(env, {
+      'speech.synthesis.baseUrl': 'https://tts.example.com/v1',
+      'speech.synthesis.model': 'kokoro',
+      'speech.synthesis.voice': 'af_heart',
+      'speech.synthesis.maxRequestsPerHour': 1,
+    });
+    fetchMock.mockImplementation(async () => new Response(AUDIO_BYTES));
+    // Hold the old KV limiter's reads together so every contender observes the empty bucket.
+    const originalGet = env.KV.get.bind(env.KV);
+    let reads = 0;
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    vi.spyOn(env.KV, 'get').mockImplementation(async (key, options) => {
+      if (key.startsWith('ratelimit:speech-synthesis:')) {
+        if (++reads === 6) release();
+        await barrier;
+        return null;
+      }
+      return originalGet(key, options);
+    });
+
+    const responses = await Promise.all(
+      Array.from({ length: 6 }, (_, index) => postSynthesize(env, `concurrent-${index}`))
+    );
+    expect(responses.map((response) => response.status).sort()).toEqual([
+      200, 429, 429, 429, 429, 429,
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('isolates users, rolls over the hourly counter, and leaves transcription counters intact', async () => {
+    const { env, sqlite } = boxEnv();
+    await configure(env, {
+      'speech.synthesis.baseUrl': 'https://tts.example.com/v1',
+      'speech.synthesis.model': 'kokoro',
+      'speech.synthesis.voice': 'af_heart',
+      'speech.synthesis.maxRequestsPerHour': 1,
+    });
+    const start = Math.floor(Date.now() / 3_600_000) * 3600;
+    sqlite.prepare('INSERT INTO ai_spend_rate_limits VALUES (?, ?, ?, ?)')
+      .run('transcribe', 'user-speech-1', start, 29);
+    sqlite.prepare('INSERT INTO speech_synthesis_rate_limits VALUES (?, ?, ?, ?)')
+      .run('speech-synthesis', 'other-user', start, 99);
+    fetchMock.mockImplementation(async () => new Response(AUDIO_BYTES));
+    expect((await postSynthesize(env, 'hour-one')).status).toBe(200);
+    expect((await postSynthesize(env, 'hour-one-refused')).status).toBe(429);
+    vi.spyOn(Date, 'now').mockReturnValue((start + 3600) * 1000);
+    expect((await postSynthesize(env, 'hour-two')).status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sqlite.prepare('SELECT count FROM ai_spend_rate_limits').get()).toEqual({ count: 29 });
+    expect(sqlite.prepare('SELECT count FROM speech_synthesis_rate_limits WHERE user_id = ?')
+      .get('other-user')).toEqual({ count: 99 });
+  });
+
+  it('fails closed without exposing database errors when the atomic counter is unavailable', async () => {
+    const { env, sqlite } = boxEnv();
+    await configure(env, {
+      'speech.synthesis.baseUrl': 'https://tts.example.com/v1',
+      'speech.synthesis.model': 'kokoro',
+      'speech.synthesis.voice': 'af_heart',
+    });
+    sqlite.exec('DROP TABLE speech_synthesis_rate_limits');
+    const response = await postSynthesize(env);
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain('speech_synthesis_rate_limits');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('rate-limits per user and hides endpoint errors from the client', async () => {

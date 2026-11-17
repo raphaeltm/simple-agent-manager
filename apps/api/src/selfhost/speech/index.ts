@@ -5,11 +5,10 @@
  * (`src/index.ts`) never imports this directory, so the Cloudflare bundle does not contain it.
  */
 import type { Env } from '../../env';
+import { errors } from '../../middleware/error';
 import {
-  checkRateLimit,
-  createRateLimitKey,
+  checkAiSpendRateLimit,
   DEFAULT_WINDOW_SECONDS,
-  getCurrentWindowStart,
   RateLimitError,
 } from '../../middleware/rate-limit';
 import { installAdminSettingDefinitions } from '../../services/admin-settings-registry';
@@ -56,15 +55,14 @@ function synthesisBackend(endpoint: SpeechEndpoint): SpeechSynthesisBackend {
   // concatenation retains those buffers plus one final copy (up to twice this payload cap).
   let audioBytes = 0;
   return {
-    // Every request spends the admin's endpoint: bound it per user (KV, per hour).
+    // Paid endpoint admission must retain every concurrent increment (D1, per hour).
     admit: async (env, userId) => {
-      const window = getCurrentWindowStart(DEFAULT_WINDOW_SECONDS);
-      const result = await checkRateLimit(
-        env.KV,
-        createRateLimitKey('speech-synthesis', userId, window),
-        await synthesisRequestsPerHour(env),
-        DEFAULT_WINDOW_SECONDS
-      );
+      const limit = await synthesisRequestsPerHour(env);
+      const result = await checkAiSpendRateLimit(
+        env.DATABASE, 'speech-synthesis', userId, limit, DEFAULT_WINDOW_SECONDS
+      ).catch(() => {
+        throw errors.serviceUnavailable('Speech rate limit unavailable. Try again shortly.');
+      });
       if (!result.allowed) {
         throw new RateLimitError(Math.max(1, result.resetAt - Math.floor(Date.now() / 1000)));
       }

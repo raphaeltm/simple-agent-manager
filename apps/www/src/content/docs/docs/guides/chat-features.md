@@ -645,7 +645,9 @@ configures; the Cloudflare Worker never installs it. Endpoint synthesis needs a 
 and voice. `speech.synthesis.maxAudioBytes` caps the combined audio across all chunks of a request
 (8 MiB by default); declared formats that differ from the requested encoding are refused before caching. Endpoint retries regenerate partial audio so changed model
 or voice settings cannot mix chunks. `speech.transcription.maxResponseBytes` caps transcription
-JSON responses before parsing (1 MiB by default). An installation with neither, or
+JSON responses before parsing (1 MiB by default). Endpoint synthesis admission uses an atomic
+per-user database counter, bounded by `speech.synthesis.maxRequestsPerHour` even for concurrent
+requests; unavailable counters refuse synthesis before calling the endpoint. An installation with neither, or
 with `TTS_ENABLED` set to `false`, reports that through
 [`GET /api/config/platform-capabilities`](/docs/reference/api/), and the app hides the microphone
 (and, for TTS, plays read-aloud through the browser's own speech synthesis) instead of showing a
