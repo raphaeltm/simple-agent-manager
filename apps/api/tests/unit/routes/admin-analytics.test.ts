@@ -75,19 +75,6 @@ describe('admin-analytics routes', () => {
     expect(opts.body).toContain("INTERVAL '7' DAY");
   });
 
-  it('GET /funnel queries for conversion events', async () => {
-    mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
-
-    const app = createApp();
-    const res = await app.request('/api/admin/analytics/funnel');
-
-    expect(res.status).toBe(200);
-    const [, opts] = mockFetch.mock.calls[0];
-    expect(opts.body).toContain('signup');
-    expect(opts.body).toContain('project_created');
-    expect(opts.body).toContain('task_submitted');
-  });
-
   it('returns 500 when CF_ACCOUNT_ID is missing', async () => {
     mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
 
@@ -177,18 +164,6 @@ describe('admin-analytics routes', () => {
     expect(Array.isArray(json.events)).toBe(true);
   });
 
-  it('GET /funnel returns correct JSON shape with data array', async () => {
-    mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
-
-    const app = createApp();
-    const res = await app.request('/api/admin/analytics/funnel');
-    const json = (await res.json()) as { funnel: unknown[]; periodDays: number };
-
-    expect(json).toHaveProperty('funnel');
-    expect(json).toHaveProperty('periodDays');
-    expect(Array.isArray(json.funnel)).toBe(true);
-  });
-
   it('returns 500 when fetch rejects (network error)', async () => {
     mockFetch.mockRejectedValue(new Error('network error'));
 
@@ -268,30 +243,6 @@ describe('admin-analytics routes', () => {
       expect(total).toBe(300); // not "100200"
     });
 
-    it('GET /funnel converts unique_users from string to number', async () => {
-      mockFetch.mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            data: [
-              { event_name: 'signup', unique_users: '50' },
-              { event_name: 'task_submitted', unique_users: '10' },
-            ],
-          }),
-          { status: 200 }
-        )
-      );
-
-      const app = createApp();
-      const res = await app.request('/api/admin/analytics/funnel');
-      const json = (await res.json()) as { funnel: Array<{ unique_users: number }> };
-
-      expect(typeof json.funnel[0].unique_users).toBe('number');
-      expect(json.funnel[0].unique_users).toBe(50);
-      // Verify division works (would be NaN or wrong with strings)
-      const rate = Math.round((json.funnel[1].unique_users / json.funnel[0].unique_users) * 100);
-      expect(rate).toBe(20);
-    });
-
     it('GET /feature-adoption converts count and unique_users from string to number', async () => {
       mockFetch.mockImplementation(async (_url: string, init: RequestInit) => {
         const sql = (init as { body?: string }).body ?? '';
@@ -313,30 +264,6 @@ describe('admin-analytics routes', () => {
       expect(json.totals[0].unique_users).toBe(10);
       expect(typeof json.trend[0].count).toBe('number');
       expect(json.trend[0].count).toBe(15);
-    });
-
-    it('GET /geo converts event_count and unique_users from string to number', async () => {
-      mockFetch.mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            data: [
-              { country: 'US', event_count: '100', unique_users: '20' },
-              { country: 'DE', event_count: '50', unique_users: '10' },
-            ],
-          }),
-          { status: 200 }
-        )
-      );
-
-      const app = createApp();
-      const res = await app.request('/api/admin/analytics/geo');
-      const json = (await res.json()) as {
-        geo: Array<{ event_count: number; unique_users: number }>;
-      };
-
-      expect(typeof json.geo[0].event_count).toBe('number');
-      expect(json.geo[0].event_count).toBe(100);
-      expect(json.geo[0].unique_users).toBe(20);
     });
 
     it('GET /website-traffic converts host totals and trend views from string to number', async () => {
@@ -560,369 +487,41 @@ describe('admin-analytics routes', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Phase 3: Geographic Distribution
+  // Retired SaaS-era sections (Insights slice H2): signup funnel, geo, retention
   // -------------------------------------------------------------------------
 
-  describe('GET /api/admin/analytics/geo', () => {
-    it('returns country distribution data', async () => {
-      mockFetch.mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            data: [
-              { country: 'US', event_count: 100, unique_users: 20 },
-              { country: 'DE', event_count: 50, unique_users: 10 },
-            ],
-          }),
-          { status: 200 }
-        )
-      );
+  describe('retired routes', () => {
+    it.each(['/funnel', '/geo', '/geo?period=30d', '/retention', '/retention?weeks=8'])(
+      'GET %s returns 404 without querying Analytics Engine',
+      async (path) => {
+        mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+        const app = createApp();
 
-      const app = createApp();
-      const res = await app.request('/api/admin/analytics/geo');
-      expect(res.status).toBe(200);
+        const retired = await app.request(`/api/admin/analytics${path}`);
+        expect(retired.status).toBe(404);
+        expect(mockFetch).not.toHaveBeenCalled();
 
-      const body = (await res.json()) as {
-        geo: Array<{ country: string; unique_users: number }>;
-        period: string;
-      };
-      expect(body.period).toBe('30d');
-      expect(body.geo).toHaveLength(2);
-      expect(body.geo[0].country).toBe('US');
-    });
-
-    it('uses custom geo limit from env', async () => {
-      mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
-
-      const app = createApp({ ANALYTICS_GEO_LIMIT: '10' });
-      await app.request('/api/admin/analytics/geo');
-
-      const [, opts] = mockFetch.mock.calls[0];
-      expect(opts.body).toContain('LIMIT 10');
-    });
-
-    it('excludes anonymous users and empty countries', async () => {
-      mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
-
-      const app = createApp();
-      await app.request('/api/admin/analytics/geo');
-
-      const [, opts] = mockFetch.mock.calls[0];
-      expect(opts.body).toContain("blob10 != ''");
-      expect(opts.body).toContain("index1 != 'anonymous'");
-    });
-
-    it('accepts period query param', async () => {
-      mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
-
-      const app = createApp();
-      const res = await app.request('/api/admin/analytics/geo?period=7d');
-      const body = (await res.json()) as { period: string };
-      expect(body.period).toBe('7d');
-
-      const [, opts] = mockFetch.mock.calls[0];
-      expect(opts.body).toContain("INTERVAL '7' DAY");
-    });
-
-    it('returns empty geo array when no data', async () => {
-      mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
-
-      const app = createApp();
-      const res = await app.request('/api/admin/analytics/geo');
-      const body = (await res.json()) as { geo: unknown[] };
-      expect(body.geo).toEqual([]);
-    });
-
-    it('default geo limit of 50 is applied when env var not set', async () => {
-      mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
-
-      const app = createApp();
-      await app.request('/api/admin/analytics/geo');
-
-      const [, opts] = mockFetch.mock.calls[0];
-      expect(opts.body).toContain('LIMIT 50');
-    });
-
-    it('orders results by unique_users DESC', async () => {
-      mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
-
-      const app = createApp();
-      await app.request('/api/admin/analytics/geo');
-
-      const [, opts] = mockFetch.mock.calls[0];
-      expect(opts.body).toContain('ORDER BY unique_users DESC');
-    });
-
-    it('returns 500 when CF API returns error', async () => {
-      mockFetch.mockResolvedValue(new Response('Forbidden', { status: 403 }));
-
-      const app = createApp();
-      const res = await app.request('/api/admin/analytics/geo');
-      expect(res.status).toBe(500);
-    });
-
-    it('ignores non-positive ANALYTICS_GEO_LIMIT and falls back to default 50', async () => {
-      mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
-
-      const app = createApp({ ANALYTICS_GEO_LIMIT: '0' });
-      await app.request('/api/admin/analytics/geo');
-
-      const [, opts] = mockFetch.mock.calls[0];
-      expect(opts.body).toContain('LIMIT 50');
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Phase 3: Retention Cohorts
-  // -------------------------------------------------------------------------
-
-  describe('GET /api/admin/analytics/retention', () => {
-    it('computes cohort retention matrix from raw query data', async () => {
-      let callCount = 0;
-      mockFetch.mockImplementation(async (_url: string, init: RequestInit) => {
-        callCount++;
-        const sql = (init as { body?: string }).body ?? '';
-        let data: unknown[];
-
-        if (sql.includes('min(toStartOfInterval')) {
-          data = [
-            { user_id: 'user-1', cohort_week: '2026-03-10' },
-            { user_id: 'user-2', cohort_week: '2026-03-10' },
-            { user_id: 'user-3', cohort_week: '2026-03-17' },
-          ];
-        } else {
-          data = [
-            { user_id: 'user-1', active_week: '2026-03-10' },
-            { user_id: 'user-1', active_week: '2026-03-17' },
-            { user_id: 'user-2', active_week: '2026-03-10' },
-            { user_id: 'user-3', active_week: '2026-03-17' },
-            { user_id: 'user-3', active_week: '2026-03-24' },
-          ];
-        }
-
-        return new Response(JSON.stringify({ data }), { status: 200 });
-      });
-
-      const app = createApp();
-      const res = await app.request('/api/admin/analytics/retention');
-      expect(res.status).toBe(200);
-
-      const body = (await res.json()) as {
-        weeks: number;
-        retention: Array<{
-          cohortWeek: string;
-          cohortSize: number;
-          weeks: Array<{ week: number; users: number; rate: number }>;
-        }>;
-      };
-      expect(body.weeks).toBe(12);
-      expect(body.retention).toHaveLength(2);
-
-      // Cohort 2026-03-10: 2 users in W0, 1 in W1
-      expect(body.retention[0].cohortWeek).toBe('2026-03-10');
-      expect(body.retention[0].cohortSize).toBe(2);
-      expect(body.retention[0].weeks[0]).toEqual({ week: 0, users: 2, rate: 100 });
-      expect(body.retention[0].weeks[1]).toEqual({ week: 1, users: 1, rate: 50 });
-
-      // Cohort 2026-03-17: 1 user in W0, 1 in W1
-      expect(body.retention[1].cohortWeek).toBe('2026-03-17');
-      expect(body.retention[1].cohortSize).toBe(1);
-      expect(callCount).toBe(2);
-    });
-
-    it('uses custom weeks from query param', async () => {
-      mockFetch.mockImplementation(
-        async () => new Response(JSON.stringify({ data: [] }), { status: 200 })
-      );
-
-      const app = createApp();
-      const res = await app.request('/api/admin/analytics/retention?weeks=8');
-      const body = (await res.json()) as { weeks: number };
-      expect(body.weeks).toBe(8);
-
-      const [, opts] = mockFetch.mock.calls[0];
-      expect(opts.body).toContain("INTERVAL '56' DAY"); // 8 * 7
-    });
-
-    it('uses env var for default retention weeks', async () => {
-      mockFetch.mockImplementation(
-        async () => new Response(JSON.stringify({ data: [] }), { status: 200 })
-      );
-
-      const app = createApp({ ANALYTICS_RETENTION_WEEKS: '6' });
-      const res = await app.request('/api/admin/analytics/retention');
-      const body = (await res.json()) as { weeks: number };
-      expect(body.weeks).toBe(6);
-    });
-
-    it('returns empty retention for no data', async () => {
-      mockFetch.mockImplementation(
-        async () => new Response(JSON.stringify({ data: [] }), { status: 200 })
-      );
-
-      const app = createApp();
-      const res = await app.request('/api/admin/analytics/retention');
-      const body = (await res.json()) as { retention: unknown[] };
-      expect(body.retention).toEqual([]);
-    });
-
-    it('cohort W0 rate is always 100% when cohort has at least one user', async () => {
-      mockFetch.mockImplementation(async (_url: string, init: RequestInit) => {
-        const sql = (init as { body?: string }).body ?? '';
-        const data = sql.includes('min(toStartOfInterval')
-          ? [{ user_id: 'user-1', cohort_week: '2026-03-10' }]
-          : [{ user_id: 'user-1', active_week: '2026-03-10' }];
-        return new Response(JSON.stringify({ data }), { status: 200 });
-      });
-
-      const app = createApp();
-      const res = await app.request('/api/admin/analytics/retention');
-      const body = (await res.json()) as {
-        retention: Array<{ cohortSize: number; weeks: Array<{ week: number; rate: number }> }>;
-      };
-      expect(body.retention[0].cohortSize).toBe(1);
-      expect(body.retention[0].weeks[0]).toEqual({ week: 0, users: 1, rate: 100 });
-    });
-
-    it('discards activity rows for users with no cohort entry', async () => {
-      // user-orphan has activity but no cohort entry — should be silently excluded
-      mockFetch.mockImplementation(async (_url: string, init: RequestInit) => {
-        const sql = (init as { body?: string }).body ?? '';
-        const data = sql.includes('min(toStartOfInterval')
-          ? [{ user_id: 'user-1', cohort_week: '2026-03-10' }]
-          : [
-              { user_id: 'user-1', active_week: '2026-03-10' },
-              { user_id: 'user-orphan', active_week: '2026-03-10' }, // no cohort row
-            ];
-        return new Response(JSON.stringify({ data }), { status: 200 });
-      });
-
-      const app = createApp();
-      const res = await app.request('/api/admin/analytics/retention');
-      const body = (await res.json()) as {
-        retention: Array<{ cohortSize: number }>;
-      };
-      // Only user-1 cohort, size 1 — orphan is not double-counted
-      expect(body.retention).toHaveLength(1);
-      expect(body.retention[0].cohortSize).toBe(1);
-    });
-
-    it('cohorts are returned sorted by cohort week ascending', async () => {
-      mockFetch.mockImplementation(async (_url: string, init: RequestInit) => {
-        const sql = (init as { body?: string }).body ?? '';
-        // Intentionally return cohorts in reverse chronological order to verify sort
-        const data = sql.includes('min(toStartOfInterval')
-          ? [
-              { user_id: 'user-b', cohort_week: '2026-03-24' },
-              { user_id: 'user-a', cohort_week: '2026-03-10' },
-            ]
-          : [
-              { user_id: 'user-b', active_week: '2026-03-24' },
-              { user_id: 'user-a', active_week: '2026-03-10' },
-            ];
-        return new Response(JSON.stringify({ data }), { status: 200 });
-      });
-
-      const app = createApp();
-      const res = await app.request('/api/admin/analytics/retention');
-      const body = (await res.json()) as {
-        retention: Array<{ cohortWeek: string }>;
-      };
-      expect(body.retention[0].cohortWeek).toBe('2026-03-10');
-      expect(body.retention[1].cohortWeek).toBe('2026-03-24');
-    });
-
-    it('clamps activity that falls outside the valid week window', async () => {
-      // user-1 has an active_week that precedes their cohort_week by 1 week (weekOffset = -1)
-      // and another that is beyond the `weeks` param (weekOffset = 100)
-      // Neither should appear in the output
-      mockFetch.mockImplementation(async (_url: string, init: RequestInit) => {
-        const sql = (init as { body?: string }).body ?? '';
-        const data = sql.includes('min(toStartOfInterval')
-          ? [{ user_id: 'user-1', cohort_week: '2026-03-17' }]
-          : [
-              { user_id: 'user-1', active_week: '2026-03-17' }, // W0 — valid
-              { user_id: 'user-1', active_week: '2026-03-10' }, // W-1 — negative offset, excluded
-              { user_id: 'user-1', active_week: '2028-03-17' }, // way in the future, > weeks, excluded
-            ];
-        return new Response(JSON.stringify({ data }), { status: 200 });
-      });
-
-      const app = createApp();
-      const res = await app.request('/api/admin/analytics/retention?weeks=4');
-      const body = (await res.json()) as {
-        retention: Array<{ cohortWeek: string; weeks: Array<{ week: number }> }>;
-      };
-      expect(body.retention).toHaveLength(1);
-      // Only W0 should be present (the negative and far-future offsets were dropped)
-      expect(body.retention[0].weeks.map((w) => w.week)).toEqual([0]);
-    });
-
-    it('default weeks is 12 when env var is absent', async () => {
-      mockFetch.mockImplementation(
-        async () => new Response(JSON.stringify({ data: [] }), { status: 200 })
-      );
-
-      const app = createApp();
-      const res = await app.request('/api/admin/analytics/retention');
-      const body = (await res.json()) as { weeks: number };
-      expect(body.weeks).toBe(12);
-
-      const [, opts] = mockFetch.mock.calls[0];
-      expect(opts.body).toContain("INTERVAL '84' DAY"); // 12 * 7
-    });
-
-    it('ignores non-positive ANALYTICS_RETENTION_WEEKS and falls back to 12', async () => {
-      mockFetch.mockImplementation(
-        async () => new Response(JSON.stringify({ data: [] }), { status: 200 })
-      );
-
-      const app = createApp({ ANALYTICS_RETENTION_WEEKS: '-5' });
-      const res = await app.request('/api/admin/analytics/retention');
-      const body = (await res.json()) as { weeks: number };
-      expect(body.weeks).toBe(12);
-    });
-
-    it('issues exactly two SQL queries (cohort + activity)', async () => {
-      let callCount = 0;
-      mockFetch.mockImplementation(async () => {
-        callCount++;
-        return new Response(JSON.stringify({ data: [] }), { status: 200 });
-      });
-
-      const app = createApp();
-      await app.request('/api/admin/analytics/retention');
-      expect(callCount).toBe(2);
-    });
-
-    it('returns 500 when CF API fails for the cohort query', async () => {
-      let callCount = 0;
-      mockFetch.mockImplementation(async () => {
-        callCount++;
-        if (callCount === 1) {
-          return new Response('Service unavailable', { status: 503 });
-        }
-        return new Response(JSON.stringify({ data: [] }), { status: 200 });
-      });
-
-      const app = createApp();
-      const res = await app.request('/api/admin/analytics/retention');
-      expect(res.status).toBe(500);
-    });
-
-    it('includes a LIMIT clause in both cohort and activity queries to guard against truncation', async () => {
-      const capturedSql: string[] = [];
-      mockFetch.mockImplementation(async (_url: string, init: RequestInit) => {
-        capturedSql.push((init as { body?: string }).body ?? '');
-        return new Response(JSON.stringify({ data: [] }), { status: 200 });
-      });
-
-      const app = createApp();
-      await app.request('/api/admin/analytics/retention');
-
-      expect(capturedSql).toHaveLength(2);
-      for (const sql of capturedSql) {
-        expect(sql).toMatch(/LIMIT \d+/);
+        // Liveness control: the same app still serves a kept section.
+        const kept = await app.request('/api/admin/analytics/dau');
+        expect(kept.status).toBe(200);
+        expect(mockFetch).toHaveBeenCalledTimes(1);
       }
+    );
+
+    it.each([
+      ['/dau', 1],
+      ['/events', 1],
+      ['/feature-adoption', 2],
+      ['/website-traffic', 3],
+    ] as const)('kept section GET %s still answers 200', async (path, queries) => {
+      mockFetch.mockImplementation(
+        async () => new Response(JSON.stringify({ data: [] }), { status: 200 })
+      );
+      const app = createApp();
+
+      const res = await app.request(`/api/admin/analytics${path}`);
+      expect(res.status).toBe(200);
+      expect(mockFetch).toHaveBeenCalledTimes(queries);
     });
   });
 });

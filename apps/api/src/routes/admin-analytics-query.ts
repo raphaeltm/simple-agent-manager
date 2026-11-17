@@ -13,14 +13,7 @@ export const DEFAULT_PERIOD_DAYS = 30;
 
 export const DEFAULT_TOP_EVENTS_LIMIT = 50;
 
-export const DEFAULT_GEO_LIMIT = 50;
-
-export const DEFAULT_RETENTION_WEEKS = 12;
-
 export const DEFAULT_WEBSITE_TRAFFIC_TOP_PAGES_LIMIT = 20;
-
-/** Analytics Engine hard cap on result rows; queries without explicit LIMIT silently truncate here. */
-export const MAX_RETENTION_QUERY_ROWS = 10_000;
 
 export const analyticsSqlResponseSchema = v.object({
   data: v.optional(v.array(v.unknown())),
