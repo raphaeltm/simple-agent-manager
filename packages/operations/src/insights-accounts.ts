@@ -11,10 +11,13 @@
  *   reported as rejected (`credential_limit_windows`), merged per account into episodes;
  * - limit meters: the provider's last-reported windows of the viewer's own accounts, the same
  *   summary the chat header's limit chip shows;
- * - spend: "not reported" for API keys until per-run usage is recorded (slice U).
+ * - tokens and spend: the measured per-run usage (`agent_run_usage`, `accountUsageStatement`)
+ *   since the range began, attached by the same limit key the runs use. Spend is a catalog-price
+ *   estimate for API keys only (`summarizeAccountUsage`); the per-merged-PR figures divide the
+ *   range's usage by the account's merged runs.
  *
  * Round trips (rule 60, budget 6 in the Insights spec): authorization 1; settings 0 or 1 (the
- * per-isolate admin-settings cache); one D1 `batch()` carrying four statements 1; the viewer's own
+ * per-isolate admin-settings cache); one D1 `batch()` carrying five statements 1; the viewer's own
  * limit windows 0 or 1 (one statement per 100 of their own accounts, so 1 in practice). At most 4;
  * measured at 3 in `insights-accounts.test.ts`. If the batch fails as a whole, each statement is
  * retried on its own so one bad section cannot blank the page; that rare degraded path costs four
@@ -54,6 +57,12 @@ import {
 import { parseInsightsRows, runInsightsBatch } from './insights-batch';
 import { bucketStarts, flowWindow } from './insights-flow';
 import { getInsightsPageLimits } from './insights-page-settings';
+import {
+  accountUsageStatement,
+  type AccountUsageRow,
+  parseAccountUsageRows,
+  summarizeAccountUsage,
+} from './insights-run-usage';
 import type { OperationContext } from './types';
 
 export interface ProjectAccountsInput {
@@ -65,11 +74,12 @@ export interface ProjectAccountsInput {
 }
 
 const EVENT = 'insights_accounts';
-type BatchKey = 'runs' | 'waits' | 'windows' | 'ownLong';
+type BatchKey = 'runs' | 'waits' | 'windows' | 'ownLong' | 'usage';
 const SECTION_OF: Record<BatchKey, InsightsAccountsSection> = {
   runs: 'runs',
   waits: 'stalls',
   windows: 'stalls',
+  usage: 'tokens',
   // Only used to name the viewer's own digest-keyed accounts; losing it hides names, not data.
   ownLong: 'usage',
 };
@@ -166,6 +176,12 @@ export async function projectAccounts(
       waits: stallWaitsStatement(w, viewerId, cap),
       windows: rejectedWindowsStatement(w, viewerId, cap),
       ownLong: ownLongCredentialsStatement(viewerId),
+      usage: accountUsageStatement({
+        projectId,
+        viewerId,
+        sinceMs: w.sinceMs,
+        maxRows: limits.accountsUsageRowCap,
+      }),
     },
     (key, error) => {
       log.error('insights_accounts.section_failed', {
@@ -305,7 +321,8 @@ export async function projectAccounts(
       runsByBucket: buckets.map(() => 0),
       stalls: { episodes: 0, totalMs: 0, ongoing: false },
       usage: null,
-      spend: display.kind === 'api_key' ? { state: 'not_reported' as const } : null,
+      tokens: null,
+      spend: null,
       limitKeys: new Set<string>(),
     };
     if (!key.startsWith('none:')) account.limitKeys.add(key);
@@ -326,6 +343,11 @@ export async function projectAccounts(
     if (episode.outcome !== 'resumed' && episode.endMs >= nowMs) account.stalls.ongoing = true;
   }
 
+  const usage = parseAccountUsageRows(rows.usage, {
+    projectId,
+    maxRows: limits.accountsUsageRowCap,
+  });
+  attachTokens(accounts, usage.rows, displayKeyOf, ownByDigest, unavailable.has('tokens'));
   await attachUsage(ctx, projectId, viewerId, ownReferences, accounts, unavailable);
 
   const list = [...accounts.values()]
@@ -366,9 +388,67 @@ export async function projectAccounts(
       runs: list.reduce((sum, account) => sum + account.runs, 0),
       merged: list.reduce((sum, account) => sum + account.merged, 0),
     },
+    usageLimited: usage.limited,
     unavailable: [...unavailable],
     generatedAt: new Date().toISOString(),
   };
+}
+
+/**
+ * Tokens and spend per account row. A usage row joins the account its limit key's runs were filed
+ * under; a redacted row (another member's personal key, no key returned) joins the group its owner,
+ * agent and kind name, as their runs do. Usage of an account with no runs in the range is not
+ * shown, like the account itself. When the read failed, tokens and spend stay null (the page says
+ * the section did not load) rather than claiming "not reported".
+ */
+function attachTokens(
+  accounts: ReadonlyMap<string, InsightsAccount>,
+  usageRows: readonly AccountUsageRow[],
+  displayKeyOf: ReadonlyMap<string, string>,
+  ownByDigest: ReadonlyMap<string, AccountMeta>,
+  failed: boolean
+): void {
+  if (failed) return;
+  const byAccount = new Map<string, AccountUsageRow[]>();
+  for (const row of usageRows) {
+    const key = usageDisplayKey(row, displayKeyOf, ownByDigest);
+    if (!accounts.has(key)) continue;
+    const list = byAccount.get(key) ?? [];
+    list.push(row);
+    byAccount.set(key, list);
+  }
+  for (const account of accounts.values()) {
+    const summary = summarizeAccountUsage(byAccount.get(account.key) ?? [], {
+      merged: account.merged,
+      spendApplies: account.kind === 'api_key',
+    });
+    account.tokens = summary.tokens;
+    account.spend = summary.spend;
+  }
+}
+
+/** Stands in for a withheld key so `displayAccount` files the row under its owner's group. */
+const REDACTED_LIMIT_KEY = 'redacted';
+
+function usageDisplayKey(
+  row: AccountUsageRow,
+  displayKeyOf: ReadonlyMap<string, string>,
+  ownByDigest: ReadonlyMap<string, AccountMeta>
+): string {
+  const known = row.ref ? displayKeyOf.get(row.ref) : undefined;
+  if (known) return known;
+  const base: AccountMeta = {
+    limitKey: row.ref ?? (row.redacted ? REDACTED_LIMIT_KEY : null),
+    reference: null,
+    source: row.source,
+    agentType: row.agentType,
+    kind: row.kind,
+    credOwn: row.credOwn,
+    sessionOwn: row.sessionOwn,
+    ownName: null,
+  };
+  const own = row.ref ? ownByDigest.get(row.ref) : undefined;
+  return displayAccount(own ? mergeMeta(base, own) : base).key;
 }
 
 /** The viewer's own accounts' last-reported limit windows; a failed read marks only `usage`. */

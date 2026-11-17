@@ -14,6 +14,7 @@ import { CircleHelp, KeyRound, PauseCircle, Server, UserRound, UsersRound } from
 import type { ReactNode } from 'react';
 
 import { CredentialLimitChip } from '../../components/credential-limits/CredentialLimitChip';
+import { spendLine, tokensLine, type UsageLine } from './accounts-usage';
 import { Empty } from './flow-parts';
 import { bucketLabel, formatDuration } from './format';
 
@@ -129,13 +130,26 @@ function pausedValue(account: InsightsAccount): ReactNode {
   );
 }
 
-function spendText(spend: NonNullable<InsightsAccount['spend']>): string {
-  if (spend.state === 'not_reported') return 'Not reported';
-  const per =
-    spend.perMergedPullRequestUsd === null
-      ? ''
-      : ` · $${spend.perMergedPullRequestUsd.toFixed(2)} per merged pull request`;
-  return `$${spend.costUsd.toFixed(2)}${per}`;
+/** A Tokens or Spend row: the figure, its per-merged-PR detail, and a note under it. */
+function UsageRow({ label, line, testId }: { label: string; line: UsageLine; testId: string }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1" data-testid={testId}>
+      <Row label={label}>
+        <span className="whitespace-nowrap">{line.value}</span>
+        {line.detail && (
+          <>
+            {' '}
+            <span className="whitespace-nowrap font-normal text-fg-muted">· {line.detail}</span>
+          </>
+        )}
+      </Row>
+      {line.note && (
+        <p className="m-0 text-right text-[11.5px] text-fg-muted [overflow-wrap:anywhere]">
+          {line.note}
+        </p>
+      )}
+    </div>
+  );
 }
 
 export function AccountCard({
@@ -143,12 +157,15 @@ export function AccountCard({
   color,
   now,
   stallsUnavailable = false,
+  usageLimited = false,
 }: {
   account: InsightsAccount;
   color: string;
   now: number;
   /** The stall read failed: say so rather than "Never". */
   stallsUnavailable?: boolean;
+  /** The usage read hit its row cap: tokens and spend are a floor. */
+  usageLimited?: boolean;
 }) {
   const title = accountTitle(account);
   return (
@@ -179,7 +196,20 @@ export function AccountCard({
           note={!stallsUnavailable && account.stalls.ongoing ? 'Paused now' : undefined}
         />
       </div>
-      {account.spend && <Row label="Spend">{spendText(account.spend)}</Row>}
+      {account.tokens && (
+        <UsageRow
+          label="Tokens"
+          line={tokensLine(account.tokens, usageLimited)}
+          testId="insights-account-tokens"
+        />
+      )}
+      {account.spend && (
+        <UsageRow
+          label="Spend"
+          line={spendLine(account.spend, usageLimited)}
+          testId="insights-account-spend"
+        />
+      )}
       {account.usage && (
         <Row label="Limits now">
           <CredentialLimitChip credential={account.usage} now={now} size="sm" />

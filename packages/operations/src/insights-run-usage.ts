@@ -1,6 +1,6 @@
 /**
- * Run usage (Insights slice U): the shared read of measured token usage per run, used by the run
- * receipt (`runReceipt`). Build spec: idea
+ * Run usage (Insights slice U): the shared reads of measured token usage, per run for the run
+ * receipt (`runReceipt`) and per account for Insights · Accounts (`projectAccounts`). Build spec: idea
  * 01M7HTS38KX2G78JD0ESAGMKKH. Rows are written by `apps/api/src/services/agent-run-usage.ts`
  * (migration 0253).
  *
@@ -11,6 +11,8 @@
  * run it is the only source read for that run, because a proxied harness reports the same calls.
  */
 import {
+  type InsightsAccountSpend,
+  type InsightsAccountTokens,
   PLATFORM_AI_MODELS,
   type RunModelUsage,
   type RunReceiptTokens,
@@ -20,6 +22,9 @@ import {
 } from '@simple-agent-manager/shared';
 import { log } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
+
+import { type InsightsRows, parseInsightsRows } from './insights-batch';
+import type { FlowStatement } from './insights-flow-sql';
 
 /** The `cc_credentials` reference prefix stored verbatim in `credential_key` for short keys. */
 const CC_CREDENTIAL_KEY_PREFIX = 'cc_credentials:';
@@ -226,4 +231,214 @@ export function summarizeRunTokens(
     spend,
     limited: read.limited,
   };
+}
+
+/**
+ * The usage rows that count, for a query that aliases `agent_run_usage` as `r`: a proxied run (one
+ * with any AI proxy row) is read from its AI proxy rows only, because the proxy measured every call
+ * the harness also reports. The probe seeks the unique key's prefix (project, chat session,
+ * source). Shared with any per-run aggregate over `agent_run_usage` so no reader counts twice.
+ */
+export const COUNTED_RUN_USAGE_SQL = `(r.source = 'ai_proxy' OR NOT EXISTS (
+    SELECT 1 FROM agent_run_usage p
+     WHERE p.project_id = r.project_id AND p.chat_session_id = r.chat_session_id
+       AND p.source = 'ai_proxy'))`;
+
+/**
+ * Whether the viewer may see a row's credential key: a shared (project or platform) account, the
+ * viewer's own credential, or, when the key names no credential row (a deleted credential or a
+ * long legacy key stored as a digest), a run the viewer started. Any other member's personal key
+ * stays in the database, as `listProjectCredentialLimits` keeps their windows there. Binds:
+ * viewer ×2.
+ */
+const KEY_VISIBLE_SQL = `COALESCE(r.credential_source IN ('project', 'platform')
+      OR c.owner_id = ? OR (c.id IS NULL AND s.user_id = ?), 0)`;
+
+/**
+ * Measured usage per account and model since `sinceMs`, for Insights · Accounts. One row per
+ * (visible key, owner, agent, credential kind, model); another member's personal key is redacted
+ * to `ref = NULL, redacted = 1` and grouped with their other keys of the same kind, matching how
+ * the Accounts tab groups their runs. Largest first, so the row cap drops the smallest usage.
+ *
+ * Every predicate binds the project: the usage rows (seeking `idx_agent_run_usage_project_updated`
+ * by project and `updated_at`), the proxied-run probe (`COUNTED_RUN_USAGE_SQL`), and the session
+ * join, which must belong to a workspace of this project. The credential columns read are `kind`
+ * and `owner_id`; never the name or the token. Binds: viewer ×4, project, since (ms), cap + 1.
+ */
+export function accountUsageStatement(input: {
+  projectId: string;
+  viewerId: string;
+  sinceMs: number;
+  maxRows: number;
+}): FlowStatement {
+  return {
+    sql: `WITH u AS (
+      SELECT CASE WHEN r.credential_key <> '' THEN ${KEY_VISIBLE_SQL} END AS visible,
+             r.credential_key AS key, r.credential_source AS cred_source,
+             COALESCE(r.agent_type, s.agent_type) AS agent, c.kind AS cred_kind, c.id AS cred_id,
+             c.owner_id AS cred_owner, s.user_id AS session_user, r.model AS usage_model,
+             r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_write_tokens,
+             r.reasoning_tokens
+        FROM agent_run_usage r
+        LEFT JOIN cc_credentials c
+          ON r.credential_key LIKE '${CC_CREDENTIAL_KEY_PREFIX}%'
+         AND c.id = substr(r.credential_key, ${CC_CREDENTIAL_KEY_PREFIX.length + 1})
+        LEFT JOIN agent_sessions s
+          ON s.id = r.agent_session_id
+         AND EXISTS (SELECT 1 FROM workspaces w WHERE w.id = s.workspace_id AND w.project_id = r.project_id)
+       WHERE r.project_id = ? AND r.updated_at >= ? AND ${COUNTED_RUN_USAGE_SQL}
+    )
+    SELECT CASE WHEN visible = 1 THEN key END AS ref,
+           CASE WHEN visible = 0 THEN 1 ELSE 0 END AS redacted,
+           cred_source AS source, agent AS agent_type, cred_kind AS kind,
+           CASE WHEN cred_id IS NULL THEN NULL WHEN cred_owner = ? THEN 1 ELSE 0 END AS cred_own,
+           max(session_user = ?) AS session_own,
+           usage_model AS model,
+           TOTAL(input_tokens) AS input_tokens, TOTAL(output_tokens) AS output_tokens,
+           TOTAL(cache_read_tokens) AS cache_read_tokens,
+           TOTAL(cache_write_tokens) AS cache_write_tokens,
+           CASE WHEN COUNT(reasoning_tokens) = 0 THEN NULL ELSE TOTAL(reasoning_tokens) END
+             AS reasoning_tokens
+      FROM u
+     GROUP BY ref, redacted, source, agent_type, kind, cred_own, model
+     ORDER BY TOTAL(input_tokens) + TOTAL(output_tokens) + TOTAL(cache_read_tokens)
+                + TOTAL(cache_write_tokens) DESC,
+              ref, redacted, source, agent_type, kind, cred_own, model
+     LIMIT ?`,
+    binds: [
+      input.viewerId,
+      input.viewerId,
+      input.projectId,
+      input.sinceMs,
+      input.viewerId,
+      input.viewerId,
+      input.maxRows + 1,
+    ],
+  };
+}
+
+const flag = v.nullish(v.number());
+const AccountUsageRowSchema = v.object({
+  ref: v.nullish(v.pipe(v.string(), v.minLength(1))),
+  redacted: v.picklist([0, 1]),
+  source: v.nullish(v.string()),
+  agent_type: v.nullish(v.string()),
+  kind: v.nullish(v.string()),
+  cred_own: flag,
+  session_own: flag,
+  model: v.string(),
+  input_tokens: CountSchema,
+  output_tokens: CountSchema,
+  cache_read_tokens: CountSchema,
+  cache_write_tokens: CountSchema,
+  reasoning_tokens: v.nullable(CountSchema),
+});
+
+export interface AccountUsageRow extends RunTokenCounts {
+  /** The credential limit key; null when redacted (another member's key) or none was recorded. */
+  ref: string | null;
+  /** Another member's personal key: the key was withheld, and so is its spend. */
+  redacted: boolean;
+  source: string | null;
+  agentType: string | null;
+  /** `cc_credentials.kind`, null when the key names no credential row. */
+  kind: string | null;
+  credOwn: number | null;
+  sessionOwn: number | null;
+  /** '' when the harness did not say which model ran. */
+  model: string;
+}
+
+export interface AccountUsageRead {
+  rows: AccountUsageRow[];
+  /** True when the cap cut smaller rows off; totals are then a floor. */
+  limited: boolean;
+}
+
+/** Validate the statement's rows one by one (`.claude/rules/50`), honouring the cap. */
+export function parseAccountUsageRows(
+  rows: InsightsRows | undefined,
+  input: { projectId: string; maxRows: number }
+): AccountUsageRead {
+  const parsed = parseInsightsRows(
+    rows?.slice(0, input.maxRows),
+    AccountUsageRowSchema,
+    'insights_accounts',
+    'account_usage',
+    input.projectId
+  );
+  return {
+    rows: parsed.map((row) => ({
+      ref: row.ref ?? null,
+      redacted: row.redacted === 1,
+      source: row.source ?? null,
+      agentType: row.agent_type ?? null,
+      kind: row.kind ?? null,
+      credOwn: row.cred_own ?? null,
+      sessionOwn: row.session_own ?? null,
+      model: row.model,
+      input: row.input_tokens,
+      output: row.output_tokens,
+      cacheRead: row.cache_read_tokens,
+      cacheWrite: row.cache_write_tokens,
+      reasoning: row.reasoning_tokens,
+    })),
+    limited: (rows?.length ?? 0) > input.maxRows,
+  };
+}
+
+/** The credential kind whose usage SAM prices: a pay-as-you-go key to a catalog provider. */
+const PRICED_CREDENTIAL_KIND = 'api-key';
+
+/**
+ * Tokens and spend for one Accounts row from the usage rows attached to it. `spendApplies` is
+ * true for API-key accounts; anything else shows tokens only. Spend is an estimate at catalog
+ * prices: a model without a price, or a custom OpenAI-compatible endpoint, is named in
+ * `unpricedModels` rather than guessed, and makes the total a floor. Per merged pull request
+ * divides the range's usage by the account's merged runs in the range.
+ */
+export function summarizeAccountUsage(
+  rows: readonly AccountUsageRow[],
+  options: { merged: number; spendApplies: boolean }
+): { tokens: InsightsAccountTokens | null; spend: InsightsAccountSpend | null } {
+  const merged = options.merged > 0 ? options.merged : null;
+  const total = rows.reduce((sum, row) => sum + tokenTotal(row), 0);
+  const tokens: InsightsAccountTokens | null =
+    rows.length === 0
+      ? null
+      : { total, perMergedPullRequest: merged === null ? null : Math.round(total / merged) };
+  if (!options.spendApplies) return { tokens, spend: null };
+  if (rows.length === 0) return { tokens, spend: { state: 'not_reported' } };
+  // Another member's personal key: their spend is theirs to see, like the key's name.
+  if (rows.some((row) => row.redacted)) return { tokens, spend: { state: 'private' } };
+
+  const unpriced = new Set<string>();
+  const byModel = new Map<string, RunTokenCounts>();
+  for (const row of rows) {
+    if (row.kind !== PRICED_CREDENTIAL_KIND) {
+      if (tokenTotal(row) > 0) unpriced.add(row.model || 'unknown model');
+      continue;
+    }
+    byModel.set(row.model, addCounts(byModel.get(row.model) ?? ZERO, row));
+  }
+  let costUsd: number | null = null;
+  for (const [model, counts] of byModel) {
+    const estimate = estimateModelSpendUsd(model, counts);
+    if (estimate === null) unpriced.add(model || 'unknown model');
+    else costUsd = (costUsd ?? 0) + estimate;
+  }
+  if (costUsd !== null) costUsd = roundUsd(costUsd);
+  return {
+    tokens,
+    spend: {
+      state: 'reported',
+      costUsd,
+      perMergedPullRequestUsd: costUsd === null || merged === null ? null : roundUsd(costUsd / merged),
+      unpricedModels: [...unpriced].sort((a, b) => a.localeCompare(b)),
+    },
+  };
+}
+
+function roundUsd(usd: number): number {
+  return Math.round(usd * 1_000_000) / 1_000_000;
 }

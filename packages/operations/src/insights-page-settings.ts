@@ -45,6 +45,13 @@ export const INSIGHTS_PAGE_SETTINGS = [
     description: 'Limit stalls listed under "Stalled on a limit" on Insights · Accounts.',
     range: { min: 1, max: 50 },
   },
+  {
+    name: 'insights.accountsUsageRowCap',
+    defaultValue: 500,
+    description:
+      'Measured token usage rows (one per account and model), largest first, read for tokens and spend on Insights · Accounts. The page says when the cap cut the smallest off.',
+    range: { min: 50, max: 5000 },
+  },
 ] as const;
 
 export type InsightsPageSettingName = (typeof INSIGHTS_PAGE_SETTINGS)[number]['name'];
@@ -56,6 +63,7 @@ export interface InsightsPageLimits {
   reworkWindowDays: number;
   accountsStallScanCap: number;
   accountsEpisodesListed: number;
+  accountsUsageRowCap: number;
 }
 
 const KEYS: Record<InsightsPageSettingName, keyof InsightsPageLimits> = {
@@ -65,6 +73,7 @@ const KEYS: Record<InsightsPageSettingName, keyof InsightsPageLimits> = {
   'insights.flowReworkWindowDays': 'reworkWindowDays',
   'insights.accountsStallScanCap': 'accountsStallScanCap',
   'insights.accountsEpisodesListed': 'accountsEpisodesListed',
+  'insights.accountsUsageRowCap': 'accountsUsageRowCap',
 };
 
 /** Each value falls back to its code default when settings storage cannot be read. */

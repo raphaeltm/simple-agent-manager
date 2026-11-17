@@ -886,6 +886,7 @@ export type {
   InsightsAccountKind,
   InsightsAccountOwner,
   InsightsAccountSpend,
+  InsightsAccountTokens,
   InsightsAccountsSection,
   InsightsAccountStalls,
   InsightsStallEpisode,
