@@ -56,7 +56,7 @@ bootstrap classification is wrong. Instant has its own working path
       commits the wake and moves the task to `in_progress`
 - [x] Controls: `snapshot_missing_or_unavailable` and unknown statuses still fail
 - [x] Discrimination: revert the classifier change, confirm the TaskRunner test goes red
-- [ ] Note the WIP-over-budget follow-up on the idea
+- [x] Note the WIP-over-budget follow-up on the idea (note 01M7N0QX54TPSW25PDCMZ6P5N5 on idea 01M7MMR6KK57PVFS3E57NJZ3N0; points at idea 01M434S53HGTY09BS09NMWEP9E)
 
 ## Acceptance criteria
 
@@ -73,3 +73,8 @@ bootstrap classification is wrong. Instant has its own working path
   any `transcript-replay` turned exactly the two `snapshot_missing_or_unavailable` / no-reason
   controls red. Dropping `reason` from the Go answer turned the Go contract test red.
 - Docs: `session-troubleshooting.md` (new notice, VM wake wording), `recent-product-changes.md`.
+- Review fixes: the ACP repair path (`transitionAcpSessionToRunning`) now re-persists the notice
+  with the reason the start used; with the default reason the reused message id was refused
+  (`Message id degraded-wake-… already belongs to a different transcript entry`, proven by revert).
+  Added a status-conjunct control, restore-request assertions, CI path filters for the fixture,
+  and hardened the Go test (lifecycle-timings flake, request checks, runtime contract, start fences).

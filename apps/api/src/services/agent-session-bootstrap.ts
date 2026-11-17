@@ -304,6 +304,9 @@ export async function startSamAwareAgentSession(
     let acpSessionId = await createAcpSessionWithLogging(env, input, agentSessionId);
 
     let shouldStartFreshSession = true;
+    // A restore that resumed the saved agent keeps the degraded wording if its ACP session
+    // later needs the fresh-start repair (`transitionAcpSessionToRunning`).
+    let snapshotRestoreRepair: FreshStartReason | null = null;
     const restoreSnapshotChatSessionId = input.restoreSnapshotChatSessionId;
     if (restoreSnapshotChatSessionId) {
       const restored = await runMaybePhased(input, 'restore_acp_session', () => {
@@ -326,6 +329,7 @@ export async function startSamAwareAgentSession(
       });
       const restoreOutcome = snapshotRestoreOutcome(restored);
       shouldStartFreshSession = restoreOutcome !== 'restored';
+      snapshotRestoreRepair = restoreOutcome === 'restored' ? 'degraded_restore' : restoreOutcome;
       if (restoreOutcome !== 'restored') {
         log.warn('agent_session_bootstrap.snapshot_restore_degraded_starting_fresh', {
           projectId: input.projectId,
@@ -389,7 +393,7 @@ export async function startSamAwareAgentSession(
         input,
         runningAcpSessionId,
         agentSessionId,
-        Boolean(restoreSnapshotChatSessionId)
+        snapshotRestoreRepair
       );
     }
     if (restoreSnapshotChatSessionId) {

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -48,30 +49,74 @@ func loadTranscriptOnlyRestoreFixture(t *testing.T) transcriptOnlyRestoreFixture
 
 // A VM wake: the workspace was provisioned by create-workspace and the wake's
 // pristine agent session was created, then the control plane calls restore.
+// The Worker sends a runtime contract (agent-session-bootstrap.ts); legacy
+// callers do not, so both request shapes are covered.
 func TestVMRestoreHandlerAnswersTranscriptOnlyFallbackWithSharedContract(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		runtimeContract string
+	}{
+		{name: "worker runtime contract", runtimeContract: `,"runtimeContract":{"version":1,"agentType":"claude-code","permissionMode":"default","settingsResolved":true,"taskContext":{"projectId":"project","taskId":"recovery","taskMode":"conversation"}}`},
+		{name: "legacy caller without contract"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertTranscriptOnlyRestoreContract(t, tc.runtimeContract)
+		})
+	}
+}
+
+func assertTranscriptOnlyRestoreContract(t *testing.T, runtimeContract string) {
+	t.Helper()
 	fixture := loadTranscriptOnlyRestoreFixture(t)
+	var controlPlane struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(fixture.ControlPlaneRestoreResponse, &controlPlane); err != nil || controlPlane.Reason == "" {
+		t.Fatalf("fixture control-plane response has no reason: %v", err)
+	}
 	s, _ := newRestoreRetryTestServer(t)
+	if s.config.IsStandaloneMode() {
+		t.Fatal("this contract covers VM wakes; the test server must not be standalone")
+	}
 	validator, key := newWorkspaceCreateJWTValidator(t, "node-test")
 	s.jwtValidator = validator
 	token := signWorkspaceCreateNodeToken(t, key, "node-test", "ws")
 
 	var mu sync.Mutex
 	var reported []map[string]string
+	var unexpected []string
 	cp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		authorized := r.Header.Get("Authorization") == "Bearer fresh"
 		switch {
-		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/session-snapshot/restore"):
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/api/workspaces/ws/session-snapshot/restore"):
+			if !authorized || r.URL.Query().Get("chatSessionId") != "chat" {
+				mu.Lock()
+				unexpected = append(unexpected, "restore fetch without the workspace token or chat: "+r.URL.String())
+				mu.Unlock()
+			}
 			_, _ = w.Write(fixture.ControlPlaneRestoreResponse)
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/session-snapshot/restore-result"):
-			body, _ := io.ReadAll(r.Body)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/api/workspaces/ws/session-snapshot/restore-result"):
 			var payload map[string]string
-			_ = json.Unmarshal(body, &payload)
+			body, err := io.ReadAll(r.Body)
+			if err == nil {
+				err = json.Unmarshal(body, &payload)
+			}
 			mu.Lock()
-			reported = append(reported, payload)
+			if err != nil || !authorized {
+				unexpected = append(unexpected, fmt.Sprintf("bad restore-result report (authorized=%v): %v", authorized, err))
+			} else {
+				reported = append(reported, payload)
+			}
 			mu.Unlock()
 			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/lifecycle-timings"):
+			// Best-effort wake telemetry, posted asynchronously; not part of this contract.
+			w.WriteHeader(http.StatusNoContent)
 		default:
-			t.Errorf("unexpected control-plane call %s %s", r.Method, r.URL.Path)
+			mu.Lock()
+			unexpected = append(unexpected, r.Method+" "+r.URL.Path)
+			mu.Unlock()
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
@@ -80,7 +125,7 @@ func TestVMRestoreHandlerAnswersTranscriptOnlyFallbackWithSharedContract(t *test
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost,
 		"/workspaces/ws/agent-sessions/session/restore",
-		strings.NewReader(`{"chatSessionId":"chat","runtime":"vm","agentType":"claude-code","workspaceCallbackToken":"fresh"}`))
+		strings.NewReader(`{"chatSessionId":"chat","runtime":"vm","agentType":"claude-code","workspaceCallbackToken":"fresh"`+runtimeContract+`}`))
 	req.SetPathValue("workspaceId", "ws")
 	req.SetPathValue("sessionId", "session")
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -99,25 +144,33 @@ func TestVMRestoreHandlerAnswersTranscriptOnlyFallbackWithSharedContract(t *test
 		t.Fatalf("restore response = %v, want the shared contract %v", got, fixture.VMAgentRestoreResponse)
 	}
 
-	// The Worker then starts the agent fresh on this same session, so the
-	// restore must leave it exactly as create made it: no host, no agent identity.
-	session, ok := s.agentSessions.Get("ws", "session")
-	if !ok {
-		t.Fatal("transcript replay removed the wake's agent session")
-	}
-	if session.Status != agentsessions.StatusRunning || session.AcpSessionID != "" || session.AgentType != "" {
-		t.Fatalf("transcript replay changed the agent session: %+v", session)
-	}
+	// The Worker then calls start on this same session. Start admission refuses
+	// while a restore or creation for the workspace is pending
+	// (handleStartAgentSession, getOrCreateSessionHostForRestore), and start
+	// needs the session running. A completed transcript replay must leave all
+	// of that open, and must not have started an agent of its own.
 	s.sessionHostMu.Lock()
+	restorePending := s.workspaceRestorePendingLocked("ws")
+	creationPending := s.workspaceCreationPendingLocked("ws")
 	hosts := len(s.sessionHosts)
 	s.sessionHostMu.Unlock()
+	if restorePending || creationPending {
+		t.Fatalf("completed transcript replay still fences start: restorePending=%v creationPending=%v", restorePending, creationPending)
+	}
 	if hosts != 0 {
 		t.Fatalf("transcript replay created %d agent host(s); the fresh start must create the first", hosts)
+	}
+	session, ok := s.agentSessions.Get("ws", "session")
+	if !ok || session.Status != agentsessions.StatusRunning || session.AcpSessionID != "" || session.AgentType != "" || session.LastPrompt != "" {
+		t.Fatalf("transcript replay left the session unable to start fresh: ok=%v %+v", ok, session)
 	}
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(reported) != 1 || reported[0]["status"] != "missing" || reported[0]["chatSessionId"] != "chat" {
-		t.Fatalf("restore-result reports = %v, want one 'missing' report for chat", reported)
+	if len(unexpected) != 0 {
+		t.Fatalf("unexpected control-plane traffic: %v", unexpected)
+	}
+	if len(reported) != 1 || reported[0]["status"] != "missing" || reported[0]["chatSessionId"] != "chat" || reported[0]["message"] != controlPlane.Reason {
+		t.Fatalf("restore-result reports = %v, want one 'missing' report for chat carrying %q", reported, controlPlane.Reason)
 	}
 }

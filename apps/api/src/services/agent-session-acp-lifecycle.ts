@@ -103,7 +103,12 @@ export async function transitionAcpSessionToRunning(
   input: SamAwareAgentStartInput,
   acpSessionId: string,
   agentSessionId: string,
-  allowSnapshotRestoreRecovery: boolean
+  /**
+   * Set after a snapshot restore: a failed ACP session may then be reset and retried, and the
+   * reset re-persists the fresh-start notice for this reason. It must be the reason the start
+   * already used, because that notice's message id is reused and a different text is refused.
+   */
+  snapshotRestoreRepair: FreshStartReason | null
 ): Promise<void> {
   const transition = () =>
     projectDataService.transitionAcpSession(env, input.projectId, acpSessionId, 'running', {
@@ -117,7 +122,7 @@ export async function transitionAcpSessionToRunning(
     await runMaybePhased(input, 'mark_acp_session_running', transition);
     return;
   } catch (err) {
-    if (!allowSnapshotRestoreRecovery) throw err;
+    if (!snapshotRestoreRepair) throw err;
     const existing = await projectDataService
       .getAcpSession(env, input.projectId, acpSessionId)
       .catch(() => null);
@@ -129,7 +134,7 @@ export async function transitionAcpSessionToRunning(
       acpSessionId,
       error: err instanceof Error ? err.message : String(err),
     });
-    await prepareAcpSessionForFreshStart(env, input, agentSessionId);
+    await prepareAcpSessionForFreshStart(env, input, agentSessionId, snapshotRestoreRepair);
     await runMaybePhased(input, 'mark_acp_session_running_after_restore_repair', transition);
   }
 }

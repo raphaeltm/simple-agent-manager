@@ -83,6 +83,9 @@ let background: Promise<unknown>[];
 let chat: { id: string; status: string; workspaceId: string; taskId: string };
 let systemMessages: string[];
 let freshStarts: Array<{ id: string; reason: unknown; metadata: unknown }>;
+let messagesById: Map<string, { role: string; content: string }>;
+/** The ACP session's first `running` transition finds it already failed, as after a crash. */
+let failFirstRunningTransition: boolean;
 
 function seed(): TaskRunnerState {
   const now = new Date().toISOString();
@@ -171,6 +174,8 @@ beforeEach(() => {
   background = [];
   systemMessages = [];
   freshStarts = [];
+  messagesById = new Map();
+  failFirstRunningTransition = false;
   chat = { id: 'chat', status: 'sleeping', workspaceId: 'original', taskId: 'source' };
   const acp = new Map<string, { id: string; chatSessionId: string; status: string }>();
   const projectData = {
@@ -192,6 +197,11 @@ beforeEach(() => {
     transitionAcpSession: vi.fn(async (id: string, status: string) => {
       const session = acp.get(id);
       if (!session) throw new Error('ACP session missing');
+      if (status === 'running' && failFirstRunningTransition) {
+        failFirstRunningTransition = false;
+        session.status = 'failed';
+        throw new Error('Invalid ACP session transition: failed -> running');
+      }
       session.status = status;
       return session;
     }),
@@ -204,10 +214,22 @@ beforeEach(() => {
         return session;
       }
     ),
-    persistMessage: vi.fn(async (_chat: string, role: string, content: string) => {
-      if (role === 'system') systemMessages.push(content);
-      return { id: 'message', sessionId: 'chat', role };
-    }),
+    // Mirrors the DO's duplicate rule (`resolveDuplicateMessage`): a message id that is
+    // reused must carry the same role and content, or the write throws.
+    persistMessage: vi.fn(
+      async (_chat: string, role: string, content: string, _meta: unknown, id?: string) => {
+        if (id) {
+          const existing = messagesById.get(id);
+          if (existing && (existing.role !== role || existing.content !== content)) {
+            throw new Error(`Message id ${id} already belongs to a different transcript entry`);
+          }
+          if (existing) return { id, sessionId: 'chat', role };
+          messagesById.set(id, { role, content });
+        }
+        if (role === 'system') systemMessages.push(content);
+        return { id: id ?? 'message', sessionId: 'chat', role };
+      }
+    ),
     admitProjectEvent: vi.fn(async () => ({ status: 'admitted', eventId: 'event' })),
     publishSessionWakeProgress: vi.fn(async () => undefined),
     notifyTaskTerminal: vi.fn(async () => undefined),
@@ -273,6 +295,7 @@ describe('waking a VM chat whose sleep fell back to transcript-only', () => {
 
     // The restore ran, then a fresh agent started with the transcript-only wake prompt.
     expect(vm.restore).toHaveBeenCalledOnce();
+    expect(vm.restore.mock.calls[0]?.[5]).toMatchObject({ chatSessionId: 'chat', runtime: 'vm' });
     expect(vm.start).toHaveBeenCalledOnce();
     const startArgs = vm.start.mock.calls[0]!;
     expect(startArgs[4]).toBe(WAKE_PROMPT);
@@ -323,6 +346,11 @@ describe('waking a VM chat whose sleep fell back to transcript-only', () => {
       'Strict session restore failed (transcript-replay)',
     ],
     ['an unknown status', { status: 'resumed' }, 'Strict session restore failed (resumed)'],
+    [
+      'another status carrying the transcript-only reason',
+      { status: 'resumed', reason: 'transcript_only_sleep_fallback' },
+      'Strict session restore failed (resumed: transcript_only_sleep_fallback)',
+    ],
   ])('still fails the wake on %s', async (_name, answer, message) => {
     const state = seed();
     vm.restore.mockResolvedValue(answer);
@@ -333,6 +361,24 @@ describe('waking a VM chat whose sleep fell back to transcript-only', () => {
     expect(systemMessages).toEqual([]);
     expect(snapshot()).toMatchObject({ recovery_status: 'waking' });
     expect(taskStatus()).toEqual({ status: 'delegated' });
+  });
+
+  // The ACP session can already be `failed` when the start marks it running; the bootstrap then
+  // resets it and re-persists the fresh-start notice under the same message id. With the wrong
+  // wording that write was refused, and every retry of the wake failed the same way.
+  it('repairs a failed ACP session without contradicting the transcript-only notice', async () => {
+    const state = seed();
+    vm.restore.mockResolvedValue(structuredClone(CONTRACT.vmAgentRestoreResponse));
+    failFirstRunningTransition = true;
+
+    await handleAgentSession(state, rc);
+
+    expect(freshStarts.map((start) => start.reason)).toEqual([
+      expect.stringContaining('transcript-only sleep fallback'),
+      expect.stringContaining('transcript-only sleep fallback'),
+    ]);
+    expect(systemMessages.filter((message) => /transcript/.test(message))).toHaveLength(1);
+    expect(taskStatus()).toEqual({ status: 'in_progress' });
   });
 
   it('still resumes the saved agent session when the restore succeeds', async () => {

@@ -137,6 +137,7 @@ jobs:
               - 'tests/fixtures/acp-activity-report-v1.json'
               - 'tests/fixtures/deploy-release/**'
               - 'tests/fixtures/durable-execution-protocol-v1.json'
+              - 'tests/fixtures/session-snapshot-restore-transcript-only-v1.json'
             web:
               - *workspace-root
               - 'apps/web/**'
@@ -183,6 +184,8 @@ jobs:
               - 'apps/web/src/components/AgentSettingsCard.tsx'
             vm-agent:
               - 'packages/vm-agent/**'
+              # Shared with the Worker tests; a fixture-only edit must run the Go half too.
+              - 'tests/fixtures/session-snapshot-restore-transcript-only-v1.json'
               - 'apps/api/Dockerfile.vm-agent-container'
               - 'scripts/ci/verify-codex-runtime-image.sh'
               - 'scripts/deploy/prepare-codex-runtime-artifact.sh'
