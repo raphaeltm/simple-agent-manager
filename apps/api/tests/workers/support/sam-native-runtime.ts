@@ -69,7 +69,6 @@ export async function startSamRuntime(outbound: (request: Request) => Promise<Re
     kvNamespaces: ['KV'],
     bindings: {
       BASE_DOMAIN: 'test.example.com',
-      SAM_MODEL: '@cf/google/gemma-4-26b-a4b-it',
       CF_API_TOKEN: 'test-only-fake-token',
       CF_ACCOUNT_ID: 'sam-test-account',
       AI_GATEWAY_ID: 'sam-test-gateway',

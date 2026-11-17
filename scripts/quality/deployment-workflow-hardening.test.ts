@@ -17,7 +17,6 @@ import { describe, expect, it } from 'vitest';
 import {
   allWorkflowRunBlocks,
   namedStep,
-  type ParsedWorkflow,
   parsedWorkflow,
   workflowFileNames,
   workflowSource as workflow,
@@ -66,6 +65,14 @@ if [ "$#" -ge 4 ] && [ "$1" = "exec" ] && [ "$2" = "tsx" ]; then
       exit 0
       ;;
     "scripts/deploy/vapid-keys.ts derive-public-from-raw")
+      printf '%s\\n' "$EXPECTED_VAPID_PUBLIC_KEY"
+      exit 0
+      ;;
+    "scripts/deploy/vapid-keys.ts derive-private-from-pem")
+      printf '%s\\n' "derived-vapid-private-from-pem"
+      exit 0
+      ;;
+    "scripts/deploy/vapid-keys.ts derive-public-from-pem")
       printf '%s\\n' "$EXPECTED_VAPID_PUBLIC_KEY"
       exit 0
       ;;
@@ -119,6 +126,10 @@ if [ "$1" = "stack" ] && [ "$2" = "output" ]; then
     echo "pulumi-stdout-secret-value"
     echo "error: simulated pulumi backend failure: AccessDenied reading state" >&2
     exit 255
+  fi
+  if [ "$3" = "\${FAKE_PULUMI_MULTILINE_OUTPUT:-}" ]; then
+    printf 'pulumi-value-%s-line-1\\npulumi-value-%s-line-2\\n' "$3" "$3"
+    exit 0
   fi
   if [ "$3" = "\${FAKE_PULUMI_MISSING_OUTPUT:-}" ]; then
     echo "error: current stack does not have output property '$3'" >&2
@@ -863,6 +874,107 @@ describe('deployment workflow hardening', () => {
       result.cleanup();
     }
   });
+
+  // Each of these runs configure-secrets.sh end to end, which can pass 5 s on a loaded runner.
+  const CONFIGURE_SECRETS_TIMEOUT_MS = 30_000;
+
+  it(
+    'worker secret configuration masks every Pulumi value in GitHub Actions before using it',
+    () => {
+      const result = runConfigureSecrets({
+        GITHUB_ACTIONS: 'true',
+        PULUMI_STACK: 'self-host-stack',
+        SECRET_ENCRYPTION_KEY: '',
+        DEPLOY_SIGNING_PRIVATE_KEY: '',
+        DEPLOY_SIGNING_PUBLIC_KEY: '',
+        VAPID_PRIVATE_KEY: '',
+        VAPID_PUBLIC_KEY: '',
+        PULUMI_PREVIEW_SIGNING_KEY: '',
+        FAKE_PULUMI_MULTILINE_OUTPUT: 'jwtPrivateKey',
+      });
+      try {
+        expect(result.status).toBe(0);
+        const lines = result.stdout.split('\n');
+        const masks = lines.filter((line) => line.startsWith('::add-mask::'));
+        for (const output of [
+          'encryptionKey',
+          'jwtPublicKey',
+          'deploySigningPrivateKey',
+          'previewSigningKey',
+          'vapidPrivateKeyPem',
+        ]) {
+          expect(masks).toContain(`::add-mask::pulumi-value-${output}`);
+        }
+        // A multi-line value: every line, and the single-line JSON-escaped form.
+        expect(masks).toContain('::add-mask::pulumi-value-jwtPrivateKey-line-1');
+        expect(masks).toContain('::add-mask::pulumi-value-jwtPrivateKey-line-2');
+        expect(masks).toContain(
+          '::add-mask::pulumi-value-jwtPrivateKey-line-1\\npulumi-value-jwtPrivateKey-line-2'
+        );
+        // A private key derived from a Pulumi value is masked too.
+        expect(masks).toContain('::add-mask::derived-vapid-private-from-pem');
+        // Nothing else carries a value: only mask commands mention one.
+        for (const line of lines) {
+          if (/pulumi-value-|derived-vapid-private/.test(line)) {
+            expect(line.startsWith('::add-mask::')).toBe(true);
+          }
+        }
+        expect(result.stderr).toBe('');
+        const payload = JSON.parse(result.bulkPayload ?? '{}') as Record<string, unknown>;
+        expect(payload.JWT_PRIVATE_KEY).toBe(
+          'pulumi-value-jwtPrivateKey-line-1\npulumi-value-jwtPrivateKey-line-2'
+        );
+        expect(payload.VAPID_PRIVATE_KEY).toBe('derived-vapid-private-from-pem');
+      } finally {
+        result.cleanup();
+      }
+    },
+    CONFIGURE_SECRETS_TIMEOUT_MS
+  );
+
+  it(
+    'worker secret configuration never prints a mask command outside GitHub Actions',
+    () => {
+      const result = runConfigureSecrets({
+        PULUMI_STACK: 'self-host-stack',
+        SECRET_ENCRYPTION_KEY: '',
+      });
+      try {
+        expect(result.status).toBe(0);
+        expect(result.stdout).not.toContain('::add-mask::');
+        expect(result.stdout).not.toContain('pulumi-value-');
+      } finally {
+        result.cleanup();
+      }
+    },
+    CONFIGURE_SECRETS_TIMEOUT_MS
+  );
+
+  it.each([
+    ['deletes the Worker trust when no trust is supplied', undefined, '', null],
+    ['keeps a secondary installation trust when its secret is unset', 'true', '', undefined],
+    ['sets a secondary installation trust from its own secret', 'true', '{"s":2}', '{"s":2}'],
+    ['never uses a secondary trust on the primary', undefined, '{"s":2}', null],
+  ])(
+    'worker secret configuration %s',
+    (_label, keep, secondary, expected) => {
+      const result = runConfigureSecrets({
+        AGENT_SIGN_IN_TRUST: '',
+        AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET: keep,
+        SECONDARY_AGENT_SIGN_IN_TRUST: secondary,
+      });
+      try {
+        expect(result.status).toBe(0);
+        const payload = JSON.parse(result.bulkPayload ?? '{}') as Record<string, unknown>;
+        expect(payload.ENCRYPTION_KEY).toBe('encryption-secret');
+        expect(payload.AGENT_SIGN_IN_TRUST).toBe(expected);
+        expect(Object.hasOwn(payload, 'AGENT_SIGN_IN_TRUST')).toBe(expected !== undefined);
+      } finally {
+        result.cleanup();
+      }
+    },
+    CONFIGURE_SECRETS_TIMEOUT_MS
+  );
 
   it('remote migration helper requires an explicit environment', () => {
     const contents = repoFile('scripts/deploy/run-migrations.ts');

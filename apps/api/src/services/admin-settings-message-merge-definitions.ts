@@ -8,6 +8,13 @@ import {
 
 export const MESSAGE_MERGE_SETTINGS: AdminSettingDefinition[] = [
   switchDefinition(
+    'chat.toolCallMergingEnabled',
+    DEFAULT_MESSAGE_MERGE_CONFIG.toolUpdatesEnabled,
+    'Operations',
+    'Store one current snapshot per agent tool call. Disable to resume individual tool notification rows.',
+    {}
+  ),
+  switchDefinition(
     'chat.messageMergingEnabled',
     DEFAULT_MESSAGE_MERGE_CONFIG.enabled,
     'Operations',

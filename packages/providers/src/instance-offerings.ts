@@ -8,7 +8,7 @@ import {
 import { DIGITALOCEAN_SIZE_CONFIGS } from './digitalocean';
 import { SIZE_MAP as GCP_SIZE_CONFIGS } from './gcp-metadata';
 import { HETZNER_SIZE_CONFIGS } from './hetzner-metadata';
-import { INFOMANIAK_SIZE_CONFIGS } from './infomaniak';
+import { INFOMANIAK_SIZE_CONFIGS } from './infomaniak-metadata';
 import { SCALEWAY_SIZE_CONFIGS } from './scaleway';
 import type { LocationMeta, SizeConfig } from './types';
 import { UPCLOUD_SIZE_CONFIGS } from './upcloud';
