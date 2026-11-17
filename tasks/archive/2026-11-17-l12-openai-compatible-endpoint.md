@@ -23,7 +23,7 @@ Rule 74: condition is an operator-enabled proxy with an addressable gateway or e
 - [x] Split passthrough to <=500 lines, guard all 3 fetches, reduce outbound baseline by 3, redirect regression tests.
 - [x] Focused behavioral and cross-boundary tests with discriminating guards; lint/typecheck/test/build (full collection plus all corrected-file reruns).
 - [x] Docs reflect settings and behavior, no unrelated spec edits.
-- [ ] Draft PR, then complete candidate ready + CodeRabbit request; required local security, Cloudflare, performance and completion reviews.
+- [x] Draft PR, then complete candidate ready + CodeRabbit request; required local security, Cloudflare, performance and completion reviews.
 - [ ] Check both staging leases, reserve and follow queue, deploy final candidate; live 401, SAM-mode chat, title generation, SAM agent, refused-private endpoint routing then reset settings; cleanup/release.
 - [ ] Full CI and review gates pass, merge authorized by coordinator; channel PR/blocker/completion evidence; idea update with PR and commit. Coordinator monitors production deployment.
 
@@ -48,3 +48,5 @@ Idea 01M72M9AEB933ZY8269D376DKC; task 01M7KNA1CNRHWG13CMNB2SVMP5; coordinator 01
 - Added direct dependency audit evidence for the already-resolved SDK version. The latest main analytics change merged cleanly before candidate readiness.
 
 - Final quality cleanup: consolidated existing callback identity projections and credential responses to address Sonar duplication without changing auth order or adding I/O. Security re-review passed with 108 callback/account tests; performance re-review passed with 123 tests. Title/endpoint cleanup passed 41 tests and raw SAM/proxy checks passed 134. Final root lint/typecheck/build passed all 62 tasks after these changes. Net non-test source growth is 1,064 lines, including mechanical split overhead.
+
+- Archived at `/do` Phase 4 after final task-completion A–F PASS, with no critical/high implementation gaps. Release workflow gates (live staging, CI, CodeRabbit, merge, completion channel and idea update) remain pending and are tracked in PR #2829 and local `.do-state.md`; archive does not claim those gates passed. PR ready and CodeRabbit requested at 03:47 UTC, runtime candidate 72e237074.
