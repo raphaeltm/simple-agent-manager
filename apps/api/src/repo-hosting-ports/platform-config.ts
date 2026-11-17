@@ -1,6 +1,7 @@
 import type { PlatformConfigPort } from '@simple-agent-manager/repo-hosting/ports';
 
 import type { Env } from '../env';
+import { resolveOutboundMaxRedirects } from '../services/outbound-fetch-settings';
 import {
   getGitHubAppConfig,
   getGitHubOAuthConfig,
@@ -13,6 +14,7 @@ import {
  * hands over its narrow env; the full worker env is what reached it.
  */
 export const platformConfigPort: PlatformConfigPort = {
+  outboundMaxRedirects: (env) => resolveOutboundMaxRedirects(env as Env),
   githubApp: (env) => getGitHubAppConfig(env as Env),
   githubOAuth: (env) => getGitHubOAuthConfig(env as Env),
   gitlabOAuth: (env) => getGitLabOAuthConfig(env as Env),

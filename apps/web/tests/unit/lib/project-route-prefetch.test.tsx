@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   getProject: vi.fn(),
   listChatSessions: vi.fn(),
   getChatSession: vi.fn(),
+  getProjectOverview: vi.fn(),
+  listInbox: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -13,6 +15,8 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   getProject: mocks.getProject,
   listChatSessions: mocks.listChatSessions,
   getChatSession: mocks.getChatSession,
+  getProjectOverview: mocks.getProjectOverview,
+  listInbox: mocks.listInbox,
 }));
 
 import { CHAT_SESSION_LIST_LIMIT } from '../../../src/lib/chat-query-config';
@@ -22,7 +26,12 @@ import {
   readInitialSessionList,
   takeRoutePrefetchedTranscript,
 } from '../../../src/lib/project-route-prefetch';
-import { chatQueryKeys, projectQueryKeys } from '../../../src/lib/query-options';
+import {
+  chatQueryKeys,
+  inboxQueryKeys,
+  projectOverviewQueryKeys,
+  projectQueryKeys,
+} from '../../../src/lib/query-options';
 
 const SESSIONS = [{ id: 'session-1', topic: 'First', status: 'active' }];
 
@@ -43,6 +52,8 @@ beforeEach(() => {
   mocks.getProject.mockResolvedValue({ id: 'proj-1', name: 'Project' });
   mocks.listChatSessions.mockResolvedValue({ sessions: SESSIONS, total: 1 });
   mocks.getChatSession.mockResolvedValue({ session: { id: 'session-1' }, messages: [] });
+  mocks.getProjectOverview.mockResolvedValue({ projectId: 'proj-1' });
+  mocks.listInbox.mockResolvedValue({ items: [], nextCursor: null, skipped: 0 });
 });
 
 describe('prefetchProjectRoute', () => {
@@ -70,12 +81,34 @@ describe('prefetchProjectRoute', () => {
     ).toBeDefined();
   });
 
-  it('starts the session list but no transcript for the bare chat route and the project index', () => {
-    for (const path of ['/projects/proj-1/chat', '/projects/proj-1']) {
+  it('starts the session list but no transcript for the bare chat route', () => {
+    prefetchProjectRoute(newClient(), 'user-1', '/projects/proj-1/chat');
+    expect(mocks.getProject).toHaveBeenCalledTimes(1);
+    expect(mocks.listChatSessions).toHaveBeenCalledTimes(1);
+    expect(mocks.getChatSession).not.toHaveBeenCalled();
+    expect(mocks.getProjectOverview).not.toHaveBeenCalled();
+  });
+
+  it('starts the Overview read and Needs you, not the chat list, for the project index and Overview', () => {
+    for (const path of ['/projects/proj-1', '/projects/proj-1/overview']) {
       vi.clearAllMocks();
-      prefetchProjectRoute(newClient(), 'user-1', path);
+      const client = newClient();
+      prefetchProjectRoute(client, 'user-1', path);
       expect(mocks.getProject).toHaveBeenCalledTimes(1);
-      expect(mocks.listChatSessions).toHaveBeenCalledTimes(1);
+      expect(mocks.getProjectOverview).toHaveBeenCalledWith('proj-1');
+      expect(mocks.listInbox).toHaveBeenCalledWith(
+        expect.objectContaining({ projectId: 'proj-1', filter: 'needs_you' }),
+        expect.anything()
+      );
+      // Keyed exactly as the page reads them, so the page joins these reads.
+      expect(
+        client.getQueryState(projectOverviewQueryKeys.detail('user-1', 'proj-1'))
+      ).toBeDefined();
+      expect(
+        client.getQueryState(inboxQueryKeys.list('user-1', 'proj-1', 'needs_you'))
+      ).toBeDefined();
+      // The chat's one-shot list would be consumed by nobody.
+      expect(mocks.listChatSessions).not.toHaveBeenCalled();
       expect(mocks.getChatSession).not.toHaveBeenCalled();
     }
   });
@@ -85,6 +118,7 @@ describe('prefetchProjectRoute', () => {
     expect(mocks.getProject).toHaveBeenCalledTimes(1);
     expect(mocks.listChatSessions).not.toHaveBeenCalled();
     expect(mocks.getChatSession).not.toHaveBeenCalled();
+    expect(mocks.getProjectOverview).not.toHaveBeenCalled();
   });
 
   it('reads nothing while signed out, so no entry is written under an empty scope', () => {

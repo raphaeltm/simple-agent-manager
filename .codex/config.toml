@@ -14,13 +14,45 @@ approval_policy = "never"
 # Hooks (schema: https://developers.openai.com/codex/hooks)
 # ==============================================================================
 # Each event holds matcher groups, and each group holds a `hooks` array of handlers.
-# `timeout` is in seconds. Project hooks run only when this .codex/ layer is trusted and
-# each hook definition has been trusted (Codex records trust against its hash).
+# `timeout` is in seconds. Codex runs project hooks only for a trusted project whose hook
+# definitions are trusted. codex-acp trusts the session's project; SAM's vm-agent supplies
+# the hook trust (bypass_hook_trust in buildCodexACPManagedConfigEnv,
+# packages/vm-agent/internal/acp/session_host_agent_config.go).
 # `pnpm quality:agent-context-budget --check` validates these entries.
 
-# No hooks are configured: SAM-managed Codex sessions do not trust this project, so Codex
-# would skip them (probe evidence on SAM idea 01M7H32EK6S4E31EHWVSJSENR5). The rule-delivery
-# and Stop hooks wait on that decision, on branch sam/codex-rule-delivery-hook.
+# Path-scoped rule delivery: Codex loads only the root AGENTS.md by itself. This hook adds
+# the rules (.claude/rules/*.md with `paths`) that govern the files a tool call touches,
+# the same rules Claude Code loads on file access. See .codex/hooks/rule-context.mjs.
+# additionalContextLimit (tokens) sits above the hook's own byte cap so Codex never spills.
+[[hooks.SessionStart]]
+matcher = "^(startup|resume|clear|compact|fork)$"
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = 'node "$(git rev-parse --show-toplevel)/.codex/hooks/rule-context.mjs"'
+timeout = 10
+additionalContextLimit = 20000
+statusMessage = "Preparing SAM rule delivery"
+
+[[hooks.PreToolUse]]
+matcher = "^(Bash|apply_patch)$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = 'node "$(git rev-parse --show-toplevel)/.codex/hooks/rule-context.mjs"'
+timeout = 10
+additionalContextLimit = 20000
+statusMessage = "Checking SAM rules for these files"
+
+# Test-quality Stop gate (rule 35), shared with Claude Code. Delivery per finding class is
+# set and measured in .claude/hooks/verify-test-quality.mjs; it never blocks without limit.
+[[hooks.Stop]]
+
+[[hooks.Stop.hooks]]
+type = "command"
+command = 'node "$(git rev-parse --show-toplevel)/.claude/hooks/verify-test-quality.mjs"'
+timeout = 30
+statusMessage = "Checking tests for changed boundary code"
 
 [projects."/workspaces/simple-agent-manager"]
 trust_level = "trusted"

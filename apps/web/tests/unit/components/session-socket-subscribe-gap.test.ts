@@ -221,6 +221,7 @@ describe('rows persisted between the last read and the socket subscription', () 
         // Include the stable tail so content appended under its existing ID is refreshed.
         after: '[2000,1999,"m2"]',
         limit: DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT,
+        afterToolRevision: 0,
         signal: undefined,
       })
     );
@@ -264,6 +265,7 @@ describe('rows persisted between the last read and the socket subscription', () 
       signal: expect.any(AbortSignal),
       // Include the stable tail so content appended under its existing ID is refreshed.
       after: '[2000,1999,"m2"]',
+      afterToolRevision: undefined,
     });
     // The cached session is active, so the socket opens while the refresh is in flight.
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
@@ -288,6 +290,7 @@ describe('rows persisted between the last read and the socket subscription', () 
         // Include the stable tail so content appended under its existing ID is refreshed.
         after: '[3000,2999,"m3"]',
         limit: DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT,
+        afterToolRevision: 0,
         signal: undefined,
       })
     );
@@ -334,6 +337,7 @@ describe('rows persisted between the last read and the socket subscription', () 
       // Include the stable tail so content appended under its existing ID is refreshed.
       after: '[2000,1999,"m2"]',
       limit: DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT,
+      afterToolRevision: 0,
       signal: undefined,
     });
     expect(result.current.map((m) => m.id)).toEqual(['m1', 'm2', 'r4']);

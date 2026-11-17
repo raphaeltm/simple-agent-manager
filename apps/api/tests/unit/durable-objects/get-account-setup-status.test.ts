@@ -31,7 +31,8 @@ vi.mock('@simple-agent-manager/shared', async (importOriginal) => ({
   resolvePolicyLimits: vi.fn().mockReturnValue({}),
 }));
 
-vi.mock('../../../src/db/schema', () => ({
+vi.mock('../../../src/db/schema', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/db/schema')>()),
   credentials: {
     provider: 'credentials.provider',
     credentialType: 'credentials.credentialType',

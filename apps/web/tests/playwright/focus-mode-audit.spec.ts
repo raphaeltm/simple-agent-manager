@@ -192,7 +192,7 @@ async function assertChatPageRendered(page: Page) {
 
 async function gotoProject(page: Page) {
   await setupApiMocks(page);
-  await page.goto('/projects/proj-1');
+  await page.goto('/projects/proj-1/chat');
   await page.waitForTimeout(1500);
   await assertChatPageRendered(page);
 }

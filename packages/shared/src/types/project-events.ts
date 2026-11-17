@@ -105,18 +105,26 @@ export type AdmitProjectEventInput = {
   receivedAt?: number;
 };
 
-export type ProjectEventAdmissionOutcome = 'created' | 'duplicate_replay' | 'conflict';
+export type ProjectEventAdmissionOutcome =
+  'created' | 'duplicate_replay' | 'conflict' | 'skipped_no_subscriber';
 
-export type ProjectEventAdmissionResult = {
-  outcome: ProjectEventAdmissionOutcome;
-  event: ProjectEventRecord;
-  matches: ProjectEventMatchRecord[];
-  conflict?: {
-    deliveryKey: string;
-    existingFingerprint: string;
-    incomingFingerprint: string;
-  };
-};
+export type ProjectEventAdmissionResult =
+  | {
+      outcome: 'skipped_no_subscriber';
+      event: null;
+      matches: [];
+      conflict?: never;
+    }
+  | {
+      outcome: Exclude<ProjectEventAdmissionOutcome, 'skipped_no_subscriber'>;
+      event: ProjectEventRecord;
+      matches: ProjectEventMatchRecord[];
+      conflict?: {
+        deliveryKey: string;
+        existingFingerprint: string;
+        incomingFingerprint: string;
+      };
+    };
 
 export const PROJECT_EVENT_SUBSCRIPTION_OWNER_TYPES = [
   'human',
@@ -703,6 +711,17 @@ export type GetProjectEventRecentStatusInput = {
 };
 
 export type ProjectEventRecentStatus = {
+  /** Volatile isolate-local counters, not durable history or complete billing coverage. */
+  admission?: {
+    windowStart: number;
+    windowEnd: number;
+    skipUnsubscribedGitHubCi: boolean;
+    counts: Record<
+      string,
+      { calls: number; created: number; duplicate: number; conflict: number; skipped: number }
+    >;
+    overflowCalls: number;
+  };
   projectId: string;
   events: ProjectEventRecord[];
   matches: ProjectEventMatchRecord[];

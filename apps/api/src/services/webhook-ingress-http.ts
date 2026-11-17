@@ -1,5 +1,6 @@
 /** Request plumbing shared by the two public webhook addresses (token and signed). */
 import type { Env } from '../env';
+import { clientIpFromHeaders } from '../lib/client-ip';
 import { log } from '../lib/logger';
 import {
   checkRateLimit,
@@ -37,11 +38,7 @@ export async function readBoundedBody(request: Request, maxBytes: number): Promi
 }
 
 export function clientIp(request: Request): string {
-  return (
-    request.headers.get('CF-Connecting-IP') ??
-    request.headers.get('X-Forwarded-For')?.split(',')[0]?.trim() ??
-    'unknown'
-  );
+  return clientIpFromHeaders((name) => request.headers.get(name)) ?? 'unknown';
 }
 
 /**

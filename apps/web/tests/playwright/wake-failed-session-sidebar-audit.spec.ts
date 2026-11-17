@@ -164,7 +164,7 @@ async function renderWakeFailedSidebar(page: Page, screenshotName: string) {
   await page.addInitScript((id) => {
     window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${id}`, 'true');
   }, userId);
-  await page.goto(`/projects/${projectId}`);
+  await page.goto(`/projects/${projectId}/chat`);
   await page.waitForTimeout(1500);
 
   const button = page.getByRole('button', { name: 'Open chat list' });

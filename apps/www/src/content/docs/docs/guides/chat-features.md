@@ -88,7 +88,9 @@ Sometimes an agent stops and waits for you. It wants permission before it runs a
 file, it has a question only you can answer, or a tool it uses wants you to open a page in your
 browser. Each request appears as a card in the chat — a permission request under the step it's
 about, a question or a link at the end of the chat — and the chat is marked **Needs input** in the
-session list. The agent is paused until you answer.
+session list. The agent is paused until you answer. An agent can also ask you for a secret, such as
+an API key, through a card with a secure field: see
+[Let the agent ask you for a secret](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret).
 
 <picture>
   <source media="(max-width: 40em)" srcset="/images/docs/chat-permission-request-mobile.png 2x" />
@@ -104,11 +106,11 @@ For every kind of request:
   [shared the chat with](/docs/guides/collaboration/#share-a-chat). In a
   [shared project](/docs/guides/collaboration/), other members see that the agent is waiting, but
   not what it asked or what was answered.
-- **No notification is sent.** Watch the session list for **Needs input**; on a phone, open the list
-  with the chat list button at the right end of the app bar. (Notifications cover a different kind of
-  question, the one agents ask with their `request_human_input` tool — see
-  [Notifications](/docs/guides/notifications/). Those questions also show as a card in the
-  conversation, where you can answer them.)
+- **You get one notification per request**, a push titled **Permission needed**, **Input needed**
+  or **Link to open**, sent to the person who started the chat. It opens the request in your
+  [Inbox](/docs/guides/inbox/): permissions can be answered there, while forms and links open the
+  chat with **Answer in chat**. The session list also marks the chat **Needs input**; on a phone,
+  open the list with the chat list button at the right end of the app bar.
 - **You don't have to stay on the page.** A request waits in SAM, not in your browser tab, so you can
   answer later or from another device until its deadline, which the card shows. Meanwhile a VM
   session stays awake, so its machine keeps running, billed to your cloud account if it's yours. If
@@ -188,11 +190,14 @@ own. **Decline** tells the agent you're skipping the question. A question waits 
 Questions appear only in sessions labelled **Chat** in the session list — see
 [Chat or Task](#chat-or-task).
 
-An agent can also ask with its `request_human_input` tool, which works in a **Task** too and, unlike
-the cards above, sends you a notification. That question appears as a card in the conversation as
-well, marked **Needs your answer** until someone answers it, then **Answered** with the choice
-that was made. Answer it on the card or in your [Inbox](/docs/guides/inbox/): it is the same
-answer wherever you give it.
+An agent can also file an item in your [Inbox](/docs/guides/inbox/#what-agents-file) with its
+`inbox_write` tool (or ask with `request_human_input`, which files a blocking question). This works
+in a **Task** too. The item appears as a card in the conversation as well, marked with where it
+stands: **Agent paused on this** for a question the agent is stopped on (every
+`request_human_input` question), **Needs your answer** for one it keeps working through, or
+**Waiting for your review** for a review. Once it is settled the card reads **Answered**,
+**Reviewed**, **Archived**, **Withdrawn by the agent** or **Expired**. Answer it on the card or in your Inbox: it is the same
+record wherever you answer it.
 
 ### Links to open
 
@@ -332,24 +337,25 @@ features on this page are opened from. (The session's lifecycle controls — Int
 Archive — and the agent's plan sit in the dock just above the composer instead, because they act on
 the conversation you are in rather than opening something beside it.)
 
-| Tool            | What it opens                                                                                                                                                      | When it appears                                                                                                                                                                   |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Files**       | The workspace file browser — [File Browsing](#file-browsing)                                                                                                       | While the session is live and has a workspace, for its owner and people it is [shared with](/docs/guides/collaboration/#share-a-chat) (limited to the repository folder for them) |
-| **Git**         | Uncommitted changes in the workspace                                                                                                                               | Same as **Files**                                                                                                                                                                 |
-| **Timeline**    | A jump list through the session's history                                                                                                                          | Always                                                                                                                                                                            |
-| **Related**     | The ideas, library files and pull requests this chat is related to; see [Related work](#related-work)                                                              | Always                                                                                                                                                                            |
-| **Resources**   | CPU, memory, I/O, and OOM history — [Session Resource History](/docs/guides/session-resources/)                                                                    | Always                                                                                                                                                                            |
-| **Automation**  | What this chat waits for, and what is set to message it — [Scheduled actions](/docs/guides/scheduled-actions/)                                                     | Always                                                                                                                                                                            |
-| **Comments**    | Comment threads on this session. Unresolved threads show as a dot in icons mode and a count in labels mode; the marker turns amber when a thread is waiting on you | Always                                                                                                                                                                            |
-| **Share**       | Who else can drive this chat and until when, with controls to add, renew or revoke — [Share a chat](/docs/guides/collaboration/#share-a-chat)                      | Always; only the owner and people it is shared with can change it                                                                                                                 |
-| **Retry**       | Start a new chat with the original task prompt — [Retrying a Session](#retrying-a-session)                                                                         | When the session has a task, unless the chat has expired                                                                                                                          |
-| **Fork**        | Start a new chat that can read this one — [Conversation Forking](#conversation-forking)                                                                            | When the session has a task                                                                                                                                                       |
-| **Report**      | File a problem report — [Reporting Issues](/docs/guides/reporting-issues/)                                                                                         | When the deployment has reporting configured                                                                                                                                      |
-| **Complete**    | Mark the task complete                                                                                                                                             | When the session has a task that has started and is not already finished                                                                                                          |
-| **Cancel task** | Cancel a task that has not started yet, so it never starts (for example one waiting for a provider limit reset)                                                    | Instead of **Complete**, when the task has not started                                                                                                                            |
-| **Details**     | Session identifiers and the infrastructure it ran on. On a phone it opens the [chat's info sheet](#the-chat-header)                                                | Always                                                                                                                                                                            |
+| Tool            | What it opens                                                                                                                                                                                                                                                                                                                                                      | When it appears                                                                                                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Files**       | The workspace file browser — [File Browsing](#file-browsing)                                                                                                                                                                                                                                                                                                       | While the session is live and has a workspace, for its owner and people it is [shared with](/docs/guides/collaboration/#share-a-chat) (limited to the repository folder for them) |
+| **Git**         | Uncommitted changes in the workspace                                                                                                                                                                                                                                                                                                                               | Same as **Files**                                                                                                                                                                 |
+| **Timeline**    | A jump list through the session's history                                                                                                                                                                                                                                                                                                                          | Always                                                                                                                                                                            |
+| **Related**     | The ideas, library files and pull requests this chat is related to; see [Related work](#related-work)                                                                                                                                                                                                                                                              | Always                                                                                                                                                                            |
+| **Resources**   | CPU, memory, I/O, and OOM history — [Session Resource History](/docs/guides/session-resources/)                                                                                                                                                                                                                                                                    | Always                                                                                                                                                                            |
+| **Automation**  | What this chat waits for, and what is set to message it — [Scheduled actions](/docs/guides/scheduled-actions/)                                                                                                                                                                                                                                                     | Always                                                                                                                                                                            |
+| **Comments**    | Comment threads on this session. Unresolved threads show as a dot in icons mode and a count in labels mode; the marker turns amber when a thread is waiting on you                                                                                                                                                                                                 | Always                                                                                                                                                                            |
+| **Receipt**     | Where the run's time went, what it produced and what slowed it down — [Run Receipt](#run-receipt)                                                                                                                                                                                                                                                                  | When the session has a task                                                                                                                                                       |
+| **Share**       | Who else can drive this chat and until when, with controls to add, renew or revoke — [Share a chat](/docs/guides/collaboration/#share-a-chat)                                                                                                                                                                                                                      | Always; only the owner and people it is shared with can change it                                                                                                                 |
+| **Retry**       | Start a new chat with the original task prompt — [Retrying a Session](#retrying-a-session)                                                                                                                                                                                                                                                                         | When the session has a task, unless the chat has expired                                                                                                                          |
+| **Fork**        | Start a new chat that can read this one — [Conversation Forking](#conversation-forking)                                                                                                                                                                                                                                                                            | When the session has a task                                                                                                                                                       |
+| **Report**      | File a problem report — [Reporting Issues](/docs/guides/reporting-issues/)                                                                                                                                                                                                                                                                                         | When the deployment has reporting configured                                                                                                                                      |
+| **Complete**    | Mark the task complete                                                                                                                                                                                                                                                                                                                                             | When the session has a task that has started and is not already finished                                                                                                          |
+| **Cancel task** | Cancel a task that has not started yet, so it never starts (for example one waiting for a provider limit reset)                                                                                                                                                                                                                                                    | Instead of **Complete**, when the task has not started                                                                                                                            |
+| **Details**     | The account the agent ran on and what chose it (for example **chosen for this chat**), its **Configuration** after every override (Model, Effort, Permissions, Skill), session identifiers and the infrastructure it ran on — [details](/docs/guides/agents/#using-another-account-for-one-profile). On a phone it opens the [chat's info sheet](#the-chat-header) | Always                                                                                                                                                                            |
 
-![The session tool rail in icons-and-labels mode, listing Files, Git, Timeline, Related, Resources, Automation and Comments, then Share, Retry and Fork after a divider, with Report, Complete and Details pinned at the bottom.](/images/docs/session-tool-rail.png)
+![The session tool rail in icons-and-labels mode, listing Files, Git, Timeline, Related, Resources, Automation and Comments, then Share, Receipt, Retry and Fork after a divider, with Report, Complete and Details pinned at the bottom.](/images/docs/session-tool-rail.png)
 
 **Files** and **Git** need a linked workspace and a live session, so they disappear once the
 session sleeps or stops. Someone the chat is shared with sees them too while their access lasts,
@@ -409,6 +415,51 @@ Two of these also surface without opening the panel:
 Most links are recorded as the work happens, so there is nothing to maintain by hand. An agent
 can also connect something deliberately when the work happened elsewhere — see
 [How work gets linked](/docs/guides/ideas/#how-work-gets-linked).
+
+## Run Receipt
+
+**Receipt** in the tool rail opens one task's run receipt: a side panel on desktop, a full sheet on a
+phone. It is built from records SAM already keeps (`runReceipt`,
+`packages/operations/src/insights-receipt.ts`), and it says when it has nothing to measure from
+rather than guessing.
+
+![The Receipt panel open beside a chat on a desktop. It reads Merged, PR #2771 · CI passed · first push failed · 42m, with a link to the pull request. Where the time went is a coloured bar with Waiting for a machine 40s, Setup 3m 10s, Agent working 21m, Waiting on a person 8m 20s and CI 9m. Tiles show Tokens 2.6M including 2.2M cache, Account Work API key, Peak memory 3.1 GB of 4.0 GB requested, and Tool calls 186. Tokens by model lists claude-opus-5-5 at about $3.98 and claude-haiku-5-5 at about $0.14, then about $4.12 estimated at SAM's model prices.](/images/docs/run-receipt.png)
+
+- **Outcome**: the pull request the run opened, whether it merged, the state of its checks on
+  the latest commit, and whether the first push passed CI (**first push passed** or **first push
+  failed**, by the same rule as [Insights](/docs/guides/insights/)). Nothing is said while those
+  checks run, or when SAM did not see the pull request from its first commit.
+- **Where the time went**: a bar split into waiting for a machine, setup, agent working, waiting on
+  a person (the agent's open questions and the inbox items it filed), and CI (from the agent's last
+  message until the pull request's last check finished). While the run is live, the phases it has
+  not reached read **not yet**.
+- **Tiles**: tokens, the account the agent ran on (its name only for the person who ran it;
+  everyone else sees which kind of account), peak memory against what the run requested, and tool
+  calls by kind. A count with `+` is a floor: the run had more tool calls than one receipt reads.
+- **Tokens by model**: the tokens the run used per model, split into fresh input, output, cache and
+  reasoning (where the agent reports reasoning on its own). SAM never estimates tokens. They come
+  from SAM's AI proxy when the run used it (it measures every model call), otherwise from the agent
+  itself through the VM agent (`agent_run_usage`, `packages/operations/src/insights-run-usage.ts`):
+  - Claude Code reports each turn, per model.
+  - OpenCode reports each turn, credited to the session's model.
+  - Codex reports its running total for the conversation, read from its session file.
+  - Other agents report nothing, and the tile says **Not reported**.
+
+  Background work Claude Code starts on its own between turns is not counted. A Codex thread's
+  total is credited to the session's model. Tokens cover the whole chat, so every task in one chat
+  shows the same totals. For an API-key account the list also shows spend, labelled as an estimate
+  from SAM's model prices (cache writes are priced as input, so it reads low for Anthropic). Only
+  the person who ran the session sees spend on their own personal key. Subscription accounts show
+  tokens only.
+
+- **CPU**: the run's CPU per minute, with a marker on each minute in which the agent started tool
+  calls, from the same history as **Resources**.
+- **What slowed it down**: up to three items, largest first. A machine wait or setup is listed only
+  when it was clearly slower than recent runs of the same skill (or profile) in the project. Time
+  spent waiting for an answer, failing checks, and memory near the limit are listed too.
+
+Admins can tune the receipt's limits under **Chat** in
+[Admin settings](/docs/guides/admin-settings/#run-receipt).
 
 ## File Browsing
 
@@ -587,6 +638,12 @@ Agent responses can be played back as audio. SAM uses Deepgram Aura 2 (via Worke
 | `TTS_MAX_TEXT_LENGTH` | `100000`                 | Max characters per synthesis |
 | `TTS_TIMEOUT_MS`      | `60000`                  | Synthesis timeout            |
 
+Voice input and server read-aloud need the Workers AI binding. An installation without it, or
+with `TTS_ENABLED` set to `false`, reports that through
+[`GET /api/config/platform-capabilities`](/docs/reference/api/), and the app hides the microphone
+(and, for TTS, plays read-aloud through the browser's own speech synthesis) instead of showing a
+control that fails.
+
 ## Conversation Forking
 
 Fork and Retry both start a new chat linked to the one you're in, and both open instantly.
@@ -759,6 +816,8 @@ You may also see a banner telling you a message was saved but its delivery was i
 When you open a new chat with two or more agent profiles you haven't hidden, SAM asks **Who should take this?** and shows your recent profiles as cards; the one you used last is already selected. See [Choosing a profile for a new chat](/docs/guides/agents/#choosing-a-profile-for-a-new-chat). Otherwise SAM offers a few repo-aware **starter prompts** instead (for example, "What's in this repo?" or "Run the tests and fix any failures") so you can get moving without a blank page. Pick one or type your own.
 
 Each profile's icon has a ring showing how much of its account's usage is left, and a profile whose account is used up says when it is back, so you can pick one with room. To change the model, effort, skill or machine size for just this chat without editing the profile, use **Chat options**, the sliders button at the end of the **To** row. See [Choosing a profile for a new chat](/docs/guides/agents/#choosing-a-profile-for-a-new-chat).
+
+When you have more than one account for the chat's agent, the **To** row also says which one it will run on, for example **on Work Max**. Select it to run this one chat on another of your accounts, without editing the profile. See [Using another account for one chat](/docs/guides/agents/#using-another-account-for-one-chat).
 
 To send on a desktop keyboard, press **Cmd+Enter** on Mac or **Ctrl+Enter** on Windows/Linux — plain **Enter** inserts a new line so you can write multi-line prompts. The composer shows the correct shortcut for your platform as a hint. On mobile, tap the send button; **Enter** always inserts a new line.
 

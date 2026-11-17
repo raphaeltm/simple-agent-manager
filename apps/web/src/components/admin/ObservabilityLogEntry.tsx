@@ -3,6 +3,7 @@ import { Button } from '@simple-agent-manager/ui';
 import { Check, Copy } from 'lucide-react';
 import { type FC, useCallback, useState } from 'react';
 
+import { projectChatPath } from '../../lib/project-routes';
 import { CopyableIdPill } from './CopyableIdPill';
 
 export interface ObservabilityLogEntryProps {
@@ -299,14 +300,18 @@ const ErrorIdPills: FC<{ entry: PlatformError; projectId: string | null }> = ({
         <CopyableIdPill
           label="task"
           value={entry.taskId}
-          href={projectId ? `/projects/${projectId}` : undefined}
+          href={
+            projectId
+              ? `/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(entry.taskId)}`
+              : undefined
+          }
         />
       )}
       {entry.sessionId && (
         <CopyableIdPill
           label="session"
           value={entry.sessionId}
-          href={projectId ? `/projects/${projectId}?sessionId=${entry.sessionId}` : undefined}
+          href={projectId ? projectChatPath(projectId, entry.sessionId) : undefined}
         />
       )}
     </div>

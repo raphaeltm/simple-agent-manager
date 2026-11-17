@@ -1,3 +1,4 @@
+import { INBOX_WRITE_TOOL } from './types/inbox';
 import { REQUEST_SECRET_TOOL } from './types/runtime-secret-requests';
 
 /**
@@ -14,5 +15,6 @@ export const TYPED_CHAT_CARD_TOOLS = [
   'ops_request_action',
   'request_human_input',
   REQUEST_SECRET_TOOL,
+  INBOX_WRITE_TOOL,
 ] as const;
 export type TypedChatCardTool = (typeof TYPED_CHAT_CARD_TOOLS)[number];

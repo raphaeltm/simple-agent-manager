@@ -628,7 +628,7 @@ describe('ProjectData idle-cleanup liveness for a stale VM node heartbeat', () =
 
     expect(fetchWithTimeoutMock).toHaveBeenCalledWith(
       'https://01m064tg56ecjw1d127h32brvj.vm.example.test:8443/health',
-      { method: 'GET' },
+      { method: 'GET', redirect: 'manual' },
       5_000
     );
     expect(verdict).toMatchObject({

@@ -142,6 +142,22 @@ function secretRequestPayload(
 }
 
 /**
+ * Keeps only the inbox item reference of an `inbox_write` ask or review; the card re-reads the
+ * item from the inbox. An update or cancel result has none and keeps the generic card.
+ */
+function inboxItemPayload(payload: Record<string, unknown>): Record<string, unknown> | undefined {
+  const item = maybeJsonRecord(payload.inboxItem);
+  const ref = item?.ref;
+  const sessionId = item?.sessionId;
+  return typeof ref === 'string' &&
+    ref.startsWith('ask:') &&
+    typeof sessionId === 'string' &&
+    sessionId
+    ? { inboxItem: { ref, sessionId } }
+    : undefined;
+}
+
+/**
  * How to recognise each typed chat card's result payload. Keyed by the shared
  * TYPED_CHAT_CARD_TOOLS list, so adding a card tool there fails to compile until it has a matcher
  * here. Each card needs only IDs: it re-reads everything it shows from the server record.
@@ -153,6 +169,7 @@ const CARD_PAYLOAD_MATCHERS: Record<TypedChatCardTool, CardPayloadMatcher> = {
   ops_request_action: approvalPayload,
   request_human_input: humanInputPayload,
   request_secret: secretRequestPayload,
+  inbox_write: inboxItemPayload,
 };
 
 /** Which typed chat card a tool renders as, and how to recognise its result payload. */

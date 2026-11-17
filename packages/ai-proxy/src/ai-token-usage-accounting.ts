@@ -1,6 +1,8 @@
 import { log } from '@simple-agent-manager/worker-core';
 import { maybeJsonRecord } from '@simple-agent-manager/worker-core';
 
+import { findPricedModel, priceModelUsageUsd } from './ai-cost-pricing';
+import { hasLocalAiCostMetering } from './ai-gateway-availability';
 import {
   type AiProviderUsageAttribution,
   incrementProviderUsage,
@@ -13,6 +15,25 @@ export type TokenUsageFormat = 'openai' | 'anthropic';
 export interface ExtractedTokenUsage {
   inputTokens?: number;
   outputTokens?: number;
+  /** Prompt-cache reads. Anthropic excludes them from `inputTokens`; OpenAI includes them. */
+  cacheReadTokens?: number;
+  /** Prompt-cache writes (Anthropic `cache_creation_input_tokens`). */
+  cacheWriteTokens?: number;
+  /** Reasoning tokens reported separately (OpenAI); also counted in `outputTokens`. */
+  reasoningTokens?: number;
+  outputBytes?: number;
+}
+
+/**
+ * Token usage the upstream actually reported for one response, normalized so `inputTokens`
+ * excludes cache reads for every format. Never built from the input estimate.
+ */
+export interface MeasuredTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  reasoningTokens: number | null;
 }
 
 export interface TokenUsageAccountingOptions {
@@ -20,8 +41,16 @@ export interface TokenUsageAccountingOptions {
   userId: string;
   format: TokenUsageFormat;
   fallbackInputTokens?: number;
+  /** Platform-billed catalog model; BYO and custom endpoints leave this unset. */
+  costModelId?: string;
+  estimateMissingUsage?: boolean;
   provider?: AiProviderUsageAttribution;
   executionCtx?: Pick<ExecutionContext, 'waitUntil'>;
+  /**
+   * Called with the upstream's measured usage (Insights run usage). Not called when the upstream
+   * reported no usage, so the input estimate never reaches it. A failure is logged, not thrown.
+   */
+  onMeasuredUsage?: (usage: MeasuredTokenUsage) => Promise<void>;
 }
 
 export interface UpstreamTokenUsageAccountingOptions extends TokenUsageAccountingOptions {
@@ -33,6 +62,8 @@ export async function accountTokenUsageFromJson(
   options: TokenUsageAccountingOptions
 ): Promise<void> {
   const usage = extractJsonTokenUsage(payload, options.format);
+  if (options.estimateMissingUsage && usage.outputTokens === undefined)
+    usage.outputBytes = jsonOutputByteLength(payload);
   await incrementExtractedUsage(usage, options);
 }
 
@@ -41,8 +72,8 @@ export function accountTokenUsageFromStream(
   options: TokenUsageAccountingOptions
 ): void {
   scheduleTokenAccounting(
-    collectStreamTokenUsage(stream, options.format).then((usage) =>
-      incrementExtractedUsage(usage, options)
+    collectStreamTokenUsage(stream, options.format, options.estimateMissingUsage === true).then(
+      (usage) => incrementExtractedUsage(usage, options)
     ),
     options
   );
@@ -76,7 +107,10 @@ export async function attachTokenUsageAccounting(
   }
 
   try {
-    await accountTokenUsageFromJson(payload, { ...options, fallbackInputTokens: undefined });
+    await accountTokenUsageFromJson(
+      payload,
+      options.estimateMissingUsage ? options : { ...options, fallbackInputTokens: undefined }
+    );
   } catch (err) {
     log.warn('ai_proxy.token_usage_increment_failed', {
       userId: options.userId,
@@ -123,12 +157,43 @@ export function extractJsonTokenUsage(
     return {
       inputTokens: numberValue(usage.input_tokens),
       outputTokens: numberValue(usage.output_tokens),
+      cacheReadTokens: numberValue(usage.cache_read_input_tokens),
+      cacheWriteTokens: numberValue(usage.cache_creation_input_tokens),
     };
   }
 
+  // Chat Completions: prompt_tokens_details; Responses API: input/output_tokens_details.
+  const inputDetails =
+    maybeJsonRecord(usage.prompt_tokens_details) ?? maybeJsonRecord(usage.input_tokens_details);
+  const outputDetails =
+    maybeJsonRecord(usage.completion_tokens_details) ??
+    maybeJsonRecord(usage.output_tokens_details);
   return {
     inputTokens: numberValue(usage.prompt_tokens) ?? numberValue(usage.input_tokens),
     outputTokens: numberValue(usage.completion_tokens) ?? numberValue(usage.output_tokens),
+    cacheReadTokens: numberValue(inputDetails?.cached_tokens),
+    reasoningTokens: numberValue(outputDetails?.reasoning_tokens),
+  };
+}
+
+/**
+ * The measured part of an extraction, or null when the upstream reported no usage at all.
+ * OpenAI counts cache reads inside the prompt total; they are moved out so every format means
+ * the same thing by `inputTokens` (fresh input), as the harness reports do.
+ */
+export function measuredTokenUsage(
+  usage: ExtractedTokenUsage,
+  format: TokenUsageFormat
+): MeasuredTokenUsage | null {
+  if (usage.inputTokens === undefined && usage.outputTokens === undefined) return null;
+  const cacheRead = usage.cacheReadTokens ?? 0;
+  const rawInput = usage.inputTokens ?? 0;
+  return {
+    inputTokens: format === 'openai' ? Math.max(0, rawInput - cacheRead) : rawInput,
+    outputTokens: usage.outputTokens ?? 0,
+    cacheReadTokens: cacheRead,
+    cacheWriteTokens: usage.cacheWriteTokens ?? 0,
+    reasoningTokens: usage.reasoningTokens ?? null,
   };
 }
 
@@ -145,12 +210,13 @@ export function estimateInputTokensFromMessages(messages: unknown): number {
 
 export async function collectStreamTokenUsage(
   stream: ReadableStream<Uint8Array>,
-  format: TokenUsageFormat
+  format: TokenUsageFormat,
+  estimate = false
 ): Promise<ExtractedTokenUsage> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  const usage: ExtractedTokenUsage = {};
+  const usage: ExtractedTokenUsage = estimate ? { outputBytes: 0 } : {};
 
   try {
     let keepReading = true;
@@ -177,19 +243,81 @@ async function incrementExtractedUsage(
   options: TokenUsageAccountingOptions
 ): Promise<void> {
   const inputTokens = usage.inputTokens ?? options.fallbackInputTokens ?? 0;
-  const outputTokens = usage.outputTokens ?? 0;
+  const outputTokens =
+    usage.outputTokens ??
+    (options.estimateMissingUsage ? Math.ceil((usage.outputBytes ?? 0) / 3) : 0);
   if (inputTokens <= 0 && outputTokens <= 0) return;
 
   await incrementTokenUsage(options.env.KV, options.userId, inputTokens, outputTokens, options.env);
-  if (options.provider) {
+  const model =
+    options.costModelId && hasLocalAiCostMetering(options.env)
+      ? findPricedModel(options.costModelId)
+      : null;
+  const provider =
+    options.provider ??
+    (model
+      ? { providerId: model.provider, providerName: model.provider, dialect: options.format }
+      : undefined);
+  if (provider) {
+    const cached = usage.cacheReadTokens ?? 0;
+    const writes = usage.cacheWriteTokens ?? 0;
+    const totalInput = options.format === 'anthropic' ? inputTokens + cached + writes : inputTokens;
+    const costUsd = model
+      ? priceModelUsageUsd(model, {
+          inputTokens: totalInput,
+          outputTokens,
+          cachedInputTokens: cached,
+          cacheWriteInputTokens: writes,
+        })
+      : 0;
     await incrementProviderUsage(
       options.env.KV,
       options.userId,
-      options.provider,
+      provider,
       inputTokens,
       outputTokens,
-      options.env
+      options.env,
+      ...(options.costModelId ? ([costUsd] as const) : [])
     );
+  }
+  // Budget accounting is the billing control and runs first; run usage is telemetry and must
+  // never delay or starve it.
+  scheduleMeasuredUsage(usage, options);
+}
+
+/**
+ * Hand the measured usage to `onMeasuredUsage` outside the response path: inside the request's
+ * `waitUntil` when there is one, so a slow D1 write never adds latency to a proxied response.
+ */
+function scheduleMeasuredUsage(
+  usage: ExtractedTokenUsage,
+  options: TokenUsageAccountingOptions
+): void {
+  if (!options.onMeasuredUsage) return;
+  const pending = recordMeasuredUsage(usage, options);
+  try {
+    options.executionCtx?.waitUntil(pending);
+  } catch {
+    // Tests and local runtimes may not provide a Cloudflare execution context.
+  }
+}
+
+async function recordMeasuredUsage(
+  usage: ExtractedTokenUsage,
+  options: TokenUsageAccountingOptions
+): Promise<void> {
+  if (!options.onMeasuredUsage) return;
+  const measured = measuredTokenUsage(usage, options.format);
+  if (!measured) return;
+  try {
+    await options.onMeasuredUsage(measured);
+  } catch (err) {
+    // Run usage is telemetry: it must never fail the budget accounting that follows.
+    log.warn('ai_proxy.run_usage_record_failed', {
+      userId: options.userId,
+      format: options.format,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -233,13 +361,55 @@ function applyStreamUsage(
     const startUsage = maybeJsonRecord(message?.usage);
     const deltaUsage = maybeJsonRecord(record.usage);
     usage.inputTokens = numberValue(startUsage?.input_tokens) ?? usage.inputTokens;
+    usage.cacheReadTokens =
+      numberValue(startUsage?.cache_read_input_tokens) ?? usage.cacheReadTokens;
+    usage.cacheWriteTokens =
+      numberValue(startUsage?.cache_creation_input_tokens) ?? usage.cacheWriteTokens;
     usage.outputTokens = numberValue(deltaUsage?.output_tokens) ?? usage.outputTokens;
     return;
   }
 
-  const jsonUsage = extractJsonTokenUsage(record, 'openai');
+  // Chat Completions streams usage at the top level; the Responses API inside `response`.
+  const jsonUsage = extractJsonTokenUsage(maybeJsonRecord(record.response) ?? record, 'openai');
   usage.inputTokens = jsonUsage.inputTokens ?? usage.inputTokens;
   usage.outputTokens = jsonUsage.outputTokens ?? usage.outputTokens;
+  usage.cacheReadTokens = jsonUsage.cacheReadTokens ?? usage.cacheReadTokens;
+  usage.reasoningTokens = jsonUsage.reasoningTokens ?? usage.reasoningTokens;
+  if (usage.outputBytes !== undefined) {
+    usage.outputBytes += choicesOutputByteLength(record.choices, 'delta');
+    if (
+      typeof record.delta === 'string' &&
+      [
+        'response.output_text.delta',
+        'response.function_call_arguments.delta',
+        'response.reasoning_text.delta',
+      ].includes(String(record.type))
+    )
+      usage.outputBytes += utf8ByteLength(record.delta);
+  }
+}
+
+const UTF8 = new TextEncoder();
+function utf8ByteLength(text: string): number {
+  return UTF8.encode(text).byteLength;
+}
+/** Bytes of generated output in a chat completion's choices (`message`) or chunk (`delta`). */
+function choicesOutputByteLength(choices: unknown, field: 'message' | 'delta'): number {
+  if (!Array.isArray(choices)) return 0;
+  let bytes = 0;
+  for (const choice of choices) {
+    const part = maybeJsonRecord(maybeJsonRecord(choice)?.[field]);
+    if (!part) continue;
+    for (const key of ['content', 'reasoning_content', 'reasoning'] as const) {
+      if (typeof part[key] === 'string') bytes += utf8ByteLength(part[key]);
+    }
+    if (Array.isArray(part.tool_calls)) bytes += utf8ByteLength(JSON.stringify(part.tool_calls));
+  }
+  return bytes;
+}
+
+function jsonOutputByteLength(payload: unknown): number {
+  return choicesOutputByteLength(maybeJsonRecord(payload)?.choices, 'message');
 }
 
 function isStreamingResponse(response: Response): boolean {

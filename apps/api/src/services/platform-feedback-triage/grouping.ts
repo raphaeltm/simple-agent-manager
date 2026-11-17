@@ -212,6 +212,26 @@ async function digest(value: string): Promise<string> {
   const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
   return [...new Uint8Array(bytes)].map((item) => item.toString(16).padStart(2, '0')).join('');
 }
+/** The source and normalized message a platform error is grouped by. */
+function platformErrorGroupKey(
+  rawSource: string,
+  message: string
+): { source: string; key: string } {
+  const candidateSource = rawSource.trim().toLowerCase();
+  const source = ALLOWED_ERROR_SOURCES.has(candidateSource) ? candidateSource : 'unknown';
+  const normalized = normalizeMessage(message) || 'redacted platform error';
+  return { source, key: `${source}\n${normalized}` };
+}
+
+/**
+ * The triage signature (`platform_feedback_triages.signature`) the hourly triage gives every
+ * error with this source and message. Lets a reader find the incident for a known error, such as
+ * the lifecycle latency watchdog's, without restating the grouping.
+ */
+export async function platformErrorSignature(source: string, message: string): Promise<string> {
+  return digest(platformErrorGroupKey(source, message).key);
+}
+
 export async function groupPlatformErrors(
   rows: ErrorRow[],
   evidenceLimit: number
@@ -223,13 +243,10 @@ export async function groupPlatformErrors(
     }
   >();
   for (const row of rows) {
-    const candidateSource = row.source.trim().toLowerCase();
-    const source = ALLOWED_ERROR_SOURCES.has(candidateSource) ? candidateSource : 'unknown';
+    const { source, key } = platformErrorGroupKey(row.source, row.message);
     const severity = normalizeSeverity(row.level);
-    const normalized = normalizeMessage(row.message) || 'redacted platform error';
     const legacyNormalized = normalizeLegacyMessage(row.message) || 'redacted platform error';
     const summary = `Recurring ${source} platform error`;
-    const key = `${source}\n${normalized}`;
     const legacyKey = `${source}\n${legacyNormalized}`;
     const current = groups.get(key);
     const safeErrorId =

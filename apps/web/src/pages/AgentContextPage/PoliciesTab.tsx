@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { useToast } from '../../hooks/useToast';
 import { deletePolicy, updatePolicy } from '../../lib/api';
 import { Badge, FOCUS_RING, GLASS_CARD, SectionHeader } from './index';
+import { PolicyInjectModeControl, PolicyInjectSummary } from './PolicyInjectMode';
 
 const categoryColors: Record<PolicyCategory, string> = {
   rule: 'border-danger/30 bg-danger-tint text-danger-fg',
@@ -287,7 +288,7 @@ function PolicyCard({
 
   return (
     <>
-      <article className={`${GLASS_CARD} group p-3 ${!policy.active ? 'opacity-60' : ''}`}>
+      <article className={`${GLASS_CARD} group p-3`}>
         {editing ? (
           <PolicyEditForm
             policy={policy}
@@ -298,7 +299,8 @@ function PolicyCard({
         ) : (
           <>
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-              <div className="min-w-0 flex-1">
+              {/* Only the text is dimmed for an inactive policy; controls stay solid (SAM Glass). */}
+              <div className={`min-w-0 flex-1 ${!policy.active ? 'opacity-60' : ''}`}>
                 <div className="flex flex-wrap items-center gap-1.5">
                   <Badge className={categoryColors[policy.category]}>{policy.category}</Badge>
                   <Badge
@@ -349,6 +351,13 @@ function PolicyCard({
                 </div>
               </div>
             </div>
+            <div className="mt-3">
+              <PolicyInjectModeControl
+                policy={policy}
+                projectId={projectId}
+                onRefresh={onRefresh}
+              />
+            </div>
             <div className="mt-3 flex flex-col gap-1.5 border-t border-[color-mix(in_srgb,var(--sam-form-border)_80%,transparent)] pt-3 text-xs text-fg-muted sm:flex-row sm:items-center sm:justify-between">
               <span className="min-w-0 break-words">
                 Source: {policy.source}
@@ -382,17 +391,20 @@ function PolicyCard({
 
 interface PoliciesTabProps {
   policies: ProjectPolicy[];
+  /** Every loaded policy, unfiltered, for the session-size summary. */
+  allPolicies: ProjectPolicy[];
   projectId: string;
   onRefresh: () => Promise<void>;
 }
 
-export function PoliciesTab({ policies, projectId, onRefresh }: PoliciesTabProps) {
+export function PoliciesTab({ policies, allPolicies, projectId, onRefresh }: PoliciesTabProps) {
   return (
     <div className="space-y-2.5">
       <SectionHeader
         title="Policies"
         description="Durable project instructions and preferences. Instruction-only until platform enforcement exists."
       />
+      {allPolicies.length > 0 && <PolicyInjectSummary policies={allPolicies} />}
       {policies.map((policy) => (
         <PolicyCard key={policy.id} policy={policy} projectId={projectId} onRefresh={onRefresh} />
       ))}

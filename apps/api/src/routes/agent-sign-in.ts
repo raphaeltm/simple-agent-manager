@@ -195,6 +195,7 @@ async function exchange(c: Context<{ Bindings: Env }>, trust: AgentSignInTrust):
   // The approval gate already ran above, before anything was recorded.
   const session = await createSessionCookieForUser(env, user.id, {
     expiresAt: new Date(sessionExpiresAtMs),
+    headers: c.req.raw.headers,
   });
   await linkAgentSignInSession(env, claim.id, session.sessionId);
   log.info('agent_sign_in.accepted', {

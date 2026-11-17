@@ -8,10 +8,12 @@ the files it governs with `paths` frontmatter.
 - **Claude Code** loads a rule without `paths` at launch. It loads a rule with `paths`
   when a matching file is read, written or edited (`.claude/hooks/log-instructions-loaded.sh`
   records every load in `.tmp/instruction-loads/`).
-- **Codex and other harnesses** load none of these files by themselves. The root
-  `AGENTS.md` lists the launch rules by name. The `AGENTS.md` nearest the code lists the
-  path-scoped rules for that directory. Read both sets before editing. This route is a
-  convention: nothing delivers these rules to Codex automatically.
+- **Codex** loads only the root `AGENTS.md`, which lists the launch rules by name. In SAM
+  sessions the hook `.codex/hooks/rule-context.mjs` adds the path-scoped rules for the files
+  a shell command or patch touches (see `scripts/quality/README.md`, "Codex hooks").
+- **Other harnesses** load none of these files by themselves. The `AGENTS.md` nearest the
+  code lists the path-scoped rules for that directory. Read it and the launch rules before
+  editing.
 - A path-scoped rule arrives when you first access a matching file. Claude Code counts
   the Read, Write and Edit tools and simple shell reads of one file (`cat`, `head`,
   `sed -n`). It does not arrive before you write a brand-new file, when a script or
@@ -128,5 +130,6 @@ work, or planning in one of these areas, open the rule yourself.
 - `79-new-enum-values-audit-every-denylist.md`: A New Value in a Shared Status Enum Must Audit Every Denylist Over That Enum. Loads for: apps/web; packages/shared
 - `80-sam-glass.md`: SAM Glass. Loads for: apps/web; packages/ui
 - `82-typed-cards-every-harness.md`: A Typed Chat Card Must Render for Every Agent Harness. Loads for: apps/web; packages/shared (src/typed-chat-cards.ts)
+- `83-no-secret-readback-in-ci.md`: No Secret Readback or Printing in CI. Loads for: .github; scripts; infra
 
 <!-- END GENERATED RULE INDEX -->

@@ -12,6 +12,7 @@ vi.mock('@cloudflare/sandbox', () => ({
 const PORTS_KEY = Symbol.for('sam.project-data.ports');
 const PORT_NAMES = [
   'credentials',
+  'inboxErrors',
   'notices',
   'notifications',
   'observability',
@@ -26,7 +27,8 @@ describe('ProjectData port wiring', () => {
   it('installs every worker port when the worker entry loads', async () => {
     delete (globalThis as Record<symbol, unknown>)[PORTS_KEY];
     vi.resetModules();
-    const { projectDataPorts } = await import('@simple-agent-manager/project-data/internal/do/ports');
+    const { projectDataPorts } =
+      await import('@simple-agent-manager/project-data/internal/do/ports');
     // Liveness: the registry really is empty before the entry loads.
     expect(() => projectDataPorts().tasks).toThrow(/port "tasks" is not configured/);
 
