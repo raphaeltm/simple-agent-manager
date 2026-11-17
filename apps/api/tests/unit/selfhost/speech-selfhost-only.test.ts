@@ -1,66 +1,37 @@
 /**
- * The self-host speech backend (src/selfhost/speech/) must not reach the Cloudflare bundle.
- *
- * Walks the static and dynamic imports of the shared Worker entry (src/index.ts) the way the
- * bundler resolves them and asserts none lands under src/selfhost/. Type-only imports count too:
- * erring towards a false alarm is cheaper than shipping the code. A positive control walks the
- * self-host module itself, so an empty or broken walk cannot pass as "all clear".
+ * The self-host speech backend (src/selfhost/speech/) must not reach the Cloudflare bundle, while
+ * the seam it plugs into (services/speech-backend.ts) must. The whole `src/selfhost/` prefix is
+ * already guarded for the Worker entry (reverse-tunnel-placement.test.ts); this pins the speech
+ * pair, with a positive control so an empty walk cannot pass as "all clear".
  */
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { dirname, relative, resolve } from 'node:path';
+import { resolve } from 'node:path';
 
-import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
-const API_ROOT = resolve(import.meta.dirname, '../../..');
-const SELFHOST_DIR = 'src/selfhost/';
+import {
+  API_SRC,
+  collectImportGraph,
+  selfhostOnlyFindings,
+} from '../../helpers/selfhost-only-modules';
 
-function isFile(path: string): boolean {
-  return existsSync(path) && statSync(path).isFile();
-}
-
-function resolveRelative(fromFile: string, specifier: string): string {
-  const base = resolve(dirname(fromFile), specifier).replace(/\.(m?js)$/, '');
-  const found = [base, `${base}.ts`, `${base}.tsx`, `${base}/index.ts`].find(isFile);
-  if (!found) throw new Error(`cannot resolve ${specifier} from ${relative(API_ROOT, fromFile)}`);
-  return found;
-}
-
-/** API-relative paths of every source file reachable from `entry` through relative imports. */
-function reachableFiles(entry: string): string[] {
-  const seen = new Set<string>();
-  const pending = [resolve(API_ROOT, entry)];
-  while (pending.length > 0) {
-    const file = pending.pop() as string;
-    if (seen.has(file)) continue;
-    seen.add(file);
-    if (!/\.tsx?$/.test(file)) continue;
-    const info = ts.preProcessFile(readFileSync(file, 'utf8'), true, true);
-    for (const { fileName } of info.importedFiles) {
-      if (fileName.startsWith('.')) pending.push(resolveRelative(file, fileName));
-    }
-  }
-  return [...seen].map((file) => relative(API_ROOT, file));
-}
-
-describe('self-host speech backend stays out of the Cloudflare Worker', () => {
-  it('the shared entry src/index.ts reaches no file under src/selfhost/', () => {
-    const files = reachableFiles('src/index.ts');
-    // A real walk of the Worker covers hundreds of modules, including the speech seam.
-    expect(files.length).toBeGreaterThan(300);
-    expect(files).toContain('src/services/speech-backend.ts');
-    expect(files.filter((file) => file.startsWith(SELFHOST_DIR))).toEqual([]);
+describe('self-host speech backend placement', () => {
+  it('the Worker entry reaches the speech seam but no self-host speech module', () => {
+    const graph = collectImportGraph(resolve(API_SRC, 'index.ts'));
+    expect(graph.files).toContain('apps/api/src/services/speech-backend.ts');
+    expect(graph.files.filter((file) => file.startsWith('apps/api/src/selfhost/speech/'))).toEqual(
+      []
+    );
   });
 
-  it('positive control: the self-host module is found when walked directly', () => {
-    const files = reachableFiles('src/selfhost/speech/index.ts');
-    expect(files).toEqual(
+  it('positive control: the speech module is flagged as self-host-only when walked', () => {
+    const graph = collectImportGraph(resolve(API_SRC, 'selfhost/speech/index.ts'));
+    expect(selfhostOnlyFindings(graph)).toEqual(
       expect.arrayContaining([
-        'src/selfhost/speech/index.ts',
-        'src/selfhost/speech/endpoints.ts',
-        'src/selfhost/speech/settings.ts',
-        'src/services/speech-backend.ts',
+        'apps/api/src/selfhost/speech/index.ts',
+        'apps/api/src/selfhost/speech/endpoints.ts',
+        'apps/api/src/selfhost/speech/settings.ts',
       ])
     );
+    expect(graph.files).toContain('apps/api/src/services/speech-backend.ts');
   });
 });
