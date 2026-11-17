@@ -170,6 +170,8 @@ export interface AdminSettingDefinition {
   readonly credential?: { readonly provider: string; readonly kind: string };
   readonly range?: { readonly min: number; readonly max: number };
   readonly choices?: readonly string[];
+  /** Explicit fail-closed value for invalid overrides or unavailable storage; absent uses normal fallback. */
+  readonly unavailableValue?: AdminSettingValue;
   readonly validate: (value: unknown) => boolean;
 }
 
@@ -284,6 +286,10 @@ export function connectorDefinition(key: ConnectorSettingKey): AdminSettingDefin
     type,
     // Reuse the shipped defaults; integration will move their ownership here without duplication.
     defaultValue: Array.isArray(value) ? Object.freeze([...value]) : value,
+    // Invalid security controls must restrict access, not inherit permissive defaults.
+    ...(type === 'boolean' ? { unavailableValue: false } : {}),
+    ...(key === 'clientRegistration' ? { unavailableValue: 'allowlist' } : {}),
+    ...(key === 'allowedRedirectHosts' ? { unavailableValue: Object.freeze([]) } : {}),
     category: 'Connector',
     description: connectorDescriptions[key],
     secret: false,
@@ -322,7 +328,7 @@ export function switchDefinition(
   defaultValue: boolean,
   category: AdminSettingDefinition['category'],
   description: string,
-  legacy: Pick<AdminSettingDefinition, 'legacyEnvironment' | 'legacyKv'>
+  legacy: Pick<AdminSettingDefinition, 'legacyEnvironment' | 'legacyKv' | 'unavailableValue'>
 ): AdminSettingDefinition {
   return {
     name,

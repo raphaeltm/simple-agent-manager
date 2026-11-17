@@ -25,6 +25,11 @@ export interface AdminSetting {
   risky: boolean;
   range?: { min: number; max: number };
   choices?: string[];
+  /** Present only when the stored override fails current validation. */
+  storedValueInvalid?: true;
+  storedValueFallback?: 'default' | 'safe';
+  /** Raw stored text; omitted for secrets. Effective value remains in `value`. */
+  storedValue?: string;
   configured: boolean;
   source: 'database' | 'environment' | 'kv' | 'default';
   updatedAt: string | null;
