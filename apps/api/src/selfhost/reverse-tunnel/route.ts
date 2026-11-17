@@ -12,6 +12,7 @@ export async function resolveReverseTunnelAgentOrigin(env: Env, nodeId: string):
     `SELECT l.port AS port
        FROM node_reverse_tunnel_leases l
        JOIN nodes n ON n.id = l.node_id AND n.runtime_incarnation_id = l.runtime_incarnation_id
+                    AND n.user_id = l.user_id
       WHERE l.node_id = ? AND l.status = 'active'`
   )
     .bind(nodeId)

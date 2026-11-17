@@ -50,6 +50,11 @@ const GATEWAY_INPUT_HEADERS = [
   'x-forwarded-uri',
   'x-forwarded-method',
   'x-forwarded-proto',
+  // Client-address headers: celld has no edge that overwrites them, so a client copy must never
+  // become the identity any IP-keyed check in the re-dispatched handler sees.
+  'cf-connecting-ip',
+  'x-forwarded-for',
+  'x-real-ip',
 ];
 
 export type GatewayDispatch = (
@@ -130,7 +135,7 @@ function forwardedGatewayTarget(env: Env, headers: Headers): URL | null {
     isGatewayTarget(env, original.hostname, original.pathname);
   if (!allowed) {
     log.warn('self_host_gateway.forward_auth_not_a_gateway_route', {
-      host,
+      host: host.slice(0, 255),
       method,
       upgrade: upgrade || null,
       action: 'rejected',

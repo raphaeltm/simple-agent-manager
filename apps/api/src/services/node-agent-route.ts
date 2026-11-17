@@ -15,6 +15,7 @@
  * column to the node read its callers already made (zero added I/O).
  */
 import type { Env } from '../env';
+import { AppError } from '../middleware/error';
 import { getNodeBackendBaseUrl } from './node-agent-readiness';
 import { nodeTransportExtension } from './node-transport-extension';
 
@@ -31,13 +32,14 @@ export interface NodeAgentRouteRow {
 /** Transports a build extension owns; they have no public backend hostname. */
 const EXTENSION_ONLY_TRANSPORTS: ReadonlySet<string> = new Set(['reverse-tunnel']);
 
-export class NodeAgentRouteError extends Error {
+/** A designed 503 (`app.onError` maps it): an unroutable node is unreachable, not a server fault. */
+export class NodeAgentRouteError extends AppError {
   override name = 'NodeAgentRouteError';
   constructor(
     readonly nodeId: string,
     message: string
   ) {
-    super(message);
+    super(503, 'NODE_UNREACHABLE', message);
   }
 }
 

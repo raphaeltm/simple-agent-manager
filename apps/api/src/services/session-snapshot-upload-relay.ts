@@ -179,7 +179,7 @@ export async function findSessionSnapshotUploadRelay(
   source: RelaySourceNode | null = null
 ): Promise<RelayNode | null> {
   const requiredVersion = env.VM_AGENT_REQUIRED_VERSION?.trim();
-  if (!requiredVersion || !!provisionsExtensionTransportNodes(env)) return null;
+  if (!requiredVersion || provisionsExtensionTransportNodes(env)) return null;
 
   const allocation = await resolveRelayAllocation(env, {
     userId,
@@ -420,7 +420,7 @@ export async function ensureSessionSnapshotUploadRelay(
   input: { userId: string; sourceNodeId: string; projectId: string | null }
 ): Promise<void> {
   const requiredVersion = env.VM_AGENT_REQUIRED_VERSION?.trim();
-  if (!requiredVersion || !!provisionsExtensionTransportNodes(env)) return;
+  if (!requiredVersion || provisionsExtensionTransportNodes(env)) return;
   const source = await loadRelaySourceNode(env, input.userId, input.sourceNodeId);
   if (!sourceStillNeedsRelay(source, requiredVersion)) return;
   if (await findSessionSnapshotUploadRelay(env, input.userId, input.projectId, source)) return;

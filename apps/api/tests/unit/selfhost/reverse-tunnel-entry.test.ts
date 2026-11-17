@@ -1,10 +1,15 @@
 // Register shared boundary mocks before importing production services.
 import '../services/node-tunnel-fixture';
 
+import { readFileSync } from 'node:fs';
+
 import { generateCloudInit } from '@simple-agent-manager/cloud-init';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { withReverseTunnel } from '../../../src/selfhost/reverse-tunnel/entry';
+import {
+  isReverseTunnelSweepCron,
+  withReverseTunnel,
+} from '../../../src/selfhost/reverse-tunnel/entry';
 import { fetchNodeAgent } from '../../../src/services/node-agent';
 import { NodeAgentRouteError } from '../../../src/services/node-agent-route';
 import { provisionNode } from '../../../src/services/nodes';
@@ -80,6 +85,14 @@ beforeEach(() => {
 });
 
 describe('the lease sweep mounted by the self-host entry', () => {
+  it('selects exactly the shared five-minute sweep among the deployed cron triggers', () => {
+    const toml = readFileSync(new URL('../../../wrangler.toml', import.meta.url), 'utf8');
+    const crons = JSON.parse(/^crons = (\[.*\])$/m.exec(toml)?.[1] ?? '[]') as string[];
+    expect(crons.length).toBeGreaterThan(1);
+    // A new dedicated cron in wrangler.toml must be classified here deliberately.
+    expect(crons.filter(isReverseTunnelSweepCron)).toEqual([SWEEP_CRON]);
+  });
+
   it('runs after the shared handler on the sweep cron: releases an orphaned lease, keeps a live one', async () => {
     const orphan = await orphanedLease();
     const live = await reverseNode();
@@ -200,6 +213,17 @@ describe('reverse-tunnel node routing', () => {
       fetchNodeAgent(node.id, env, publicUrl(node.id), { method: 'GET' }, 1000)
     ).rejects.toBeInstanceOf(NodeAgentRouteError);
     expect(leaseStatus(node.id)).toBe('active');
+    expect(nodeFetch).not.toHaveBeenCalled();
+  });
+
+  it('a lease whose owner no longer matches the node row is never routed to', async () => {
+    const node = await reverseNode();
+    sqlite
+      .prepare("UPDATE node_reverse_tunnel_leases SET user_id = 'someone-else' WHERE node_id = ?")
+      .run(node.id);
+    await expect(
+      fetchNodeAgent(node.id, env, publicUrl(node.id), { method: 'GET' }, 1000)
+    ).rejects.toBeInstanceOf(NodeAgentRouteError);
     expect(nodeFetch).not.toHaveBeenCalled();
   });
 

@@ -662,3 +662,29 @@ describe('lease port range membership at the point the upstream is produced', ()
     }
   );
 });
+
+describe('control-plane node requests (system-info) on the reverse tunnel', () => {
+  it('reach the lease port, and answer a designed 503 once the lease is released, never fetching', async () => {
+    await seedUser('rt-sysinfo');
+    const node = await seedReverseNode('Y', 'rt-sysinfo');
+    const cookie = await seedSignedInUser('rt-sysinfo');
+    const sysInfo = () =>
+      call(
+        new Request(`${API}/api/nodes/${node.nodeId}/system-info`, { headers: { Cookie: cookie } })
+      );
+    upstream.mockImplementation(async () => Response.json({ cpu: { count: 2 } }));
+    const live = await sysInfo();
+    expect(live.status).toBe(200);
+    expect(String(upstream.mock.calls[0]?.[0])).toBe(`http://127.0.0.1:${node.port}/system-info`);
+
+    upstream.mockClear();
+    await env.DATABASE.prepare(
+      "UPDATE node_reverse_tunnel_leases SET status = 'released' WHERE node_id = ?"
+    )
+      .bind(node.nodeId)
+      .run();
+    const released = await sysInfo();
+    expect(released.status).toBe(503);
+    expect(upstream).not.toHaveBeenCalled();
+  });
+});
