@@ -15,12 +15,12 @@ Codex runs a non-managed hook only when its definition is trusted by hash (an in
 - [x] Restore `.codex/hooks/rule-context.mjs`, generated `rule-scopes.json` + `--check` staleness, Codex hook entries (SessionStart, PreToolUse, Stop), `.gitignore` re-include
 - [x] Close Codex-hook test gaps from the PR #2790 test review (deny-once with deferred rules, cd/cwd, ignored dirs, write table, patch ops, SessionStart sources, session isolation, config wiring, real-lookup smoke)
 - [x] Docs: scripts/quality/README.md, security doc if it describes hook/trust behaviour
-- [ ] Staging: deploy, fresh VM node, Codex session on a repo with the hooks: rule text before the first edit (existing file, new file, shell), Stop gate fires; control without hooks
-- [ ] Reviews, CI, merge, deploy monitoring
+- [x] Staging: deploy, fresh VM node, Codex session on a repo with the hooks: rule text before the first edit (existing file, new file, shell), Stop gate fires; control without hooks (control = the pre-change CODEX_CONFIG case of the real-binary process test; staging only runs one vm-agent build at a time)
+- [x] Reviews, CI, merge, deploy monitoring (merge and production deploy monitoring follow this commit)
 
 ## Acceptance
-- [ ] A SAM Codex session on staging runs the repository hooks (log + agent report), Stop gate continues the turn once
-- [ ] Unit tests prove CODEX_CONFIG content for VM and standalone shapes
+- [x] A SAM Codex session on staging runs the repository hooks (log + agent report), Stop gate continues the turn once
+- [x] Unit tests prove CODEX_CONFIG content for VM and standalone shapes (gateway_test.go: CodexStandaloneWritesMcpConfig, CodexContainerKeepsConfigAndEnvContract)
 
 ## Progress (state survives workspace restores here, not in .tmp)
 - Commits: 413910d14 restore hook+tests, 2d13120a4 pure move, 94f9c1179 CODEX_CONFIG trust, b9a3745e9 docs, c589cedf3 seed script. Draft PR #2804.
@@ -35,3 +35,4 @@ Codex runs a non-managed hook only when its definition is trusted by hash (an in
 - 18:18Z: 42a7941a3 fixes SonarCloud (33 duplicated test lines -> shared helpers in session_host_adapter_process_helpers_test.go; curl --proto =https in the seed script) and a gofmt miss in gateway.go. Real-binary hook probe passes 3/3 after the refactor.
 - 19:45Z: holder sam/self-host-landing-slice-14gedp until 20:28Z; now position 4, turn est. 20:58:38Z. Wake schedule 540cc862-1129-4390-a924-34eba080c280 at 20:45Z. SonarCloud passes on b723b9792; rest of CI still queued.
 - CodeRabbit: request workflow 43925636583 succeeded 18:08Z; CodeRabbit check reports "skipping" (Review skipped) -> wait ended, recorded in PR body.
+- 23:01-23:27Z staging (`staging`, deploy run 43971455359 of 14a835910, success): Artifacts project seeded (ca6e9db) by a Claude Code task; Codex VM session: SessionStart text, PROBE-RULE-CANARY-7731 injected before the read of src/existing.txt, Stop gate message for apps/api/src/services/probe.ts; Codex VM write-first session and Codex Instant (cf-container) write-first session: write to src/new.txt refused once with the rule attached, retry succeeded. Every Codex session first said get_instructions was unavailable: pre-existing, tasks/backlog/2026-11-07-codex-first-turn-misses-deferred-sam-mcp-tools.md. Nodes, profile, project deleted; lease released early (run 43979032242), next task notified. Evidence in the PR body.
