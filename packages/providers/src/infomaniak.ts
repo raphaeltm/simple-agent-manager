@@ -30,8 +30,8 @@ import {
   infomaniakMetadata,
   mapInfomaniakStatus,
   mergeInfomaniakLegacySizes,
-  optionalPositiveInteger,
   optionalNonNegativeInteger,
+  optionalPositiveInteger,
 } from './infomaniak-metadata';
 import {
   attachInfomaniakVolume,
@@ -304,7 +304,6 @@ export class InfomaniakProvider implements Provider {
         infomaniakDefaultBootVolumeGb(resolved, source, this.bootVolumeSizeGb),
       minBootDiskSizeGb: INFOMANIAK_BOOT_VOLUME_LIMITS.min,
       maxBootDiskSizeGb: INFOMANIAK_BOOT_VOLUME_LIMITS.max,
-      legacyBootDiskSizeAuthority: 'provider-default',
     });
     // Resolution always sets bootDiskSizeGb (the default above returns a number); the fallback only
     // narrows the optional type.
