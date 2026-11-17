@@ -213,9 +213,12 @@ export interface TaskRunnerState {
   agentReadyStartedAt: number | null;
   /**
    * Consecutive final-reservation refusals in this run (`workspace-placement-rejection.ts`).
-   * Reset when a reservation succeeds; at `operations.workspacePlacementMaxRejections` the task fails.
+   * Reset on successful reservation or the single provisioned-node fallback. At the configured
+   * cap, a run that has already used its fallback fails.
    */
   workspacePlacementRejections?: number;
+  /** One fallback per execution: never re-adopt this capacity-rejected provisioned node. */
+  rejectedAutoProvisionedNodeId?: string;
   /**
    * Final reservations refused only because the chosen node's startup backlog grew after it was
    * ranked (`workspace-placement-rejection.ts`), counted since this run's last successful

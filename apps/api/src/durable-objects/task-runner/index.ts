@@ -239,6 +239,10 @@ export class TaskRunner extends DurableObject<Env> {
         lastD1Step: null,
         // Failure replay belongs to the previous attempt, not this fresh claim.
         wakeFailureMessage: undefined,
+        // A new wake is a new placement episode; replay of the same attempt returned above.
+        rejectedAutoProvisionedNodeId: undefined,
+        workspacePlacementRejections: 0,
+        startupBacklogConflicts: 0,
         completed: false,
       };
       await transaction.put('state', state);

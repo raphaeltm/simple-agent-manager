@@ -1987,6 +1987,8 @@ export const nodes = sqliteTable(
      * enrolled machine). Drives lifecycle guards, billing, quota, and UI. Orthogonal to `runtime`.
      */
     nodeClass: text('node_class').notNull().default('managed'),
+    /** Server-written task provisioning provenance retained after a placement fallback releases ownership. */
+    taskProvisioned: integer('task_provisioned', { mode: 'boolean' }).notNull().default(false),
     /** Reachability transport: 'vm-public-dns' | 'cloudflare-tunnel'. Null for implicit transport. */
     transport: text('transport'),
     /** Cloudflare Tunnel UUID for tunnel-transport nodes (user-owned or managed). Null otherwise. */

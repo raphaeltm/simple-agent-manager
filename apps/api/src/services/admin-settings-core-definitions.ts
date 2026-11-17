@@ -373,7 +373,7 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     'operations.workspacePlacementMaxRejections',
     DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS,
     'Operations',
-    'Consecutive times the node a task selected may refuse its final workspace reservation before the task fails with the refusal reasons. The count resets when a reservation succeeds.',
+    'Consecutive final workspace reservation refusals per placement episode. An owned provisioned node gets one fallback to normal placement; exhausting the budget again fails the run. A successful reservation or new wake resets the episode.',
     { min: 1, max: 20 }
   ),
   integerDefinition(

@@ -3,6 +3,7 @@
  * `node-phases.ts` (`.claude/rules/18-file-size-limits.md`).
  */
 import type { Env } from '../../env';
+import { taskProvisionedNodeConditionSql } from '../../services/node-teardown-provenance';
 import {
   boundedWarmPlacementClaimGuardSql,
   type CleanupConfig,
@@ -45,10 +46,7 @@ export async function selectMaxLifetimeCandidates(
        WHERE n.status NOT IN ('stopped', 'destroying', 'deleted')
          AND n.node_role = 'workspace'
          AND n.node_class != 'user-owned'
-         AND EXISTS (
-           SELECT 1 FROM tasks t
-           WHERE t.auto_provisioned_node_id = n.id
-         )
+         AND ${taskProvisionedNodeConditionSql('n')}
          AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
          ${boundedWarmPlacementClaimGuardSql('n.id')}
          ${sleepingContainerRetentionGuardSql('n')}
