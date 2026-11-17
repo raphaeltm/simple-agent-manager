@@ -16,6 +16,7 @@ import {
   buildAnyDefaultCapacityPoolExclusionSql,
   buildHigherPrecedenceDefaultCapacityPoolExclusionSql,
 } from './capacity-pool-precedence';
+import { externalCapacitySourceCredentialId } from './default-capacity-pool-helpers';
 
 export type PlacementSqlBind = string | number | null;
 export type PlacementAuthorityNodeClass = 'managed' | 'user-owned';
@@ -351,7 +352,9 @@ function buildCredentialAuthoritySql(
   }
 
   if (reference.kind === 'ccCredential') {
-    const attachment = parseComposableAttachmentReference(snapshot.capacitySourceExternalRef);
+    const externalRef = snapshot.capacitySourceExternalRef;
+    if (!externalRef) return null;
+    const attachment = parseComposableAttachmentReference(externalRef);
     if (!attachment) return null;
     if (snapshot.placementCredentialSource === 'project' && !input.projectId) return null;
     const attachmentScope =
@@ -362,8 +365,15 @@ function buildCredentialAuthoritySql(
               AND current_cc_attachment.project_id IS NULL`,
             binds: [],
           };
+    // Reconciliation must satisfy migration 0125's non-null FK with a secret-free anchor.
+    // It is not credential authority: accept only this attachment/version's exact anchor
+    // (or the older null shape), then validate the real cc_* binding below.
+    const anchorId = externalCapacitySourceCredentialId(
+      externalRef,
+      snapshot.placementCredentialVersion
+    );
     return {
-      sql: `AND s.credential_id IS NULL
+      sql: `AND (s.credential_id IS NULL OR s.credential_id = ?)
         AND s.platform_credential_id IS NULL
         AND EXISTS (
           SELECT 1
@@ -387,7 +397,7 @@ function buildCredentialAuthoritySql(
             ${attachmentScope.sql}
             AND ${sqliteTimestampVersion('current_cc_credential.updated_at')} = ${credentialVersionSql}
         )`,
-      binds: [reference.id, attachment.id, ...attachmentScope.binds],
+      binds: [anchorId, reference.id, attachment.id, ...attachmentScope.binds],
     };
   }
 

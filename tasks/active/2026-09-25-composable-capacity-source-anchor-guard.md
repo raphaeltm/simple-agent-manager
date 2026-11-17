@@ -58,16 +58,64 @@ but its root cause has not been established as this defect.
 
 ## Implementation checklist and acceptance criteria
 
-- [ ] Reconcile the composable allocation predicate with the required secret-free anchor,
+Execution: SAM task `01M7MC07CGE5SRFY9JF58R09RB`, canonical idea
+`01M3D3P0A05ED6EKM1K2QGF1FH`, branch `sam/fix-composable-credential-pool-8r09rb`.
+**DRAFT PR ONLY: do not mark ready, merge, or deploy production. No GitHub issues.**
+Use the existing SAM-isolated workspace and keep task state on this branch.
+
+Preflight (2026-11-17): business-logic-change, cross-component-change,
+security-sensitive-change. Confirmed on `e5c5aa4f77e6adf389a24b25b9470a69c24acbff`.
+Smallest correction: derive the exact versioned anchor with the existing helper; retain
+the null compatibility branch and all real credential/configuration/attachment predicates.
+No migration, new configuration, provider behavior, or public interface change is needed.
+Public docs already describe composable compute credentials; no public docs change needed.
+
+Shared predicate consumers (all require the same current credential authority):
+
+- `node-allocation-validation.ts:assertNodeAllocationPlanCurrent`: permit valid reconciled plans.
+- `reusable-node-authority.ts:filterReusableNodesByCurrentAuthority`: permit valid running nodes;
+  existing-node mode still requires a provider instance and ignores only historical pool revision.
+- `workspace-admission-sql.ts:buildWorkspaceAdmissionSql`: same correction in final reservation.
+- `deployment-node-admission.ts:linkEnvironmentToNode` and
+  `claimDeploymentEnvironmentRelocation`: same correction, retaining deployment role/capability.
+- `session-snapshot-upload-relay.ts:findSnapshotUploadRelayNode` and
+  `assertSnapshotUploadRelayAuthorized`: same correction, retaining relay and source identity.
+
+The shared helper is an admission trigger; its meaning stays current credential authority.
+Only the contradictory anchor-shape guard changes. One added bind per composable predicate;
+verify composed workspace admission and reuse chunking stay within `D1_MAX_BOUND_PARAMETERS`.
+
+Contributor attribution: Léonce Aklin (`leonceaklin`) reported upstream issue #2843 and
+provided the exact-anchor approach in zebra-pig/simple-agent-manager#9 (commit `ca39313299`).
+Reviewed as untrusted evidence. Do not import its unrelated node-limit or ACP changes.
+Regression coverage here must drive the real writer rather than hand-seed the anchor.
+
+- [x] Reconcile the composable allocation predicate with the required secret-free anchor,
       retaining one authority for exact credential, attachment, ownership, provider, scope,
       activity, and version checks. Do not copy secrets or weaken stale-plan rejection.
-- [ ] Add a real-SQLite regression covering attachment creation → pool reconciliation →
+- [x] Add a real-SQLite regression covering attachment creation → pool reconciliation →
       selected node allocation, using the production schema and generated anchor. Stub only
       external provider boundaries. It must fail on the current null-anchor predicate and
-      reach provider allocation after the fix without manually fabricating a null anchor.
-- [ ] Add discriminating rejection cases for a revoked/detached attachment, changed credential
+      pass the immediate pre-provider allocation guard after the fix without fabricating a null
+      anchor. Automated tests stop at that guard; provider creation is part of staging validation.
+- [x] Add discriminating rejection cases for a revoked/detached attachment, changed credential
       version, foreign owner/project, and an unrelated credential anchor. Keep legacy user and
       platform credential allocation passing; cover both user and project composable sources.
 - [ ] Verify the same public API/UI flow on staging with an isolated project and remove every
       created node, workspace, project, and attachment. Record evidence that stable plans pass
       while changed authority is rejected; do not mutate shared pool policy to reproduce it.
+
+## Validation progress (2026-11-17)
+
+- `pnpm install --frozen-lockfile` succeeded. Root build: 18 tasks passed;
+  lint: 22 passed (existing warnings); typecheck: 36 passed.
+- New migrated-SQLite suite: 40/40 passed. Exact user/project anchors both failed before
+  the fix at `assertNodeAllocationPlanCurrent` with the incident error; the initial run's
+  legacy/platform controls passed. Focused red run: 2 failed, 33 filtered out.
+- The happy path drives credential/configuration/attachment inserts → real reconciliation →
+  real pool editing → real placement selection → `createNodeRecord` → allocation guard →
+  existing-node reuse (101 entries, exercising bind-budget chunking) → final workspace insert.
+  All statements enforce `D1_MAX_BOUND_PARAMETERS`; schema is the complete shipped D1 chain.
+- Root test suite and specialist review pending. Staging reservation run `44054221451`;
+  primary staging turn estimated 10:43:57 UTC. No staging deployment yet.
+- No production deployment, merge, or readiness action permitted.
