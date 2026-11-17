@@ -204,7 +204,9 @@ are created, so a lint would be mostly noise.
 `pnpm quality:no-secret-readback` (`scripts/quality/check-no-secret-readback.ts`) is blocking in
 the Secret Scan job. It scans every `.yml`, `.yaml`, `.sh`, JS/TS file and Dockerfile under
 `.github/`, `scripts/` and `infra/`, except JS/TS tests (`*.test.*`, `*.spec.*`, `__tests__/`, `fixtures/`) and itself; shell
-`test-*.sh` scripts are scanned because workflows run some of them. Comment lines are skipped, apart from a tracing shebang on line 1. Rules apply to logical lines, so
+`test-*.sh` scripts are scanned because workflows run some of them. Comment-only lines are skipped, apart from a tracing shebang on line 1. In shell, YAML and
+Dockerfiles only `#` starts a comment (a leading `*` there is a glob or a `case` pattern such as
+`*) env ;;`); in JS/TS a block comment that ends on the line does not hide the code after it. Rules apply to logical lines, so
 a split statement counts: shell `\` continuations in every file type, and JS/TS method chains
 (`crypto.subtle` followed by `.decrypt(` on the next line) are joined. A finding is reported at the
 statement's first line.

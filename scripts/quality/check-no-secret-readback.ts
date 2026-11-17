@@ -69,12 +69,13 @@ const SAME_COMMAND = String.raw`[^#\n;|&]*?`;
 /**
  * The start of a shell command: line start, a YAML `run:` value, a Dockerfile `RUN`, or after
  * `;`, `&&`, `||`, `|`, or the opening of a subshell or command substitution (`(`, `$(`, a backtick),
- * so `echo "$(env)"` counts as running `env`.
+ * so `echo "$(env)"` counts as running `env`. A `case` pattern at the start of a line (`*)`,
+ * `a|b)`) is skipped, so `*) env ;;` is a command too.
  */
 // Wrappers that still run the named command, with their own options: `command env`,
 // `sudo -E env`, `sudo -u runner printenv`, `exec env`.
 const WRAPPER = String.raw`(?:command|builtin|exec|sudo|nohup|time)(?:\s+(?:-[A-Za-z]+(?:\s+[^\s-]\S*)?|--[\w-]+(?:=\S+)?))*`;
-const COMMAND_START = String.raw`(?:^\s*(?:-\s*)?(?:run:\s*|RUN\s+)?|[;&|(\x60]\s*)(?:${WRAPPER}\s+)*`;
+const COMMAND_START = String.raw`(?:^\s*(?:-\s*)?(?:run:\s*|RUN\s+)?(?:[^\s()]+\)\s*)?|[;&|(\x60]\s*)(?:${WRAPPER}\s+)*`;
 /** The end of a command with no further arguments: line end, a separator, a redirect, or the close
  * of a subshell or command substitution. */
 const COMMAND_END = String.raw`\s*(?:$|[|>;&)\x60])`;
@@ -215,11 +216,19 @@ export function isScannedPath(path: string): boolean {
 const XTRACE_SHEBANG = /^#!.*\b(?:ba|z|da|k)?sh\s+-[A-Za-z]*x/;
 
 /**
- * A line that holds only a comment. A block comment closed on the same line does not hide the code
- * after it: `/* compat *\/ crypto.subtle.decrypt(...)` is scanned.
+ * Comments that end on this line: a whole `/* ... *\/`, or the close of one opened earlier
+ * (`*\/`, ` * text *\/`).
  */
-function isCommentLine(line: string): boolean {
-  const code = line.replace(/^(?:\s*\/\*.*?\*\/)+/, '');
+const LEADING_CLOSED_COMMENTS = /^(?:\s*(?:\/\*.*?\*\/|\*\/|\*.*?\*\/))+/;
+
+/**
+ * A line that holds only a comment. A comment that ends on the line does not hide the code after
+ * it: `/* compat *\/ crypto.subtle.decrypt(...)` and ` *\/ crypto.subtle.decrypt(...)` are scanned.
+ */
+function isCommentLine(line: string, shell: boolean): boolean {
+  // Shell, YAML and Dockerfiles: only `#`. A leading `*` there is a glob or a `case` pattern (`*) env ;;`).
+  if (shell) return /^\s*#/.test(line);
+  const code = line.replace(LEADING_CLOSED_COMMENTS, '');
   if (code !== line && code.trim() === '') return true;
   return /^\s*(?:#|\/\/|\/\*|\*)/.test(code);
 }
@@ -264,7 +273,7 @@ export function scanText(
       report(index, 'xtrace');
       return;
     }
-    if (index <= continuedUntil || isCommentLine(line)) return;
+    if (index <= continuedUntil || isCommentLine(line, shell)) return;
     const logical = logicalLine(lines, index, shell);
     continuedUntil = logical.lastIndex;
     // Every rule that matches, so a marker that excuses a readback cannot hide a trace on the

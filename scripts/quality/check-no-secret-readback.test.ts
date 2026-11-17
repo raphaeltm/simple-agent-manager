@@ -97,6 +97,8 @@ const POSITIVE: Array<[string, RuleId]> = [
   ['        run: env --null | sort', 'env-dump'],
   ['      - run: printenv | sort', 'env-dump'],
   ['cd infra && env | grep KEY', 'env-dump'],
+  ['  *) printenv ;;', 'env-dump'],
+  ['            dev|staging) env | sort ;;', 'env-dump'],
   ['echo "$(env)"', 'env-dump'],
   ['        run: echo "$(printenv)" > env.txt', 'env-dump'],
   ['echo "`env`"', 'env-dump'],
@@ -108,11 +110,6 @@ const POSITIVE: Array<[string, RuleId]> = [
   ["const plain = await crypto.subtle['decrypt'](params, key, data);", 'decryption'],
   ['const plain = await crypto.subtle?.decrypt(params, key, data);', 'decryption'],
   ["const plain = await subtle?.['decrypt'](params, key, data);", 'decryption'],
-  [
-    '/* compatibility */ const plain = await crypto.subtle.decrypt(params, key, data);',
-    'decryption',
-  ],
-  ['/* a */ /* b */ await crypto.subtle.decrypt(params, key, data);', 'decryption'],
   ["const enc = await import('../../apps/api/src/services/encryption');", 'decryption'],
   ["const { decrypt: open } = require('../api/src/services/encryption.js');", 'decryption'],
   ['set -e -x', 'xtrace'],
@@ -141,9 +138,6 @@ const NEGATIVE = [
   'const ciphertext = await crypto.subtle.encrypt(params, key, data);',
   '# Never use --show-secrets or set -x here.',
   '// decryptToken used to live here; see policy 795e72a6.',
-  '/* crypto.subtle.decrypt(params, key, data) is banned here */',
-  '/** set -x is banned in workflows. */',
-  ' * set -x is banned in workflows.',
   'echo "::add-mask::$TARGET_ENCRYPTION_KEY"',
   "node -e 'process.stdout.write(JSON.stringify({ token: process.env.SMOKE_TEST_TOKEN }))'",
   '        run: envsubst < template > out',
@@ -164,6 +158,9 @@ const NEGATIVE = [
   'sudo -u runner make deploy',
   'declare -a items=(a b)',
   'declare -r MAX=3',
+  '  *) echo "unknown environment" ;;',
+  '  staging) DEPLOY_ENV=staging ;;',
+  '# printenv is banned here',
   'echo "$(env node --version)"',
   'NODE=$(command -v node)',
   'ENV_NAME=$(environment_name)',
@@ -297,6 +294,28 @@ describe('tracing shebangs', () => {
 });
 
 describe('JS/TS files', () => {
+  // JS comments: only a line that is nothing but comment is skipped. In shell, YAML and
+  // Dockerfiles only `#` is a comment, so `*) env ;;` is scanned there.
+  it.each([
+    '/* compatibility */ const plain = await crypto.subtle.decrypt(params, key, data);',
+    '/* a */ /* b */ await crypto.subtle.decrypt(params, key, data);',
+    ' */ const plain = await crypto.subtle.decrypt(params, key, data);',
+    ' * compatibility */ await crypto.subtle.decrypt(params, key, data);',
+  ])('scan code after a comment that ends on the line: %s', (line) => {
+    expect(rulesOf(line, 'scripts/deploy/x.ts')).toEqual(['decryption']);
+  });
+
+  it.each([
+    '/* crypto.subtle.decrypt(params, key, data) is banned here */',
+    '/** set -x is banned in workflows. */',
+    ' * crypto.subtle.decrypt(params, key, data) is banned here */',
+    ' */',
+    ' * set -x is banned in workflows.',
+    '// decryptToken used to live here; see policy 795e72a6.',
+  ])('skip a line that is only comment: %s', (line) => {
+    expect(rulesOf(line, 'scripts/deploy/x.ts')).toEqual([]);
+  });
+
   it.each([
     'const target = process.env.TARGET || env;',
     "headers.set('x-trace', '1');",
