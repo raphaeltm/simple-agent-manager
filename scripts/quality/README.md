@@ -199,6 +199,77 @@ original incident (`runtime.Lightweight = opt.Lightweight`), at every sampled co
 direct form, and the remaining forms (`patch.x ?? false`, spreads) are also how records
 are created, so a lint would be mostly noise.
 
+## No secret readback in CI code (policy 795e72a6)
+
+`pnpm quality:no-secret-readback` (`scripts/quality/check-no-secret-readback.ts`) is blocking in
+the Secret Scan job. It scans every `.yml`, `.yaml`, `.sh`, JS/TS file and Dockerfile under
+`.github/`, `scripts/` and `infra/`, except JS/TS tests (`*.test.*`, `*.spec.*`, `__tests__/`, `fixtures/`) and itself; shell
+`test-*.sh` scripts are scanned because workflows run some of them. Comment-only lines are skipped, apart from a tracing shebang on line 1. In shell, YAML and
+Dockerfiles only `#` starts a comment (a leading `*` there is a glob or a `case` pattern such as
+`*) env ;;`); in JS/TS a block comment that ends on the line does not hide the code after it. Rules apply to logical lines, so
+a split statement counts: shell `\` continuations in every file type, and JS/TS method chains
+(`crypto.subtle` followed by `.decrypt(` on the next line) are joined. A finding is reported at the
+statement's first line.
+
+It reports four kinds of finding:
+
+- `show-secrets`: `--show-secrets`, any `showSecrets` other than `showSecrets: false`, and
+  `pulumi config get`.
+- `decryption`: `subtle.decrypt(` or `subtle['decrypt'](`, `createDecipher(iv)(`,
+  `require(...).decrypt*`, and any import, re-export or dynamic import that names `decrypt*` or
+  loads the API's `services/encryption` module, including multi-line imports and inline JS in
+  YAML.
+- `xtrace`: `set -x` in any flag cluster or position (`set -euxo`, `set -e -x`), `set -o xtrace` or
+  `bash -o xtrace`,
+  a `-x` shebang, and, in shell and YAML only, `bash -x`, `SHELLOPTS=…xtrace`, `BASH_XTRACEFD` and
+  `trap … DEBUG`.
+- `env-dump`, in shell, YAML and Dockerfiles only: `env` with no command (options such as `-0`
+  or `-u NAME` allowed), `printenv`, and a bare `export`, `declare` or `typeset` (flags allowed,
+  no names) at the start of a command, including `run: env`, `RUN env`, and a subshell or
+  command substitution such as `echo "$(env)"`.
+
+The shell-only rules never apply to JS/TS, so code such as `value || env` is not reported.
+
+A legacy line that cannot go yet is accepted only when all of these hold:
+
+- it is a `show-secrets` finding (a decryption, trace or dump is never excused);
+- it carries `# sam:secret-readback-allowed <task>` on the same line or the line directly above;
+- `ALLOWED_LEGACY_READS` in the checker pins that file and task together;
+- the task is still open, under `tasks/backlog/` or `tasks/active/`.
+
+A marker that fails any of these makes the line a finding, and the marker itself is reported.
+Today the only entry is the Pulumi readback in `scripts/deploy/configure-secrets.sh`, tracked by
+`tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md` (idea 01M7M5PJCY4T3CR715AFKRM74R).
+Every value that read returns is masked before any other use.
+
+It runs in the Secret Scan job, which has no path filter, so every pull request and every
+canonical `main` push runs it, whatever the change touches.
+
+### Measurements (2026-11-17)
+
+- Current tree: 206 files and 42,024 lines scanned, 0 findings, 1 tracked read.
+- History: 25 first-parent commits on `main`, sampled evenly back to 2026-06-11. Every finding was
+  a real instance of the class, and there were no false positives:
+  - the `configure-secrets.sh` readback;
+  - the three `set -euxo pipefail` in `devcontainer-cache-experiments.yml`;
+  - `set -eux` in a fixture Dockerfile;
+  - at the newest sample (2026-11-17, before this fix), also the staging2 bootstrap's
+    `--show-secrets` read and its `crypto.subtle.decrypt`.
+
+  The patterns added after review (YAML `run:` forms, shebangs, `pulumi config get`, SHELLOPTS,
+  `trap DEBUG`, dynamic imports, Dockerfiles and logical lines) found nothing new in the same
+  sample. Because there were no false
+  positives, the check was blocking from the start (policy f9ae7f88).
+
+### How the tests prove it
+
+- They reintroduce the staging2 bootstrap step, its decrypt helper and its multi-line import, and
+  include negative controls for nearby shapes.
+- Each guard was deleted once and the tests went red: every pattern, the import pass, the comment
+  skip, the shebang check, the shell-only gate, the open-task check, the file pinning, Dockerfile
+  matching and logical-line joining.
+- A test also requires every pattern to be the only match for at least one reintroduced line.
+
 ## Runtime workflow state
 
 `pnpm quality:runtime-state-files` rejects committed or staged `.do-state.md` and

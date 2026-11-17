@@ -71,7 +71,7 @@ export async function recordSessionWakeActivation(
   admit: (event: AdmitProjectEventInput) => unknown
 ): Promise<void> {
   try {
-    admit(
+    await admit(
       await buildSessionLifecycleEventInput({
         projectId: input.projectId,
         sessionId: input.chatSessionId,
