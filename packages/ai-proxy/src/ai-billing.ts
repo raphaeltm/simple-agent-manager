@@ -15,6 +15,7 @@ import {
 } from '@simple-agent-manager/shared';
 import { log } from '@simple-agent-manager/worker-core';
 
+import { resolveAiGatewayId } from './ai-gateway-availability';
 import type { AiProxyEnv } from './env';
 import type { AiProxyPorts } from './ports';
 
@@ -55,6 +56,7 @@ function isValidBillingMode(value: string): value is BillingMode {
  * Prefers the explicit CF_AIG_TOKEN, falls back to CF_API_TOKEN (already a Worker secret).
  */
 export function resolveUnifiedBillingToken(env: AiProxyEnv): string | undefined {
+  if (!resolveAiGatewayId(env)) return undefined;
   return env.CF_AIG_TOKEN ?? env.CF_API_TOKEN ?? undefined;
 }
 

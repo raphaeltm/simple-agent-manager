@@ -95,10 +95,10 @@ ask or a review in your [Inbox](/docs/guides/inbox/#what-agents-file) with `inbo
 
 The agent specifies:
 
-- A **question** describing what input is needed
+- **Context**: what it needs from you (required, up to 4,000 characters). Its first sentence
+  becomes the item's title.
 - A **category**: `decision`, `clarification`, `approval`, or `error_help`
-- Optional **choices** the user can select from (up to 10 options)
-- **Context** about the current state (up to 4,000 characters)
+- Optional **options** you can pick from (up to 10)
 
 The tool call is non-blocking: the agent records the request and can stop its turn while
 SAM waits for your answer. Ordinary typed replies continue to resolve the request. When the

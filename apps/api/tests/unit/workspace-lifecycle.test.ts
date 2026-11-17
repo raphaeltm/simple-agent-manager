@@ -81,6 +81,11 @@ const doSource = [
 const routeSource = [
   readFileSync(resolve(process.cwd(), 'src/routes/workspaces/lifecycle.ts'), 'utf8'),
   readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime.ts'), 'utf8'),
+  readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime-agent-key.ts'), 'utf8'),
+  readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime-git-token.ts'), 'utf8'),
+  readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime-message-helpers.ts'), 'utf8'),
+  readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime-messages.ts'), 'utf8'),
+  readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime-callback-response.ts'), 'utf8'),
 ].join('\n');
 
 // ============================================================================

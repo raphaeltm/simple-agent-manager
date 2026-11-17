@@ -16,7 +16,7 @@ the trial product in November 2026; a value saved for it earlier is ignored.
 
 ## Open the settings
 
-Select **Admin** in the sidebar (only superadmins see it), then the **Settings** tab. The page is
+Select **Admin** in the sidebar (only superadmins see it), then **Settings** under **Platform**. The page is
 titled **Runtime settings**. An account must be an approved, active superadmin to use it; admins
 can't.
 
@@ -672,6 +672,15 @@ the Cloudflare dashboard; no redeploy is needed.
 vCPU-hour estimate (`COMPUTE_VCPU_HOUR_COST_USD`) was removed in favour of the per-machine prices
 above.
 
+## Analytics
+
+**Admin → Analytics** (under **Spend and health**) shows how the installation is used: summary
+figures, **AI Usage**, **Daily Active Users**, **Feature Adoption**, **Website Traffic** and **Top
+Events**, over the period you pick, with **Refresh**. It no longer has the sign-up funnel, the
+geography map or the retention cohorts. For how work moves through a project, open that project's
+[Insights](/docs/guides/insights/); for what the installation costs, see
+[Health & cost](#health--cost).
+
 ## Linked work
 
 These **Operations** settings control automatic links between chats, ideas, library files and pull requests. Links that mean work (a chat working on, creating or editing something) are always kept; links that only record reading or viewing are capped.
@@ -699,7 +708,7 @@ If you lower the cap on read and view links below what a target already has, not
 
 These **Collaboration** settings bound the size of the `get_instructions` payload every agent
 reads at session start. Pinned policies and the task are never trimmed by them. Every policy is
-pinned until a project admin unpins it in **Agent context → Policies**. While every policy is
+pinned until a project admin unpins it in [**Agent Context → Policies**](/docs/guides/agent-context/#pinned-or-on-demand). While every policy is
 pinned, setting the three character budgets to their maximum returns the unbudgeted payload. To
 undo an unpin, pin the policy again. The section budgets count characters of rendered text; the
 total counts characters of the serialized payload, so the three do not simply add up.
@@ -1056,3 +1065,16 @@ bootstrap default. Bootstrap cannot depend on reading its own D1 override. Once 
 available, the runtime deadline governs legacy platform configuration and session reads.
 Pending cache loads expire on deadline; late results cannot republish stale data. No deployment
 configuration is required.
+
+## Use an OpenAI-compatible model server
+
+Under **AI models**, set `llm.openAICompatible.baseUrl`, the model ID and optional API key.
+The endpoint replaces Workers AI chat calls and the SAM agent's model route. Purpose-specific
+model settings are available for agents, titles, diagnosis and the Workers AI proxy route.
+Private hosts require the separate `allowPrivateNetwork` confirmation; metadata hosts are always
+refused. Reset the base URL to restore normal routing. See the
+[endpoint configuration reference](/docs/reference/configuration/#openai-compatible-model-endpoint)
+for all keys, budgets, proxy availability and accounting limits.
+
+<!-- Verified: services/llm-endpoint-settings.ts, services/llm-chat-target.ts,
+     services/platform-capabilities.ts:resolveLlmEndpointCapability. -->

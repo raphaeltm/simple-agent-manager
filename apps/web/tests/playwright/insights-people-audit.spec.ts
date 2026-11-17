@@ -19,7 +19,7 @@ import {
 import { makePeople, type PeopleScene } from './insights-people-fixtures';
 
 const MEMBERS = [
-  { userId: USER_ID, name: 'Raph', email: 'raph@example.com' },
+  { userId: USER_ID, name: 'Dana Reyes', email: 'dana@example.com' },
   { userId: 'user-priya', name: 'Priya Natarajan', email: 'priya@example.com' },
   { userId: 'user-sam', name: 'Sam Okafor', email: 'sam@example.com' },
 ].map((m) => ({
@@ -195,7 +195,7 @@ test.describe('Insights · People', () => {
     // A task nobody took is already the team's: "Back to the team" is not offered.
     await expect(form.getByRole('combobox').locator('option')).toHaveText([
       'Choose who…',
-      'Raph',
+      'Dana Reyes',
       'Priya Natarajan',
       'Sam Okafor',
     ]);

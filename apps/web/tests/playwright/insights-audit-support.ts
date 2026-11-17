@@ -6,45 +6,16 @@
  */
 import { expect, type Page, type Route, test, type TestInfo } from '@playwright/test';
 
-import {
-  assertNoClippedOverflow,
-  assertNoOverflow,
-  makeMockUser,
-  screenshot,
-} from './audit-helpers';
+import { acmeBillingProject, acmeBillingUser } from './acme-billing-fixtures';
+import { assertNoClippedOverflow, assertNoOverflow, screenshot } from './audit-helpers';
 
 export const PROJECT_ID = 'proj-insights';
 export const USER_ID = 'user-insights';
 export const BASE = `/projects/${PROJECT_ID}/insights`;
 
-export const MOCK_USER = makeMockUser({
-  email: 'raph@example.com',
-  name: 'Raph',
-  sessionId: 'session-insights',
-  userId: USER_ID,
-});
+export const MOCK_USER = acmeBillingUser(USER_ID, 'session-insights');
 
-export const MOCK_PROJECT = {
-  id: PROJECT_ID,
-  name: 'Acme Billing',
-  repository: 'acme/billing',
-  repoProvider: 'github',
-  defaultBranch: 'main',
-  userId: USER_ID,
-  installationId: 'inst-1',
-  defaultWorkspaceProfile: 'full',
-  defaultDevcontainerConfigName: '',
-  createdAt: '2026-10-01T00:00:00Z',
-  updatedAt: '2026-11-15T00:00:00Z',
-  multiplayerActive: false,
-  summary: {
-    activeWorkspaceCount: 0,
-    activeSessionCount: 0,
-    lastActivityAt: null,
-    taskCountsByStatus: {},
-    linkedWorkspaces: 0,
-  },
-};
+export const MOCK_PROJECT = acmeBillingProject(PROJECT_ID, USER_ID);
 
 export type Respond = (status: number, body: unknown) => Promise<void>;
 

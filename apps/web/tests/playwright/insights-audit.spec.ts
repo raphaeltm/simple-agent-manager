@@ -13,6 +13,7 @@
 import { expect, type Page, test } from '@playwright/test';
 import { isInsightsRange } from '@simple-agent-manager/shared';
 
+import { docsShot } from './docs-shot';
 import { type AccountsScene, makeAccounts } from './insights-accounts-fixtures';
 import {
   auditOnPhoneAndDesktop,
@@ -80,6 +81,8 @@ async function setupScene(
 
 auditOnPhoneAndDesktop();
 
+const isPhoneViewport = (page: Page) => (page.viewportSize()?.width ?? 0) < 640;
+
 test.describe('Insights', () => {
   test('flow with a realistic month', async ({ page }) => {
     await setupScene(page, 'realistic');
@@ -102,6 +105,8 @@ test.describe('Insights', () => {
       page.getByTestId('insights-waiting-ideas').getByRole('link', { name: /Tax ID validation/ })
     ).toHaveAttribute('href', `/projects/${PROJECT_ID}/ideas/idea-c`);
     await expect(page.getByTestId('insights-waiting-ideas')).toContainText('PR open, CI red');
+    // Docs image (insights.md): the first screen, before capture() grows the scrollers.
+    await docsShot(page, isPhoneViewport(page) ? 'insights-flow-mobile' : 'insights-flow');
     await capture(page, 'insights-flow-realistic');
   });
 

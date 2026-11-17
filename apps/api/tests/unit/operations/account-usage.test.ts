@@ -168,6 +168,8 @@ describe('connector account monitoring', () => {
     env = {
       DATABASE: createSqliteD1(sqlite),
       BASE_DOMAIN: 'example.com',
+      CF_ACCOUNT_ID: 'account-test',
+      AI_GATEWAY_ID: 'gateway-test',
       KV: { get: vi.fn(async () => null) },
     } as unknown as Env;
   });
