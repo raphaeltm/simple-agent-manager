@@ -35,3 +35,8 @@ Local results:
 - Existing Wrangler SAM_MODEL binding retained and updated in place, preserving the explicit deployment model binding without adding any bindings. No migrations, new infrastructure, auth changes, new settings or dependencies.
 - Local specialist review confirmed Cloudflare, constitution and doc-sync PASS; task completion findings ADDRESSED after green reruns. PR/CI pending.
 - Staging explicitly skipped by user; no deploy or validation. Production still old model; needs normal reviewed release and post-deploy binding + health verification.
+
+## PR follow-up
+
+PR https://github.com/raphaeltm/simple-agent-manager/pull/2860. Codex GitHub review reported no findings; CodeRabbit request succeeded but review was rate-limited, so no re-trigger. Initial smoke, secret scan and benchmarks passed.
+PR Evidence description corrected to use full paths and explicit official-documentation wording; local event-payload preflight passes. Sonar flagged 2 changed lines in pre-existing duplicated Anthropic fixture blocks (3.6% new-line duplication). Hoisted read-only Claude test configuration to suite scope; focused suite 39/39 and ESLint pass, local reviewer confirms unchanged behavior and no config mutation. New head CI must pass before merge. Staging remains forbidden; no production changes.
