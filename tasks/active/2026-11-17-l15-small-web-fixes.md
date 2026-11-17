@@ -37,8 +37,8 @@ SAM task 01M7M9EWWHSFH09VE6ZN1S27WJ. Self-host landing slice L15 (idea 01M72M9AE
 
 ## Checklist
 
-- [x] `useProfileChoice`: `instantEnabled` input, `createDefaultChatProfile()` creates exactly one profile
-- [x] `useNewChatComposer`: read Instant availability via TanStack Query
+- [x] `useProfileChoice`: `createDefaultChatProfile()` creates exactly one profile (Instant read at click time via `fetchQuery`)
+- [x] `useProfileChoice`: Instant availability via the shared TanStack query (`instantRuntimeEnabledQueryOptions`) for the wizard
 - [x] `NoProfilesGate` quick start (one agent only) + Customize; wired in project chat and overview
 - [x] Wizard: Instant card disabled when unavailable; no-runtime fallback to VM
 - [x] API: `hostMemoryReserveMb` on `SafeCapacityPoolPlacementSettingsSummary`
