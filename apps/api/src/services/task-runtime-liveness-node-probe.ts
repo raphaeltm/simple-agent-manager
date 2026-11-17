@@ -12,7 +12,6 @@ import type { Env } from '../env';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { getNodeBackendBaseUrl } from './node-agent-readiness';
 import { resolveNodeAgentRoute, retargetNodeAgentUrl } from './node-agent-route';
-import { nodeTransportExtension } from './node-transport-extension';
 import type {
   RuntimeWorkspaceSnapshot,
   TaskLivenessNodeHealthProbeEnv,
@@ -114,15 +113,15 @@ export async function probeNodeHealthForTaskLiveness(
   let url = `${getNodeBackendBaseUrl(nodeId, env)}/health`;
   let fetchTimeoutMs = timeoutMs;
   try {
-    if (nodeTransport && nodeTransportExtension(nodeTransport)) {
-      const startedAt = Date.now();
-      const route = await withinBudget(
-        resolveNodeAgentRoute(env, nodeId, { runtime: 'vm', transport: nodeTransport }),
-        timeoutMs
-      );
-      url = retargetNodeAgentUrl(url, route);
-      fetchTimeoutMs = Math.max(1, timeoutMs - (Date.now() - startedAt));
-    }
+    const startedAt = Date.now();
+    // Resolve even when no driver is installed: extension-only rows must never fall
+    // back to public DNS. Public transports resolve locally with no additional I/O.
+    const route = await withinBudget(
+      resolveNodeAgentRoute(env, nodeId, { runtime: 'vm', transport: nodeTransport }),
+      timeoutMs
+    );
+    url = retargetNodeAgentUrl(url, route);
+    fetchTimeoutMs = Math.max(1, timeoutMs - (Date.now() - startedAt));
     const response = await fetchWithTimeout(
       url,
       { method: 'GET', redirect: 'manual' },

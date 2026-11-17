@@ -61,8 +61,10 @@ Reverse-tunnel nodes add one indexed lease read per control-plane request.
 - [x] Docs: self-hosting guide gateway/entry contract
 - [x] Lint/typecheck/test/build (CI to confirm); reviews: security-auditor, cloudflare-specialist, test-engineer,
       task-completion-validator
-- [ ] Staging: default + cloudflare-tunnel nodes connect, heartbeat, system-info, websocket; sweep no-op; cleanup
-- [ ] BOX: reverse-tunnel run on the self-host box against this branch
+- [ ] Staging: fresh default-transport VM heartbeat, system-info, terminal and agent WebSockets,
+      node log stream; self-host gateway routes absent on Cloudflare; cleanup to zero VMs
+- [ ] BOX debt: integration run after M4 includes L17b, before L22 (coordinator option (c),
+      channel seq 165; not a per-slice merge gate)
 - [ ] PR, CI, CodeRabbit, merge, idea update
 
 ## Acceptance
@@ -71,3 +73,32 @@ Reverse-tunnel nodes add one indexed lease read per control-plane request.
 - Reverse node HTTP, liveness and WebSocket traffic route to the current lease; a released lease is refused.
 - frps Login allow is serialized with unchange:false/content; other ops unchange:true.
 - Lease sweep runs from the self-host entry on the sweep cron, isolated, honours the kill switch.
+
+## Takeover validation (2026-11-17)
+
+Task `01M7NBKDNAFCMWSP5ASE305Y1S` continues PR #2859 on its existing branch. Merged main
+including safe-deploy #2841 (`0c672ddbf`); no-secret-readback, build, typecheck and lint pass.
+Prior four specialist reviews remain ADDRESSED; CodeRabbit rate limit ends its wait.
+
+Coordinator message `ea9fe982-fbca-4c19-8aa5-50f75fb0820b` approves replacing the live
+tunnel-marked-node check with real Worker/D1 evidence: no authorized staging fixture path
+exists. Do not mutate staging D1, obtain deploy-secret write access, or add a debug endpoint.
+`cloudflare-node-transport.test.ts` drives the unwrapped Worker with stored reverse-tunnel
+transport and checks system-info, log stream and workspace-proxy refusal before any fetch;
+same-row public-DNS controls pass. Removing the extension-only guard makes it fail.
+
+New Codex review findings were reproduced and fixed:
+
+- P1: the standalone self-host gateway registers the shared Hono error handler. Tests enter
+  both gateway routes with redispatch/lease-query exceptions and assert sanitized JSON;
+  typed route errors retain their status. All three new cases failed before the fix.
+- P2: the liveness probe always resolves the stored transport within its existing budget.
+  `task-liveness-no-driver.test.ts` drives both real liveness adapters with real SQLite
+  snapshots and migrated ProjectData reads; unavailable reverse-tunnel routing stays
+  inconclusive and never probes public DNS. Both cases fail on the old probe while all six
+  public-transport controls pass. Public transports add no D1 reads.
+
+Delta Cloudflare/security and test/completion reviews PASS. BOX remains owed after M4; the
+celld entry calls `withReverseTunnel(worker, frpcRenderer)`, and main's `node-agent-route.ts`
+and `node-websocket-gateway.ts` supersede the integration copies. Merge still waits for live
+staging, current-head CI, and the coordinator's production #2841 hold-lift message.

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { AppError } from '../../../src/middleware/error';
+import type { ReverseTunnelEnv } from '../../../src/selfhost/reverse-tunnel/env';
 import {
   createSelfHostGatewayRoutes,
   frpsPluginReply,
@@ -12,6 +14,71 @@ const env = { BASE_DOMAIN: 'example.test', REVERSE_TUNNEL_GATEWAY_SECRET: SECRET
 const ctx = { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext;
 
 describe('node-websocket forward_auth re-dispatch', () => {
+  it.each([
+    [new Error('private upstream detail'), 500, 'INTERNAL_ERROR'],
+    [new AppError(503, 'NODE_UNREACHABLE', 'No active route'), 503, 'NODE_UNREACHABLE'],
+  ] as const)(
+    'returns structured errors when redispatch throws (%s)',
+    async (error, status, code) => {
+      const routes = createSelfHostGatewayRoutes(async () => {
+        throw error;
+      });
+      const response = await routes.fetch(
+        new Request('http://api.example.test/api/self-host/gateway/node-websocket', {
+          headers: {
+            'X-SAM-Gateway-Secret': SECRET,
+            'X-SAM-Gateway-Original-Host': 'ws-01krrtx0000000000000000000.example.test',
+            'X-Forwarded-Uri': '/agent/ws',
+            'X-Forwarded-Method': 'GET',
+            Upgrade: 'websocket',
+          },
+        }),
+        env,
+        ctx
+      );
+      expect(response.status).toBe(status);
+      expect(response.headers.get('Content-Type')).toContain('application/json');
+      expect(await response.json()).toMatchObject({
+        error: code,
+        message: status === 500 ? 'Internal server error' : 'No active route',
+      });
+      expect(response.headers.get('X-SAM-Upstream')).toBeNull();
+    }
+  );
+
+  it('returns a sanitized JSON failure when the frps lease lookup throws', async () => {
+    const prepare = vi.fn(() => {
+      throw new Error('private database detail');
+    });
+    const response = await createSelfHostGatewayRoutes(async () => new Response('unused')).fetch(
+      new Request('http://api.example.test/api/self-host/gateway/frps-plugin?op=Login', {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${btoa(`frps:${SECRET}`)}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          content: {
+            user: 'node-a',
+            metas: {
+              node_id: 'node-a',
+              incarnation: 'incarnation-a',
+              credential: 'fixture-credential',
+            },
+          },
+        }),
+      }),
+      { ...env, DATABASE: { prepare } } as unknown as ReverseTunnelEnv,
+      ctx
+    );
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      error: 'INTERNAL_ERROR',
+      message: 'Internal server error',
+    });
+  });
+
   it('drops gateway inputs and client-address headers, and marks the inner request', async () => {
     let inner: Request | undefined;
     const routes = createSelfHostGatewayRoutes(async (request) => {

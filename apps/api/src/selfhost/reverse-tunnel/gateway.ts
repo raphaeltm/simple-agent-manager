@@ -21,6 +21,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { readRequestJsonRecord, RequestBodyTooLargeError } from '../../lib/runtime-validation';
 import { parseWorkspaceSubdomain } from '../../lib/workspace-subdomain';
+import { handleAppError } from '../../middleware/app-error-handler';
 import {
   GATEWAY_HEADER,
   isGatewayDecisionFor,
@@ -177,6 +178,7 @@ function toForwardAuthResponse(inner: Request, response: Response, host: string)
 
 export function createSelfHostGatewayRoutes(dispatch: GatewayDispatch) {
   const routes = new Hono<{ Bindings: ReverseTunnelEnv }>().basePath(SELF_HOST_GATEWAY_PATH_PREFIX);
+  routes.onError(handleAppError);
 
   routes.post('/frps-plugin', async (c) => {
     if (!getReverseTunnelGatewaySecret(c.env)) return notFound();
