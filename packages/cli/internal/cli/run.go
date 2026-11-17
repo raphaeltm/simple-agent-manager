@@ -23,7 +23,7 @@ func Run(ctx context.Context, runtime Runtime) int {
 		return fail(runtime.Stderr, err)
 	}
 	if len(parsed.Positionals) == 0 || parsed.Bools["help"] || parsed.Bools["h"] {
-		fmt.Fprintln(runtime.Stdout, contextualHelp(parsed))
+		fmt.Fprintln(runtime.Stdout, sanitizeTerminalText(contextualHelp(parsed)))
 		return 0
 	}
 

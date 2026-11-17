@@ -13,7 +13,7 @@ func writeOutput(w io.Writer, jsonMode bool, text string, value any) error {
 		if err != nil {
 			return err
 		}
-		_, err = fmt.Fprintln(w, string(content))
+		_, err = fmt.Fprintln(w, terminalSafeJSON(content))
 		return err
 	}
 	_, err := fmt.Fprintln(w, sanitizeTerminalText(text))
@@ -160,4 +160,11 @@ func formatFloat(value float64) string {
 		return fmt.Sprintf("%d", int64(value))
 	}
 	return fmt.Sprintf("%.2f", value)
+}
+
+// terminalSafeJSON accepts already encoded JSON. encoding/json escapes C0, but
+// leaves DEL and C1 controls literal. Escaping those inside JSON strings preserves
+// the decoded value while keeping terminal output inert. Transport bytes bypass it.
+func terminalSafeJSON(encoded []byte) string {
+	return sanitizeTerminalText(string(encoded))
 }
