@@ -448,6 +448,32 @@ describe('server read-aloud through an OpenAI-compatible endpoint', () => {
     expect((await postSynthesize(env)).status).toBe(200);
   });
 
+  it.each(['wav', 'flac', 'opus'])('refuses chunked %s endpoint audio before fetching, but accepts a single chunk', async (encoding) => {
+    const { r2, stored } = createR2();
+    const { env } = boxEnv({ R2: r2, TTS_CHUNK_SIZE: '40', TTS_ENCODING: encoding });
+    await configure(env, {
+      'speech.synthesis.baseUrl': 'https://tts.example.com/v1',
+      'speech.synthesis.model': 'kokoro',
+      'speech.synthesis.voice': 'af_heart',
+    });
+    fetchMock.mockImplementation(async () => new Response(AUDIO_BYTES, {
+      headers: { 'Content-Type': `audio/${encoding}` },
+    }));
+    const request = (text: string, storageId: string) => app().request('/api/tts/synthesize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, storageId }),
+    }, env);
+    const chunked = await request('A short sentence here. Another sentence to read.', 'container-chunks');
+    expect(chunked.status).toBe(503);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(stored.size).toBe(0);
+    const single = await request('One short sentence.', 'single-container');
+    expect(single.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(stored.size).toBe(1);
+  });
+
   it('bounds the combined audio from all chunks and resets the budget for a new request', async () => {
     const { r2, stored } = createR2();
     const { env } = boxEnv({ R2: r2, TTS_CHUNK_SIZE: '40' });

@@ -172,6 +172,12 @@ export async function generateSpeechAudio(
     return generateSpeechAudioChunk(chunk, ai, config);
   }
 
+  // Each endpoint response is a complete file. Only MP3 frame concatenation is supported;
+  // appending WAV/FLAC/container headers can silently truncate browser playback.
+  if (isSynthesisBackend(ai) && (config.encoding ?? DEFAULT_TTS_ENCODING) !== 'mp3') {
+    throw new Error('Chunked endpoint synthesis requires MP3 encoding');
+  }
+
   // Guard against CPU time exhaustion on Workers runtime
   if (chunks.length > maxChunks) {
     log.warn('tts.chunk_limit_exceeded', {
