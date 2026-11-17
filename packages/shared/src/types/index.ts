@@ -893,6 +893,26 @@ export type {
   ProjectAccountsResponse,
 } from './insights-accounts';
 
+// Insights · Agent setups (Insights slice S)
+export type {
+  InsightsSetupGroup,
+  InsightsSetupGrouping,
+  InsightsSetupMemory,
+  InsightsSetupNudges,
+  InsightsSetupOwner,
+  InsightsSetupsSection,
+  InsightsSetupSuggestion,
+  InsightsSetupTokens,
+  ProjectSetupsResponse,
+  RunNudgeCounts,
+  RunNudgeWindow,
+} from './insights-setups';
+export {
+  DEFAULT_INSIGHTS_SETUP_GROUPING,
+  INSIGHTS_SETUP_GROUPINGS,
+  isInsightsSetupGrouping,
+} from './insights-setups';
+
 // Knowledge Graph
 export type {
   AddObservationRequest,

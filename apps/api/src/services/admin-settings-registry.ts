@@ -11,6 +11,8 @@ import { NODE_TUNNEL_SETTINGS } from './admin-settings-node-tunnel-definitions';
 import { OPERATIONS_TELEMETRY_SETTINGS } from './admin-settings-operations-telemetry-definitions';
 import { OPERATOR_SETTINGS } from './admin-settings-operator-definitions';
 import { OUTBOUND_SETTINGS } from './admin-settings-outbound-definitions';
+import { AI_PROXY_SETTINGS } from './ai-proxy-settings';
+import { llmEndpointSettingDefinitions } from './llm-endpoint-settings';
 export {
   type AdminSettingDefinition,
   type AdminSettingName,
@@ -28,6 +30,8 @@ export {
 } from './admin-setting-definitions';
 const definitions = [
   ...ACCOUNT_LINKING_SETTINGS,
+  ...llmEndpointSettingDefinitions(),
+  ...AI_PROXY_SETTINGS,
   ...MESSAGE_MERGE_SETTINGS,
   ...DEPLOYMENT_PUBLISH_SETTINGS,
   ...CORE_SETTINGS,

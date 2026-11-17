@@ -1,3 +1,14 @@
+import { LlmUnavailableError } from '@simple-agent-manager/ai-proxy';
+
+import { resolveD1BindingIdentity } from '../lib/d1-session';
+import { cache } from './admin-settings-resolution';
+import { validLlmBaseUrl } from './llm-endpoint-settings';
+export {
+  aiGatewayOnlyHeaders,
+  hasCloudflareAccountApi,
+  isMonthlyCostCapAvailable,
+  resolveAiGatewayId,
+} from '@simple-agent-manager/ai-proxy';
 /**
  * Which platform services this installation actually has.
  *
@@ -64,4 +75,27 @@ export function publicPlatformCapabilities(env: CapabilityEnv): PublicPlatformCa
     textToSpeech: capabilities.textToSpeech,
     agentModelCalls: capabilities.workersAi,
   };
+}
+
+/**
+ * Endpoint capability is the configured base URL itself, from the existing module-scope TTL
+ * snapshot. Cloudflare's unconfigured path does one snapshot read per isolate TTL, zero key
+ * reads, and zero additional D1 reads per call. No second cache can outlive admin invalidation.
+ * Remember configuration across expired snapshots: an outage must not reroute private prompts.
+ */
+export async function resolveLlmEndpointCapability(env: Env): Promise<string | null> {
+  const db = resolveD1BindingIdentity(env.DATABASE);
+  try {
+    const rows = await cache.read(db);
+    const row = rows.find((row) => row.key === 'llm.openAICompatible.baseUrl');
+    if (!row) {
+      return null;
+    }
+    const value: unknown = row.value;
+    if (!validLlmBaseUrl(value)) throw new Error('Invalid endpoint configuration');
+    return String(value);
+  } catch {
+    // Unknown configuration must not send prompts to a provider the operator may have replaced.
+    throw new LlmUnavailableError('aiProxy', 'settings_unreadable');
+  }
 }

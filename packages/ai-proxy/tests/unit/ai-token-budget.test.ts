@@ -145,7 +145,11 @@ describe('monthly cost cap', () => {
       })
     );
 
-    const result = await checkMonthlyCostCap(kv, 'user-cap');
+    const result = await checkMonthlyCostCap(kv, 'user-cap', {
+      AI_GATEWAY_ID: 'gateway',
+      CF_ACCOUNT_ID: 'account',
+      CF_API_TOKEN: 'token',
+    } as never);
     expect(result).toEqual({ allowed: true, costUsd: 0, capUsd: 10 });
   });
 
@@ -162,7 +166,11 @@ describe('monthly cost cap', () => {
     );
     kv._store.set(buildMonthlyCostCacheKey('user-over-cap'), '10.000000');
 
-    const result = await checkMonthlyCostCap(kv, 'user-over-cap');
+    const result = await checkMonthlyCostCap(kv, 'user-over-cap', {
+      AI_GATEWAY_ID: 'gateway',
+      CF_ACCOUNT_ID: 'account',
+      CF_API_TOKEN: 'token',
+    } as never);
     expect(result).toEqual({ allowed: false, costUsd: 10, capUsd: 10 });
   });
 });
@@ -478,7 +486,11 @@ describe('checkAiUsageGate', () => {
     );
     kv._store.set(buildMonthlyCostCacheKey('user-monthly'), '10.010000');
 
-    const result = await checkAiUsageGate(kv, 'user-monthly', makeEnv());
+    const result = await checkAiUsageGate(
+      kv,
+      'user-monthly',
+      makeEnv({ AI_GATEWAY_ID: 'gateway', CF_ACCOUNT_ID: 'account', CF_API_TOKEN: 'token' })
+    );
     expect(result.allowed).toBe(false);
     if (!result.allowed) {
       expect(result.reason).toBe('monthly-cost-cap');

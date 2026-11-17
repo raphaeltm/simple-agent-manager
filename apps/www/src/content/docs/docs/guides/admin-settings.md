@@ -16,7 +16,7 @@ the trial product in November 2026; a value saved for it earlier is ignored.
 
 ## Open the settings
 
-Select **Admin** in the sidebar (only superadmins see it), then the **Settings** tab. The page is
+Select **Admin** in the sidebar (only superadmins see it), then **Settings** under **Platform**. The page is
 titled **Runtime settings**. An account must be an approved, active superadmin to use it; admins
 can't.
 
@@ -316,31 +316,35 @@ given, and its reminders follow the current percentages.
 Listed under **Chat**. Bounds for the [run receipt](/docs/reference/api/#get-apiprojectsprojectidtaskstaskidreceipt)
 (`packages/operations/src/insights-receipt-settings-definition.ts`).
 
-| Setting                                  | Default | Range       | What it limits                                                                     |
-| ---------------------------------------- | ------- | ----------- | ---------------------------------------------------------------------------------- |
-| `insights.receiptMessageScanMaxRows`     | 10,000  | 100–100,000 | Chat messages one receipt reads to count tool calls; a longer run shows a floor    |
-| `insights.receiptWaitingMaxQuestions`    | 200     | 10–2,000    | Agent questions one receipt reads to measure time waiting on a person              |
-| `insights.receiptComparisonRuns`         | 50      | 3–500       | Recent runs of the same skill or profile read to find the usual durations          |
-| `insights.receiptComparisonWindowDays`   | 30      | 1–365       | Days back the receipt looks for runs to compare with                               |
-| `insights.receiptComparisonMinRuns`      | 3       | 1–50        | Fewest comparable runs before a duration is called slower than usual               |
-| `insights.receiptSlowFactorPercent`      | 150     | 101–1,000   | Percentage of the usual duration at which a phase is listed as slow                |
-| `insights.receiptSlowMinSeconds`         | 60      | 0–3,600     | Phases shorter than this are never listed as slowing a run down                    |
-| `insights.receiptMemoryNearLimitPercent` | 90      | 50–100      | Peak memory at or above this share of the requested memory is listed as a slowdown |
+| Setting                                  | Default | Range       | What it limits                                                                           |
+| ---------------------------------------- | ------- | ----------- | ---------------------------------------------------------------------------------------- |
+| `insights.receiptMessageScanMaxRows`     | 10,000  | 100–100,000 | Chat messages one receipt reads to count tool calls; a longer run shows a floor          |
+| `insights.receiptWaitingMaxQuestions`    | 200     | 10–2,000    | Agent questions one receipt reads to measure time waiting on a person                    |
+| `insights.receiptComparisonRuns`         | 50      | 3–500       | Recent runs of the same skill or profile read to find the usual durations                |
+| `insights.receiptComparisonWindowDays`   | 30      | 1–365       | Days back the receipt looks for runs to compare with                                     |
+| `insights.receiptComparisonMinRuns`      | 3       | 1–50        | Fewest comparable runs before a duration is called slower than usual                     |
+| `insights.receiptSlowFactorPercent`      | 150     | 101–1,000   | Percentage of the usual duration at which a phase is listed as slow                      |
+| `insights.receiptSlowMinSeconds`         | 60      | 0–3,600     | Phases shorter than this are never listed as slowing a run down                          |
+| `insights.receiptMemoryNearLimitPercent` | 90      | 50–100      | Peak memory at or above this share of the requested memory is listed as a slowdown       |
 | `insights.receiptTokenRowsMax`           | 64      | 8–1,000     | Token-usage rows (model × account × agent restart) one receipt reads; more shows a floor |
 
 ## Insights page
 
-Listed under **Operations**. Bounds for the project [Insights](/docs/guides/insights/) Flow and
-Accounts tabs (`packages/operations/src/insights-page-settings.ts`).
+Listed under **Operations**. Bounds for the project [Insights](/docs/guides/insights/) Flow, Agent
+setups and Accounts tabs (`packages/operations/src/insights-page-settings.ts`).
 
-| Setting                           | Default | Range    | What it limits                                                                                                                          |
-| --------------------------------- | ------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `insights.flowIdeaSampleCap`      | 100     | 10–500   | Ideas, newest-updated first, examined for "idea to merged"; the page says when the cap cut it short                                     |
-| `insights.flowWaitingIdeasLimit`  | 5       | 1–20     | Ideas shown under "Ideas waiting longest"                                                                                               |
-| `insights.flowFlakyChecksLimit`   | 5       | 1–20     | Checks shown under "Flaky checks"                                                                                                       |
-| `insights.flowReworkWindowDays`   | 7       | 1–30     | Days after a merge in which another pull request on the same branch or idea counts as rework                                            |
-| `insights.accountsStallScanCap`   | 500     | 50–5,000 | Usage-limit waits and exhausted limit windows, newest first, examined for "Stalled on a limit"; the page says when the cap cut it short |
-| `insights.accountsEpisodesListed` | 10      | 1–50     | Limit stalls listed under "Stalled on a limit"                                                                                          |
+| Setting                                  | Default | Range      | What it limits                                                                                                                          |
+| ---------------------------------------- | ------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `insights.flowIdeaSampleCap`             | 100     | 10–500     | Ideas, newest-updated first, examined for "idea to merged"; the page says when the cap cut it short                                     |
+| `insights.flowWaitingIdeasLimit`         | 5       | 1–20       | Ideas shown under "Ideas waiting longest"                                                                                               |
+| `insights.flowFlakyChecksLimit`          | 5       | 1–20       | Checks shown under "Flaky checks"                                                                                                       |
+| `insights.flowReworkWindowDays`          | 7       | 1–30       | Days after a merge in which another pull request on the same branch or idea counts as rework                                            |
+| `insights.accountsStallScanCap`          | 500     | 50–5,000   | Usage-limit waits and exhausted limit windows, newest first, examined for "Stalled on a limit"; the page says when the cap cut it short |
+| `insights.accountsEpisodesListed`        | 10      | 1–50       | Limit stalls listed under "Stalled on a limit"                                                                                          |
+| `insights.setupsRunScanCap`              | 2,000   | 100–10,000 | Runs, newest first, examined on Agent setups; the page says when the cap cut the range short                                            |
+| `insights.setupsSuggestionMinRuns`       | 10      | 3–200      | Finished runs each compared setup needs before Agent setups suggests a skill change                                                     |
+| `insights.setupsSuggestionMinGapPercent` | 20      | 5–80       | Points by which a profile must beat the one it is compared with to be suggested as a skill default                                      |
+| `insights.setupsMemoryHeadroomPercent`   | 25      | 0–200      | Headroom added to the 90th-percentile peak memory when suggesting a memory request                                                      |
 
 ## Node provisioning
 
@@ -666,6 +670,15 @@ the Cloudflare dashboard; no redeploy is needed.
 vCPU-hour estimate (`COMPUTE_VCPU_HOUR_COST_USD`) was removed in favour of the per-machine prices
 above.
 
+## Analytics
+
+**Admin → Analytics** (under **Spend and health**) shows how the installation is used: summary
+figures, **AI Usage**, **Daily Active Users**, **Feature Adoption**, **Website Traffic** and **Top
+Events**, over the period you pick, with **Refresh**. It no longer has the sign-up funnel, the
+geography map or the retention cohorts. For how work moves through a project, open that project's
+[Insights](/docs/guides/insights/); for what the installation costs, see
+[Health & cost](#health--cost).
+
 ## Linked work
 
 These **Operations** settings control automatic links between chats, ideas, library files and pull requests. Links that mean work (a chat working on, creating or editing something) are always kept; links that only record reading or viewing are capped.
@@ -693,7 +706,7 @@ If you lower the cap on read and view links below what a target already has, not
 
 These **Collaboration** settings bound the size of the `get_instructions` payload every agent
 reads at session start. Pinned policies and the task are never trimmed by them. Every policy is
-pinned until a project admin unpins it in **Agent context → Policies**. While every policy is
+pinned until a project admin unpins it in [**Agent Context → Policies**](/docs/guides/agent-context/#pinned-or-on-demand). While every policy is
 pinned, setting the three character budgets to their maximum returns the unbudgeted payload. To
 undo an unpin, pin the policy again. The section budgets count characters of rendered text; the
 total counts characters of the serialized payload, so the three do not simply add up.
@@ -1050,3 +1063,16 @@ bootstrap default. Bootstrap cannot depend on reading its own D1 override. Once 
 available, the runtime deadline governs legacy platform configuration and session reads.
 Pending cache loads expire on deadline; late results cannot republish stale data. No deployment
 configuration is required.
+
+## Use an OpenAI-compatible model server
+
+Under **AI models**, set `llm.openAICompatible.baseUrl`, the model ID and optional API key.
+The endpoint replaces Workers AI chat calls and the SAM agent's model route. Purpose-specific
+model settings are available for agents, titles, diagnosis and the Workers AI proxy route.
+Private hosts require the separate `allowPrivateNetwork` confirmation; metadata hosts are always
+refused. Reset the base URL to restore normal routing. See the
+[endpoint configuration reference](/docs/reference/configuration/#openai-compatible-model-endpoint)
+for all keys, budgets, proxy availability and accounting limits.
+
+<!-- Verified: services/llm-endpoint-settings.ts, services/llm-chat-target.ts,
+     services/platform-capabilities.ts:resolveLlmEndpointCapability. -->

@@ -1,3 +1,4 @@
+export const customEndpointResponses = new WeakSet<Response>();
 /**
  * AI proxy upstream forwarding — sends prepared requests to Workers AI,
  * Anthropic, or OpenAI through Cloudflare AI Gateway, translating Anthropic's
@@ -18,8 +19,15 @@ import {
 } from '../services/ai-anthropic-translate';
 import type { UpstreamAuth } from '../services/ai-billing';
 import { resolveUnifiedBillingToken } from '../services/ai-billing';
-import { buildAnthropicGatewayUrl, buildWorkersAIGatewayUrl } from '../services/ai-proxy-shared';
+import { buildAnthropicGatewayUrl } from '../services/ai-proxy-shared';
 import { copyCredentialLimitHeaders } from '../services/credential-limit-events';
+import {
+  chatTargetHeaders,
+  fetchChatTarget,
+  LlmUnavailableError,
+  resolveWorkersAiChatTarget,
+} from '../services/llm-chat-target';
+import { aiGatewayOnlyHeaders, resolveAiGatewayId } from '../services/platform-capabilities';
 
 const anthropicContentBlockSchema = v.variant('type', [
   v.object({ type: v.literal('text'), text: v.string() }),
@@ -45,7 +53,7 @@ const anthropicResponseSchema = v.object({
 
 /** Build upstream URL for OpenAI chat completions via AI Gateway. */
 function buildOpenAIUrl(env: Env): string {
-  const gatewayId = env.AI_GATEWAY_ID;
+  const gatewayId = resolveAiGatewayId(env);
   if (gatewayId) {
     return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/openai/v1/chat/completions`;
   }
@@ -55,7 +63,7 @@ function buildOpenAIUrl(env: Env): string {
 
 /** Build upstream URL for OpenAI Responses API via AI Gateway. */
 function buildOpenAIResponsesUrl(env: Env): string {
-  const gatewayId = env.AI_GATEWAY_ID;
+  const gatewayId = resolveAiGatewayId(env);
   if (gatewayId) {
     return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/openai/v1/responses`;
   }
@@ -73,16 +81,30 @@ export async function forwardToWorkersAI(
   modelId: string,
   aigMetadata: string
 ): Promise<Response> {
-  const gatewayUrl = buildWorkersAIGatewayUrl(env);
-  const gatewayBody = { ...body, model: modelId };
+  let target;
+  try {
+    target = await resolveWorkersAiChatTarget(env, 'aiProxy', modelId);
+  } catch (err) {
+    if (!(err instanceof LlmUnavailableError)) throw err;
+    return new Response(
+      JSON.stringify({
+        error: { message: err.message, type: 'api_error', code: 'LLM_SETTINGS_UNAVAILABLE' },
+      }),
+      { status: 503, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+  if (!target)
+    return new Response(
+      JSON.stringify({
+        error: { message: 'Model route is unavailable', code: 'FEATURE_UNAVAILABLE' },
+      }),
+      { status: 404, headers: { 'Content-Type': 'application/json' } }
+    );
+  const gatewayBody = { ...body, model: target.model };
 
-  const response = await fetch(gatewayUrl, {
+  const response = await fetchChatTarget(target, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.CF_API_TOKEN}`,
-      'Content-Type': 'application/json',
-      'cf-aig-metadata': aigMetadata,
-    },
+    headers: chatTargetHeaders(target, { 'cf-aig-metadata': aigMetadata }),
     body: JSON.stringify(gatewayBody),
   });
 
@@ -90,7 +112,10 @@ export async function forwardToWorkersAI(
     const errorText = await response.text();
     log.error('ai_proxy.workers_ai_error', {
       status: response.status,
-      body: errorText.slice(0, 500),
+      body:
+        target.kind === 'openai-compatible'
+          ? '[external endpoint body omitted]'
+          : errorText.slice(0, 500),
     });
     const errorHeaders = new Headers({ 'Content-Type': 'application/json' });
     copyCredentialLimitHeaders(response.headers, errorHeaders);
@@ -115,7 +140,12 @@ export async function forwardToWorkersAI(
     responseHeaders.set('X-Accel-Buffering', 'no');
   }
 
-  return new Response(response.body, { status: response.status, headers: responseHeaders });
+  const forwarded = new Response(response.body, {
+    status: response.status,
+    headers: responseHeaders,
+  });
+  if (target.kind === 'openai-compatible') customEndpointResponses.add(forwarded);
+  return forwarded;
 }
 
 /** Forward request to Anthropic via AI Gateway (with format translation). */
@@ -136,7 +166,7 @@ export async function forwardToAnthropic(
       ...upstreamAuth.headers,
       'anthropic-version': '2023-06-01',
       'Content-Type': 'application/json',
-      'cf-aig-metadata': aigMetadata,
+      ...aiGatewayOnlyHeaders(env, { 'cf-aig-metadata': aigMetadata }),
     },
     body: JSON.stringify(anthropicRequest),
   });
@@ -215,7 +245,7 @@ export async function forwardToOpenAI(
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'cf-aig-metadata': aigMetadata,
+    ...aiGatewayOnlyHeaders(env, { 'cf-aig-metadata': aigMetadata }),
   };
   if (cfToken) {
     headers['cf-aig-authorization'] = `Bearer ${cfToken}`;
@@ -276,7 +306,7 @@ export async function forwardToOpenAIResponses(
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'cf-aig-metadata': aigMetadata,
+    ...aiGatewayOnlyHeaders(env, { 'cf-aig-metadata': aigMetadata }),
   };
   if (cfToken) {
     headers['cf-aig-authorization'] = `Bearer ${cfToken}`;
