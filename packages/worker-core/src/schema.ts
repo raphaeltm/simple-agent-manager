@@ -876,6 +876,34 @@ export const asks = sqliteTable(
   })
 );
 
+/**
+ * The generated brief on a Project Overview (inbox slice I, migration 0255). One row per project,
+ * the brief's only home. Written by `refreshProjectBriefIfDue` (apps/api), read by
+ * `readProjectBrief` (packages/operations). Times are epoch milliseconds.
+ */
+export const projectBriefs = sqliteTable('project_briefs', {
+  projectId: text('project_id')
+    .primaryKey()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  /** NULL when the project was quiet at the last check. */
+  briefJson: text('brief_json'),
+  refAsksJson: text('ref_asks_json').notNull().default('[]'),
+  refChatsJson: text('ref_chats_json').notNull().default('[]'),
+  refAutomationsJson: text('ref_automations_json').notNull().default('[]'),
+  refAccountsJson: text('ref_accounts_json').notNull().default('[]'),
+  fingerprint: text('fingerprint'),
+  generatedAt: integer('generated_at'),
+  checkedAt: integer('checked_at'),
+  stale: integer('stale').notNull().default(0),
+  pendingSince: integer('pending_since'),
+  /** Per-UTC-day generation budget: a daily cap by design, reset by a new day only. */
+  generationDay: text('generation_day'),
+  generationCount: integer('generation_count').notNull().default(0),
+  lastError: text('last_error'),
+  lastErrorAt: integer('last_error_at'),
+  updatedAt: integer('updated_at').notNull(),
+});
+
 export type AskRow = typeof asks.$inferSelect;
 
 /** Lifecycle of an ask, one row per change (human tasks, migration 0254). No discussion text. */
@@ -3570,6 +3598,12 @@ export const triggerExecutions = sqliteTable(
     finishedSequenceIdx: index('idx_trigger_executions_trigger_finished')
       .on(table.triggerId, table.sequenceNumber)
       .where(sql`status IN ('completed', 'failed')`),
+    /** Newest runs of one trigger without a sort (migration 0255; the Overview brief's facts). */
+    triggerSequenceIdx: index('idx_trigger_executions_trigger_sequence').on(
+      table.triggerId,
+      table.sequenceNumber,
+      table.createdAt
+    ),
     queueExpiryIdx: index('idx_trigger_queue_expiry')
       .on(table.queueExpiresAt)
       .where(sql`status IN ('waiting','queued')`),
@@ -4481,6 +4515,8 @@ export const sessionSummaries = sqliteTable(
       table.updatedAt
     ),
     projectIdx: index('idx_session_summaries_project').on(table.projectId, table.updatedAt),
+    /** A task's chat (migration 0255; the Overview brief's failed chats). */
+    taskIdx: index('idx_session_summaries_task').on(table.taskId),
     projectCreatorIdx: index('idx_session_summaries_project_creator').on(
       table.projectId,
       table.createdByUserId,

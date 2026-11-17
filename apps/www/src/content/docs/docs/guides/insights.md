@@ -145,9 +145,22 @@ whose agent session recorded no credential appear as **Account not recorded**.
   long in total (**Paused now** while one is still going).
 - **Limits now** (your own accounts): the provider's last-reported windows, the same chip as the chat
   header. Open it for every window and when it resets.
-- **Spend** (API keys): **Not reported** for now: this tab does not add up spend yet. Each run's
-  tokens per model, and an estimated spend for runs on an API key, are on its chat's
+- **Tokens** (every account): the tokens the account's runs used in the range (input, output,
+  cache reads and cache writes), and that total divided by the account's merged pull requests. A run
+  through SAM's AI proxy is counted once, from the proxy's own measurement, even though the agent
+  reports the same calls. Agents that report no token counts contribute nothing, so a total can be
+  low rather than wrong.
+- **Spend** (API keys only): an **estimate** at SAM's model catalog prices, never a bill, with the
+  estimate per merged pull request beside it. Subscriptions and SAM's platform credential show tokens
+  only. A model SAM has no price for, or a custom OpenAI-compatible endpoint, is named under the
+  figure and makes the total partial (**At least**); SAM never guesses a price. A key with no
+  measured usage in the range shows **Not reported**. A teammate's personal key shows its tokens but
+  its spend is **Private**: only the key's owner sees it, as with its name. Shared project keys show
+  spend to every member. Each run's own tokens per model are on its chat's
   [Receipt](/docs/guides/chat-features/#run-receipt).
+
+Tokens and spend cover usage SAM recorded since the range began, while **Merged** counts runs that
+ended in the range, so a run that spans the range's start counts its later usage only.
 
 The ring around each account's icon is its colour in the chart below.
 
@@ -240,8 +253,9 @@ whichever affected more work.
 ## For administrators
 
 How many ideas "idea to merged" looks at, how many flaky checks and waiting ideas are listed, the
-rework window, how many limit waits the Accounts tab examines and how many stalls it lists, how
-many runs Agent setups examines and when it makes a suggestion, and how many items People lists per
-person and how many review requests it examines are runtime settings under **Admin → Settings →
-Operations** (`insights.flow*`, `insights.accounts*`, `insights.setups*`, `insights.people*`).
+rework window, how many limit waits the Accounts tab examines, how many stalls it lists and how
+many token usage rows it reads, how many runs Agent setups examines and when it makes a suggestion,
+and how many items People lists per person and how many review requests it examines are runtime
+settings under **Admin → Settings → Operations** (`insights.flow*`, `insights.accounts*`,
+`insights.setups*`, `insights.people*`).
 See [Admin settings](/docs/guides/admin-settings/).
