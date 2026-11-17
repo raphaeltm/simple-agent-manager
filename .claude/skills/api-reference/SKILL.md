@@ -67,6 +67,7 @@ The control plane uses the VM-agent capability path `DELETE /workspaces/:id/phys
 - `PATCH /api/projects/:id/capacity-pools/defaults` — Update only the project-owned default pool policy (workspace strategy, deployment strategy, exhaustion policy, or maximum nodes), candidate statuses, provider-native `catalogAdditions`, or `sourceOrder` (provider order, most preferred source first; `null`/`[]` clears; unknown ids → 400 `missingSourceIds`); requires project `secret:write` and never mutates user or installation fallback pools.
 - `PATCH /api/projects/:id` — Update project metadata (`name`, `description`, `defaultBranch`)
 - `DELETE /api/projects/:id` — Delete project (cascades project tasks/dependencies/events)
+- Insights (project members; `?range=7d|30d|90d`, default `30d`, else 400; each a thin adapter over its `packages/operations/src/insights-*.ts` op, `routes/project-insights.ts`): `GET /api/projects/:projectId/insights/flow` (`projectFlow`), `.../insights/accounts` (`projectAccounts`, `private, no-store`), `.../insights/people` (`projectPeople`, `private, no-store`: waiting-on by assignee with private items reduced to their age, review pickup median/p90 from `pull_request_review_requests`, first-person answer share; reassign goes through the Inbox `.../inbox/items/:ref/reassign` route). Run receipt: `GET /api/projects/:projectId/tasks/:taskId/receipt`
 
 ## Default Capacity Pools
 

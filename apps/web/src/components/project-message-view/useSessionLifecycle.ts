@@ -18,7 +18,6 @@ import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
 import { DEFAULT_ATTACHMENT_MESSAGE } from '../../pages/project-chat/useAttachments';
 import { optimisticUserMessage, refreshIdleCleanupAfterSend } from './send-follow-up-helpers';
 import { useSessionDraft } from './session-drafts';
-import type { FilePanelState } from './session-lifecycle-helpers';
 import { parsePlanContent, useSessionStatusPush } from './session-lifecycle-helpers';
 import { ownedWorkspaceId, resolveSessionViewerCapabilities } from './session-viewer-access';
 import type { AgentActivityState } from './types';
@@ -29,9 +28,11 @@ import { useCompletionDockWorking } from './useCompletionDockWorking';
 import { useConnectionRecovery } from './useConnectionRecovery';
 import { useFallbackSessionPoll } from './useFallbackSessionPoll';
 import { useSessionAccessSync } from './useSessionAccessSync';
+import { useSessionCatchUp } from './useSessionCatchUp';
 import { useSessionFileUpload } from './useSessionFileUpload';
 import { useSessionInfrastructure } from './useSessionInfrastructure';
 import type { UseSessionLifecycleResult } from './useSessionLifecycle.types';
+import { useSessionPanels } from './useSessionPanels';
 import { useSessionTranscript } from './useSessionTranscript';
 import { useWakeProgress } from './useWakeProgress';
 
@@ -138,13 +139,15 @@ export function useSessionLifecycle(
     [clearActivity, hydratePlan, hydrateWakeProgress, startVerifyDecayTimer, stopVerifyDecayTimer]
   );
 
-  const [filePanel, setFilePanel] = useState<FilePanelState>(null);
-  const handleFileClick = useCallback((path: string, line?: number | null) => {
-    setFilePanel({ mode: 'view', path, line });
-  }, []);
-  const handleOpenFileBrowser = useCallback(() => setFilePanel({ mode: 'browse', path: '.' }), []);
-  const handleOpenGitChanges = useCallback(() => setFilePanel({ mode: 'git-status' }), []);
-  const [showScrollButton, setShowScrollButton] = useState(false);
+  const {
+    setFilePanel,
+    filePanel,
+    handleFileClick,
+    handleOpenFileBrowser,
+    handleOpenGitChanges,
+    showScrollButton,
+    setShowScrollButton,
+  } = useSessionPanels();
   const sessionState = session ? deriveSessionState(session) : 'terminated';
   const transcribeApiUrl = getTranscribeApiUrl();
 
@@ -208,29 +211,7 @@ export function useSessionLifecycle(
       stopVerifyDecayTimer();
     }, [invalidateStatus, stopVerifyDecayTimer]),
     onSessionAccessChanged,
-    onCatchUp: useCallback(
-      (
-        catchUpMessages: ChatMessageResponse[],
-        catchUpSession: ChatSessionResponse,
-        state?: SessionStateSnapshot | null
-      ) => {
-        setSession(catchUpSession);
-        const merged = mergeRecentWindow({
-          session: catchUpSession,
-          messages: catchUpMessages,
-          // A window's own `hasMore` is used only when no transcript is loaded
-          // yet; the catch-up does not report it, so assume older history.
-          hasMore: true,
-          state: state ?? null,
-        }).catch(() => {
-          // Best-effort catch-up: the socket remains connected, and the next
-          // explicit refresh/reconnect will retry from the current cache.
-        });
-        hydrateState(state);
-        return merged;
-      },
-      [hydrateState, mergeRecentWindow]
-    ),
+    onCatchUp: useSessionCatchUp(setSession, mergeRecentWindow, hydrateState),
     // What the agent's runtime did with a steer, on its transcript row.
     onDeliveryUpdate: useCallback(
       (update: PromptDeliveryUpdate) => {

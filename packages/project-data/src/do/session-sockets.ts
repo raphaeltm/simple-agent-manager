@@ -20,10 +20,13 @@
 import {
   CHAT_MESSAGE_APPEND_CAPABILITY,
   CHAT_MESSAGE_RESYNC_CLOSE_CODE,
+  CHAT_TOOL_REPLACE_CAPABILITY,
+  toolMessageRevision,
 } from '@simple-agent-manager/shared';
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
 
 import { sealMessageStream } from './message-stream-ingest';
+import { sealToolMerging } from './tool-call-changes';
 
 const log = createModuleLogger('project_data.sockets');
 
@@ -42,7 +45,12 @@ function sessionTag(sessionId: string): string {
 }
 
 /** Accept a browser socket upgrade forwarded by the API route. */
-export function admitBrowserSocket(ctx: DurableObjectState, sql: SqlStorage, url: URL): Response {
+export function admitBrowserSocket(
+  ctx: DurableObjectState,
+  sql: SqlStorage,
+  url: URL,
+  onToolSeal?: () => void
+): Response {
   const requested = url.searchParams.get('sessionId');
   const tags: string[] = [];
   // Session IDs are stored lowercase; an uppercase spelling must still match the
@@ -58,6 +66,19 @@ export function admitBrowserSocket(ctx: DurableObjectState, sql: SqlStorage, url
   } else if (sessionId) {
     // This client may already hold the open row and cannot apply appends to it.
     sealMessageStream(sql, sessionId);
+  }
+  if (url.searchParams.get('toolReplace') === CHAT_TOOL_REPLACE_CAPABILITY)
+    tags.push(CHAT_TOOL_REPLACE_CAPABILITY);
+  else if (sessionId) {
+    const row = sql
+      .exec('SELECT stream_ingest_state FROM chat_sessions WHERE id = ?', sessionId)
+      .toArray()[0];
+    if (
+      typeof row?.stream_ingest_state === 'string' &&
+      Number(JSON.parse(row.stream_ingest_state).toolRevision ?? 0) > 0 &&
+      sealToolMerging(sql, sessionId)
+    )
+      onToolSeal?.();
   }
   const pair = new WebSocketPair();
   ctx.acceptWebSocket(pair[1], tags);
@@ -138,6 +159,15 @@ export function broadcastToBrowserSockets(
   sessionId?: string
 ): void {
   const message = JSON.stringify({ type, payload });
+  const replacesTool =
+    type === 'messages.batch' &&
+    Array.isArray(payload.messages) &&
+    payload.messages.some(
+      (row: unknown) =>
+        row !== null &&
+        typeof row === 'object' &&
+        toolMessageRevision((row as Record<string, unknown>).toolMetadata) > 1
+    );
   if (!sessionId) {
     for (const ws of ctx.getWebSockets()) send(ws, message);
     return;
@@ -145,7 +175,10 @@ export function broadcastToBrowserSockets(
   for (const ws of ctx.getWebSockets(sessionTag(sessionId))) {
     const tags = tagsOf(ctx, ws);
     if (!tags) continue;
-    if (type === MESSAGE_APPEND_FRAME && !tags.includes(CHAT_MESSAGE_APPEND_CAPABILITY))
+    if (
+      (type === MESSAGE_APPEND_FRAME && !tags.includes(CHAT_MESSAGE_APPEND_CAPABILITY)) ||
+      (replacesTool && !tags.includes(CHAT_TOOL_REPLACE_CAPABILITY))
+    )
       closeForResync(ws, sessionId);
     else send(ws, message);
   }
@@ -155,4 +188,15 @@ export function broadcastToBrowserSockets(
     if (!tags || tags.some((tag) => tag.startsWith(SESSION_TAG_PREFIX))) continue;
     send(ws, message);
   }
+}
+
+/** A legacy reader permanently seals tool mutation, even after its socket disconnects. */
+export function countLegacyToolSockets(ctx: DurableObjectState, sessionId: string): boolean {
+  return ctx
+    .getWebSockets(sessionTag(sessionId))
+    .some(
+      (socket) =>
+        socket.readyState === WebSocket.OPEN &&
+        !tagsOf(ctx, socket)?.includes(CHAT_TOOL_REPLACE_CAPABILITY)
+    );
 }

@@ -64,7 +64,7 @@ import {
   scopedConfig as scopedArchiveCoordinatorConfig,
 } from '@simple-agent-manager/project-data/internal/scheduled/project-data-archive-sharding';
 import { configFromEnv as storageReliefPreflightConfig } from '@simple-agent-manager/project-data/internal/scheduled/project-data-storage-relief-preflight';
-import { resolveOrchestratorConfig } from '@simple-agent-manager/shared';
+import { resolveOrchestratorConfig, resolveSamConfig } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
 import { OMITTED_WORKER_VAR_DEFAULTS } from '../../../../../scripts/deploy/worker-var-defaults';
@@ -128,6 +128,11 @@ const asEnv = <T>(env: WorkerVars): T => env as unknown as T;
 const API = 'apps/api/src';
 
 const READ_PATHS: readonly ReadPath[] = [
+  {
+    label: 'SAM assistant model default',
+    sources: ['packages/shared/src/constants/sam.ts'],
+    read: (env) => resolveSamConfig(env),
+  },
   {
     label: 'managed VM tunnel transport and connector boot configuration',
     sources: [`${API}/services/node-tunnel-config.ts`, `${API}/selfhost/reverse-tunnel/env.ts`],

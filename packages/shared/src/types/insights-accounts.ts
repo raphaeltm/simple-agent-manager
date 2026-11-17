@@ -5,7 +5,8 @@
  * `GET /api/projects/:projectId/insights/accounts?range=…`.
  *
  * Everything is derived at read time from records SAM already keeps; nothing here is stored.
- * Spend is "not reported" until SAM records per-run usage (slice U), never an estimate.
+ * Tokens and spend come from the measured per-run usage (`agent_run_usage`, slice U). Spend is an
+ * estimate at SAM's catalog prices, shown only for API keys and never guessed for an unpriced model.
  *
  * Account names are private to the person who owns the credential, as in the chat header
  * (`routes/chat-agent-credential.ts`): another member's account appears only as its kind
@@ -24,10 +25,34 @@ export type InsightsAccountOwner = 'you' | 'teammate' | 'project' | 'platform' |
  */
 export type InsightsAccountKind = 'subscription' | 'api_key' | 'platform' | 'unknown';
 
-/** API-key spend. `not_reported` until per-run usage is recorded (slice U). */
+/**
+ * API-key spend over the range, an estimate from SAM's model catalog prices (never a bill).
+ * - `not_reported`: no measured usage for this account in the range.
+ * - `private`: another member's personal key; like its name, its spend is theirs to see.
+ * - `reported`: `costUsd` sums the priced models (null when none had a price). `unpricedModels`
+ *   names the usage SAM could not price (a model missing from the catalog, or a custom
+ *   OpenAI-compatible endpoint); when it is not empty the total is partial, a floor.
+ */
 export type InsightsAccountSpend =
   | { state: 'not_reported' }
-  | { state: 'reported'; costUsd: number; perMergedPullRequestUsd: number | null };
+  | { state: 'private' }
+  | {
+      state: 'reported';
+      costUsd: number | null;
+      /** `costUsd` over the account's merged runs; null when none merged or nothing was priced. */
+      perMergedPullRequestUsd: number | null;
+      unpricedModels: string[];
+    };
+
+/**
+ * Measured tokens over the range (input, output, cache read and cache write), for every kind of
+ * account. A proxied run is counted once, from the AI proxy's measurement.
+ */
+export interface InsightsAccountTokens {
+  total: number;
+  /** `total` over the account's merged runs; null when none merged. */
+  perMergedPullRequest: number | null;
+}
 
 export interface InsightsAccountStalls {
   /** Limit-stall episodes that began in the range (merged per account; see `InsightsStallEpisode`). */
@@ -63,6 +88,8 @@ export interface InsightsAccount {
    * header's limit chip). Null for other people's accounts or when none was ever reported.
    */
   usage: CredentialLimitCredentialSummary | null;
+  /** Tokens the account's runs used in the range; null when no run reported any. */
+  tokens: InsightsAccountTokens | null;
   /** API keys only; null for subscriptions and the platform. */
   spend: InsightsAccountSpend | null;
 }
@@ -91,7 +118,8 @@ export interface InsightsStallEpisode {
   outcome: InsightsStallOutcome;
 }
 
-export type InsightsAccountsSection = 'runs' | 'stalls' | 'usage';
+/** `tokens`: the measured token usage read (tokens and spend) failed. */
+export type InsightsAccountsSection = 'runs' | 'stalls' | 'usage' | 'tokens';
 
 export interface ProjectAccountsResponse {
   projectId: string;
@@ -112,6 +140,11 @@ export interface ProjectAccountsResponse {
     truncated: boolean;
   };
   totals: { runs: number; merged: number };
+  /**
+   * True when the usage read hit its row cap (`insights.accountsUsageRowCap`): tokens and spend
+   * are then a floor.
+   */
+  usageLimited: boolean;
   unavailable: InsightsAccountsSection[];
   generatedAt: string;
 }

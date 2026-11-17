@@ -148,9 +148,15 @@ export function auditSignedDeliveryIntents(fixture, targetEnvironment) {
   return deliveries.map((item, index) => {
     assert(isUuid(item.deliveryId), 'Invalid fixture delivery ID');
     assert(
-      ['issues', 'issue_comment', 'pull_request_review', 'pull_request_review_comment'].includes(
-        item.eventType
-      ),
+      [
+        'issues',
+        'issue_comment',
+        'pull_request_review',
+        'pull_request_review_comment',
+        'check_run',
+        'check_suite',
+        'workflow_run',
+      ].includes(item.eventType),
       'Unsupported audit event'
     );
     assert(
@@ -159,6 +165,30 @@ export function auditSignedDeliveryIntents(fixture, targetEnvironment) {
     );
     const reviewEvent = item.eventType.startsWith('pull_request_review');
     const contentId = Number.parseInt(item.deliveryId.replaceAll('-', '').slice(0, 12), 16) + 1;
+    if (['check_run', 'check_suite', 'workflow_run'].includes(item.eventType)) {
+      assert(targetEnvironment === 'staging', 'CI fixtures are staging-only');
+      assert(
+        typeof item.headSha === 'string' && /^[a-f0-9]{40}$/.test(item.headSha),
+        'Full CI commit SHA required'
+      );
+      return {
+        deliveryId: item.deliveryId,
+        eventType: item.eventType,
+        payload: JSON.stringify({
+          action: 'completed',
+          installation: { id: fixture.installationId },
+          repository: { id: fixture.repositoryId, full_name: fixture.repository },
+          sender: { login: 'sam-staging-audit', type: 'User' },
+          [item.eventType]: {
+            id: contentId,
+            name: fixture.marker,
+            head_sha: item.headSha,
+            status: 'completed',
+            conclusion: 'success',
+          },
+        }),
+      };
+    }
     const user = { login: 'sam-staging-audit', type: 'User' };
     const subjectUrl = `https://github.com/${fixture.repository}/pull/${item.subjectNumber}`;
     return {
