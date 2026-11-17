@@ -2,6 +2,7 @@ import * as v from 'valibot';
 
 import { log, serializeError } from '../../lib/logger';
 import { LIVE_INCARNATION_SQL } from '../../services/node-tunnel-journal';
+import { nodeTransportExtension } from '../../services/node-transport-extension';
 import {
   deriveReverseTunnelCredential,
   hashReverseTunnelCredential,
@@ -38,6 +39,9 @@ const NODE_LIVE_FENCE_SQL = `id = ? AND user_id = ? AND runtime = 'vm' AND node_
   AND status NOT IN ('deleted', 'stopped', 'destroying')`;
 
 type LeaseEnv = Pick<Env, 'DATABASE' | 'VM_AGENT_TRANSPORT'>;
+
+// Build registration owns cleanup: changing admission must not strand an older lease.
+// Cloudflare never imports/installs the reverse driver, so it never queries this table.
 
 export type ReverseTunnelLeaseErrorCode =
   | 'port_range_exhausted'
@@ -248,7 +252,7 @@ export async function releaseUnallocatedReverseTunnelLease(
   runtimeIncarnationId: string,
   reason: string
 ): Promise<boolean> {
-  if (!isReverseTunnelInstallation(env)) return false;
+  if (!nodeTransportExtension('reverse-tunnel')) return false;
   const now = new Date().toISOString();
   const result = await env.DATABASE.prepare(
     `UPDATE node_reverse_tunnel_leases
@@ -265,7 +269,7 @@ export async function releaseNonLiveReverseTunnelLeases(
   reason: string,
   nodeId?: string
 ): Promise<number> {
-  if (!isReverseTunnelInstallation(env)) return 0;
+  if (!nodeTransportExtension('reverse-tunnel')) return 0;
   const now = new Date().toISOString();
   const result = await env.DATABASE.prepare(
     `UPDATE node_reverse_tunnel_leases AS t
@@ -293,13 +297,13 @@ export async function releaseNodeReverseTunnelLeases(
 }
 
 export type ReverseTunnelLeaseSweepResult =
-  { released: number } | { released: null; skipReason: 'transport_not_reverse_tunnel' };
+  { released: number } | { released: null; skipReason: 'driver_not_installed' };
 
 export async function runReverseTunnelLeaseSweep(
   env: LeaseEnv & Pick<Env, 'VM_AGENT_TRANSPORT'>
 ): Promise<ReverseTunnelLeaseSweepResult> {
-  if (!isReverseTunnelInstallation(env)) {
-    return { released: null, skipReason: 'transport_not_reverse_tunnel' };
+  if (!nodeTransportExtension('reverse-tunnel')) {
+    return { released: null, skipReason: 'driver_not_installed' };
   }
   return { released: await releaseNonLiveReverseTunnelLeases(env, 'runtime_not_live') };
 }

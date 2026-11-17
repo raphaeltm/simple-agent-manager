@@ -7,6 +7,8 @@ import { ProviderError } from '@simple-agent-manager/providers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ensureReverseTunnelLease, releaseNonLiveReverseTunnelLeases, releaseUnallocatedReverseTunnelLease, runReverseTunnelLeaseSweep } from '../../../src/selfhost/reverse-tunnel/leases';
+import * as transportRegistry from '../../../src/services/node-transport-extension';
+import { releaseTerminatedNodeIngress } from '../../../src/services/node-provisioning-ingress';
 import { installReverseTunnelTransport } from '../../../src/selfhost/reverse-tunnel/transport';
 import { buildNodeProviderLabels } from '../../../src/services/node-provider-labels';
 import { deleteCreatedProviderVmDirectly } from '../../../src/services/node-provisioning-race-cleanup';
@@ -197,6 +199,8 @@ describe('reverse-tunnel provisioning', () => {
       expect(mocks.cloudInitVars).toHaveLength(2);
       expect(mocks.cloudInitVars[1]?.reverseTunnelCredential).toBe(firstCredential);
       expect(statements.mock.calls.some(([sql]) => /(?:INSERT INTO|UPDATE) node_reverse_tunnel_leases/i.test(sql))).toBe(false);
+      await deleteNodeResourcesStrict(node.id, USER, env);
+      expect(leases(node.id)).toMatchObject([{ status: 'released', releaseReason: 'runtime_terminated' }]);
     }
   );
 
@@ -373,37 +377,34 @@ describe('every lifecycle path releases the lease', () => {
   });
 });
 
-describe('the cron lease sweep on other transports', () => {
-  it.each([
-    ['vm-public-dns', 'vm-public-dns'],
-    ['cloudflare-tunnel', 'cloudflare-tunnel'],
-    ['the default (unset) transport', undefined],
-  ] as const)(
-    'makes no D1 call and reports why on %s, leaving a releasable lease active',
-    async (_name, transport) => {
-      // A lease the sweep WOULD release (node row hard-deleted), so a skip is observable.
-      const gone = await freshNode();
-      await provisionNode(gone.id, env);
-      sqlite.prepare('DELETE FROM nodes WHERE id = ?').run(gone.id);
-      const prepare = vi.spyOn(env.DATABASE, 'prepare');
-      const result = await runReverseTunnelLeaseSweep({ ...env, VM_AGENT_TRANSPORT: transport });
-      expect(result).toEqual({ released: null, skipReason: 'transport_not_reverse_tunnel' });
-      expect(prepare).not.toHaveBeenCalled();
-      prepare.mockRestore();
-      expect(leases(gone.id)).toMatchObject([{ status: 'active' }]);
-      // Control: the same lease on a reverse-tunnel installation is released.
-      expect(await runReverseTunnelLeaseSweep(env)).toEqual({ released: 1 });
-      expect(leases(gone.id)).toMatchObject([{ status: 'released' }]);
+describe('the installed reverse driver owns cleanup across admission changes', () => {
+  it.each([undefined, 'vm-public-dns', 'cloudflare-tunnel'])(
+    'sweep after selection changes to %j releases all nonlive owners and preserves live ones',
+    async (transport) => {
+      const gone = await freshNode(); const replaced = await freshNode();
+      const terminated = await freshNode(); const live = await freshNode();
+      const labelledDeleted = await freshNode();
+      for (const node of [gone, replaced, terminated, live, labelledDeleted]) await provisionNode(node.id, env);
+      sqlite.prepare('DELETE FROM nodes WHERE id=?').run(gone.id);
+      sqlite.prepare("UPDATE nodes SET runtime_incarnation_id='replacement' WHERE id=?").run(replaced.id);
+      sqlite.prepare("UPDATE nodes SET runtime_termination_confirmed_at='2026-01-01T00:00:00.000Z' WHERE id=?").run(terminated.id);
+      sqlite.prepare("UPDATE nodes SET status='deleted' WHERE id=?").run(labelledDeleted.id);
+      setEnv(reverseEnv({ VM_AGENT_TRANSPORT: transport }));
+      expect(await runReverseTunnelLeaseSweep(env)).toEqual({ released: 3 });
+      expect(await runReverseTunnelLeaseSweep(env)).toEqual({ released: 0 });
+      for (const node of [gone, replaced, terminated]) expect(leases(node.id)).toMatchObject([{ status: 'released' }]);
+      for (const node of [live, labelledDeleted]) expect(leases(node.id)).toMatchObject([{ status: 'active' }]);
     }
   );
 });
 
 describe('F19 release paths', () => {
-  it('a confirmed direct provider delete releases only its exact incarnation', async () => {
+  it.each([undefined, 'vm-public-dns', 'cloudflare-tunnel'])('a confirmed direct provider delete releases only its exact incarnation after selection changes to %j', async (transport) => {
     const node = await freshNode();
     await provisionNode(node.id, env);
     const sibling = await freshNode(); await provisionNode(sibling.id, env);
     const current = readNode(node.id)!;
+    setEnv(reverseEnv({ VM_AGENT_TRANSPORT: transport }));
     await deleteCreatedProviderVmDirectly({ env, provider: provider.provider,
       providerInstanceId: current.providerInstanceId!, nodeId: node.id,
       runtimeIncarnationId: current.incarnation });
@@ -492,15 +493,26 @@ describe('lease allocation bounds and C18', () => {
     await expect(ensureReverseTunnelLease(env, input)).resolves.toMatchObject({ port: 20000 });
     await expect(ensureReverseTunnelLease(env, { ...input, userId: 'foreign-user' })).rejects.toMatchObject({ code: 'lease_released' });
   });
-  it.each([undefined, 'cloudflare-tunnel', 'vm-public-dns'])('release SQL is absent on %s even when a lease could be released', async (transport) => {
-    const node = await freshNode(); await provisionNode(node.id, env);
-    const incarnation = readNode(node.id)!.incarnation!;
-    sqlite.prepare('DELETE FROM nodes WHERE id=?').run(node.id);
-    const prepare = vi.spyOn(env.DATABASE, 'prepare');
-    const otherEnv = { ...env, VM_AGENT_TRANSPORT: transport };
-    expect(await releaseUnallocatedReverseTunnelLease(otherEnv, node.id, incarnation, 'control')).toBe(false);
-    expect(await releaseNonLiveReverseTunnelLeases(otherEnv, 'control')).toBe(0);
-    expect(prepare).not.toHaveBeenCalled(); prepare.mockRestore();
-    expect(await runReverseTunnelLeaseSweep(env)).toEqual({ released: 1 });
-  });
+  it.each([undefined, 'cloudflare-tunnel', 'vm-public-dns', 'reverse-tunnel'])(
+    'C18: without an installed reverse driver all releases/sweep issue zero SQL even with selection %j',
+    async (transport) => {
+      const node = await freshNode(); await provisionNode(node.id, env);
+      const incarnation = readNode(node.id)!.incarnation!;
+      sqlite.prepare('DELETE FROM nodes WHERE id=?').run(node.id);
+      setEnv(reverseEnv({ VM_AGENT_TRANSPORT: transport }));
+      const prepare = vi.spyOn(env.DATABASE, 'prepare');
+      const installed = vi.spyOn(transportRegistry, 'nodeTransportExtension').mockReturnValue(undefined);
+      try {
+        expect(await releaseUnallocatedReverseTunnelLease(env, node.id, incarnation, 'control')).toBe(false);
+        expect(await releaseNonLiveReverseTunnelLeases(env, 'control')).toBe(0);
+        expect(await runReverseTunnelLeaseSweep(env)).toEqual({ released: null, skipReason: 'driver_not_installed' });
+        await releaseTerminatedNodeIngress(env, { id: node.id, runtime: 'vm', transport: 'reverse-tunnel' });
+        expect(prepare).not.toHaveBeenCalled();
+        expect(leases(node.id)).toMatchObject([{ status: 'active' }]);
+      } finally { installed.mockRestore(); prepare.mockRestore(); }
+      // The same releasable row is cleaned when its owning build driver is installed.
+      expect(await runReverseTunnelLeaseSweep(env)).toEqual({ released: 1 });
+      expect(leases(node.id)).toMatchObject([{ status: 'released' }]);
+    }
+  );
 });

@@ -23,6 +23,11 @@ projection after the shared migrations, rejecting filename collisions. Cloudflar
 not receive the reverse-tunnel lease table. Existing boxes keep the additive table created by
 the earlier migration number.
 
+The transport setting admits new leases. Existing allocations adopt their original lease only
+while its exact stored owner remains live. Cleanup and the backstop follow the installed
+self-host driver, so changing the setting cannot strand an old lease. A build without that
+driver performs no reverse-lease SQL.
+
 Lease credentials and frps session IDs use separate HKDF-derived HMAC keys. One pinned frps
 instance owns session replacement. Its Login plugin must apply the server-selected `run_id`
 with `unchange: false`, and every subsequent operation checks that session against the lease.
