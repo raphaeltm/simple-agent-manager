@@ -748,6 +748,49 @@ test.describe('Default capacity pool scope surfaces', () => {
     await editStressedPool(page, 'user', `default-capacity-pools-user-edit-${suffix}`);
   });
 
+  test('personal page on the shared pool warns when it cannot fit the installation default', async ({
+    page,
+  }, testInfo) => {
+    await setupCommonMocks(page, user, 'installation');
+    // The person has no pool of their own, so the page shows the shared (installation) pool,
+    // read-only. The installation overrides the default workspace to 8 vCPU / 16 GB; the
+    // largest allowed machine (16 GB) keeps 1 GB for its host, so nothing can place one.
+    const body = {
+      ...defaultsResponse('installation'),
+      placementSettings: {
+        version: 1,
+        sourceGeneration: 7,
+        legacyWorkloadAdapterVersion: 1,
+        selectionWeights: { priority: 1, price: 1, fit: 1, capacity: 1, candidateOrder: 1 },
+        rolloutCohortPercent: 100,
+        source: {
+          legacyWorkloadMapping: 'default',
+          platformDefaults: 'persisted',
+          selection: 'default',
+        },
+        resourceDefaults: {
+          legacyWorkloadMapping: {},
+          platformDefaults: { minVcpu: 8, minMemoryGb: 16, minDiskGb: 40, exclusiveNode: false },
+        },
+        hostMemoryReserveMb: 1024,
+      },
+    };
+    await page.route('**/api/capacity-pools/defaults*', (route) => jsonResponse(route, 200, body));
+    await page.goto('/settings/infrastructure');
+
+    const warning = page.getByText(/No allowed machine can run a default workspace/);
+    await expect(warning).toBeVisible();
+    await expect(warning).toContainText('It needs 8 vCPU and 16 GB of memory');
+    await expect(warning).toContainText('at least 8 vCPU and 17 GB of memory');
+    await expect(page.getByText(/Your work uses the shared compute pool/)).toBeVisible();
+    await assertNoOverflow(page);
+    await screenshotNearHeading(
+      page,
+      POOL_HEADINGS.user,
+      `default-capacity-pools-user-fit-warning-${getProjectSuffix(testInfo.project.name)}`
+    );
+  });
+
   test('admin surface renders stressed installation default pool without overflow', async ({
     page,
   }, testInfo) => {

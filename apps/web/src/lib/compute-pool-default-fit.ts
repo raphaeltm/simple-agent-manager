@@ -1,7 +1,7 @@
 import type { SafeCapacityPoolPlacementSettingsSummary } from '@simple-agent-manager/shared';
 
-import { formatOfferingNumber } from './compute-pool-offerings';
 import type { MachineGroup } from './compute-pool-machines';
+import { formatOfferingNumber } from './compute-pool-offerings';
 
 /** What a default workspace asks for on this installation, as the pool response reports it. */
 type DefaultFitSettings = Pick<SafeCapacityPoolPlacementSettingsSummary, 'resourceDefaults'> & {

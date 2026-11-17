@@ -331,6 +331,9 @@ async function typeAndSend(text: string) {
   });
 }
 
+/** The no-profiles gate's heading: one-click for a single agent, otherwise the wizard. */
+const NO_PROFILES_GATE = /^(Ready to chat|Create a profile to start)$/;
+
 describe('Project Overview', () => {
   beforeEach(() => {
     recorded = [];
@@ -822,18 +825,19 @@ describe('Project Overview', () => {
       // Liveness: the page and the box are up, the agents are known.
       await screen.findByRole('region', { name: 'Running now' });
       await screen.findByPlaceholderText(/Start a task/);
-      expect(screen.queryByText('Create a profile to start')).not.toBeInTheDocument();
+      // Either form of the no-profiles gate (one-click for one agent, or the wizard).
+      expect(screen.queryByText(NO_PROFILES_GATE)).not.toBeInTheDocument();
       await act(async () => {
         release();
       });
       await screen.findByText('Opus 5.5 Build', { selector: 'button *' });
-      expect(screen.queryByText('Create a profile to start')).not.toBeInTheDocument();
+      expect(screen.queryByText(NO_PROFILES_GATE)).not.toBeInTheDocument();
     });
 
     it('still offers to create a profile when the project really has none (control)', async () => {
       profileItems = [];
       renderOverview();
-      expect(await screen.findByText('Create a profile to start')).toBeInTheDocument();
+      expect(await screen.findByText(NO_PROFILES_GATE)).toBeInTheDocument();
     });
   });
 });

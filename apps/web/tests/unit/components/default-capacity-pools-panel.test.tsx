@@ -200,7 +200,7 @@ describe('DefaultCapacityPoolsPanel', () => {
       expect(warning).toHaveTextContent('It needs 2 vCPU and 8 GB of memory');
       expect(warning).toHaveTextContent('keeps 1 GB for itself');
       expect(warning).toHaveTextContent('at least 2 vCPU and 9 GB of memory');
-      expect(screen.getByText(/This project uses|the shared compute pool/)).toBeInTheDocument();
+      expect(screen.getByText(/Your work uses the shared compute pool/)).toBeInTheDocument();
     });
 
     it('warns when the installation host reserve leaves too little memory', async () => {

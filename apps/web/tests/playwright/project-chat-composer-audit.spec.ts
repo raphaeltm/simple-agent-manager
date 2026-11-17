@@ -232,6 +232,11 @@ async function captureComposerAudit(page: Page, name: string) {
   await assertNoOverflow(page);
 }
 
+/** What GET /api/config/instant-runtime answers; a Cloudflare install without containers says no. */
+let instantRuntimeEnabled = true;
+/** Profiles created through POST /agent-profiles during one test (the one-click gate). */
+let createdProfiles: Record<string, unknown>[] = [];
+
 async function setupApiMocks(page: Page, mode: AuditMode, profiles = AGENT_PROFILES) {
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route: Route) => {
     const url = new URL(route.request().url());
@@ -240,6 +245,9 @@ async function setupApiMocks(page: Page, mode: AuditMode, profiles = AGENT_PROFI
       route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
+    if (path === '/api/config/instant-runtime') {
+      return respond(200, { enabled: instantRuntimeEnabled });
+    }
     if (path.startsWith('/api/notifications'))
       return respond(200, { notifications: [], unreadCount: 0 });
     if (path.startsWith('/api/credentials'))
@@ -297,6 +305,18 @@ async function setupApiMocks(page: Page, mode: AuditMode, profiles = AGENT_PROFI
     const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (projectMatch) {
       const subPath = projectMatch[2] || '';
+      if (subPath === '/agent-profiles' && route.request().method() === 'POST') {
+        const body = route.request().postDataJSON() as Record<string, unknown>;
+        const created = makeAgentProfile({
+          ...body,
+          id: `profile-created-${createdProfiles.length}`,
+        });
+        createdProfiles.push(created);
+        return respond(201, created);
+      }
+      if (subPath === '/agent-profiles' && createdProfiles.length > 0) {
+        return respond(200, { items: createdProfiles });
+      }
       if (subPath === '/agent-profiles') {
         return respond(200, {
           items:
@@ -393,6 +413,11 @@ async function chooseWizardOption(page: Page, label: RegExp) {
 }
 
 test.describe('Project chat composer audit', () => {
+  test.beforeEach(() => {
+    instantRuntimeEnabled = true;
+    createdProfiles = [];
+  });
+
   test('new-chat composer handles controls, long text, slash, and mentions', async ({
     page,
   }, testInfo) => {
@@ -466,18 +491,30 @@ test.describe('Project chat composer audit', () => {
     );
   });
 
-  test('single-agent no-profile state gates composer and opens shortened wizard', async ({
+  test('single-agent no-profile state offers one click and opens the shortened wizard', async ({
     page,
   }, testInfo) => {
     await openMockedChat(page, 'single-wizard');
 
-    await expect(page.getByText(/Choose an agent and default runtime settings/)).toBeVisible();
-    await captureNoProfileGate(
+    await expect(page.getByText('Ready to chat')).toBeVisible();
+    await expect(
+      page.getByText(
+        /One click creates a profile named "OpenAI Codex With A Long Friendly Name Chat"/
+      )
+    ).toBeVisible();
+    const quickStart = page.getByRole('button', {
+      name: /Start chatting with OpenAI Codex With A Long Friendly Name/,
+    });
+    await expect(quickStart).toBeVisible();
+    await expectComposerDisabled(page);
+    await captureComposerAudit(
       page,
       `project-chat-profile-gate-single-${getProjectSuffix(testInfo.project.name)}`
     );
+    // Nothing is created until the click.
+    expect(createdProfiles).toHaveLength(0);
 
-    await openProfileWizard(page);
+    await page.getByRole('button', { name: /^Customize/ }).click();
     await expect(page.getByText('What kind of work?')).toBeVisible();
     await expect(page.getByText('Which agent?')).toHaveCount(0);
     await captureComposerAudit(
@@ -490,6 +527,50 @@ test.describe('Project chat composer audit', () => {
     await captureComposerAudit(
       page,
       `project-chat-profile-wizard-single-runtime-${getProjectSuffix(testInfo.project.name)}`
+    );
+  });
+
+  test('one click creates the chat profile and unlocks the composer', async ({
+    page,
+  }, testInfo) => {
+    await openMockedChat(page, 'single-wizard');
+
+    await page
+      .getByRole('button', { name: /Start chatting with OpenAI Codex With A Long Friendly Name/ })
+      .click();
+
+    const textarea = page.locator('textarea[role="combobox"]');
+    await expect(textarea).toBeEnabled();
+    await expect(page.getByRole('button', { name: /^To / })).toContainText(
+      'OpenAI Codex With A Long Friendly Name Chat'
+    );
+    await expect(page.getByText('Ready to chat')).toHaveCount(0);
+    expect(createdProfiles).toHaveLength(1);
+    expect(createdProfiles[0]).toMatchObject({
+      agentType: 'openai-codex',
+      runtime: 'cf-container',
+      taskMode: 'conversation',
+    });
+    await captureComposerAudit(
+      page,
+      `project-chat-profile-gate-single-created-${getProjectSuffix(testInfo.project.name)}`
+    );
+  });
+
+  test('without Instant, one click makes a Cloud VM profile and the wizard disables Instant', async ({
+    page,
+  }, testInfo) => {
+    instantRuntimeEnabled = false;
+    await openMockedChat(page, 'single-wizard');
+
+    await page.getByRole('button', { name: /^Customize/ }).click();
+    await chooseWizardOption(page, /Chat and explore/i);
+    const instant = page.getByRole('button', { name: /Instant container/i });
+    await expect(instant).toBeDisabled();
+    await expect(instant).toContainText('Not available on this installation');
+    await captureComposerAudit(
+      page,
+      `project-chat-profile-wizard-no-instant-${getProjectSuffix(testInfo.project.name)}`
     );
   });
 

@@ -1723,9 +1723,7 @@ describe('ProjectChat profile setup wizard', () => {
     mocks.getInstantRuntimeEnabled.mockResolvedValue(false);
     renderProjectChat();
 
-    fireEvent.click(
-      await screen.findByRole('button', { name: /Start chatting with Claude Code/ })
-    );
+    fireEvent.click(await screen.findByRole('button', { name: /Start chatting with Claude Code/ }));
 
     await waitFor(() => expect(mocks.createAgentProfile).toHaveBeenCalledTimes(1));
     expect(mocks.createAgentProfile).toHaveBeenCalledWith(
@@ -1744,9 +1742,7 @@ describe('ProjectChat profile setup wizard', () => {
     mocks.createAgentProfile.mockRejectedValueOnce(new Error('Profile limit reached'));
     renderProjectChat();
 
-    fireEvent.click(
-      await screen.findByRole('button', { name: /Start chatting with Claude Code/ })
-    );
+    fireEvent.click(await screen.findByRole('button', { name: /Start chatting with Claude Code/ }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Profile limit reached');
     expect(mocks.createAgentProfile).toHaveBeenCalledTimes(1);

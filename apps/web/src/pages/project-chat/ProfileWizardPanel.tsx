@@ -369,7 +369,11 @@ export function NoProfilesGate({
   };
 
   return (
-    <div className="mb-3 flex flex-col gap-3 rounded-lg border border-accent/20 bg-accent/5 p-3 sm:flex-row sm:items-center">
+    // With a quick start the agent's name sits in the button, so the text gets its own row
+    // instead of sharing one with buttons whose width depends on that name.
+    <div
+      className={`mb-3 flex flex-col gap-3 rounded-lg border border-accent/20 bg-accent/5 p-3 ${quickStart ? '' : 'sm:flex-row sm:items-center'}`}
+    >
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-fg-primary">
           {quickStart ? 'Ready to chat' : 'Create a profile to start'}
@@ -385,13 +389,13 @@ export function NoProfilesGate({
           </div>
         )}
       </div>
-      <div className="flex min-w-0 flex-col gap-2 sm:shrink-0 sm:flex-row">
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap">
         {quickStart && (
           <button
             type="button"
             onClick={() => void handleQuickStart()}
             disabled={creating}
-            className={`${GATE_PRIMARY_BUTTON} break-words`}
+            className={`${GATE_PRIMARY_BUTTON} min-w-0 break-words text-center`}
           >
             {creating ? 'Creating profile…' : `Start chatting with ${quickStart.agentName}`}
             <ChevronRight size={15} aria-hidden />
