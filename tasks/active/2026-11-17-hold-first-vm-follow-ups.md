@@ -1,0 +1,40 @@
+# Hold follow-ups before the first VM (#2847)
+
+## Scope and authorization
+
+DRAFT PR ONLY. Do not mark ready, merge, deploy production, or open GitHub issues.
+SAM task: 01M7MC453ZXPZ0TQA2RF08FJ1D. Idea: [01M7MC3E482AXTABR5G68BQRV2](https://app.simple-agent-manager.org/projects/01KHRJGANBBWGDY1NZ0KVF0D4J/ideas/01M7MC3E482AXTABR5G68BQRV2).
+
+## Problem and preflight
+
+A follow-up while the initial task waits for capacity reaches sleep recovery with no workspace or sleep snapshot, fails with `sleeping_snapshot_missing`, and fails the conversation. This is a business-logic-change crossing D1 task/runtime state and the ProjectData durable inbox. Keep the existing queue, attempt policy and TTL.
+
+Research baseline: e5c5aa4f77e6adf389a24b25b9470a69c24acbff. Rechecked upstream main, 24 open PR titles, SAM task search for resolver and idea search for the refusal on 2026-11-17; no overlapping initial-start fix. Related #2693 and genuine sleep/Instant failures are distinct. Production anomaly sweep confirms genuine queued wakes exist; it does not reproduce the external reporter's case (no runtime IDs supplied).
+
+Prior art: [leonceaklin's report](https://github.com/raphaeltm/simple-agent-manager/issues/2847) and [fork PR #17](https://github.com/zebra-pig/simple-agent-manager/pull/17). Independently reviewed candidate patch: starting task status alone cannot distinguish recovery, because recovery requeues tasks. Retained `sleeping_at` must preserve recovery authority. Credit reporter's diagnosis and approach in upstream PR.
+
+Data flow: user follow-up → ProjectData acceptPromptDelivery → session_inbox claim/runPromptDeliveryClaim → DefaultVmPromptDeliveryAdapter → resolveVmPromptDeliveryTarget → D1 runtime/startup lookup → retry or VM prompt acceptance. Existing first-turn activity gate and turn-end nudge own ordering. TTL, not capacity retries, bounds waiting.
+
+## Writer inventory and design
+
+- `submit-vm-task.ts` / `submit-vm-task-effects.ts`, reserved submission storage, MCP dispatch, /sam dispatch/retry, trigger submission, project orchestrator: inspect exact task/chat binding creation before the runtime exists.
+- TaskRunner `ensureSessionLinked` binds both task and workspace; workspace becomes ready before agent-session step commits `transitionToInProgress` (delegated → in_progress).
+- `session-recovery.ts` reuses/requeues or replaces the task; retains sleep snapshot and releases previous task/workspace chat links. Snapshot lifecycle may create a checkpoint before any sleep; mere snapshot presence must not exclude startup.
+- Nullers (recovery cleanup, unlink/stop) must not qualify an unrelated task. Query binds both project and exact chat; never falls back to project-wide queued work.
+- Change only no-workspace target resolution. Add one bounded existence read there; no extra queries on live runtime path. Target file is 494 lines, so isolate startup lookup in a small service to stay within source-size rule.
+- No public API, env, schema, or architecture change. Existing queue contract is restored; document behavior and validation here and in PR, with no broad reference-doc churn.
+
+## Checklist / acceptance
+
+- [ ] Finish writer inventory with exact paths and verification evidence.
+- [ ] Real-D1 regression goes red pre-fix for initial queued/delegated follow-ups.
+- [ ] Hold draft/ready/queued/delegated conversations without retained sleep, without recovery or failure.
+- [ ] Real durable inbox keeps retry attempts below cap; delivers after readiness and first turn end.
+- [ ] Existing TTL expires a still-waiting follow-up without renewal.
+- [ ] Genuine slept sessions with queued recovery tasks still reach recovery.
+- [ ] in_progress missing runtime, terminal tasks, project/chat mismatch, snapshot authority and allowWake=false controls retain behavior.
+- [ ] Relevant local tests, lint/typecheck/build and full dispatched CI complete.
+- [ ] Local specialist reviews complete and findings resolved.
+- [ ] Reserve/deploy staging, verify changed flow, clean up and release lease.
+- [ ] Draft PR includes Closes #2847, contribution credit, review/CI/staging evidence and explicit draft-only constraint.
+- [ ] Update SAM idea with PR and findings; leave task file active pending human completion confirmation.
