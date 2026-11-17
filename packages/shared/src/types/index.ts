@@ -1272,8 +1272,12 @@ export {
   INBOX_TASK_STEP_EVENT_TYPES,
 } from './inbox-tasks';
 
-// Admin Health & cost (Insights slice H)
+// Admin Health & cost (Insights slices H and CF)
 export type {
+  InstallationCloudflareCost,
+  InstallationCloudflareCostStatus,
+  InstallationCloudflareProductLine,
+  InstallationCloudflareRefreshResponse,
   InstallationComputeCurrencySpend,
   InstallationComputeProviderSpend,
   InstallationComputeSpend,

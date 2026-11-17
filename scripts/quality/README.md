@@ -244,6 +244,11 @@ does not dilute the recent-rate projection; pass `--end-date=YYYY-MM-DD` for an 
 read. The script fails closed when credentials are absent, when Cloudflare GraphQL returns errors,
 or when a dataset reaches the query limit and might be partial.
 
+The query, the list prices and the analysis live in `packages/shared/src/cloudflare-cost/`, shared
+with the API Worker's daily snapshot behind the Cloudflare card on Admin → Health & cost
+(`apps/api/src/services/cloudflare-cost-snapshot.ts`), so both report the same numbers. Workers
+requests exclude tail-worker invocations (`eventType = tail`); their CPU time is counted.
+
 Metric choices are deliberate:
 
 - Durable Objects duration uses `durableObjectsPeriodicGroups.sum.duration` ("Sum of Duration -
