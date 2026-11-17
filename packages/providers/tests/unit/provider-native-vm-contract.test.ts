@@ -748,7 +748,8 @@ describe('provider native VM request contracts', () => {
       throw new Error(`Unexpected request ${url}`);
     }) as typeof fetch;
 
-    const provider = new InfomaniakProvider('id', 'secret', { authUrl });
+    // The explicit 96 GB request must fit the configured boot volume size.
+    const provider = new InfomaniakProvider('id', 'secret', { authUrl, bootVolumeSizeGb: 96 });
     const first = await provider.createVM({
       ...nativeOnlyConfig(nativeConfig('small').native!),
       location: 'dc4-a',

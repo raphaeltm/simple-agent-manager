@@ -2,6 +2,7 @@ import type { CredentialProvider, VMSize } from '@simple-agent-manager/shared';
 
 import {
   applyInfomaniakBootVolumeSize,
+  assertInfomaniakRequestedBootVolumeAllowed,
   INFOMANIAK_BOOT_VOLUME_LIMITS,
   infomaniakBootVolumeMapping,
   infomaniakDefaultBootVolumeGb,
@@ -305,6 +306,10 @@ export class InfomaniakProvider implements Provider {
       minBootDiskSizeGb: INFOMANIAK_BOOT_VOLUME_LIMITS.min,
       maxBootDiskSizeGb: INFOMANIAK_BOOT_VOLUME_LIMITS.max,
     });
+    assertInfomaniakRequestedBootVolumeAllowed(
+      config.native?.bootDiskSizeGb,
+      this.bootVolumeSizeGb
+    );
     // Resolution always sets bootDiskSizeGb (the default above returns a number); the fallback only
     // narrows the optional type.
     const bootVolumeGb = nativeConfig.bootDiskSizeGb ?? this.bootVolumeSizeGb;

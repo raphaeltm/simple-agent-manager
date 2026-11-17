@@ -23,7 +23,7 @@ import {
 } from '@simple-agent-manager/shared';
 
 import type { NativeVMConfigSource } from './native-vm-config';
-import type { NativeVMConfig, VMHardwareResources } from './types';
+import { type NativeVMConfig, ProviderError, type VMHardwareResources } from './types';
 
 export {
   DEFAULT_INFOMANIAK_BOOT_VOLUME_GB,
@@ -61,6 +61,26 @@ function isValidBootVolumeGb(value: unknown): value is number {
     Number.isInteger(value) &&
     value >= INFOMANIAK_BOOT_VOLUME_MIN_GB &&
     value <= INFOMANIAK_BOOT_VOLUME_MAX_GB
+  );
+}
+
+/**
+ * An explicit `bootDiskSizeGb` is a user-supplied value (`POST /api/nodes`, workspace create), and
+ * the VM may run on a shared platform credential, so the configured size is the largest volume a
+ * request may ask for: the admin decides how much block storage one node can take. Smaller explicit
+ * sizes down to the minimum are allowed. Sizes carried by a pool plan are server-derived and are not
+ * limited here. Throws `invalid_config` before any provider request.
+ */
+export function assertInfomaniakRequestedBootVolumeAllowed(
+  requestedGb: number | undefined,
+  configuredSizeGb: number
+): void {
+  if (requestedGb === undefined || requestedGb <= configuredSizeGb) return;
+  throw new ProviderError(
+    'infomaniak',
+    400,
+    `bootDiskSizeGb ${requestedGb}GB exceeds the configured Infomaniak boot volume size of ${configuredSizeGb}GB (admin setting infomaniak.bootVolumeGb)`,
+    { category: 'invalid_config' }
   );
 }
 

@@ -190,7 +190,54 @@ describe('Infomaniak boot volume (#2842)', () => {
     expect((vm.observedHardware.resources.value as { diskGb: number }).diskGb).toBe(expectedGb);
   });
 
-  it('honours an explicit bootDiskSizeGb above the flavor root disk', async () => {
+  it.each([
+    ['between the flavor disk and the configured size', 80, 60],
+    ['equal to the configured size', 80, 80],
+    ['above the flavor disk when an admin raised the setting', 250, 200],
+  ])('honours an explicit bootDiskSizeGb %s', async (_label, configuredGb, requestedGb) => {
+    const nova = fakeNova();
+    const provider = new InfomaniakProvider('id', 'secret', {
+      authUrl: AUTH_URL,
+      bootVolumeSizeGb: configuredGb,
+    });
+
+    await provider.createVM({
+      ...baseConfig,
+      native: {
+        instanceType: 'a4-ram8-disk20-perf1',
+        bootDiskSizeGb: requestedGb,
+        resources: { vcpuCount: 4, memoryMb: 8192, diskGb: 20 },
+      },
+    });
+
+    expect(lastMapping(nova).volume_size).toBe(requestedGb);
+    expect(nova.createBodies[0]?.server.metadata).toMatchObject({
+      [INFOMANIAK_ROOT_DISK_METADATA_KEY]: String(requestedGb),
+    });
+  });
+
+  it('refuses an explicit bootDiskSizeGb above the configured size before any request', async () => {
+    // A user-supplied size may land on a shared platform credential: the admin setting caps it.
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    const provider = new InfomaniakProvider('id', 'secret', { authUrl: AUTH_URL });
+
+    await expect(
+      provider.createVM({
+        ...baseConfig,
+        native: {
+          instanceType: 'a4-ram8-disk20-perf1',
+          bootDiskSizeGb: 4_096,
+          resources: { vcpuCount: 4, memoryMb: 8192, diskGb: 80 },
+        },
+      })
+    ).rejects.toMatchObject({
+      category: 'invalid_config',
+      message: expect.stringContaining('infomaniak.bootVolumeGb'),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('does not cap a server-derived plan disk above the configured size', async () => {
     const nova = fakeNova();
     const provider = new InfomaniakProvider('id', 'secret', { authUrl: AUTH_URL });
 
@@ -198,15 +245,11 @@ describe('Infomaniak boot volume (#2842)', () => {
       ...baseConfig,
       native: {
         instanceType: 'a4-ram8-disk20-perf1',
-        bootDiskSizeGb: 200,
-        resources: { vcpuCount: 4, memoryMb: 8192, diskGb: 20 },
+        resources: { vcpuCount: 4, memoryMb: 8192, diskGb: 300 },
       },
     });
 
-    expect(lastMapping(nova).volume_size).toBe(200);
-    expect(nova.createBodies[0]?.server.metadata).toMatchObject({
-      [INFOMANIAK_ROOT_DISK_METADATA_KEY]: '200',
-    });
+    expect(lastMapping(nova).volume_size).toBe(300);
   });
 
   it('records the real size even when caller labels carry a stale root-disk key', async () => {
