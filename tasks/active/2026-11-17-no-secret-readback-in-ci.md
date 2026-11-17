@@ -83,4 +83,24 @@ regardless.
 
 ## Audit
 
-(filled in during implementation)
+All 26 workflows (there is no `.github/actions/`) and the scripts they call were checked for
+secret readback, decryption in CI, `set -x`, echo of secret-bearing variables, env dumps,
+transformed secrets, and secrets in summaries, outputs or artifacts. Nothing prints a raw
+GitHub secret today.
+
+- Fixed here:
+  - the staging2 bootstrap read, decryption and copying;
+  - the derive-trust step;
+  - the `configure-secrets.sh` readback, now masked and tracked;
+  - `set -euxo pipefail` ×3 in `devcontainer-cache-experiments.yml`;
+  - a raw dump of minted registry credentials in the same workflow;
+  - `set -eux` in the fixture Dockerfile written by `scripts/ci/prepare-devcontainer-fixture-images.sh`.
+- Tracked:
+  - the Pulumi readback, in `tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md` (idea
+    01M7M5PJCY4T3CR715AFKRM74R);
+  - the shared-engine JSON secret bundle, the setup-token mask under the engine, bearer tokens
+    on curl command lines, the experiments workflow's R2 keys on a command line and its
+    registry password in `$GITHUB_ENV`, and the installer client secret, in
+    `tasks/backlog/2026-11-17-ci-secret-handling-audit-followups.md`.
+- Clean: no `printenv`/`env` dumps, `pulumi config get`, `wrangler secret` reads or `gh secret`
+  reads anywhere. Artifacts carry no secrets.
