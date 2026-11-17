@@ -52,7 +52,7 @@ packages/
 ├── repo-hosting/ # GitHub App and OAuth, GitLab, repository browsing
 ├── terminal/     # Shared terminal component
 ├── cloud-init/   # Cloud-init template generator
-├── cron/         # Cron expressions for triggers: validation, next fire time, descriptions
+├── cron/         # Cron parsing for triggers
 ├── acp-client/   # Shared ACP React components (MessageBubble, MessageActions, AudioPlayer)
 ├── eslint-plugin-sam/ # Unpublished repository-specific ESLint boundary rules
 ├── ui/           # Design system tokens and shared UI components

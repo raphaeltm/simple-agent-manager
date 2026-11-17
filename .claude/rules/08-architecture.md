@@ -13,8 +13,8 @@ No database is required for the MVP.
 ```
 @simple-agent-manager/shared
     ^
-@simple-agent-manager/providers   @simple-agent-manager/worker-core   @simple-agent-manager/scheduler-core   @simple-agent-manager/cron
-    ^                                 ^                                   ^                                      ^
+@simple-agent-manager/providers   @simple-agent-manager/worker-core   @simple-agent-manager/scheduler-core
+    ^                                 ^                                   ^
 worker module packages: project-data, operations, app-deployment, ai-proxy, agent-email, repo-hosting
     ^
 @simple-agent-manager/api
