@@ -197,6 +197,25 @@ async function seedMissionFixture(label: string) {
   return { userId, projectId, missionId, token };
 }
 
+async function seedUnclaimedMissionTask(
+  fixture: Awaited<ReturnType<typeof seedMissionFixture>>,
+  label: string
+): Promise<string> {
+  const taskId = unique(label);
+  await seedTask(taskId, fixture.projectId, fixture.userId, {
+    status: 'queued',
+    title: `Test ${label}`,
+  });
+  await env.DATABASE.prepare(
+    `UPDATE tasks
+     SET mission_id = ?, scheduler_state = 'schedulable', description = ?
+     WHERE id = ?`
+  )
+    .bind(fixture.missionId, `Run ${label}`, taskId)
+    .run();
+  return taskId;
+}
+
 async function dispatchMissionTask(
   fixture: Awaited<ReturnType<typeof seedMissionFixture>>,
   description: string,
@@ -639,6 +658,114 @@ describe('mission dispatch has exactly one starter', () => {
       claimedSessionId,
     ]);
     expect((await taskRow(dispatched.taskId))?.chat_session_id).toBe(claimedSessionId);
+  });
+
+  it('pause and resume invalidate an in-flight cycle before it can claim or start work', async () => {
+    const fixture = await seedMissionFixture('pause-resume-race');
+    const taskId = await seedUnclaimedMissionTask(fixture, 'pause-resume-task');
+    const entered = deferred<string>();
+    const release = deferred<void>();
+    const createSession = projectDataService.createSession;
+    let held = false;
+    vi.spyOn(projectDataService, 'createSession').mockImplementation(async (...args) => {
+      const sessionId = await createSession(...args);
+      if (!held && args[4] === taskId) {
+        held = true;
+        entered.resolve(sessionId);
+        await release.promise;
+      }
+      return sessionId;
+    });
+
+    let orphanSessionId = '';
+    await runInDurableObject(orchestratorStub(fixture.projectId), async (instance) => {
+      const staleCycle = instance.alarm();
+      orphanSessionId = await entered.promise;
+      expect(await instance.pauseMission(fixture.projectId, fixture.missionId)).toBe(true);
+      expect(await instance.resumeMission(fixture.projectId, fixture.missionId)).toBe(true);
+      release.resolve();
+      await staleCycle;
+      await instance.ctx.storage.deleteAlarm();
+    });
+
+    expect(await taskRow(taskId)).toMatchObject({
+      status: 'queued',
+      scheduler_state: 'schedulable',
+      chat_session_id: null,
+    });
+    expect(await taskRunnerStub(taskId).getStatus()).toBeNull();
+    expect(
+      await projectDataService.getSession(testEnv, fixture.projectId, orphanSessionId)
+    ).toMatchObject({ status: 'stopped' });
+
+    // A fresh cycle in the resumed generation still dispatches ordinary work.
+    await runInDurableObject(orchestratorStub(fixture.projectId), async (instance) => {
+      await instance.alarm();
+      await instance.ctx.storage.deleteAlarm();
+    });
+    expect(await taskRow(taskId)).toMatchObject({
+      status: 'queued',
+      scheduler_state: 'schedulable',
+      chat_session_id: expect.any(String),
+    });
+    expect(await taskRunnerStub(taskId).getStatus()).toMatchObject({
+      currentStep: 'node_selection',
+    });
+  });
+
+  it('still auto-dispatches an unclaimed task while its D1 mission is planning', async () => {
+    const fixture = await seedMissionFixture('planning-dispatch');
+    const taskId = await seedUnclaimedMissionTask(fixture, 'planning-task');
+    await env.DATABASE.prepare("UPDATE missions SET status = 'planning' WHERE id = ?")
+      .bind(fixture.missionId)
+      .run();
+
+    await runOrchestratorCycleOver(fixture.projectId, fixture.missionId);
+
+    expect(await taskRow(taskId)).toMatchObject({
+      status: 'queued',
+      scheduler_state: 'schedulable',
+      chat_session_id: expect.any(String),
+    });
+    expect(await taskRunnerStub(taskId).getStatus()).toMatchObject({
+      currentStep: 'node_selection',
+    });
+  });
+
+  it('cancellation wins while an in-flight cycle is creating its dispatch session', async () => {
+    const fixture = await seedMissionFixture('cancel-race');
+    const taskId = await seedUnclaimedMissionTask(fixture, 'cancel-task');
+    const entered = deferred<string>();
+    const release = deferred<void>();
+    const createSession = projectDataService.createSession;
+    vi.spyOn(projectDataService, 'createSession').mockImplementation(async (...args) => {
+      const sessionId = await createSession(...args);
+      if (args[4] === taskId) {
+        entered.resolve(sessionId);
+        await release.promise;
+      }
+      return sessionId;
+    });
+
+    let orphanSessionId = '';
+    await runInDurableObject(orchestratorStub(fixture.projectId), async (instance) => {
+      const staleCycle = instance.alarm();
+      orphanSessionId = await entered.promise;
+      expect(await instance.cancelMission(fixture.projectId, fixture.missionId)).toBe(true);
+      release.resolve();
+      await staleCycle;
+      await instance.ctx.storage.deleteAlarm();
+    });
+
+    expect(await taskRow(taskId)).toMatchObject({
+      status: 'cancelled',
+      scheduler_state: 'cancelled',
+      chat_session_id: null,
+    });
+    expect(await taskRunnerStub(taskId).getStatus()).toBeNull();
+    expect(
+      await projectDataService.getSession(testEnv, fixture.projectId, orphanSessionId)
+    ).toMatchObject({ status: 'stopped' });
   });
 
   it('the /sam dispatch_task and retry_subtask creators own their mission tasks from the insert', async () => {

@@ -127,6 +127,14 @@ describe('Orchestrator Migrations', () => {
       expect(migration.sql.toUpperCase()).not.toContain('DROP TABLE');
     }
   });
+
+  it('adds a monotonic dispatch generation with a legacy-safe default', () => {
+    const migration = ORCHESTRATOR_MIGRATIONS.find(
+      (entry) => entry.name === '003_dispatch_generation'
+    );
+    expect(migration?.sql).toContain('ADD COLUMN dispatch_generation');
+    expect(migration?.sql).toContain('NOT NULL DEFAULT 1');
+  });
 });
 
 describe('Orchestrator MCP Tool Definitions', () => {

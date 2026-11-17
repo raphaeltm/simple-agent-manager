@@ -33,6 +33,7 @@ import { log } from '../../lib/logger';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import { mapRows, parseRowOrNull } from '../row-validation';
 import { logDecision, pruneDecisionLog } from './decision-log';
+import { isMissionDispatchCurrent } from './dispatch-fence';
 import { runOrchestratorMigrations } from './migrations';
 import { runSchedulingCycle } from './scheduling';
 
@@ -76,6 +77,7 @@ const MissionIdRowSchema = v.object({ mission_id: v.string() });
 export class ProjectOrchestrator extends DurableObject<Env> {
   private projectId: string | null = null;
   private cycleLock: Promise<void> = Promise.resolve();
+  private missionLifecycleLock: Promise<unknown> = Promise.resolve();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -138,113 +140,102 @@ export class ProjectOrchestrator extends DurableObject<Env> {
    * Pause a mission — stops scheduling new tasks but running tasks continue.
    */
   async pauseMission(projectId: string, missionId: string): Promise<boolean> {
-    // Workflow steering is not exposed in Phase 0; do not let legacy mission
-    // controls bypass workflow ownership or alter durable step state.
-    if (
-      await this.env.DATABASE.prepare(
-        'SELECT 1 FROM missions WHERE id = ? AND workflow_plan_json IS NOT NULL'
-      )
-        .bind(missionId)
-        .first()
-    )
-      return false;
-    this.projectId = projectId;
-    const sql = this.ctx.storage.sql;
-    const result = sql.exec(
-      `UPDATE orchestrator_missions SET status = 'paused' WHERE mission_id = ? AND status = 'active'`,
-      missionId
-    );
-    if (result.rowsWritten === 0) return false;
+    return this.withMissionLifecycleLock(async () => {
+      // Workflow steering is not exposed in Phase 0; do not let legacy mission
+      // controls bypass workflow ownership or alter durable step state.
+      if (await this.isWorkflowMission(missionId)) return false;
+      this.projectId = projectId;
+      const sql = this.ctx.storage.sql;
+      const result = sql.exec(
+        `UPDATE orchestrator_missions
+         SET status = 'paused', dispatch_generation = dispatch_generation + 1
+         WHERE mission_id = ? AND status = 'active'`,
+        missionId
+      );
+      if (result.rowsWritten === 0) return false;
 
-    logDecision(sql, missionId, null, 'pause', 'Mission paused by user', Date.now());
+      logDecision(sql, missionId, null, 'pause', 'Mission paused by user', Date.now());
 
-    // Update D1 mission status
-    await this.env.DATABASE.prepare('UPDATE missions SET status = ?, updated_at = ? WHERE id = ?')
-      .bind('paused', new Date().toISOString(), missionId)
-      .run();
+      // Update D1 mission status
+      await this.env.DATABASE.prepare('UPDATE missions SET status = ?, updated_at = ? WHERE id = ?')
+        .bind('paused', new Date().toISOString(), missionId)
+        .run();
 
-    log.info('orchestrator.mission_paused', { projectId, missionId });
-    return true;
+      log.info('orchestrator.mission_paused', { projectId, missionId });
+      return true;
+    });
   }
 
   /**
    * Resume a paused mission — re-enables scheduling.
    */
   async resumeMission(projectId: string, missionId: string): Promise<boolean> {
-    // Workflow steering is not exposed in Phase 0; do not let legacy mission
-    // controls bypass workflow ownership or alter durable step state.
-    if (
-      await this.env.DATABASE.prepare(
-        'SELECT 1 FROM missions WHERE id = ? AND workflow_plan_json IS NOT NULL'
-      )
-        .bind(missionId)
-        .first()
-    )
-      return false;
-    this.projectId = projectId;
-    const sql = this.ctx.storage.sql;
-    const result = sql.exec(
-      `UPDATE orchestrator_missions SET status = 'active' WHERE mission_id = ? AND status = 'paused'`,
-      missionId
-    );
-    if (result.rowsWritten === 0) return false;
+    return this.withMissionLifecycleLock(async () => {
+      // Workflow steering is not exposed in Phase 0; do not let legacy mission
+      // controls bypass workflow ownership or alter durable step state.
+      if (await this.isWorkflowMission(missionId)) return false;
+      this.projectId = projectId;
+      const sql = this.ctx.storage.sql;
+      const result = sql.exec(
+        `UPDATE orchestrator_missions
+         SET status = 'active', dispatch_generation = dispatch_generation + 1
+         WHERE mission_id = ? AND status = 'paused'`,
+        missionId
+      );
+      if (result.rowsWritten === 0) return false;
 
-    logDecision(sql, missionId, null, 'resume', 'Mission resumed by user', Date.now());
+      logDecision(sql, missionId, null, 'resume', 'Mission resumed by user', Date.now());
 
-    // Update D1 mission status
-    await this.env.DATABASE.prepare('UPDATE missions SET status = ?, updated_at = ? WHERE id = ?')
-      .bind('active', new Date().toISOString(), missionId)
-      .run();
+      // Update D1 mission status
+      await this.env.DATABASE.prepare('UPDATE missions SET status = ?, updated_at = ? WHERE id = ?')
+        .bind('active', new Date().toISOString(), missionId)
+        .run();
 
-    log.info('orchestrator.mission_resumed', { projectId, missionId });
-    await this.armAlarm();
-    return true;
+      log.info('orchestrator.mission_resumed', { projectId, missionId });
+      await this.armAlarm();
+      return true;
+    });
   }
 
   /**
    * Cancel a mission — marks pending tasks as cancelled.
    */
   async cancelMission(projectId: string, missionId: string): Promise<boolean> {
-    // Workflow steering is not exposed in Phase 0; do not let legacy mission
-    // controls bypass workflow ownership or alter durable step state.
-    if (
+    return this.withMissionLifecycleLock(async () => {
+      // Workflow steering is not exposed in Phase 0; do not let legacy mission
+      // controls bypass workflow ownership or alter durable step state.
+      if (await this.isWorkflowMission(missionId)) return false;
+      this.projectId = projectId;
+      const sql = this.ctx.storage.sql;
+
+      // Verify mission is tracked before proceeding
+      const tracked = sql
+        .exec(`SELECT 1 FROM orchestrator_missions WHERE mission_id = ?`, missionId)
+        .toArray();
+      if (tracked.length === 0) return false;
+
+      // Update D1 first (source of truth) — cancel tasks and mission
+      const now = new Date().toISOString();
       await this.env.DATABASE.prepare(
-        'SELECT 1 FROM missions WHERE id = ? AND workflow_plan_json IS NOT NULL'
+        `UPDATE tasks SET status = 'cancelled', scheduler_state = 'cancelled', updated_at = ?
+         WHERE mission_id = ? AND status NOT IN ('completed', 'failed', 'cancelled')`
       )
-        .bind(missionId)
-        .first()
-    )
-      return false;
-    this.projectId = projectId;
-    const sql = this.ctx.storage.sql;
+        .bind(now, missionId)
+        .run();
 
-    // Verify mission is tracked before proceeding
-    const tracked = sql
-      .exec(`SELECT 1 FROM orchestrator_missions WHERE mission_id = ?`, missionId)
-      .toArray();
-    if (tracked.length === 0) return false;
+      await this.env.DATABASE.prepare('UPDATE missions SET status = ?, updated_at = ? WHERE id = ?')
+        .bind('cancelled', now, missionId)
+        .run();
 
-    // Update D1 first (source of truth) — cancel tasks and mission
-    const now = new Date().toISOString();
-    await this.env.DATABASE.prepare(
-      `UPDATE tasks SET status = 'cancelled', scheduler_state = 'cancelled', updated_at = ?
-       WHERE mission_id = ? AND status NOT IN ('completed', 'failed', 'cancelled')`
-    )
-      .bind(now, missionId)
-      .run();
+      // Then remove from DO tracking
+      sql.exec(`DELETE FROM orchestrator_missions WHERE mission_id = ?`, missionId);
+      sql.exec('DELETE FROM scheduling_queue WHERE mission_id = ?', missionId);
 
-    await this.env.DATABASE.prepare('UPDATE missions SET status = ?, updated_at = ? WHERE id = ?')
-      .bind('cancelled', now, missionId)
-      .run();
+      logDecision(sql, missionId, null, 'cancel', 'Mission cancelled by user', Date.now());
+      log.info('orchestrator.mission_cancelled', { projectId, missionId });
 
-    // Then remove from DO tracking
-    sql.exec(`DELETE FROM orchestrator_missions WHERE mission_id = ?`, missionId);
-    sql.exec('DELETE FROM scheduling_queue WHERE mission_id = ?', missionId);
-
-    logDecision(sql, missionId, null, 'cancel', 'Mission cancelled by user', Date.now());
-    log.info('orchestrator.mission_cancelled', { projectId, missionId });
-
-    return true;
+      return true;
+    });
   }
 
   /**
@@ -461,7 +452,18 @@ export class ProjectOrchestrator extends DurableObject<Env> {
 
     try {
       const cycle = this.cycleLock.then(() =>
-        runSchedulingCycle(this.ctx.storage.sql, this.env, projectId, config)
+        runSchedulingCycle(
+          this.ctx.storage.sql,
+          this.env,
+          projectId,
+          config,
+          (missionId, generation, dispatch) =>
+            this.withMissionLifecycleLock(async () => {
+              if (!isMissionDispatchCurrent(this.ctx.storage.sql, missionId, generation))
+                return false;
+              return dispatch();
+            })
+        )
       );
       this.cycleLock = cycle.catch(() => undefined);
       await cycle;
@@ -488,6 +490,25 @@ export class ProjectOrchestrator extends DurableObject<Env> {
   // =========================================================================
   // Helpers
   // =========================================================================
+
+  private withMissionLifecycleLock<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.missionLifecycleLock.then(operation);
+    this.missionLifecycleLock = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  private async isWorkflowMission(missionId: string): Promise<boolean> {
+    return Boolean(
+      await this.env.DATABASE.prepare(
+        'SELECT 1 FROM missions WHERE id = ? AND workflow_plan_json IS NOT NULL'
+      )
+        .bind(missionId)
+        .first()
+    );
+  }
 
   private async armAlarm(): Promise<void> {
     const config = resolveOrchestratorConfig(this.env);

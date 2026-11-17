@@ -10,7 +10,10 @@
 import { resolveOrchestratorConfig } from '@simple-agent-manager/shared';
 import { describe, expect, it, vi } from 'vitest';
 
-import { runSchedulingCycle } from '../../../src/durable-objects/project-orchestrator/scheduling';
+import {
+  runSchedulingCycle as runSchedulingCycleWithFence,
+} from '../../../src/durable-objects/project-orchestrator/scheduling';
+import type { Env } from '../../../src/env';
 
 vi.mock('../../../src/services/placement-resolver', () => ({
   capacityPlacementSnapshotForTaskStart: vi.fn(() => null),
@@ -43,7 +46,13 @@ vi.mock('../../../src/services/placement-resolver', () => ({
 // ── Mock helpers ──────────────────────────────────────────────────────────────
 
 function makeSqlStorage(tables: Record<string, unknown[]> = {}) {
-  const data: Record<string, unknown[]> = { ...tables };
+  const data: Record<string, unknown[]> = {
+    ...tables,
+    orchestrator_missions: (tables.orchestrator_missions ?? []).map((row) => ({
+      dispatch_generation: 1,
+      ...(row as Record<string, unknown>),
+    })),
+  };
   return {
     exec: vi.fn((query: string, ...params: unknown[]) => {
       const q = query.trim().toUpperCase();
@@ -91,6 +100,21 @@ function makeSqlStorage(tables: Record<string, unknown[]> = {}) {
     }),
     _data: data,
   } as unknown as SqlStorage;
+}
+
+function runSchedulingCycle(
+  sql: SqlStorage,
+  env: Env,
+  projectId: string,
+  config: ReturnType<typeof resolveOrchestratorConfig>
+): Promise<void> {
+  return runSchedulingCycleWithFence(
+    sql,
+    env,
+    projectId,
+    config,
+    async (_missionId, _generation, dispatch) => dispatch()
+  );
 }
 
 interface MockD1Result {

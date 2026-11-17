@@ -6,23 +6,12 @@
  * log decisions.
  */
 import type { OrchestratorConfig } from '@simple-agent-manager/shared';
-import type { VMSize } from '@simple-agent-manager/shared';
-import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
 
-import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { expectJsonRecord } from '../../lib/runtime-validation';
-import { ulid } from '../../lib/ulid';
-import {
-  CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
-  capacityPlacementSnapshotSqlValues,
-} from '../../services/capacity-placement-snapshot';
-import { resolveTaskStartPlacementCredentialAttribution } from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
-import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { getWorkflowConfig } from '../../services/workflow-config';
 import {
   cleanupTerminalWorkflowWaits,
@@ -30,7 +19,9 @@ import {
 } from '../../services/workflow-reconcile';
 import type { WorkflowRunRow } from '../../services/workflow-runs';
 import { mapRows } from '../row-validation';
+import { autoDispatchSchedulableTasks } from './auto-dispatch';
 import { logDecision } from './decision-log';
+import { isMissionDispatchCurrent, type MissionGenerationFence } from './dispatch-fence';
 import { buildHandoffContent, parseRoutableHandoff, type RoutableHandoff } from './handoff-content';
 import { detectStalls, resolveActiveSessionIdsForTaskIds } from './stall-detection';
 
@@ -55,6 +46,7 @@ const SchedulingMissionRowSchema = v.object({
   status: v.string(),
   registered_at: v.number(),
   workflow_registration_deadline: v.optional(v.nullable(v.number())),
+  dispatch_generation: v.number(),
 });
 
 // ── Scheduling Cycle ──────────────────────────────────────────────────────────
@@ -67,7 +59,8 @@ export async function runSchedulingCycle(
   sql: SqlStorage,
   env: Env,
   projectId: string,
-  config: OrchestratorConfig
+  config: OrchestratorConfig,
+  withMissionGenerationFence: MissionGenerationFence
 ): Promise<void> {
   const now = Date.now();
 
@@ -76,7 +69,7 @@ export async function runSchedulingCycle(
   const missions = mapRows(
     sql
       .exec(
-        `SELECT mission_id, status, registered_at, workflow_registration_deadline
+        `SELECT mission_id, status, registered_at, workflow_registration_deadline, dispatch_generation
            FROM orchestrator_missions
            WHERE status IN ('active', 'completing') ORDER BY last_checked_at, mission_id`
       )
@@ -136,19 +129,36 @@ export async function runSchedulingCycle(
 
       const registeredAt = mission.registered_at ?? now;
       if (now - registeredAt >= config.maxMissionLifetimeMs) {
-        await terminalizeMission(
-          sql,
-          env,
-          projectId,
+        await withMissionGenerationFence(
           mission.mission_id,
-          'completed',
-          'max_mission_lifetime',
-          now
+          mission.dispatch_generation,
+          async () => {
+            await terminalizeMission(
+              sql,
+              env,
+              projectId,
+              mission.mission_id,
+              'completed',
+              'max_mission_lifetime',
+              now
+            );
+            return true;
+          }
         );
         continue;
       }
 
-      await processMission(sql, env, projectId, mission.mission_id, config, now, registeredAt);
+      await processMission(
+        sql,
+        env,
+        projectId,
+        mission.mission_id,
+        mission.dispatch_generation,
+        config,
+        now,
+        registeredAt,
+        withMissionGenerationFence
+      );
     } catch (err) {
       log.error('orchestrator.scheduling_cycle.mission_error', {
         projectId,
@@ -174,9 +184,11 @@ async function processMission(
   env: Env,
   projectId: string,
   missionId: string,
+  dispatchGeneration: number,
   config: OrchestratorConfig,
   now: number,
-  registeredAt: number
+  registeredAt: number,
+  withMissionGenerationFence: MissionGenerationFence
 ): Promise<void> {
   // 1. Fetch all tasks for this mission from D1
   const tasksResult = await env.DATABASE.prepare(
@@ -187,35 +199,52 @@ async function processMission(
     .all<TaskRow>();
 
   const tasks = tasksResult.results ?? [];
+  if (!isMissionDispatchCurrent(sql, missionId, dispatchGeneration)) return;
   if (tasks.length === 0) {
     if (now - registeredAt >= config.zeroTaskGraceMs) {
-      await terminalizeMission(
-        sql,
-        env,
-        projectId,
-        missionId,
-        'completed',
-        'zero_tasks_grace_expired',
-        now
-      );
+      await withMissionGenerationFence(missionId, dispatchGeneration, async () => {
+        await terminalizeMission(
+          sql,
+          env,
+          projectId,
+          missionId,
+          'completed',
+          'zero_tasks_grace_expired',
+          now
+        );
+        return true;
+      });
     }
     return;
   }
 
   // 2. Recompute scheduler states
   await recomputeMissionSchedulerStates(env.DATABASE, missionId);
+  if (!isMissionDispatchCurrent(sql, missionId, dispatchGeneration)) return;
 
   // 3. Auto-dispatch schedulable tasks
-  await autoDispatchSchedulableTasks(sql, env, projectId, missionId, config, now);
+  await autoDispatchSchedulableTasks(
+    sql,
+    env,
+    projectId,
+    missionId,
+    dispatchGeneration,
+    config,
+    now,
+    withMissionGenerationFence
+  );
+  if (!isMissionDispatchCurrent(sql, missionId, dispatchGeneration)) return;
 
   // 5. Find newly completed tasks — check for handoff packets to route
   const completedTasks = tasks.filter((t) => t.status === 'completed');
   for (const task of completedTasks) {
     await routeHandoffsForTask(sql, env, projectId, missionId, task.id, tasks, now);
+    if (!isMissionDispatchCurrent(sql, missionId, dispatchGeneration)) return;
   }
 
   // 6. Detect stalled tasks
   await detectStalls(sql, env, projectId, missionId, tasks, config, now);
+  if (!isMissionDispatchCurrent(sql, missionId, dispatchGeneration)) return;
 
   // 7. Check if mission is complete (all tasks terminal)
   const allTerminal = tasks.every(
@@ -225,24 +254,28 @@ async function processMission(
     const anyFailed = tasks.some((t) => t.status === 'failed');
     const newMissionStatus = anyFailed ? 'failed' : 'completed';
 
-    logDecision(
-      sql,
-      missionId,
-      null,
-      anyFailed ? 'skip' : 'dispatch', // 'dispatch' is semantic for "completed"
-      `Mission ${anyFailed ? 'failed' : 'completed'}: all ${tasks.length} tasks are terminal`,
-      now
-    );
-
-    await terminalizeMission(
-      sql,
-      env,
-      projectId,
-      missionId,
-      newMissionStatus,
-      'all_tasks_terminal',
-      now
-    );
+    await withMissionGenerationFence(missionId, dispatchGeneration, async () => {
+      const transitioned = await terminalizeMission(
+        sql,
+        env,
+        projectId,
+        missionId,
+        newMissionStatus,
+        'all_tasks_terminal',
+        now
+      );
+      if (transitioned) {
+        logDecision(
+          sql,
+          missionId,
+          null,
+          anyFailed ? 'skip' : 'dispatch', // 'dispatch' is semantic for "completed"
+          `Mission ${anyFailed ? 'failed' : 'completed'}: all ${tasks.length} tasks are terminal`,
+          now
+        );
+      }
+      return true;
+    });
   }
 }
 
@@ -259,359 +292,17 @@ async function terminalizeMission(
   status: 'completed' | 'failed',
   reason: string,
   now: number
-): Promise<void> {
-  await env.DATABASE.prepare('UPDATE missions SET status = ?, updated_at = ? WHERE id = ?')
+): Promise<boolean> {
+  const transition = await env.DATABASE.prepare(
+    "UPDATE missions SET status = ?, updated_at = ? WHERE id = ? AND status IN ('planning', 'active')"
+  )
     .bind(status, new Date(now).toISOString(), missionId)
     .run();
+  if (!transition.meta.changes) return false;
 
   cleanupMissionTracking(sql, missionId);
   log.info('orchestrator.mission_terminal', { projectId, missionId, status, reason });
-}
-
-// ── Auto-Dispatch ─────────────────────────────────────────────────────────────
-
-interface DispatchableTaskRow {
-  id: string;
-  title: string;
-  description: string | null;
-  user_id: string;
-  project_id: string;
-  output_branch: string | null;
-  agent_profile_hint: string | null;
-  dispatch_depth: number;
-  priority: number;
-}
-
-/**
- * Find schedulable tasks and auto-dispatch them via startTaskRunnerDO.
- * Respects concurrency limits from mission budget_config and per-cycle max.
- */
-async function autoDispatchSchedulableTasks(
-  sql: SqlStorage,
-  env: Env,
-  projectId: string,
-  missionId: string,
-  config: OrchestratorConfig,
-  now: number
-): Promise<void> {
-  // Re-read task states from D1 (fresh after recompute)
-  const schedulableResult = await env.DATABASE.prepare(
-    `SELECT id, title, description, user_id, project_id, output_branch, agent_profile_hint, dispatch_depth, priority
-     FROM tasks
-     WHERE mission_id = ?
-       AND scheduler_state = 'schedulable'
-       AND status = 'queued'
-       AND chat_session_id IS NULL
-       AND NOT EXISTS (
-         SELECT 1
-         FROM vm_task_admissions
-         WHERE vm_task_admissions.task_id = tasks.id
-           AND vm_task_admissions.state IN (
-             'queued', 'waiting', 'provisioning_granted', 'provisioning', 'node_ready'
-           )
-       )
-     ORDER BY priority DESC, created_at ASC
-     LIMIT ?`
-  )
-    .bind(missionId, config.maxDispatchesPerCycle)
-    .all<DispatchableTaskRow>();
-
-  const schedulable = schedulableResult.results ?? [];
-  if (schedulable.length === 0) return;
-
-  // Check concurrency limit: count currently active tasks in this mission
-  const activeCountResult = await env.DATABASE.prepare(
-    `SELECT COUNT(*) as cnt FROM tasks
-     WHERE mission_id = ?
-       AND (
-         status IN ('in_progress', 'delegated')
-         OR (status = 'queued' AND chat_session_id IS NOT NULL)
-         OR EXISTS (
-           SELECT 1
-           FROM vm_task_admissions
-           WHERE vm_task_admissions.task_id = tasks.id
-             AND vm_task_admissions.state IN (
-               'queued', 'waiting', 'provisioning_granted', 'provisioning', 'node_ready'
-             )
-         )
-       )`
-  )
-    .bind(missionId)
-    .first<{ cnt: number }>();
-
-  const activeCount = activeCountResult?.cnt ?? 0;
-
-  // Resolve max active tasks from mission budget_config
-  const missionRow = await env.DATABASE.prepare('SELECT budget_config FROM missions WHERE id = ?')
-    .bind(missionId)
-    .first<{ budget_config: string | null }>();
-
-  let maxActive = config.maxActiveTasksPerMission;
-  if (missionRow?.budget_config) {
-    try {
-      const budget = expectJsonRecord(
-        JSON.parse(missionRow.budget_config),
-        'mission.budget_config'
-      );
-      if (typeof budget.maxActiveTasks === 'number' && budget.maxActiveTasks > 0) {
-        maxActive = budget.maxActiveTasks;
-      }
-    } catch {
-      // Invalid JSON — use default
-    }
-  }
-
-  const slotsAvailable = Math.max(0, maxActive - activeCount);
-  if (slotsAvailable === 0) {
-    logDecision(
-      sql,
-      missionId,
-      null,
-      'skip',
-      `${schedulable.length} schedulable task(s) held: concurrency limit reached (${activeCount}/${maxActive} active)`,
-      now
-    );
-    return;
-  }
-
-  // Fetch project info (needed for startTaskRunnerDO)
-  const projectRow = await env.DATABASE.prepare(
-    `SELECT repository, installation_id, default_branch, default_vm_size,
-            default_agent_type, default_workspace_profile, default_devcontainer_config_name,
-            task_execution_timeout_ms, node_cpu_threshold_percent,
-            node_memory_threshold_percent, warm_node_timeout_ms
-     FROM projects WHERE id = ?`
-  )
-    .bind(projectId)
-    .first<{
-      repository: string;
-      installation_id: string;
-      default_branch: string;
-      default_vm_size: string | null;
-      default_agent_type: string | null;
-      default_workspace_profile: string | null;
-      default_devcontainer_config_name: string | null;
-      task_execution_timeout_ms: number | null;
-      node_cpu_threshold_percent: number | null;
-      node_memory_threshold_percent: number | null;
-      warm_node_timeout_ms: number | null;
-    }>();
-
-  if (!projectRow) {
-    logDecision(sql, missionId, null, 'skip', 'Project not found — cannot dispatch', now);
-    return;
-  }
-
-  const db = drizzle(env.DATABASE, { schema });
-  const toDispatch = schedulable.slice(0, Math.min(slotsAvailable, config.maxDispatchesPerCycle));
-  let dispatched = 0;
-
-  for (const task of toDispatch) {
-    try {
-      // Resolve user info for git config
-      const userRow = await env.DATABASE.prepare(
-        'SELECT name, email, github_id FROM users WHERE id = ?'
-      )
-        .bind(task.user_id)
-        .first<{ name: string | null; email: string | null; github_id: string | null }>();
-
-      const placementResolution = await resolveTaskStartPlacementCredentialAttribution(
-        db,
-        {
-          entryPoint: 'orchestrator-dispatch',
-          taskId: task.id,
-          projectId,
-          userId: task.user_id,
-          project: {
-            id: projectId,
-            defaultVmSize: projectRow.default_vm_size,
-            defaultWorkspaceProfile: projectRow.default_workspace_profile,
-            defaultDevcontainerConfigName: projectRow.default_devcontainer_config_name,
-            defaultAgentType: projectRow.default_agent_type,
-          },
-          profile: null,
-          credentialProjectPolicy: 'current-project',
-          taskModeDefault: 'task',
-          resourceRequirements: {},
-        },
-        { env }
-      );
-      if ('error' in placementResolution) {
-        logDecision(sql, missionId, task.id, 'skip', placementResolution.error, now);
-        continue;
-      }
-      const {
-        placement,
-        effectiveProvider,
-        credentialAttributionUserId,
-        credentialAttributionProjectId,
-        credentialAttributionSource,
-        capacityPoolSelection,
-        capacityPlacementSnapshot,
-      } = placementResolution;
-      const {
-        vmSize: resolvedVmSize,
-        vmSizeSource,
-        vmLocation: resolvedVmLocation,
-        workspaceProfile: resolvedWorkspaceProfile,
-        devcontainerConfigName: resolvedDevcontainerConfig,
-        agentType: resolvedAgentType,
-        resolvedReservation,
-      } = placement;
-
-      // Create chat session for the task
-      const sessionId = await projectDataService.createSession(
-        env,
-        projectId,
-        null,
-        task.title,
-        task.id,
-        task.user_id
-      );
-
-      if (task.description) {
-        await projectDataService.persistMessage(
-          env,
-          projectId,
-          sessionId,
-          'user',
-          task.description,
-          null
-        );
-      }
-
-      // Transition task to queued → provisioning via status update
-      const dispatchTransition = await env.DATABASE.prepare(
-        `UPDATE tasks
-         SET status = 'queued',
-             chat_session_id = ?,
-             execution_step = 'node_selection',
-             requested_vm_size = ?,
-             requested_vm_size_source = ?,
-             resource_requirements_source = ?,
-             resolved_reservation_json = ?,
-             credential_attribution_user_id = ?,
-             credential_attribution_project_id = ?,
-             credential_attribution_source = ?,
-             ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS},
-             updated_at = ?
-         WHERE id = ? AND (chat_session_id IS NULL OR chat_session_id = ?)`
-      )
-        .bind(
-          sessionId,
-          resolvedVmSize,
-          vmSizeSource,
-          resolvedReservation.source,
-          JSON.stringify(resolvedReservation),
-          credentialAttributionUserId,
-          credentialAttributionProjectId,
-          credentialAttributionSource,
-          ...capacityPlacementSnapshotSqlValues(capacityPlacementSnapshot),
-          new Date().toISOString(),
-          task.id,
-          sessionId
-        )
-        .run();
-      if (!dispatchTransition.meta.changes) {
-        throw new Error('Task was already bound to a different chat session');
-      }
-
-      // Start the TaskRunner DO
-      await startTaskRunnerDO(env, {
-        taskId: task.id,
-        projectId,
-        userId: task.user_id,
-        vmSize: resolvedVmSize,
-        vmLocation: resolvedVmLocation,
-        branch: projectRow.default_branch,
-        defaultBranch: projectRow.default_branch,
-        userName: userRow?.name ?? null,
-        userEmail: userRow?.email ?? null,
-        githubId: userRow?.github_id ?? null,
-        taskTitle: task.title,
-        taskDescription: task.description ?? null,
-        repository: projectRow.repository,
-        installationId: projectRow.installation_id,
-        outputBranch: task.output_branch ?? null,
-        projectDefaultVmSize: projectRow.default_vm_size as VMSize | null,
-        chatSessionId: sessionId,
-        agentType: resolvedAgentType,
-        workspaceProfile: resolvedWorkspaceProfile,
-        devcontainerConfigName: resolvedDevcontainerConfig,
-        cloudProvider: placement.provider ?? effectiveProvider,
-        explicitVmLocation: placement.explicitVmLocation === true,
-        credentialAttributionUserId,
-        credentialAttributionProjectId,
-        credentialAttributionSource,
-        agentProfileHint: task.agent_profile_hint ?? null,
-        effort: null,
-        projectScaling: {
-          taskExecutionTimeoutMs: projectRow.task_execution_timeout_ms ?? null,
-          nodeCpuThresholdPercent: projectRow.node_cpu_threshold_percent ?? null,
-          nodeMemoryThresholdPercent: projectRow.node_memory_threshold_percent ?? null,
-          warmNodeTimeoutMs: projectRow.warm_node_timeout_ms ?? null,
-        },
-        resolvedReservation,
-        capacityPoolSelection,
-        vmSizeSource,
-      });
-
-      // Record in scheduling_queue
-      sql.exec(
-        `INSERT INTO scheduling_queue (id, mission_id, task_id, scheduled_at, dispatched_at, reason)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        ulid(),
-        missionId,
-        task.id,
-        now,
-        now,
-        'auto-dispatch: task became schedulable'
-      );
-
-      logDecision(
-        sql,
-        missionId,
-        task.id,
-        'dispatch',
-        `Auto-dispatched schedulable task (slot ${dispatched + 1}/${slotsAvailable})`,
-        now
-      );
-
-      dispatched++;
-
-      log.info('orchestrator.task_dispatched', {
-        projectId,
-        missionId,
-        taskId: task.id,
-        slot: dispatched,
-        slotsAvailable,
-      });
-    } catch (err) {
-      log.error('orchestrator.auto_dispatch_failed', {
-        projectId,
-        missionId,
-        taskId: task.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      logDecision(
-        sql,
-        missionId,
-        task.id,
-        'skip',
-        `Auto-dispatch failed: ${err instanceof Error ? err.message : String(err)}`,
-        now
-      );
-    }
-  }
-
-  if (dispatched > 0) {
-    // Update last_dispatch_at
-    sql.exec(
-      'UPDATE orchestrator_missions SET last_dispatch_at = ? WHERE mission_id = ?',
-      now,
-      missionId
-    );
-  }
+  return true;
 }
 
 // ── Handoff Routing ───────────────────────────────────────────────────────────

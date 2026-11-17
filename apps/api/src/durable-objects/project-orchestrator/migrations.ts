@@ -46,6 +46,10 @@ export const ORCHESTRATOR_MIGRATIONS = [
     name: '002_workflow_registration',
     sql: 'ALTER TABLE orchestrator_missions ADD COLUMN workflow_registration_deadline INTEGER;',
   },
+  {
+    name: '003_dispatch_generation',
+    sql: 'ALTER TABLE orchestrator_missions ADD COLUMN dispatch_generation INTEGER NOT NULL DEFAULT 1;',
+  },
 ] as const;
 
 /**

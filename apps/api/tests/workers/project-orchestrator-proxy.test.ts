@@ -175,6 +175,31 @@ describe('project-orchestrator proxy — Worker→DO contract', () => {
     expect(result).toBe(false);
   });
 
+  it('pause and resume advance the dispatch generation monotonically', async () => {
+    const projectId = 'proj-po-generation-001';
+    const missionId = 'mission-generation-001';
+    await seedTestProject(projectId);
+    await seedMission(missionId, projectId, TEST_USER_ID);
+    await startOrchestration(env, projectId, missionId);
+
+    const generation = () =>
+      runInDurableObject(getStub(projectId), async (instance) => {
+        const row = instance.ctx.storage.sql
+          .exec(
+            'SELECT dispatch_generation FROM orchestrator_missions WHERE mission_id = ?',
+            missionId
+          )
+          .one();
+        return Number(row.dispatch_generation);
+      });
+
+    expect(await generation()).toBe(1);
+    expect(await pauseMission(env, projectId, missionId)).toBe(true);
+    expect(await generation()).toBe(2);
+    expect(await resumeMission(env, projectId, missionId)).toBe(true);
+    expect(await generation()).toBe(3);
+  });
+
   it('cancelMission removes mission from DO and updates D1', async () => {
     const projectId = 'proj-po-cancel-001';
     const missionId = 'mission-cancel-001';
