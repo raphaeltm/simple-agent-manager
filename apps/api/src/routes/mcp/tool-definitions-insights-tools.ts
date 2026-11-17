@@ -4,8 +4,20 @@
  * that operation's input minus `projectId`, which always comes from the MCP token. A test keeps the
  * two in step (`tests/unit/routes/mcp/project-insights-tool.test.ts`).
  */
-import { PROJECT_INSIGHTS_METHODS } from '@simple-agent-manager/operations';
+import {
+  MAX_PHASE_STATS_PHASES,
+  MAX_PHASE_STATS_WINDOW_DAYS,
+  PROJECT_INSIGHTS_METHODS,
+} from '@simple-agent-manager/operations';
 import { INSIGHTS_RANGES, INSIGHTS_SETUP_GROUPINGS } from '@simple-agent-manager/shared';
+
+/** Bounds the handler enforces (`ProjectInsightsInputSchema`); the test compares them all. */
+const id = (description: string) => ({
+  type: 'string',
+  minLength: 1,
+  maxLength: 200,
+  description,
+});
 
 export const INSIGHTS_TOOLS = [
   {
@@ -16,7 +28,7 @@ export const INSIGHTS_TOOLS = [
       type: 'object' as const,
       properties: {
         method: { type: 'string', enum: [...PROJECT_INSIGHTS_METHODS] },
-        taskId: { type: 'string', description: 'receipt: the task to read.' },
+        taskId: id('receipt: the task to read.'),
         range: {
           type: 'string',
           enum: [...INSIGHTS_RANGES],
@@ -27,18 +39,26 @@ export const INSIGHTS_TOOLS = [
           enum: [...INSIGHTS_SETUP_GROUPINGS],
           description: 'setups: grouping (default profile).',
         },
-        skillId: { type: 'string', description: 'phases: one skill (or agentProfileId).' },
-        agentProfileId: { type: 'string', description: 'phases: one agent profile.' },
+        skillId: id('phases: one skill (or agentProfileId).'),
+        agentProfileId: id('phases: one agent profile.'),
         operation: {
           type: 'string',
+          pattern: '^[a-z_]{1,32}$',
           description: 'phases: only workspace, wake, sleep, runner_start or runner_wake.',
         },
         phaseNames: {
           type: 'array',
-          items: { type: 'string' },
+          items: { type: 'string', pattern: '^[a-z0-9_-]{1,64}$' },
+          minItems: 1,
+          maxItems: MAX_PHASE_STATS_PHASES,
           description: 'phases: only these phases (default all).',
         },
-        windowDays: { type: 'number', description: 'phases: days back (default 30).' },
+        windowDays: {
+          type: 'integer',
+          minimum: 1,
+          maximum: MAX_PHASE_STATS_WINDOW_DAYS,
+          description: 'phases: days back (default 30).',
+        },
       },
       required: ['method'],
       additionalProperties: false,

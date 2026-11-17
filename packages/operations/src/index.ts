@@ -159,6 +159,7 @@ export {
   PROJECT_INSIGHTS_METHODS,
   projectInsights,
   type ProjectInsightsInput,
+  projectInsightsInputError,
   ProjectInsightsInputSchema,
   type ProjectInsightsMethod,
 } from './insights-agent';

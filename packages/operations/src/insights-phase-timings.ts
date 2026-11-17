@@ -23,6 +23,13 @@ export const DEFAULT_PHASE_STATS_SAMPLE_LIMIT = 500;
 export const MAX_PHASE_STATS_SAMPLE_LIMIT = 20_000;
 /** Rows one stats read returns in total, whatever the number of phases (a memory bound). */
 export const MAX_PHASE_STATS_TOTAL_ROWS = 20_000;
+/**
+ * Operations that can store one phase name: the VM vocabulary is shared by `workspace`, `sleep`
+ * and `wake` (`provision` rows have no project); runner steps have their own operations. A phase
+ * reads at most this many samples' worth of its newest rows, so every operation can fill its own
+ * sample.
+ */
+export const PHASE_STATS_OPERATIONS_PER_PHASE = 3;
 export const DEFAULT_PHASE_STATS_WINDOW_DAYS = 30;
 export const MAX_PHASE_STATS_WINDOW_DAYS = 365;
 /** Distinct phases one stats call may ask for (the VM vocabulary plus runner steps fit). */
@@ -162,30 +169,60 @@ export async function phaseDurationStats(
     MAX_PHASE_STATS_SAMPLE_LIMIT
   );
   const since = (input.now ?? Date.now()) - windowDays * DAY_MS;
-  const operationFilter = input.operation !== undefined ? 'AND operation = ?' : '';
-  const phaseFilter = phases === null ? '' : `AND phase IN (${phases.map(() => '?').join(', ')})`;
-  const bindings: Array<string | number> = [projectId, byId, ...(phases ?? [])];
-  if (input.operation !== undefined) bindings.push(input.operation);
-  bindings.push(since, sampleLimit + 1, MAX_PHASE_STATS_TOTAL_ROWS);
+  const phaseScanLimit = (sampleLimit + 1) * PHASE_STATS_OPERATIONS_PER_PHASE;
 
+  // The database work is bounded by phases, not by history: the phase list comes from index
+  // seeks (one per stored phase, or the caller's list), and each phase reads only its newest
+  // `phaseScanLimit` rows in index order. A year of rows costs what a day costs.
   // The cap is per (operation, phase), never global: a newest-first LIMIT over every phase lets
   // one frequent phase crowd the others out of the sample (rule 65). One extra row per group shows
-  // whether that group was cut. The total bound is ordered by row number, so it trims every
-  // group's oldest rows before any group's newest.
+  // whether that group was cut, and a phase that filled its scan may have older rows unread. The
+  // total bound is ordered by row number, so it trims every group's oldest rows first.
+  const phaseList =
+    phases === null
+      ? `SELECT MIN(phase) FROM lifecycle_phase_timings
+          WHERE project_id = ? AND ${byColumn} = ?
+         UNION ALL
+         SELECT (SELECT MIN(phase) FROM lifecycle_phase_timings
+                  WHERE project_id = ? AND ${byColumn} = ? AND phase > phases.phase)
+           FROM phases WHERE phases.phase IS NOT NULL`
+      : `VALUES ${phases.map(() => '(?)').join(', ')}`;
+  const operationFilter = input.operation !== undefined ? 'AND s.operation = ?' : '';
+  const bindings: Array<string | number> = [
+    ...(phases ?? [projectId, byId, projectId, byId]),
+    projectId,
+    byId,
+    since,
+  ];
+  if (input.operation !== undefined) bindings.push(input.operation);
+  bindings.push(phaseScanLimit, sampleLimit + 1, MAX_PHASE_STATS_TOTAL_ROWS);
+
   const result = await db
     .prepare(
-      `SELECT operation, phase, duration_ms, rn FROM (
+      `WITH RECURSIVE phases(phase) AS (${phaseList}),
+       sampled AS (
+         SELECT t.id, t.operation, t.phase, t.duration_ms, t.created_at
+           FROM phases p
+           JOIN lifecycle_phase_timings t
+             ON t.id IN (
+               SELECT s.id FROM lifecycle_phase_timings s
+                WHERE s.project_id = ?
+                  AND s.${byColumn} = ?
+                  AND s.phase = p.phase
+                  AND s.created_at >= ?
+                  AND s.outcome = 'success'
+                  ${operationFilter}
+                ORDER BY s.created_at DESC
+                LIMIT ?)
+          WHERE p.phase IS NOT NULL
+       )
+       SELECT operation, phase, duration_ms, rn, phase_rows FROM (
          SELECT operation, phase, duration_ms,
                 ROW_NUMBER() OVER (
                   PARTITION BY operation, phase ORDER BY created_at DESC, id DESC
-                ) AS rn
-           FROM lifecycle_phase_timings
-          WHERE project_id = ?
-            AND ${byColumn} = ?
-            ${phaseFilter}
-            ${operationFilter}
-            AND outcome = 'success'
-            AND created_at >= ?
+                ) AS rn,
+                COUNT(*) OVER (PARTITION BY phase) AS phase_rows
+           FROM sampled
        )
        WHERE rn <= ?
        ORDER BY rn, operation, phase
@@ -198,6 +235,7 @@ export async function phaseDurationStats(
   const groups = new Map<string, { operation: string; phase: string; durations: number[] }>();
   let truncated = rows.length >= MAX_PHASE_STATS_TOTAL_ROWS;
   for (const raw of rows) {
+    if (typeof raw.phase_rows === 'number' && raw.phase_rows >= phaseScanLimit) truncated = true;
     if (typeof raw.rn === 'number' && raw.rn > sampleLimit) {
       truncated = true;
       continue;

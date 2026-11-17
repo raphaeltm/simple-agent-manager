@@ -1180,7 +1180,10 @@ Connector lists; sam-mcp tool `project_insights`, `apps/api/src/routes/mcp/proje
 - `receipt` (`taskId`): `runReceipt`. `flow` (`range`): `projectFlow`. `setups` (`range`,
   `groupBy`): `projectSetups`. `accounts` (`range`): `projectAccounts`. `phases` (`skillId` or
   `agentProfileId`, optional `operation`, `phaseNames` and `windowDays`): median and p90 per
-  lifecycle phase from `phaseDurationStats`, over at most the 500 newest rows of each phase. An argument the method does not read is `invalid_input`.
+  lifecycle phase from `phaseDurationStats`, over at most the 500 newest successful rows of each
+  operation and phase. Each phase's rows are read newest first through its index and the read stops
+  there, so the cost does not grow with stored history; `truncated` says when older rows were left
+  out. An argument the method does not read, or a missing one it needs, is `invalid_input`.
 - Numbers only: no task, pull request or idea titles, no idea notes, no agent questions, no account
   names or credential references, no names of a teammate's profiles. CI check names are kept
   (capped at 100 characters) because they identify a flaky check. Accounts are keyed `account-1`,
@@ -1189,7 +1192,8 @@ Connector lists; sam-mcp tool `project_insights`, `apps/api/src/routes/mcp/proje
 - On sam-mcp the project always comes from the MCP token; a different `projectId` is refused with
   `Project does not match workspace token`. Each chat may call it `insights.agentToolCallsPerWindow`
   times per `insights.agentToolWindowSeconds` (see [admin settings](/docs/guides/admin-settings/));
-  the next call returns JSON-RPC error `-32000` with the retry time. The Connector has no chat, so
+  the next call returns JSON-RPC error `-32000` with the retry time. A call refused for its
+  arguments does not count. The Connector has no chat, so
   there it spends the per-user `connector.readRateLimitPerMinute` budget instead.
 - Round trips in the handler are the page read's plus one rate-limit RPC: receipt at most 8 (it
   skips the account-name read), flow at most 11, setups at most 6, accounts at most 5, phases 3.

@@ -310,16 +310,29 @@ const OPTIONAL_KEYS = [
   'windowDays',
 ] as const;
 
-export async function projectInsights(ctx: OperationContext, input: ProjectInsightsInput) {
+/**
+ * The method-specific checks the schema cannot express: arguments the method does not read, and
+ * the ones it needs. Returns the refusal message, or null. sam-mcp runs it before spending a call
+ * of the chat's budget, so a malformed call costs nothing.
+ */
+export function projectInsightsInputError(input: ProjectInsightsInput): string | null {
   const extra = OPTIONAL_KEYS.filter(
     (key) => input[key] !== undefined && !ALLOWED[input.method].has(key)
   );
-  if (extra.length > 0) {
-    throw new OperationError(
-      'invalid_input',
-      `method ${input.method} does not take ${extra.join(', ')}`
-    );
+  if (extra.length > 0) return `method ${input.method} does not take ${extra.join(', ')}`;
+  if (input.method === 'receipt' && !input.taskId) return 'receipt needs taskId';
+  if (
+    input.method === 'phases' &&
+    (input.skillId === undefined) === (input.agentProfileId === undefined)
+  ) {
+    return 'phases needs exactly one of skillId or agentProfileId';
   }
+  return null;
+}
+
+export async function projectInsights(ctx: OperationContext, input: ProjectInsightsInput) {
+  const refusal = projectInsightsInputError(input);
+  if (refusal !== null) throw new OperationError('invalid_input', refusal);
   const { projectId } = input;
   switch (input.method) {
     case 'receipt': {

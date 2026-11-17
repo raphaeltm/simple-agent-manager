@@ -233,12 +233,18 @@ describe('project_insights through /mcp', () => {
     expect((await call(first, { method: 'phases', skillId: SKILL })).error?.code).toBe(-32000);
   });
 
-  it('refuses the call after the per-chat budget, without spending it on invalid input', async () => {
+  it('refuses the call after the per-chat budget, without spending it on refused input', async () => {
     const token = await tokenFor(projectA);
     const budget = INSIGHTS_AGENT_SETTINGS[0].defaultValue;
     // Invalid input is refused before the budget is touched.
     const invalid = await call(token, { method: 'nope' });
     expect(invalid.error?.message).toBe('Invalid method');
+    // So are calls the schema accepts but the method refuses: a missing or a foreign argument.
+    expect((await call(token, { method: 'receipt' })).error?.message).toBe('receipt needs taskId');
+    expect((await call(token, { method: 'flow', taskId: 'x' })).error).toMatchObject({
+      code: -32602,
+      message: 'method flow does not take taskId',
+    });
 
     for (let i = 0; i < budget; i += 1) {
       const ok = await call(token, { method: 'phases', skillId: SKILL });

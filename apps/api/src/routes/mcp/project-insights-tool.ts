@@ -1,7 +1,7 @@
 /**
  * sam-mcp `project_insights` (Insights slice I): validates with the catalog operation's own schema
- * (`sam_project_insights`, packages/operations/src/insights-agent.ts), spends one call of the
- * chat's budget, then runs the shared operation with the token's project.
+ * (`sam_project_insights`, packages/operations/src/insights-agent.ts) and its method checks, spends
+ * one call of the chat's budget, then runs the shared operation with the token's project.
  *
  * Identity: the project always comes from the MCP token. A `projectId` argument that differs is
  * refused before any read, and `authorizeProjectOperation` refuses it again (rule 51).
@@ -18,6 +18,7 @@ import {
   getInsightsAgentRateLimit,
   OperationError,
   projectInsights,
+  projectInsightsInputError,
   ProjectInsightsInputSchema,
 } from '@simple-agent-manager/operations';
 import * as v from 'valibot';
@@ -94,6 +95,9 @@ export async function handleProjectInsights(
     const path = issue?.path?.map((item) => String(item.key)).join('.') ?? 'input';
     return jsonRpcError(requestId, INVALID_PARAMS, `Invalid ${path}`);
   }
+  // Method-specific refusals before the budget, so correcting a malformed call costs nothing.
+  const refusal = projectInsightsInputError(parsed.output);
+  if (refusal !== null) return jsonRpcError(requestId, INVALID_PARAMS, refusal);
 
   const ctx = workspaceOperationContext(requestId, token, env);
   let admission: McpRateResult;

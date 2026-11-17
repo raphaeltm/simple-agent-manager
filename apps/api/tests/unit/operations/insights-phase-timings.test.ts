@@ -201,6 +201,55 @@ describe('insights phase timings reads', () => {
     });
   });
 
+  it('reads a phase shared by two operations into a sample for each', async () => {
+    // VM phases repeat across workspace, sleep and wake: newer workspace rows must not use up
+    // the wake rows' share of the per-phase read.
+    for (let i = 0; i < 5; i += 1) {
+      insert({ project: 'p', phase: 'git_clone', durationMs: 10 + i, ageMs: DAY - i * 1000 });
+    }
+    insert({ project: 'p', phase: 'git_clone', durationMs: 90, operation: 'wake', ageMs: 2 * DAY });
+    insert({ project: 'p', phase: 'git_clone', durationMs: 91, operation: 'wake', ageMs: 3 * DAY });
+
+    const result = await phaseDurationStats(db, {
+      projectId: 'p',
+      skillId: 'skill-1',
+      sampleLimit: 2,
+      now: NOW,
+    });
+    expect(result.truncated).toBe(true);
+    expect(result.stats.map((stat) => [stat.operation, stat.count])).toEqual([
+      ['wake', 2],
+      ['workspace', 2],
+    ]);
+  });
+
+  it('reads each phase through its index, never every row of the skill (rule 81)', async () => {
+    // The work bound is per phase: each phase's newest rows come from an index range ordered by
+    // created_at, so history beyond the sample is never read. Checked on the SQL the read issues.
+    const issued: string[] = [];
+    const recording = {
+      ...db,
+      prepare: (sql: string) => {
+        issued.push(sql);
+        return db.prepare(sql);
+      },
+    } as D1Database;
+    for (const phases of [undefined, ['git_clone', 'devcontainer_up']]) {
+      issued.length = 0;
+      await phaseDurationStats(recording, { projectId: 'p', skillId: 'skill-1', phases, now: NOW });
+      expect(issued).toHaveLength(1);
+      const binds = (issued[0]!.match(/\?/g) ?? []).map(() => 'x');
+      const plan = sqlite
+        .prepare(`EXPLAIN QUERY PLAN ${issued[0]}`)
+        .all(...binds)
+        .map((row) => (row as { detail: string }).detail);
+      expect(plan).toContain(
+        'SEARCH s USING INDEX idx_lifecycle_phase_timings_skill_phase (project_id=? AND skill_id=? AND phase=? AND created_at>?)'
+      );
+      expect(plan.some((line) => /^SCAN lifecycle_phase_timings\b/.test(line))).toBe(false);
+    }
+  });
+
   it('rejects ambiguous or empty inputs', async () => {
     await expect(
       phaseDurationStats(db, { projectId: 'p', phases: ['git_clone'], now: NOW })
