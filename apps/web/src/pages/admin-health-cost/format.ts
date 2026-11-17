@@ -86,3 +86,20 @@ export function timeLabel(iso: string): string {
     minute: '2-digit',
   });
 }
+
+/** "November" for `2026-11`. */
+export function monthName(month: string): string {
+  return new Date(`${month}-01T00:00:00Z`).toLocaleString('en-US', {
+    month: 'long',
+    timeZone: 'UTC',
+  });
+}
+
+/** "Nov 15" for `2026-11-15`. */
+export function dayLabel(day: string): string {
+  return new Date(`${day}T00:00:00Z`).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+}
