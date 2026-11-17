@@ -97,7 +97,8 @@ func (h *relayHarness) installExchange() string {
 func (h *relayHarness) serveAgentMux(listener net.Listener) {
 	mux := http.NewServeMux()
 	h.server.setupRoutes(mux)
-	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	h.server.buildHTTPServers(mux)
+	srv := &http.Server{Handler: h.server.httpServer.Handler, ReadHeaderTimeout: 5 * time.Second}
 	go func() { _ = srv.Serve(listener) }()
 	h.t.Cleanup(func() { _ = srv.Close() })
 }

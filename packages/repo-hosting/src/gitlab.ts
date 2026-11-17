@@ -4,6 +4,8 @@ import {
   errors,
   fetchWithTimeout,
   getTimeoutMs,
+  guardedFetch,
+  IoTimeoutError,
   log,
   readResponseJson,
 } from '@simple-agent-manager/worker-core';
@@ -311,13 +313,19 @@ async function gitlabFetch(
     headers.set('Accept', 'application/json');
   }
   const timeoutMs = getTimeoutMs(env.GITLAB_API_TIMEOUT_MS, DEFAULT_GITLAB_API_TIMEOUT_MS);
-  return fetchWithTimeout(
+  const maxRedirects = await repoHostingPorts().platformConfig.outboundMaxRedirects(env);
+  const startedAt = Date.now();
+  return guardedFetch(
     `${apiBaseUrl}${pathAndQuery}`,
+    { ...init, headers },
     {
-      ...init,
-      headers,
-    },
-    timeoutMs
+      maxRedirects,
+      fetchFn: (url, request) => {
+        const remainingMs = timeoutMs - (Date.now() - startedAt);
+        if (remainingMs <= 0) throw new IoTimeoutError('GitLab request timed out');
+        return fetchWithTimeout(url, request, remainingMs);
+      },
+    }
   );
 }
 

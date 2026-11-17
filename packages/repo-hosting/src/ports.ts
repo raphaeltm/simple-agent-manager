@@ -29,6 +29,7 @@ export interface PlatformConfigPort {
   githubApp(env: Env): Promise<GitHubAppConfig | null>;
   githubOAuth(env: Env): Promise<GitHubOAuthConfig | null>;
   gitlabOAuth(env: Env): Promise<GitLabOAuthConfig | null>;
+  outboundMaxRedirects(env: Env): Promise<number>;
 }
 
 /** Better Auth owns OAuth token encryption and refresh; the worker constructs it. */

@@ -323,6 +323,30 @@ describe('guardedFetch', () => {
     expect(headers.get('accept')).toBe('application/json');
   });
 
+  it('keeps only safe headers across origins, including unfamiliar credentials', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(redirect(302, 'https://b.example.com/'))
+      .mockResolvedValueOnce(new Response('ok'));
+    const response = await guardedFetch(
+      'https://a.example.com/',
+      {
+        headers: {
+          'Private-Token': 'secret',
+          'X-New-Provider-Credential': 'secret',
+          cookie: 'session=secret',
+          accept: 'application/json',
+          'accept-language': 'en',
+          'user-agent': 'sam',
+        },
+      },
+      { fetchFn }
+    );
+    expect(await response.text()).toBe('ok');
+    const headers = new Headers((fetchFn.mock.calls[1]?.[1] as RequestInit).headers);
+    expect([...headers.keys()].sort()).toEqual(['accept', 'accept-language', 'user-agent']);
+  });
+
   it('keeps credential headers on a same-origin redirect', async () => {
     const fetchFn = vi
       .fn()
