@@ -90,8 +90,12 @@ export async function ensureReverseTunnelLease(
   env: LeaseEnv & ReverseTunnelEnv & Pick<Env, 'ENCRYPTION_KEY'>,
   input: EnsureReverseTunnelLeaseInput
 ): Promise<ReverseTunnelLeaseProvisioning> {
-  if (!isReverseTunnelInstallation(env)) throw new Error('Reverse tunnel is disabled');
   if (!input.nodeId || !input.userId || !input.runtimeIncarnationId) throw new Error('Reverse-tunnel owner identity is required');
+  // A durable allocation keeps the transport its VM already booted with, even if the
+  // installation now selects another transport. Only admission of a NEW lease reads the flag.
+  const existing = await readReverseTunnelLeaseByIncarnation(env, input.nodeId, input.runtimeIncarnationId);
+  if (existing) return adoptReverseTunnelLease(env, input, existing);
+  if (!isReverseTunnelInstallation(env)) throw new Error('Reverse tunnel is disabled');
   const range = resolveReverseTunnelPortRange(env);
   const reuseMinAgeSeconds = resolveReverseTunnelPortReuseMinAgeSeconds(env);
   const nowMs = Date.now();
@@ -165,28 +169,27 @@ export async function ensureReverseTunnelLease(
     }
     throw await noFreePortError(env, input.nodeId, range, reusableBefore, reuseMinAgeSeconds);
   }
+  return adoptReverseTunnelLease(env, input, row);
+}
+
+/** Existing authority is adopted only while its exact persisted owner remains live. */
+async function adoptReverseTunnelLease(
+  env: LeaseEnv & Pick<Env, 'ENCRYPTION_KEY'>,
+  input: EnsureReverseTunnelLeaseInput,
+  row: ReverseTunnelLeaseRow
+): Promise<ReverseTunnelLeaseProvisioning> {
   if (row.userId !== input.userId || row.status !== 'active') {
-    throw new ReverseTunnelLeaseError(
-      'lease_released',
-      'Reverse-tunnel lease for this node incarnation was released'
-    );
+    throw new ReverseTunnelLeaseError('lease_released', 'Reverse-tunnel lease for this node incarnation was released');
   }
-  // Adopting an earlier attempt's row (retry or durable resume): re-derive ITS credential. A
-  // mismatch (for example a rotated ENCRYPTION_KEY) must not hand a VM a credential the plugin
-  // will refuse; fail closed instead.
-  const credential =
-    row.id === leaseId
-      ? candidateCredential
-      : await deriveReverseTunnelCredential(env, {
-          leaseId: row.id,
-          nodeId: row.nodeId,
-          runtimeIncarnationId: row.runtimeIncarnationId,
-        });
+  const live = await env.DATABASE.prepare(`SELECT 1 AS live FROM nodes WHERE ${NODE_LIVE_FENCE_SQL}`)
+    .bind(input.nodeId, input.userId, input.runtimeIncarnationId).first<{ live: number }>();
+  if (!live) throw new ReverseTunnelLeaseError('incarnation_not_live', 'Reverse-tunnel lease owner is no longer live');
+  // A rotated root must never hand a VM a credential the plugin will refuse.
+  const credential = await deriveReverseTunnelCredential(env, {
+    leaseId: row.id, nodeId: row.nodeId, runtimeIncarnationId: row.runtimeIncarnationId,
+  });
   if ((await hashReverseTunnelCredential(credential)) !== row.credentialHash) {
-    throw new ReverseTunnelLeaseError(
-      'credential_mismatch',
-      'Reverse-tunnel credential cannot be re-derived for this lease'
-    );
+    throw new ReverseTunnelLeaseError('credential_mismatch', 'Reverse-tunnel credential cannot be re-derived for this lease');
   }
   return { leaseId: row.id, port: row.port, credential };
 }

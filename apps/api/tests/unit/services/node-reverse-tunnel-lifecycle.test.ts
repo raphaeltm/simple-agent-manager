@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: cohesive provisioning/deletion vertical slice with shared real SQLite authority.
 // Register shared boundary mocks before importing production services.
 import './node-tunnel-fixture';
 
@@ -172,6 +173,69 @@ describe('reverse-tunnel provisioning', () => {
     expect(readNode(node.id)?.transport).toBe('vm-public-dns');
     expect(leases(node.id)).toEqual([]);
     expect(mocks.createARecord).toHaveBeenCalled();
+  });
+
+  it.each([undefined, 'vm-public-dns', 'cloudflare-tunnel'])(
+    'durable resume recovers its original reverse lease after transport changes to %j',
+    async (transport) => {
+      const node = await freshNode();
+      const durable = { createdAt: Date.now(), initialIncarnationId: readNode(node.id)!.incarnation!, incarnationId: crypto.randomUUID() };
+      mocks.createVM.mockRejectedValueOnce(new ProviderError('hetzner', undefined, 'socket hang up'));
+      await expect(provisionNode(node.id, env, undefined, { durableAllocation: durable })).rejects.toThrow();
+      const before = leases(node.id);
+      const firstCredential = mocks.cloudInitVars[0]?.reverseTunnelCredential;
+      expect(typeof firstCredential).toBe('string');
+      const listVMs = vi.fn().mockImplementation(async (labels) => [{ ...vmFor(), labels }]);
+      mocks.createProvider.mockResolvedValue({ ...provider, provider: { ...provider.provider, listVMs } });
+      setEnv(reverseEnv({ VM_AGENT_TRANSPORT: transport }));
+      const statements = vi.spyOn(env.DATABASE, 'prepare');
+      await expect(provisionNode(node.id, env, undefined, { durableAllocation: durable })).resolves.toEqual({ allocationConfirmed: true });
+      expect(listVMs).toHaveBeenCalledOnce();
+      expect(mocks.createVM).toHaveBeenCalledOnce();
+      expect(readNode(node.id)?.transport).toBe('reverse-tunnel');
+      expect(leases(node.id)).toEqual(before);
+      expect(mocks.cloudInitVars).toHaveLength(2);
+      expect(mocks.cloudInitVars[1]?.reverseTunnelCredential).toBe(firstCredential);
+      expect(statements.mock.calls.some(([sql]) => /(?:INSERT INTO|UPDATE) node_reverse_tunnel_leases/i.test(sql))).toBe(false);
+    }
+  );
+
+  it('disabled reverse admission cannot create a missing lease on a stored reverse node', async () => {
+    const node = await freshNode();
+    const incarnation = readNode(node.id)!.incarnation!;
+    sqlite.prepare("UPDATE nodes SET transport='reverse-tunnel' WHERE id=?").run(node.id);
+    setEnv(reverseEnv({ VM_AGENT_TRANSPORT: 'vm-public-dns' }));
+    const statements = vi.spyOn(env.DATABASE, 'prepare');
+    await expect(ensureReverseTunnelLease(env, { nodeId: node.id, userId: USER, runtimeIncarnationId: incarnation })).rejects.toThrow('Reverse tunnel is disabled');
+    expect(leases(node.id)).toEqual([]);
+    expect(statements.mock.calls.some(([sql]) => /(?:INSERT INTO|UPDATE) node_reverse_tunnel_leases/i.test(sql))).toBe(false);
+  });
+
+  it.each([
+    ["user_id='another-owner'", 'incarnation_not_live'],
+    ["runtime_incarnation_id='another-incarnation'", 'incarnation_not_live'],
+    ["runtime_termination_confirmed_at='2026-01-01T00:00:00.000Z'", 'incarnation_not_live'],
+    ["status='destroying'", 'incarnation_not_live'],
+    ["transport='vm-public-dns'", 'incarnation_not_live'],
+    ["node_class='user-owned'", 'incarnation_not_live'],
+    ["runtime='cf-container'", 'incarnation_not_live'],
+  ])('existing lease adoption refuses changed live owner: %s', async (mutation, code) => {
+    const node = await freshNode();
+    await provisionNode(node.id, env);
+    const incarnation = readNode(node.id)!.incarnation!;
+    sqlite.prepare(`UPDATE nodes SET ${mutation} WHERE id=?`).run(node.id);
+    setEnv(reverseEnv({ VM_AGENT_TRANSPORT: 'vm-public-dns' }));
+    await expect(ensureReverseTunnelLease(env, { nodeId: node.id, userId: USER, runtimeIncarnationId: incarnation })).rejects.toMatchObject({ code });
+    expect(leases(node.id)).toMatchObject([{ status: 'active' }]);
+  });
+
+  it('released lease cannot be adopted when reverse admission is disabled', async () => {
+    const node = await freshNode();
+    await provisionNode(node.id, env);
+    const incarnation = readNode(node.id)!.incarnation!;
+    sqlite.prepare("UPDATE node_reverse_tunnel_leases SET status='released' WHERE node_id=?").run(node.id);
+    setEnv(reverseEnv({ VM_AGENT_TRANSPORT: 'vm-public-dns' }));
+    await expect(ensureReverseTunnelLease(env, { nodeId: node.id, userId: USER, runtimeIncarnationId: incarnation })).rejects.toMatchObject({ code: 'lease_released' });
   });
 
   it('a durable resume adopts the same lease and re-derives the same credential', async () => {

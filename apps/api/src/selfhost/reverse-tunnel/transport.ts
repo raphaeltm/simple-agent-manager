@@ -3,7 +3,6 @@ import type { CloudInitVariables } from '@simple-agent-manager/cloud-init';
 
 import { installNodeTransportExtension } from '../../services/node-transport-extension';
 import { nodeTunnelBootVariables } from '../../services/node-tunnel-config';
-import { isReverseTunnelInstallation } from './env';
 import { releaseNodeReverseTunnelLeases, releaseUnallocatedReverseTunnelLease } from './leases';
 import { ensureNodeReverseTunnelForProvisioning } from './provisioning';
 
@@ -21,7 +20,6 @@ export function installReverseTunnelTransport(
     select: (node) => node.runtime === 'vm' && node.nodeClass === 'managed' && node.nodeRole === 'workspace'
       ? 'reverse-tunnel' : null,
     prepare: async (env, owner) => {
-      if (!isReverseTunnelInstallation(env)) throw new Error('Reverse tunnel is disabled');
       const lease = await ensureNodeReverseTunnelForProvisioning(env, owner);
       return (variables) => render({
         ...variables,
