@@ -40,7 +40,9 @@ This verifies the provisioning mechanism, not the reporter's live disk measureme
    never the flavor value. Image-booted (legacy) servers keep `flavor.disk`.
 3. Pool plans carry the candidate's disk as `resources.diskGb` (`nativePlanFromRow`). GCP's
    `defaultBootDiskSizeGb` uses it so the VM matches what the node row records. → reuse that
-   pattern (`legacyBootDiskSizeAuthority: 'provider-default'`).
+   pattern, but floored at the configured size: candidates published before this fix carry 20 GB
+   until the catalog refreshes (review H1). Legacy sizes already carry the configured size, so no
+   `legacyBootDiskSizeAuthority` is needed.
 4. Catalog disk must equal created disk: live catalog (`createCatalogProvider`), static fallback
    (`getStaticProviderCatalogOfferings` / `staticCatalogOptions`), and provisioning
    (`provider-credentials.ts`) all build Infomaniak providers. → one setting resolved for all.
@@ -56,40 +58,55 @@ This verifies the provisioning mechanism, not the reporter's live disk measureme
 8. Existing nodes: not migrated. Image-booted legacy nodes keep reporting `flavor.disk`.
 9. New failure mode: Cinder quota/volume creation failure turns the server to `ERROR` after the
    create call. Today `ERROR` maps to `initializing` (pre-existing, all build failures). Recorded
-   as a validation gap; not changed here.
+   as a validation gap; not changed here. Deferred to
+   `tasks/backlog/2026-11-17-infomaniak-boot-volume-follow-ups.md` (with 403 quota classification,
+   explicit boot disk caps on platform credentials, unlabeled boot volume reporting).
 
 ## Implementation checklist
 
-- [ ] Split `infomaniak.ts` (796 lines) before adding: parsers/constants/size configs to
+- [x] Split `infomaniak.ts` (796 lines) before adding: parsers/constants/size configs to
       `infomaniak-metadata.ts`; boot-volume helpers to `infomaniak-boot-volume.ts`
-- [ ] Shared constants `DEFAULT_INFOMANIAK_BOOT_VOLUME_GB` (80), `INFOMANIAK_BOOT_VOLUME_MIN_GB`
+- [x] Shared constants `DEFAULT_INFOMANIAK_BOOT_VOLUME_GB` (80), `INFOMANIAK_BOOT_VOLUME_MIN_GB`
       (20), `INFOMANIAK_BOOT_VOLUME_MAX_GB`
-- [ ] `InfomaniakProviderOptions.bootVolumeSizeGb` / `InfomaniakProviderConfig.bootVolumeSizeGb`,
-      passed by `createProvider`; invalid values rejected at construction
-- [ ] Sizes and `listInstanceOfferings` advertise the boot volume size
-- [ ] `createVM`: default from plan `resources.diskGb` (native) else provider size; explicit
-      `bootDiskSizeGb` honoured and validated (integer, min, max); `block_device_mapping_v2`
+- [x] `InfomaniakProviderOptions.bootVolumeSizeGb` / `InfomaniakProviderConfig.bootVolumeSizeGb`,
+      passed by `createProvider`; invalid configured values fall back to the default
+- [x] Sizes and `listInstanceOfferings` advertise the boot volume size
+- [x] `createVM`: default from plan `resources.diskGb` (native) else provider size; explicit
+      `bootDiskSizeGb` honoured and validated (integer, min, max); configured size normalized
+      without throwing (teardown must not fail); `block_device_mapping_v2`
       boot volume with `delete_on_termination: true`; no `imageRef`, no `volume_type`, no
       microversion header; metadata `sam-root-disk-gb`
-- [ ] `vm()`: volume-booted → metadata disk or unknown; image-booted → flavor disk
-- [ ] Static `INFOMANIAK_SIZE_CONFIGS` and `PROVIDER_VM_CAPACITY.infomaniak` storage = default
-- [ ] Admin setting `infomaniak.bootVolumeGb`; resolved for catalog (live + static fallback) and
+- [x] `vm()`: volume-booted → metadata disk or unknown; image-booted → flavor disk
+- [x] Static `INFOMANIAK_SIZE_CONFIGS` and `PROVIDER_VM_CAPACITY.infomaniak` storage = default
+- [x] Admin setting `infomaniak.bootVolumeGb`; resolved for catalog (live + static fallback) and
       every provisioning provider build
-- [ ] Docs: self-hosting / admin settings / .env.example note
-- [ ] Tests: createVM payload (default, plan, explicit, invalid), get/list mapping (volume with
+- [x] Docs: admin settings guide and .env.example note (self-hosting.mdx has no disk content to update)
+- [x] Tests: createVM payload (default, plan, explicit, invalid), get/list mapping (volume with
       metadata, volume without/malformed metadata, legacy image boot), offerings disk, contract
       tests updated, API threading tests
 
 ## Acceptance criteria
 
-- [ ] A new Infomaniak VM boots from a Cinder volume of the configured size that Nova deletes with
+- [x] A new Infomaniak VM boots from a Cinder volume of the configured size that Nova deletes with
       the server
-- [ ] Catalog disk, created volume size and observed disk agree
-- [ ] Legacy image-booted nodes keep their observed disk
-- [ ] Invalid explicit sizes fail before any provider request
-- [ ] No `volume_type` or microversion header is sent
-- [ ] Draft PR with `Closes #2842`, hold recorded; live Infomaniak validation gap recorded
+- [x] Catalog disk, created volume size and observed disk agree
+- [x] Legacy image-booted nodes keep their observed disk
+- [x] Invalid explicit sizes fail before any provider request
+- [x] No `volume_type` or microversion header is sent
+- [x] Draft PR #2854 with `Closes #2842`, hold recorded; live Infomaniak validation gap recorded
 
 ## Validation gaps
 
 - No Infomaniak credentials are available to this agent; no live Infomaniak provisioning was run.
+
+## Review
+
+- task-completion-validator: WARN, no CRITICAL/HIGH. Addressed: plan-path API test
+  (`applyNativePlanToVmConfig` → `createProviderForUser` → `createVM`), stale-candidate behaviour,
+  task file maintenance, unrelated test formatting churn reverted. Deferred (MEDIUM): finding 9 →
+  backlog file above.
+- architecture-reviewer: H1 (stale 20 GB plans) fixed with `max(planned, configured)`; M1
+  constructor throw → non-throwing normalize; M4 volume-type caveat documented; M2 label format is
+  pinned by `infomaniak-boot-volume.test.ts`; M3 static capacity map left as a static default.
+- security-auditor: no CRITICAL/HIGH. L1 read-back bound and L3 non-throwing construction fixed;
+  M1/M2/M3 deferred to the backlog file (M1 matches existing GCP behaviour; M3 is pre-existing).

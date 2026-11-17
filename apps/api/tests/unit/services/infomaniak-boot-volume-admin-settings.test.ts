@@ -21,6 +21,10 @@ import {
   createProviderForUser,
   serializeCredentialToken,
 } from '../../../src/services/provider-credentials';
+import {
+  applyNativePlanToVmConfig,
+  observedHardwareDbValues,
+} from '../../../src/services/runtime-allocation';
 import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
 import { createSchemaTables } from '../../helpers/sqlite-d1';
 
@@ -90,7 +94,13 @@ function stubOpenStack(): number[] {
           name: 'node-1',
           status: 'ACTIVE',
           addresses: { 'ext-net1': [{ version: 4, addr: '203.0.113.10' }] },
-          flavor: { id: 'flavor-1', original_name: 'a4-ram8-disk20-perf1', vcpus: 4, ram: 8192, disk: 20 },
+          flavor: {
+            id: 'flavor-1',
+            original_name: 'a4-ram8-disk20-perf1',
+            vcpus: 4,
+            ram: 8192,
+            disk: 20,
+          },
           image: '',
           created: '2026-11-17T00:00:00Z',
           metadata: lastMetadata,
@@ -179,6 +189,49 @@ describe('Infomaniak boot volume admin setting', () => {
     expect(await resolveInfomaniakBootVolumeGb(env)).toBe(150);
     expect(await sizes()).toEqual({ advertised: 150, created: 150, observed: 150 });
   });
+
+  it.each([
+    ['a candidate published at the current size', 80, 80],
+    ['a larger candidate', 200, 200],
+    ['a stale pre-#2842 candidate still carrying 20 GB', 20, 80],
+  ])(
+    'a pool plan for %s provisions and records the volume the node really has',
+    async (_label, candidateDiskGb, expectedGb) => {
+      await seedPlatformInfomaniakCredential();
+      const created = stubOpenStack();
+      const resolved = await createProviderForUser(
+        drizzle(env.DATABASE, { schema }),
+        'user-without-own-credential',
+        env.ENCRYPTION_KEY,
+        testEnv()
+      );
+      if (!resolved) throw new Error('expected the platform Infomaniak credential to resolve');
+      // The node row carries the pool candidate's plan; node-provisioning.ts builds the VM config
+      // with the same function.
+      const vmConfig = applyNativePlanToVmConfig(
+        {
+          name: 'node-1',
+          size: 'medium',
+          location: 'dc4-a',
+          userData: '#cloud-config\n',
+          labels: { node: 'node-1' },
+        },
+        {
+          providerInstanceType: 'a4-ram8-disk20-perf1',
+          providerInstanceVcpuCount: 4,
+          providerInstanceMemoryMb: 8192,
+          providerInstanceDiskGb: candidateDiskGb,
+          providerInstanceBootDiskSizeGb: null,
+        }
+      );
+      const vm = await resolved.provider.createVM(vmConfig);
+      expect(created).toEqual([expectedGb]);
+      expect(observedHardwareDbValues(vm)).toMatchObject({
+        observedProviderInstanceDiskGb: expectedGb,
+        observedHardwareSource: 'observed',
+      });
+    }
+  );
 
   it.each([19, 4_097, 40.5])('rejects %s and keeps the previous value', async (value) => {
     await expect(setBootVolumeGb(value)).rejects.toThrow();

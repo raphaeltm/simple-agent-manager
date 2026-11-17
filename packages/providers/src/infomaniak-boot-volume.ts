@@ -22,7 +22,7 @@ import {
   INFOMANIAK_BOOT_VOLUME_MIN_GB,
 } from '@simple-agent-manager/shared';
 
-import { assertBootDiskSizeGb, type NativeVMConfigSource } from './native-vm-config';
+import type { NativeVMConfigSource } from './native-vm-config';
 import type { NativeVMConfig, VMHardwareResources } from './types';
 
 export {
@@ -44,17 +44,33 @@ export const INFOMANIAK_BOOT_VOLUME_LIMITS = Object.freeze({
   max: INFOMANIAK_BOOT_VOLUME_MAX_GB,
 });
 
-/** Validate a configured boot volume size; throws `invalid_config` for anything else. */
+/**
+ * Normalize a configured boot volume size. Never throws: every provider build goes through this,
+ * including teardown of existing nodes, so a bad configured value must not block deletion. An
+ * out-of-range or non-integer value falls back to the default, as `normalizeGcpBootDiskPolicy`
+ * does for GCP. The admin setting's own validator already keeps stored values in range.
+ * Explicit per-request `bootDiskSizeGb` values are validated (and rejected) in `createVM`.
+ */
 export function resolveInfomaniakBootVolumeSizeGb(value: number | undefined): number {
-  const size = value ?? DEFAULT_INFOMANIAK_BOOT_VOLUME_GB;
-  assertBootDiskSizeGb('infomaniak', size, INFOMANIAK_BOOT_VOLUME_LIMITS);
-  return size;
+  return isValidBootVolumeGb(value) ? value : DEFAULT_INFOMANIAK_BOOT_VOLUME_GB;
+}
+
+function isValidBootVolumeGb(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= INFOMANIAK_BOOT_VOLUME_MIN_GB &&
+    value <= INFOMANIAK_BOOT_VOLUME_MAX_GB
+  );
 }
 
 /**
  * Boot volume for a request that names no `bootDiskSizeGb`. A pool plan is a native request
- * carrying the candidate's disk as `resources.diskGb`; that is what the catalog advertised and what
- * the node row records, so the volume is created at exactly that size. Any other request gets the
+ * carrying the candidate's disk as `resources.diskGb`, which is what placement reserved against, so
+ * the volume is never smaller than that. It is never smaller than the configured size either:
+ * candidates published before #2842 still carry the flavor's 20 GB, the exact size that filled up,
+ * until the next catalog refresh re-publishes them. The node's observed disk is read back from the
+ * server (`sam-root-disk-gb`), so admission sees the larger size. Any other request gets the
  * configured size.
  */
 export function infomaniakDefaultBootVolumeGb(
@@ -67,7 +83,7 @@ export function infomaniakDefaultBootVolumeGb(
     source === 'native' &&
     typeof plannedDiskGb === 'number' &&
     Number.isInteger(plannedDiskGb) &&
-    plannedDiskGb > 0
+    plannedDiskGb > configuredSizeGb
   ) {
     return plannedDiskGb;
   }
@@ -129,8 +145,9 @@ export function infomaniakObservedResources(input: {
   if (input.image !== '')
     return { resources: null, unknownReason: 'Infomaniak server response omitted its boot source' };
   const recorded = input.metadata[INFOMANIAK_ROOT_DISK_METADATA_KEY];
+  // Bounded like a request: the record is server metadata the project owner can edit.
   const diskGb = recorded !== undefined && /^[1-9]\d*$/.test(recorded) ? Number(recorded) : null;
-  if (diskGb === null || !Number.isSafeInteger(diskGb))
+  if (!isValidBootVolumeGb(diskGb))
     return {
       resources: null,
       unknownReason: `Infomaniak volume-booted server has no valid ${INFOMANIAK_ROOT_DISK_METADATA_KEY} record`,

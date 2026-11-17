@@ -170,7 +170,11 @@ describe('Infomaniak boot volume (#2842)', () => {
     expect((vm.observedHardware.resources.value as { diskGb: number }).diskGb).toBe(120);
   });
 
-  it('sizes a pool plan to the candidate disk the node row records', async () => {
+  it.each([
+    ['a larger candidate keeps its planned disk', 120, 120],
+    ['a stale pre-#2842 20 GB candidate gets the configured size', 20, 80],
+    ['a smaller candidate gets the configured size', 64, 80],
+  ])('pool plan: %s', async (_label, plannedDiskGb, expectedGb) => {
     const nova = fakeNova();
     const provider = new InfomaniakProvider('id', 'secret', { authUrl: AUTH_URL });
 
@@ -178,12 +182,12 @@ describe('Infomaniak boot volume (#2842)', () => {
       ...baseConfig,
       native: {
         instanceType: 'a4-ram8-disk20-perf1',
-        resources: { vcpuCount: 4, memoryMb: 8192, diskGb: 64 },
+        resources: { vcpuCount: 4, memoryMb: 8192, diskGb: plannedDiskGb },
       },
     });
 
-    expect(lastMapping(nova).volume_size).toBe(64);
-    expect((vm.observedHardware.resources.value as { diskGb: number }).diskGb).toBe(64);
+    expect(lastMapping(nova).volume_size).toBe(expectedGb);
+    expect((vm.observedHardware.resources.value as { diskGb: number }).diskGb).toBe(expectedGb);
   });
 
   it('honours an explicit bootDiskSizeGb above the flavor root disk', async () => {
@@ -243,11 +247,17 @@ describe('Infomaniak boot volume (#2842)', () => {
   });
 
   it.each([10, 1.5, 100_000, Number.NaN])(
-    'rejects a configured boot volume size of %s at construction',
-    (size) => {
-      expect(
-        () => new InfomaniakProvider('id', 'secret', { authUrl: AUTH_URL, bootVolumeSizeGb: size })
-      ).toThrow(expect.objectContaining({ category: 'invalid_config' }));
+    'falls back to the default for a configured size of %s instead of failing provider builds',
+    async (size) => {
+      const nova = fakeNova();
+      const provider = new InfomaniakProvider('id', 'secret', {
+        authUrl: AUTH_URL,
+        bootVolumeSizeGb: size,
+      });
+      // Teardown must still work with a bad configured value.
+      await provider.deleteVM('server-1');
+      await provider.createVM({ ...baseConfig, size: 'small' });
+      expect(lastMapping(nova).volume_size).toBe(80);
     }
   );
 
@@ -302,6 +312,8 @@ describe('Infomaniak observed root disk', () => {
     ['zero', { [INFOMANIAK_ROOT_DISK_METADATA_KEY]: '0' }],
     ['negative', { [INFOMANIAK_ROOT_DISK_METADATA_KEY]: '-5' }],
     ['fractional', { [INFOMANIAK_ROOT_DISK_METADATA_KEY]: '80.5' }],
+    ['below the volume minimum', { [INFOMANIAK_ROOT_DISK_METADATA_KEY]: '10' }],
+    ['above the volume maximum', { [INFOMANIAK_ROOT_DISK_METADATA_KEY]: '9000000000000000' }],
   ])('reports unknown disk for a volume-booted node with a %s record', async (_label, metadata) => {
     const vm = await listOne({ image: '', metadata });
     expect(vm.observedHardware.resources).toMatchObject({ source: 'unknown', value: null });
