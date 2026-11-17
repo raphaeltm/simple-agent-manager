@@ -128,6 +128,55 @@ describe('run token usage from the VM agent callback to the receipt', () => {
     });
   });
 
+  it('bounds fresh callback epochs without blocking an admitted epoch update', async () => {
+    const previousLimit = testEnv.RUN_USAGE_MAX_ROWS_PER_SESSION;
+    testEnv.RUN_USAGE_MAX_ROWS_PER_SESSION = '2';
+    try {
+      const suffix = crypto.randomUUID().slice(0, 8);
+      const credentialReference = `cc_credentials:cred-run-usage-cap-${suffix}`;
+      const session = await seedClaudeSession(suffix, credentialReference);
+      const report = goTokenReport(session, credentialReference);
+
+      expect((await postUsage(session, report)).status).toBe(204);
+      expect(
+        (
+          await postUsage(session, {
+            ...report,
+            tokenUsage: {
+              epoch: 'host-fedcba987654321001234567',
+              models: [{ model: 'new-model', inputTokens: 1, outputTokens: 1 }],
+            },
+          })
+        ).status
+      ).toBe(204);
+      expect(
+        (
+          await postUsage(session, {
+            ...report,
+            tokenUsage: {
+              epoch: contractFixture.tokenUsage.epoch,
+              models: [{ model: 'claude-opus-5-5', inputTokens: 1300, outputTokens: 350 }],
+            },
+          })
+        ).status
+      ).toBe(204);
+
+      const rows = await storedRows(session.projectId);
+      expect(rows).toHaveLength(2);
+      expect(rows).toContainEqual(
+        expect.objectContaining({
+          model: 'claude-opus-5-5',
+          input_tokens: 1300,
+          output_tokens: 350,
+        })
+      );
+      expect(rows).not.toContainEqual(expect.objectContaining({ model: 'new-model' }));
+    } finally {
+      if (previousLimit === undefined) delete testEnv.RUN_USAGE_MAX_ROWS_PER_SESSION;
+      else testEnv.RUN_USAGE_MAX_ROWS_PER_SESSION = previousLimit;
+    }
+  });
+
   it('keeps an old agent’s report (no tokenUsage) working and writes no usage', async () => {
     const suffix = crypto.randomUUID().slice(0, 8);
     const credentialReference = `cc_credentials:cred-run-usage-old-${suffix}`;

@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import {
+  purgeExpiredRunUsage,
   recordHarnessRunUsage,
   recordHarnessTokenReport,
   recordProxyRunUsage,
@@ -17,6 +18,10 @@ import {
 import { applySqliteMigration, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const MIGRATION = new URL('../../../src/db/migrations/0253_agent_run_usage.sql', import.meta.url);
+const RETENTION_MIGRATION = new URL(
+  '../../../src/db/migrations/0259_agent_run_usage_retention.sql',
+  import.meta.url
+);
 
 const scope = (overrides: Partial<RunUsageScope> = {}): RunUsageScope => ({
   projectId: 'project-a',
@@ -40,11 +45,18 @@ const opus = (input: number, output: number, cacheRead = 0, cacheWrite = 0) => (
 
 describe('agent_run_usage writers and reads', () => {
   let sqlite: Database.Database;
-  let env: Pick<Env, 'DATABASE'>;
+  let env: Pick<
+    Env,
+    | 'DATABASE'
+    | 'RUN_USAGE_MAX_ROWS_PER_SESSION'
+    | 'RUN_USAGE_RETENTION_DAYS'
+    | 'RUN_USAGE_RETENTION_BATCH_SIZE'
+  >;
 
   beforeEach(() => {
     sqlite = new Database(':memory:');
     applySqliteMigration(sqlite, MIGRATION);
+    applySqliteMigration(sqlite, RETENTION_MIGRATION);
     sqlite.exec(`CREATE TABLE cc_credentials (id TEXT PRIMARY KEY, owner_id TEXT, name TEXT, kind TEXT);
       INSERT INTO cc_credentials VALUES ('cred-key', 'u', 'Anthropic key', 'api-key'),
         ('cred-max', 'u', 'Claude Max', 'oauth-token');`);
@@ -81,6 +93,34 @@ describe('agent_run_usage writers and reads', () => {
     await recordHarnessRunUsage(env, scope(), 'epoch-1', [opus(100, 20)]);
     await recordHarnessRunUsage(env, scope({ agentSessionId: 'as-2' }), 'epoch-2', [opus(40, 5)]);
     expect((await read())?.models[0]).toMatchObject({ input: 140, output: 25 });
+  });
+
+  it('atomically caps client-selected epochs while preserving cumulative updates', async () => {
+    env.RUN_USAGE_MAX_ROWS_PER_SESSION = '2';
+    await recordHarnessRunUsage(env, scope(), 'epoch-1', [opus(10, 1)]);
+    await recordHarnessRunUsage(env, scope(), 'epoch-2', [opus(20, 2)]);
+
+    // Lowering policy below existing cardinality must still allow non-growing cumulative updates.
+    env.RUN_USAGE_MAX_ROWS_PER_SESSION = '1';
+    expect(await recordHarnessRunUsage(env, scope(), 'epoch-3', [opus(30, 3)])).toBe(0);
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage').get()).toEqual({ n: 2 });
+
+    await recordHarnessRunUsage(env, scope(), 'epoch-2', [opus(25, 4)]);
+    expect((await read())?.models[0]).toMatchObject({ input: 35, output: 5 });
+  });
+
+  it('purges only an indexed, configured batch of expired rows', async () => {
+    const day = 86_400_000;
+    env.RUN_USAGE_RETENTION_DAYS = '90';
+    env.RUN_USAGE_RETENTION_BATCH_SIZE = '1';
+    await recordHarnessRunUsage(env, scope(), 'oldest', [opus(1, 1)], day);
+    await recordHarnessRunUsage(env, scope(), 'old', [opus(2, 2)], 2 * day);
+    await recordHarnessRunUsage(env, scope(), 'fresh', [opus(3, 3)], 100 * day);
+
+    expect(await purgeExpiredRunUsage(env, 100 * day)).toBe(1);
+    expect(
+      sqlite.prepare('SELECT usage_epoch FROM agent_run_usage ORDER BY usage_epoch').all()
+    ).toEqual([{ usage_epoch: 'fresh' }, { usage_epoch: 'old' }]);
   });
 
   it('adds proxy responses and prefers the proxy over the harness for the same run', async () => {

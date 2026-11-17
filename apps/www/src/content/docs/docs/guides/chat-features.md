@@ -450,7 +450,9 @@ rather than guessing.
   shows the same totals. For an API-key account the list also shows spend, labelled as an estimate
   from SAM's model prices (cache writes are priced as input, so it reads low for Anthropic). Only
   the person who ran the session sees spend on their own personal key. Subscription accounts show
-  tokens only.
+  tokens only. Measured run usage is retained for 90 days by default; operators can tune the row
+  ceiling and retention with the `RUN_USAGE_*` settings
+  (`apps/api/src/services/agent-run-usage.ts`).
 
 - **CPU**: the run's CPU per minute, with a marker on each minute in which the agent started tool
   calls, from the same history as **Resources**.

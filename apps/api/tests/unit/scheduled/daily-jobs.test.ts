@@ -11,6 +11,7 @@ const jobs = vi.hoisted(() => ({
   auditPurge: vi.fn(),
   debugPurge: vi.fn(),
   telemetryRetention: vi.fn(),
+  runUsageRetention: vi.fn(),
   secretPurge: vi.fn(),
   latency: vi.fn(),
   cloudflare: vi.fn(),
@@ -28,6 +29,9 @@ vi.mock('../../../src/scheduled/debug-package-purge', () => ({
 }));
 vi.mock('../../../src/scheduled/operations-telemetry-retention', () => ({
   runOperationsTelemetryRetention: jobs.telemetryRetention,
+}));
+vi.mock('../../../src/services/agent-run-usage', () => ({
+  purgeExpiredRunUsage: jobs.runUsageRetention,
 }));
 vi.mock('../../../src/services/runtime-secret-request-maintenance', () => ({
   purgeRuntimeSecretMaterial: jobs.secretPurge,
@@ -66,6 +70,7 @@ describe('scheduleDailyJobs', () => {
       jobs.auditPurge,
       jobs.debugPurge,
       jobs.telemetryRetention,
+      jobs.runUsageRetention,
       jobs.secretPurge,
       jobs.latency,
     ])
@@ -80,6 +85,7 @@ describe('scheduleDailyJobs', () => {
     expect(jobs.cloudflare).toHaveBeenCalledWith(env);
     expect(jobs.latency).toHaveBeenCalledTimes(1);
     expect(jobs.auditPurge).toHaveBeenCalledTimes(1);
+    expect(jobs.runUsageRetention).toHaveBeenCalledWith(env);
   });
 
   it('a failing snapshot is contained and logged; the other jobs still run', async () => {
@@ -97,6 +103,7 @@ describe('scheduleDailyJobs', () => {
       jobs.auditPurge,
       jobs.debugPurge,
       jobs.telemetryRetention,
+      jobs.runUsageRetention,
       jobs.secretPurge,
       jobs.latency,
     ])

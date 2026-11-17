@@ -5,6 +5,7 @@
  */
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { purgeExpiredRunUsage } from '../services/agent-run-usage';
 import { runCloudflareCostSnapshot } from '../services/cloudflare-cost-snapshot';
 import { runLifecycleLatencyDailyEvaluation } from '../services/lifecycle-latency';
 import { purgeRuntimeSecretMaterial } from '../services/runtime-secret-request-maintenance';
@@ -44,6 +45,13 @@ export function scheduleDailyJobs(
   waitUntil(runOperationsAuditPurge(env, cron));
   waitUntil(runDebugPackagePurge(env, cron));
   waitUntil(runOperationsTelemetryRetention(env, cron));
+  // At the default 10k rows/day, this outpaces roughly 625 ordinary 16-row runs per day;
+  // the write-side per-run cap prevents a callback client from increasing that workload forever.
+  waitUntil(
+    purgeExpiredRunUsage(env)
+      .then((deleted) => log.info('cron.run_usage_retention_completed', { cron, deleted }))
+      .catch(logFailure('cron.run_usage_retention_failed'))
+  );
   // Expired collected secret values are already refused at read time; this deletes them.
   waitUntil(purgeRuntimeSecretMaterial(env).catch(logFailure('cron.runtime_secret_purge_failed')));
   // Separate promise again, so none of the jobs above can suppress the latency check.

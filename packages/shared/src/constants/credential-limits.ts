@@ -75,6 +75,15 @@ export const RUN_USAGE_MAX_MODELS_PER_REPORT = 16;
 /** Largest value one token counter in a run-usage report may carry (schema bound). */
 export const RUN_USAGE_MAX_TOKENS_PER_COUNTER = 1_000_000_000_000;
 
+/** Maximum harness token-usage rows retained for one run across models and agent restarts. */
+export const DEFAULT_RUN_USAGE_MAX_ROWS_PER_SESSION = 256;
+
+/** Days measured run-usage rows remain available for receipts and account insights. */
+export const DEFAULT_RUN_USAGE_RETENTION_DAYS = 90;
+
+/** Expired run-usage rows removed by each daily retention pass. */
+export const DEFAULT_RUN_USAGE_RETENTION_BATCH_SIZE = 10_000;
+
 /** Maximum predecessor-CAS recomputes for one credential-limit observation. */
 export const DEFAULT_CREDENTIAL_LIMIT_TRANSITION_RECOMPUTE_ATTEMPTS = 4;
 

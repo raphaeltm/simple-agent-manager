@@ -12,7 +12,13 @@
  * (`credentialLimitReferenceKey`), never a secret.
  */
 import type { MeasuredTokenUsage } from '@simple-agent-manager/ai-proxy';
-import { RUN_USAGE_MAX_TOKENS_PER_COUNTER } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_RUN_USAGE_MAX_ROWS_PER_SESSION,
+  DEFAULT_RUN_USAGE_RETENTION_BATCH_SIZE,
+  DEFAULT_RUN_USAGE_RETENTION_DAYS,
+  RUN_USAGE_MAX_TOKENS_PER_COUNTER,
+} from '@simple-agent-manager/shared';
+import { parsePositiveInt } from '@simple-agent-manager/worker-core';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
@@ -47,9 +53,62 @@ const UPSERT_COLUMNS = `project_id, chat_session_id, workspace_id, agent_session
 const UPSERT_VALUES = '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?';
 const CONFLICT_KEY = 'project_id, chat_session_id, source, usage_epoch, model, credential_key';
 
-/** Cumulative counters: keep the larger of the stored and the reported value, column by column. */
-const HARNESS_UPSERT_SQL = `INSERT INTO agent_run_usage (${UPSERT_COLUMNS})
-  VALUES (${UPSERT_VALUES})
+/**
+ * Admit every model in one statement or none. The count and insert share SQLite's write boundary,
+ * so concurrent client-selected epochs cannot race past the configured per-run row ceiling.
+ */
+const HARNESS_UPSERT_SQL = `WITH report(
+    project_id, chat_session_id, workspace_id, agent_session_id, usage_epoch, credential_key,
+    credential_source, agent_type, reported_at, max_rows, models_json
+  ) AS (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)),
+  incoming_raw AS (
+    SELECT
+      TRIM(CAST(json_extract(model.value, '$.model') AS TEXT)) AS model,
+      CAST(json_extract(model.value, '$.inputTokens') AS INTEGER) AS input_tokens,
+      CAST(json_extract(model.value, '$.outputTokens') AS INTEGER) AS output_tokens,
+      CAST(json_extract(model.value, '$.cacheReadTokens') AS INTEGER) AS cache_read_tokens,
+      CAST(json_extract(model.value, '$.cacheWriteTokens') AS INTEGER) AS cache_write_tokens,
+      CAST(json_extract(model.value, '$.reasoningTokens') AS INTEGER) AS reasoning_tokens
+    FROM report, json_each(report.models_json) AS model
+  ),
+  incoming AS (
+    SELECT model, MAX(input_tokens) AS input_tokens, MAX(output_tokens) AS output_tokens,
+      MAX(cache_read_tokens) AS cache_read_tokens,
+      MAX(cache_write_tokens) AS cache_write_tokens,
+      MAX(reasoning_tokens) AS reasoning_tokens
+    FROM incoming_raw
+    GROUP BY model
+  ),
+  usage_counts AS (
+    SELECT
+      (SELECT COUNT(*) FROM agent_run_usage existing
+        WHERE existing.project_id = report.project_id
+          AND existing.chat_session_id = report.chat_session_id
+          AND existing.source = 'harness') AS existing_rows,
+      (SELECT COUNT(*) FROM incoming
+        WHERE NOT EXISTS (
+          SELECT 1 FROM agent_run_usage existing
+          WHERE existing.project_id = report.project_id
+            AND existing.chat_session_id = report.chat_session_id
+            AND existing.source = 'harness'
+            AND existing.usage_epoch = report.usage_epoch
+            AND existing.model = incoming.model
+            AND existing.credential_key = report.credential_key
+        )) AS new_rows
+    FROM report
+  ),
+  admission AS (
+    SELECT new_rows = 0 OR existing_rows + new_rows <= report.max_rows AS allowed
+    FROM report, usage_counts
+  )
+INSERT INTO agent_run_usage (${UPSERT_COLUMNS})
+  SELECT report.project_id, report.chat_session_id, report.workspace_id,
+    report.agent_session_id, 'harness', report.usage_epoch, incoming.model,
+    report.credential_key, report.credential_source, report.agent_type,
+    incoming.input_tokens, incoming.output_tokens, incoming.cache_read_tokens,
+    incoming.cache_write_tokens, incoming.reasoning_tokens, report.reported_at, report.reported_at
+  FROM report, incoming, admission
+  WHERE admission.allowed
   ON CONFLICT (${CONFLICT_KEY}) DO UPDATE SET
     input_tokens = MAX(input_tokens, excluded.input_tokens),
     output_tokens = MAX(output_tokens, excluded.output_tokens),
@@ -109,37 +168,44 @@ function hasTokens(counts: RunUsageModelCounts): boolean {
   );
 }
 
-async function bindRows(
+function normalizedModels(models: RunUsageModelCounts[]): RunUsageModelCounts[] {
+  return models.filter(hasTokens).map((counts) => ({
+    model: counts.model.trim(),
+    inputTokens: count(counts.inputTokens),
+    outputTokens: count(counts.outputTokens),
+    cacheReadTokens: count(counts.cacheReadTokens),
+    cacheWriteTokens: count(counts.cacheWriteTokens),
+    reasoningTokens: optionalCount(counts.reasoningTokens),
+  }));
+}
+
+async function bindProxyRows(
   db: D1Database,
-  sql: string,
   scope: RunUsageScope,
-  source: 'harness' | 'ai_proxy',
-  epoch: string,
   models: RunUsageModelCounts[],
   now: number
 ): Promise<D1PreparedStatement[]> {
   const credentialKey = (await credentialLimitReferenceKey(scope.credentialReference)) ?? '';
-  return models
-    .filter(hasTokens)
+  return normalizedModels(models)
     .map((counts) =>
       db
-        .prepare(sql)
+        .prepare(PROXY_UPSERT_SQL)
         .bind(
           scope.projectId,
           scope.chatSessionId,
           scope.workspaceId,
           scope.agentSessionId,
-          source,
-          epoch,
-          counts.model.trim(),
+          'ai_proxy',
+          AI_PROXY_USAGE_EPOCH,
+          counts.model,
           credentialKey,
           credentialKey ? scope.credentialSource : null,
           scope.agentType,
-          count(counts.inputTokens),
-          count(counts.outputTokens),
-          count(counts.cacheReadTokens),
-          count(counts.cacheWriteTokens),
-          optionalCount(counts.reasoningTokens),
+          counts.inputTokens,
+          counts.outputTokens,
+          counts.cacheReadTokens,
+          counts.cacheWriteTokens,
+          counts.reasoningTokens,
           now,
           now
         )
@@ -152,24 +218,58 @@ async function bindRows(
  * attribution; `scope` carries only server-verified values.
  */
 export async function recordHarnessRunUsage(
-  env: Pick<Env, 'DATABASE'>,
+  env: Pick<Env, 'DATABASE' | 'RUN_USAGE_MAX_ROWS_PER_SESSION'>,
   scope: RunUsageScope,
   epoch: string,
   models: RunUsageModelCounts[],
   now: number = Date.now()
 ): Promise<number> {
-  const statements = await bindRows(
-    env.DATABASE,
-    HARNESS_UPSERT_SQL,
-    scope,
-    'harness',
-    epoch,
-    models,
-    now
+  const normalized = normalizedModels(models);
+  if (normalized.length === 0) return 0;
+  const credentialKey = (await credentialLimitReferenceKey(scope.credentialReference)) ?? '';
+  const result = await env.DATABASE.prepare(HARNESS_UPSERT_SQL)
+    .bind(
+      scope.projectId,
+      scope.chatSessionId,
+      scope.workspaceId,
+      scope.agentSessionId,
+      epoch,
+      credentialKey,
+      credentialKey ? scope.credentialSource : null,
+      scope.agentType,
+      now,
+      parsePositiveInt(
+        env.RUN_USAGE_MAX_ROWS_PER_SESSION,
+        DEFAULT_RUN_USAGE_MAX_ROWS_PER_SESSION
+      ),
+      JSON.stringify(normalized)
+    )
+    .run();
+  return result.meta.changes ?? 0;
+}
+
+/** Delete one indexed batch of expired measured usage; the daily caller repeats on its next run. */
+export async function purgeExpiredRunUsage(
+  env: Pick<Env, 'DATABASE' | 'RUN_USAGE_RETENTION_DAYS' | 'RUN_USAGE_RETENTION_BATCH_SIZE'>,
+  now: number = Date.now()
+): Promise<number> {
+  const retentionDays = parsePositiveInt(
+    env.RUN_USAGE_RETENTION_DAYS,
+    DEFAULT_RUN_USAGE_RETENTION_DAYS
   );
-  if (statements.length === 0) return 0;
-  await env.DATABASE.batch(statements);
-  return statements.length;
+  const batchSize = parsePositiveInt(
+    env.RUN_USAGE_RETENTION_BATCH_SIZE,
+    DEFAULT_RUN_USAGE_RETENTION_BATCH_SIZE
+  );
+  const cutoff = now - retentionDays * 86_400_000;
+  const result = await env.DATABASE.prepare(
+    `DELETE FROM agent_run_usage WHERE id IN (
+       SELECT id FROM agent_run_usage WHERE updated_at < ? ORDER BY updated_at, id LIMIT ?
+     )`
+  )
+    .bind(cutoff, batchSize)
+    .run();
+  return result.meta.changes ?? 0;
 }
 
 /** Cumulative token totals of one VM-agent usage epoch, per model (the callback's `tokenUsage`). */
@@ -191,7 +291,7 @@ export interface HarnessTokenUsageReport {
  * observations must not be retried because of it.
  */
 export async function recordHarnessTokenReport(
-  env: Pick<Env, 'DATABASE'>,
+  env: Pick<Env, 'DATABASE' | 'RUN_USAGE_MAX_ROWS_PER_SESSION'>,
   scope: RunUsageScope,
   report: HarnessTokenUsageReport
 ): Promise<void> {
@@ -244,12 +344,9 @@ export async function recordProxyRunUsage(
     return;
   }
   try {
-    const statements = await bindRows(
+    const statements = await bindProxyRows(
       env.DATABASE,
-      PROXY_UPSERT_SQL,
       { ...scope, projectId: scope.projectId, chatSessionId: scope.chatSessionId },
-      'ai_proxy',
-      AI_PROXY_USAGE_EPOCH,
       [{ model, ...usage }],
       now
     );
