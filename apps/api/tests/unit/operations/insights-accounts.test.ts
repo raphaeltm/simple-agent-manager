@@ -14,17 +14,21 @@ import { accountRunsStatement } from '@simple-agent-manager/operations/internal/
 import { flowWindow } from '@simple-agent-manager/operations/internal/insights-flow';
 import { newProviderLimitWait, PROVIDER_LIMIT_POLICY } from '@simple-agent-manager/scheduler-core';
 import { credentialLimitReferenceKey } from '@simple-agent-manager/shared';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import { createOperationPorts } from '../../../src/operation-ports';
+import { countD1RoundTrips } from '../../helpers/insights-d1';
+import { createDeclaredIndexes } from '../../helpers/sqlite-d1';
 import {
-  createAllSchemaTables,
-  createDeclaredIndexes,
-  createSqliteD1,
-} from '../../helpers/sqlite-d1';
+  createAccountsTestDb,
+  insertCredential,
+  insertRow,
+  insertRun,
+  operationContext,
+  withFailingStatement,
+} from './insights-accounts-test-db';
 
 const NOW = Date.parse('2026-11-16T12:00:00.000Z');
 const DAY = 86_400_000;
@@ -40,34 +44,11 @@ describe('projectAccounts', () => {
   let sqlite: Database.Database;
   let env: Env;
 
-  function ctx(userId = 'owner'): OperationContext {
-    return {
-      env,
-      ports: createOperationPorts(env),
-      requestId: 'test',
-      actor: { userId, via: 'web', scopes: new Set(['sam.read']) },
-    };
-  }
-
-  function insert(table: string, row: Record<string, string | number | null>): void {
-    const columns = Object.keys(row);
-    sqlite
-      .prepare(
-        `INSERT INTO ${table} (${columns.join(',')}) VALUES (${columns.map(() => '?').join(',')})`
-      )
-      .run(...Object.values(row));
-  }
-
-  function credential(id: string, ownerId: string, name: string, kind: string): void {
-    insert('cc_credentials', {
-      id,
-      owner_id: ownerId,
-      name,
-      kind,
-      encrypted_token: 'ciphertext-never-read',
-      iv: 'iv-never-read',
-    });
-  }
+  const ctx = (userId = 'owner'): OperationContext => operationContext(env, userId);
+  const insert = (table: string, row: Record<string, string | number | null>) =>
+    insertRow(sqlite, table, row);
+  const credential = (id: string, ownerId: string, name: string, kind: string) =>
+    insertCredential(sqlite, id, ownerId, name, kind);
 
   /**
    * A finished run of project `projectId` on `credentialId` (null: no credential recorded),
@@ -79,44 +60,15 @@ describe('projectAccounts', () => {
     fields: Record<string, string | number | null> = {},
     session: Record<string, string | number | null> = {}
   ): void {
-    const projectId = (fields.project_id as string | undefined) ?? 'p';
-    const userId = (session.user_id as string | undefined) ?? 'owner';
-    insert('workspaces', {
-      id: `w-${id}`,
-      project_id: (fields.workspace_project_id as string | undefined) ?? projectId,
-      user_id: userId,
-      name: `ws ${id}`,
-      repository: 'acme/app',
-      branch: 'main',
-      status: 'deleted',
-      vm_size: 'small',
-      vm_location: 'fsn1',
-    });
-    insert('agent_sessions', {
-      id: `s-${id}`,
-      workspace_id: `w-${id}`,
-      user_id: userId,
-      status: 'stopped',
-      agent_type: 'claude-code',
-      agent_credential_source: 'user',
-      agent_credential_reference: credentialId ? ref(credentialId) : null,
-      ...session,
-    });
-    const taskFields = { ...fields };
-    delete taskFields.workspace_project_id;
-    insert('tasks', {
-      id,
-      project_id: projectId,
-      user_id: userId,
-      title: `Run ${id}`,
-      status: 'completed',
-      task_mode: 'task',
-      is_idea: 0,
-      workspace_id: `w-${id}`,
-      created_at: daysAgo(6),
-      updated_at: daysAgo(5),
-      completed_at: daysAgo(5),
-      ...taskFields,
+    const { project_id, workspace_project_id, ...task } = fields;
+    insertRun(sqlite, id, {
+      projectId: (project_id as string | undefined) ?? 'p',
+      workspaceProjectId: workspace_project_id as string | undefined,
+      userId: (session.user_id as string | undefined) ?? 'owner',
+      credentialReference: credentialId ? ref(credentialId) : null,
+      session,
+      task,
+      taskTimes: { created: daysAgo(6), ended: daysAgo(5) },
     });
   }
 
@@ -185,23 +137,13 @@ describe('projectAccounts', () => {
   }
 
   beforeEach(() => {
-    sqlite = new Database(':memory:');
-    createAllSchemaTables(sqlite, schema);
-    sqlite.exec(`
-      INSERT INTO users (id, name, email) VALUES ('owner','Owner','o@example.com'),
-        ('mate','Mate','m@example.com'), ('outsider','Out','x@example.com');
-      INSERT INTO projects (id, name, repository, user_id) VALUES ('p', 'Project', 'acme/app', 'owner'),
-        ('foreign', 'Other', 'acme/app', 'outsider');
-      INSERT INTO project_members (project_id, user_id, role, status) VALUES
-        ('p','owner','owner','active'), ('p','mate','member','active'), ('foreign','outsider','owner','active');
-    `);
+    ({ sqlite, env } = createAccountsTestDb());
     credential('cc-max', 'owner', 'Personal Max', 'oauth-token');
     credential('cc-key', 'owner', 'Work API key', 'api-key');
     credential('cc-mate', 'mate', 'Mate Secret Name', 'oauth-token');
     credential('cc-mate2', 'mate', 'Mate Second Name', 'oauth-token');
     credential(LONG_ID, 'owner', 'Legacy Max', 'oauth-token');
     credential('cc-out', 'outsider', 'Outsider Name', 'oauth-token');
-    env = { DATABASE: createSqliteD1(sqlite), BASE_DOMAIN: 'example.test' } as unknown as Env;
   });
   afterEach(() => sqlite.close());
 
@@ -492,26 +434,12 @@ describe('projectAccounts', () => {
   it('a failed batch retries each statement and marks only the failed section', async () => {
     run('a1', 'cc-max');
     await wait('a1', ref('cc-max'), HOUR, { phase: 'released' });
-    const real = env.DATABASE;
     env = {
       ...env,
-      DATABASE: {
-        ...real,
-        prepare: (sql: string) => {
-          const statement = real.prepare(sql);
-          if (!sql.includes('provider_limit_wait_json AS wait_json')) return statement;
-          const failing = {
-            all: async () => {
-              throw new Error('D1_ERROR: simulated');
-            },
-          };
-          return { ...statement, bind: () => failing, ...failing };
-        },
-        batch: async () => {
-          throw new Error('D1_ERROR: batch failed');
-        },
-      },
-    } as unknown as Env;
+      DATABASE: withFailingStatement(env.DATABASE, (sql) =>
+        sql.includes('provider_limit_wait_json AS wait_json')
+      ),
+    };
     const result = await projectAccounts(ctx(), { projectId: 'p', range: '7d', nowMs: NOW });
     expect(result.unavailable).toEqual(['stalls']);
     expect(result.accounts.find((a) => a.key === 'cred:cc-max')).toMatchObject({
@@ -842,45 +770,8 @@ describe('projectAccounts', () => {
   });
 
   it('stays within its round-trip budget', async () => {
-    const real = env.DATABASE;
-    let trips = 0;
-    const wrap = <T extends Record<string, unknown>>(statement: T): T => ({
-      ...statement,
-      all: async (...a: unknown[]) => {
-        trips += 1;
-        return (statement.all as (...x: unknown[]) => unknown)(...a);
-      },
-      first: async (...a: unknown[]) => {
-        trips += 1;
-        return (statement.first as (...x: unknown[]) => unknown)(...a);
-      },
-      run: async (...a: unknown[]) => {
-        trips += 1;
-        return (statement.run as (...x: unknown[]) => unknown)(...a);
-      },
-      raw: async (...a: unknown[]) => {
-        trips += 1;
-        return (statement.raw as (...x: unknown[]) => unknown)(...a);
-      },
-    });
-    env = {
-      ...env,
-      DATABASE: {
-        ...real,
-        prepare: (sql: string) => {
-          const statement = real.prepare(sql) as unknown as Record<string, unknown>;
-          return {
-            ...wrap(statement),
-            bind: (...params: unknown[]) =>
-              wrap((statement.bind as (...p: unknown[]) => Record<string, unknown>)(...params)),
-          };
-        },
-        batch: async (statements: unknown[]) => {
-          trips += 1;
-          return (real.batch as (s: unknown[]) => unknown)(statements);
-        },
-      },
-    } as unknown as Env;
+    const counter = countD1RoundTrips(env);
+    env = counter.env;
     // Busy project: 120 runs over every account, own accounts with stalls, so every read fires.
     for (let i = 0; i < 120; i += 1) {
       const id = ['cc-max', 'cc-key', 'cc-mate', LONG_ID][i % 4] as string;
@@ -888,7 +779,7 @@ describe('projectAccounts', () => {
       if (i % 10 === 0) await wait(`t${i}`, ref(id), (i + 1) * HOUR, { phase: 'released' });
     }
     await projectAccounts(ctx(), { projectId: 'p', range: '30d', nowMs: NOW }); // warm settings
-    trips = 0;
+    counter.reset();
     const result = await projectAccounts(ctx(), { projectId: 'p', range: '30d', nowMs: NOW });
     expect(result.totals.runs).toBe(120);
     expect(result.accounts.find((a) => a.key === 'cred:cc-max')?.stalls.episodes).toBeGreaterThan(
@@ -896,6 +787,6 @@ describe('projectAccounts', () => {
     );
     // Rule 60 budget for this read is 6 (Insights spec). Measured: membership, the batch, the
     // viewer's own limit windows (settings are cached after the first call).
-    expect(trips).toBe(3);
+    expect(counter.trips()).toBe(3);
   });
 });

@@ -1,3 +1,7 @@
+vi.mock('../../../src/services/platform-capabilities', async (original) => ({
+  ...(await original<typeof import('../../../src/services/platform-capabilities')>()),
+  resolveLlmEndpointCapability: async () => null,
+}));
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';

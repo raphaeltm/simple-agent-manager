@@ -43,6 +43,27 @@ export const INSIGHTS_INSTALLATION_SETTINGS = [
       'Weeks shown in the compute spend and machine reuse charts on Admin Health & cost.',
     range: { min: 1, max: 26 },
   },
+  {
+    name: 'insights.healthCloudflareSeriesDays',
+    defaultValue: 30,
+    description:
+      'Days of daily estimated cost shown in the Cloudflare card on Admin Health & cost.',
+    range: { min: 7, max: 62 },
+  },
+  {
+    name: 'insights.healthCloudflareProjectionDays',
+    defaultValue: 7,
+    description:
+      'Most recent days whose average daily Cloudflare cost projects the rest of the month on Admin Health & cost (the CLI default too).',
+    range: { min: 1, max: 31 },
+  },
+  {
+    name: 'insights.healthCloudflareTopLines',
+    defaultValue: 5,
+    description:
+      'Cloudflare product lines the Health & cost card lists by projected cost. The rest are summed as "everything else".',
+    range: { min: 1, max: 19 },
+  },
 ] as const;
 
 export type InsightsInstallationSettingName =

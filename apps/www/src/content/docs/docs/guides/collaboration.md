@@ -326,10 +326,11 @@ While their access lasts, a teammate can also:
 The terminal, port previews and the workspace page stay with the owner: they reach the whole
 workspace, and SAM can't cut off a live terminal or port connection when access ends.
 
-Notifications about the chat itself still go to the owner: the agent finishing its work, and
-questions it asks with its `request_human_input` tool. The cards the agent puts in the chat
-(permission requests, questions, and links) notify no one, and a teammate with shared access can
-answer them, so a teammate driving the chat should keep it open.
+Notifications about the chat itself still go to the owner: the agent finishing its work,
+questions it asks with its `request_human_input` tool, and the cards it puts in the chat
+(permission requests, forms and links), which reach the owner's Inbox. A teammate with shared
+access can answer those cards in the chat but is not notified of them, so a teammate driving the
+chat should keep it open.
 
 ### If it isn't your chat
 

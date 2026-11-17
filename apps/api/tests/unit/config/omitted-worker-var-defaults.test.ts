@@ -76,6 +76,7 @@ import { resolveMaxMessageBytes } from '../../../src/routes/workspaces/runtime';
 import { throttleKey } from '../../../src/scheduled/failed-sweep-notifications';
 import { resolveCleanupConfig } from '../../../src/scheduled/node-cleanup/config';
 import { resolveOperatorNotificationThrottleMs } from '../../../src/scheduled/operator-notifications';
+import { isReverseTunnelInstallation } from '../../../src/selfhost/reverse-tunnel/env';
 import { getAcpInteractionConfig } from '../../../src/services/acp-interaction-config';
 import { buildAcpInteractionRuntimeConfig } from '../../../src/services/acp-interaction-runtime-config';
 import { adminSettingCacheMs, readAdminSettings } from '../../../src/services/admin-settings';
@@ -129,7 +130,7 @@ const API = 'apps/api/src';
 const READ_PATHS: readonly ReadPath[] = [
   {
     label: 'managed VM tunnel transport and connector boot configuration',
-    sources: [`${API}/services/node-tunnel-config.ts`],
+    sources: [`${API}/services/node-tunnel-config.ts`, `${API}/selfhost/reverse-tunnel/env.ts`],
     read: (env) => {
       let boot: string;
       try {
@@ -154,13 +155,23 @@ const READ_PATHS: readonly ReadPath[] = [
           throw error;
         boot = error.message;
       }
-      return [
-        resolveManagedNodeTransport(asEnv(env), {
+      let selected: string | null;
+      try {
+        selected = resolveManagedNodeTransport(asEnv(env), {
           runtime: 'vm',
           nodeClass: 'managed',
-        }),
-        boot,
-      ];
+          nodeRole: 'workspace',
+        });
+      } catch (error) {
+        // A build without a reverse adapter deliberately rejects that bootstrap value.
+        if (
+          !(error instanceof Error) ||
+          !error.message.startsWith('Unsupported VM_AGENT_TRANSPORT')
+        )
+          throw error;
+        selected = error.message;
+      }
+      return [selected, boot, isReverseTunnelInstallation(asEnv(env))];
     },
   },
   {
@@ -339,7 +350,7 @@ const READ_PATHS: readonly ReadPath[] = [
   },
   {
     label: 'resolveMaxMessageBytes',
-    sources: [`${API}/routes/workspaces/runtime.ts`],
+    sources: [`${API}/routes/workspaces/runtime-message-helpers.ts`],
     read: (env) => resolveMaxMessageBytes(asEnv(env)),
   },
   {

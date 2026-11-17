@@ -815,6 +815,11 @@ export {
 
 // Project Overview (Inbox slice F1)
 export type {
+  OverviewBrief,
+  OverviewBriefPart,
+  OverviewBriefRef,
+  OverviewBriefRefKind,
+  OverviewBriefSentence,
   OverviewMergedPullRequest,
   OverviewRunningChat,
   OverviewRunningState,
@@ -825,6 +830,7 @@ export {
   DEFAULT_PROJECT_OVERVIEW_RECENT_LIMIT,
   DEFAULT_PROJECT_OVERVIEW_RUNNING_LIMIT,
   MAX_PROJECT_OVERVIEW_LIMIT,
+  OVERVIEW_BRIEF_REF_KINDS,
 } from './project-overview';
 
 // Run receipt (Insights slice R)
@@ -888,10 +894,42 @@ export type {
   InsightsAccountSpend,
   InsightsAccountsSection,
   InsightsAccountStalls,
+  InsightsAccountTokens,
   InsightsStallEpisode,
   InsightsStallOutcome,
   ProjectAccountsResponse,
 } from './insights-accounts';
+export type {
+  InsightsFirstPerson,
+  InsightsPeopleAskKind,
+  InsightsPeopleSection,
+  InsightsReviewPickup,
+  InsightsWaiting,
+  InsightsWaitingGroup,
+  InsightsWaitingItem,
+  ProjectPeopleResponse,
+} from './insights-people';
+export { INSIGHTS_PEOPLE_ASK_KINDS } from './insights-people';
+
+// Insights · Agent setups (Insights slice S)
+export type {
+  InsightsSetupGroup,
+  InsightsSetupGrouping,
+  InsightsSetupMemory,
+  InsightsSetupNudges,
+  InsightsSetupOwner,
+  InsightsSetupsSection,
+  InsightsSetupSuggestion,
+  InsightsSetupTokens,
+  ProjectSetupsResponse,
+  RunNudgeCounts,
+  RunNudgeWindow,
+} from './insights-setups';
+export {
+  DEFAULT_INSIGHTS_SETUP_GROUPING,
+  INSIGHTS_SETUP_GROUPINGS,
+  isInsightsSetupGrouping,
+} from './insights-setups';
 
 // Knowledge Graph
 export type {
@@ -1272,8 +1310,12 @@ export {
   INBOX_TASK_STEP_EVENT_TYPES,
 } from './inbox-tasks';
 
-// Admin Health & cost (Insights slice H)
+// Admin Health & cost (Insights slices H and CF)
 export type {
+  InstallationCloudflareCost,
+  InstallationCloudflareCostStatus,
+  InstallationCloudflareProductLine,
+  InstallationCloudflareRefreshResponse,
   InstallationComputeCurrencySpend,
   InstallationComputeProviderSpend,
   InstallationComputeSpend,

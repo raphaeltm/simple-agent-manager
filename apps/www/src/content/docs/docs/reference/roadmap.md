@@ -121,6 +121,7 @@ Shared project collaboration:
 - Invite links and access requests.
 - Member removal and ownership transfer flows with credential impact handling.
 - Sharing a chat with a teammate for a set time, so they can drive it on the owner's accounts.
+- An [Inbox](/docs/guides/inbox/) that collects every question, permission request, secret, approval and review agents need from you, across projects.
 
 ## Planned: Role Assignment for Project Members
 

@@ -86,7 +86,7 @@ The panel's status line tells you where things stand: **Paste the signing secret
 **Waiting for the first request**, **Receiving · last event 2 min ago**, or **Requests are being
 refused** with the reason.
 
-Two things to know before you invite the app anywhere:
+Before you invite the app anywhere, know that:
 
 - Anyone who can mention the app can start a run that uses the trigger's agent profile and the
   trigger owner's access. The message reaches the agent as untrusted input; write the instructions

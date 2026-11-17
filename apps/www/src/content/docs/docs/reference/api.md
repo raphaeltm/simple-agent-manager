@@ -1004,7 +1004,7 @@ admin setting `performance.projectRecentTimeoutMs`.
 ### `GET /api/projects/:projectId/overview`
 
 The Project Overview's one read (`projectOverviewGet`, `packages/operations/src/project-overview.ts`).
-Returns `{ projectId, running: { items, total }, recent: { ideas, mergedPullRequests }, unavailable, generatedAt }`:
+Returns `{ projectId, running: { items, total }, recent: { ideas, mergedPullRequests }, brief, unavailable, generatedAt }`:
 
 - `running.items`: awake chats whose task is queued, delegated or in progress and that are starting,
   mid-turn, or paused on an open question, newest activity first. Each has `sessionId`, `taskId`,
@@ -1012,8 +1012,17 @@ Returns `{ projectId, running: { items, total }, recent: { ideas, mergedPullRequ
   `lastActivityAt` and `profile` (`{ id, name }` or null). `running.total` counts every running chat.
 - `recent.ideas`: the most recently updated ideas, open or closed, in the Ideas list's item shape.
 - `recent.mergedPullRequests`: `{ number, url, title, repository, mergedAt }`, newest merge first.
-- `unavailable`: sections whose read failed this time (`running`, `ideas`, `pullRequests`); they
-  come back empty rather than failing the whole response.
+- `brief`: the generated brief (`readProjectBrief`, `packages/operations/src/project-brief-read.ts`)
+  or null. `{ sentences: [{ parts: [{ text } | { ref: { kind, id, label, url? } }] }], generatedAt,
+stale, refreshing }`. `kind` is `ask`, `chat`, `automation`, `account`, `pullRequest` or `idea`;
+  clients build links from `kind` and `id` (a pull request carries its stored https `url`). Claims
+  about items that have closed since are already removed.
+- `unavailable`: sections whose read failed this time (`running`, `ideas`, `pullRequests`,
+  `brief`); they come back empty rather than failing the whole response.
+
+After responding, the route checks in the background whether the brief needs rewriting
+(`refreshProjectBriefIfDue`, `apps/api/src/services/project-brief/refresh.ts`); the response never
+waits for the model.
 
 Optional query `runningLimit` and `recentLimit` (defaults 5 and 3, at most 20). Requires project
 membership.
@@ -1082,22 +1091,80 @@ Query `range` is `7d`, `30d` or `90d` (default `30d`; anything else is `400`). R
 membership. Sent with `Cache-Control: private, no-store`: the body carries the caller's own account
 names and limit windows. Returns `ProjectAccountsResponse`
 (`packages/shared/src/types/insights-accounts.ts`):
-`{ projectId, range, since, until, bucket, buckets, accounts, stallEpisodes, totals, unavailable, generatedAt }`.
+`{ projectId, range, since, until, bucket, buckets, accounts, stallEpisodes, totals, usageLimited, unavailable, generatedAt }`.
 
-- `accounts`: most runs first. Each is `{ key, name, owner, kind, agentType, credentials, runs, merged, runsByBucket, stalls, usage, spend }`.
+- `accounts`: most runs first. Each is `{ key, name, owner, kind, agentType, credentials, runs, merged, runsByBucket, stalls, usage, tokens, spend }`.
   `owner` is `you`, `teammate`, `project`, `platform` or `not_recorded`; `kind` is `subscription`,
   `api_key`, `platform` or `unknown`. Only the caller's own credentials are rows of their own with a
   `name` (`key` is `cred:<credentialId>`); everyone else's are grouped by owner, agent and kind, with
   `name: null` and `credentials` saying how many they stand for. `runs` counts the same runs as
   Flow, attributed to the agent session that ran them; `runsByBucket` lines up with `buckets`.
 - `stalls`: `{ episodes, totalMs, ongoing }`. `usage`: the caller's own last-reported limit windows
-  (`CredentialLimitCredentialSummary`), else `null`. `spend`: `{ state: 'not_reported' }` for API
-  keys, `null` otherwise.
+  (`CredentialLimitCredentialSummary`), else `null`. `tokens`: `{ total, perMergedPullRequest }` from
+  the measured usage since the range began (`agent_run_usage`; a proxied run counted once, from the AI
+  proxy rows), or `null` when none was recorded. `spend` (API keys only, `null` otherwise):
+  `{ state: 'not_reported' }` with no usage, `{ state: 'private' }` for another member's personal
+  key, or `{ state: 'reported', costUsd, perMergedPullRequestUsd, unpricedModels }`, an estimate at
+  SAM's catalog prices where `costUsd` is `null` when nothing could be priced and a non-empty
+  `unpricedModels` makes it partial. Read by `accountUsageStatement`
+  (`packages/operations/src/insights-run-usage.ts`).
 - `stallEpisodes`: `{ items, total, listed, truncated }`; each item is
   `{ accountKey, window, startedAt, endedAt, durationMs, runs, outcome }`, newest first, where
   `outcome` is `resumed`, `ended` (the run ended while waiting), `blocked` or `ongoing`. `truncated` means the scan cap
   (`insights.accountsStallScanCap`) left older limit waits out.
-- `unavailable`: sections whose read failed this time (`runs`, `stalls`, `usage`).
+- `usageLimited`: the usage read hit `insights.accountsUsageRowCap`, so tokens and spend are a floor.
+- `unavailable`: sections whose read failed this time (`runs`, `stalls`, `usage`, `tokens`).
+
+### `GET /api/projects/:projectId/insights/setups`
+
+Insights · Agent setups for one project (`projectSetups`, `packages/operations/src/insights-setups.ts`).
+Query `range` is `7d`, `30d` or `90d` (default `30d`) and `groupBy` is `profile`, `skill` or
+`model` (default `profile`); anything else is `400`. Requires project membership. Sent with
+`Cache-Control: private, no-store`: the body names the caller's own personal profiles and skills.
+Returns `ProjectSetupsResponse` (`packages/shared/src/types/insights-setups.ts`):
+`{ projectId, range, groupBy, since, until, rework, sample, groups, suggestions, suggestionMinRuns, unavailable, generatedAt }`.
+
+- `groups`: most runs first, with the rows for no profile/skill and an unrecorded model last. Each
+  is `{ key, label, owner, agentType, usedFor, runs, finished, mergedClean, mergedCleanRate, merged, medianToPullRequestMs, pullRequests, nudges, tokens, memory }`.
+  `owner` is `project`, `you`, `teammate`, `none` or `not_recorded`; a teammate's personal profile
+  or skill has `label: null`. `nudges` is `{ state: 'measured', perRun, total, runs }` or
+  `not_recorded`; `tokens` is `{ state: 'reported', total, perMergedPullRequest, reportedRuns, merged }`
+  or `not_reported`; `memory` is `{ state: 'measured', p90Bytes, maxBytes, requestedMb, runs, oomKills }`
+  or `not_recorded`.
+- `rework`: `{ windowDays, rule: 'same_branch' }`. `sample`: `{ runs, cap, truncated }`, where
+  `truncated` means `insights.setupsRunScanCap` left older runs out.
+- `suggestions`: each is `default_profile` (`{ skill, profile, compared, currentDefault, apply }`) or
+  `request_size` (`{ skill, currentGb, suggestedGb, runs, p90Bytes, maxBytes, oomKills, apply }`).
+  `apply` is `{ skillId, patch }`, the body to send to `PATCH /api/projects/:projectId/skills/:skillId`.
+- `unavailable`: sections whose read failed this time (`runs`, `nudges`).
+
+### `GET /api/projects/:projectId/insights/people`
+
+Insights · People for one project (`projectPeople`, `packages/operations/src/insights-people.ts`).
+Query `range` is `7d`, `30d` or `90d` (default `30d`; anything else is `400`). Requires project
+membership. Sent with `Cache-Control: private, no-store`: the body carries the titles of the inbox
+items the caller may open. Returns `ProjectPeopleResponse`
+(`packages/shared/src/types/insights-people.ts`):
+`{ projectId, range, since, until, waiting, reviewPickup, firstPerson, unavailable, generatedAt }`.
+
+- `waiting`: `{ groups, total, listed }`, open `question`/`review`/`task` asks right now (not
+  range-bound), longest wait first. Each group is
+  `{ key, kind: 'person' | 'unassigned', userId, name, member, you, open, blocking, oldestAgeMs, items }`;
+  `name` is set only for an active member (`member: false` for someone who left). `items` are the
+  oldest `listed` (`insights.peopleWaitingItemsListed`), each
+  `{ private, ref, title, kind, blocking, claimed, createdAt, ageMs, canReassign }`. For an item the
+  caller could not open in the Inbox, `private` is true and `ref`, `title`, `kind`, `blocking` and
+  `claimed` are `null`. `canReassign` is true only for a human task the caller may hand on through
+  `POST /api/projects/:projectId/inbox/items/:ref/reassign`.
+- `reviewPickup`: `{ state: 'recorded', samples, medianMs, p90Ms, waiting, recordedSince, truncated }`
+  or `{ state: 'not_recorded', waiting, recordedSince }`: `not_recorded` when nothing is recorded
+  yet (`recordedSince` null) or no request in the range has been picked up yet. From review
+  request cycles the GitHub webhook ingest records (`pull_request_review_requests`,
+  `services/github-pull-request-reviews.ts`); a cycle still open when its pull request closes is
+  closed as removed and never counts as waiting.
+  `truncated` means the scan cap (`insights.peopleReviewScanCap`) kept only the newest requests.
+- `firstPerson`: `{ closed, firstPerson, share }`, `share` `null` when nothing closed.
+- `unavailable`: sections whose read failed this time (`waiting`, `reviews`, `first_person`).
 
 ### `POST /api/projects/:id/tasks`
 
@@ -1325,9 +1392,19 @@ Superadmin only. Backs **Admin → Health & cost**. Optional `range`: `7d`, `30d
 (the default, the calendar month so far in UTC); any other value returns `400`. Returns
 `InstallationHealthResponse` (`packages/shared/src/types/insights-installation.ts`): `window`,
 `compute` (spend per provider and per week at each machine's recorded price), `reuse`, `density`
-(agents per busy machine), `newMachines` (reasons) and `latency` (p95 against budget per watched
-state, with open incidents). A section that fails to read is `null` and named in `unavailable`.
-See [Health & cost](/docs/guides/admin-settings/#health--cost).
+(agents per busy machine), `newMachines` (reasons), `latency` (p95 against budget per watched
+state, with open incidents) and `cloudflare` (the Cloudflare account's estimated USD cost this
+month from the daily snapshot, with the snapshot's status). A section that fails to read is
+`null` and named in `unavailable`. See [Health & cost](/docs/guides/admin-settings/#health--cost).
+
+### `POST /api/admin/health-cost/cloudflare/refresh`
+
+Superadmin only. Runs the daily Cloudflare cost snapshot now (the card's **Refresh now**) and
+returns `InstallationCloudflareRefreshResponse`: `status` (`ok`, `not_configured`,
+`permission_denied` or `error`), the stored window (`firstDay`, `lastDay`), `rowsWritten` and
+`error`. A Cloudflare failure is a `200` with that status, recorded for the card. A second refresh
+within `insights.cloudflareCostRefreshMinSeconds` (60 by default) of the last attempt returns `429`
+without calling Cloudflare.
 
 ## Operations Approvals
 

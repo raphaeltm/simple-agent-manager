@@ -1,4 +1,5 @@
 import type {
+  InstallationCloudflareRefreshResponse,
   InstallationHealthRange,
   InstallationHealthResponse,
 } from '@simple-agent-manager/shared';
@@ -13,5 +14,13 @@ export function getInstallationHealth(
   return request<InstallationHealthResponse>(
     `/api/admin/health-cost?range=${encodeURIComponent(range)}`,
     { signal }
+  );
+}
+
+/** Runs the daily Cloudflare cost snapshot now (the card's "Refresh now"), superadmin only. */
+export function refreshCloudflareCost(): Promise<InstallationCloudflareRefreshResponse> {
+  return request<InstallationCloudflareRefreshResponse>(
+    '/api/admin/health-cost/cloudflare/refresh',
+    { method: 'POST' }
   );
 }
