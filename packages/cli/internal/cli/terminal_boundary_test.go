@@ -38,13 +38,7 @@ func allTerminalControls() string {
 
 func TestTerminalBoundaryCommandScenarios(t *testing.T) {
 	payload := "café  世界\n\tanswer" + allTerminalControls()
-	for _, scenario := range []struct {
-		name        string
-		args        []string
-		response    any
-		status      int
-		errorOutput bool
-	}{
+	for _, scenario := range []terminalScenario{
 		{"chat text", []string{"chat", "session_1"}, map[string]any{"messages": []any{map[string]any{"id": "m1", "role": "assistant", "content": payload}}, "hasMore": false}, 200, false},
 		{"chat JSON", []string{"chat", "session_1", "--json"}, map[string]any{"messages": []any{map[string]any{"id": "m1", "role": "assistant", "content": payload}}, "hasMore": false}, 200, false},
 		{"ports table", []string{"workspace", "ws1", "ports"}, map[string]any{"ports": []any{map[string]any{"port": 3000, "label": payload, "url": payload}}}, 200, false},
@@ -55,93 +49,112 @@ func TestTerminalBoundaryCommandScenarios(t *testing.T) {
 		{"unknown command", []string{payload}, nil, 200, true},
 		{"unknown command JSON", []string{payload, "--json"}, nil, 200, true},
 	} {
-		t.Run(scenario.name, func(t *testing.T) {
-			encoded, err := json.Marshal(scenario.response)
-			if err != nil {
-				t.Fatal(err)
-			}
-			calls := 0
-			doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
-				calls++
-				return jsonResponse(string(encoded), scenario.status), nil
-			})
-			runtime, stdout, stderr := testRuntime(t, scenario.args, doer, activeProjectEnv(t))
-			code := Run(context.Background(), runtime)
-			if scenario.errorOutput != (code != 0) {
-				t.Fatalf("exit=%d stderr=%q", code, stderr.String())
-			}
-			output := stdout.String()
-			if scenario.errorOutput {
-				output = stderr.String()
-			}
-			requireInertTerminal(t, output)
-			if scenario.response != nil && scenario.errorOutput {
-				if !strings.Contains(output, "SAM API request failed with 400") || strings.Contains(output, "café") {
-					t.Fatalf("API error disclosure changed: %q", output)
-				}
-			} else if !strings.Contains(output, "café") {
-				t.Fatalf("missing legitimate content: %q", output)
-			}
-			if strings.Contains(scenario.name, "JSON") {
-				var decoded any
-				if err := json.Unmarshal([]byte(output), &decoded); err != nil {
-					t.Fatal(err)
-				}
-				// Full value equality checks controls, Unicode, spacing and multiline layout.
-				want := scenario.response
-				if scenario.response == nil {
-					want = map[string]any{"error": "CLI_ERROR", "message": "unknown command: " + payload + "\nRun `sam --help` for usage"}
-				}
-				if scenario.errorOutput && scenario.response != nil {
-					want = map[string]any{"error": "BAD_REQUEST", "message": "failed to list ports: BAD_REQUEST: SAM API request failed with 400; use the error code to reconcile or correct the request", "status": 400}
-				}
-				wantBytes, _ := json.Marshal(want)
-				gotBytes, _ := json.Marshal(decoded)
-				if !bytes.Equal(wantBytes, gotBytes) {
-					t.Fatalf("JSON semantic change: %s != %s", gotBytes, wantBytes)
-				}
-			}
-			if scenario.name == "chat text" && !strings.Contains(output, "café  世界\n\tanswer") {
-				t.Fatalf("chat layout changed: %q", output)
-			}
-			if scenario.response != nil && calls != 1 {
-				t.Fatalf("HTTP calls=%d want1", calls)
-			}
-		})
+		t.Run(scenario.name, func(t *testing.T) { runTerminalScenario(t, scenario, payload) })
+	}
+}
+
+type terminalScenario struct {
+	name        string
+	args        []string
+	response    any
+	status      int
+	errorOutput bool
+}
+
+func runTerminalScenario(t *testing.T, scenario terminalScenario, payload string) {
+	t.Helper()
+	encoded, err := json.Marshal(scenario.response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		return jsonResponse(string(encoded), scenario.status), nil
+	})
+	runtime, stdout, stderr := testRuntime(t, scenario.args, doer, activeProjectEnv(t))
+	code := Run(context.Background(), runtime)
+	if scenario.errorOutput != (code != 0) {
+		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+	}
+	output := stdout.String()
+	if scenario.errorOutput {
+		output = stderr.String()
+	}
+	requireInertTerminal(t, output)
+	if scenario.response != nil && scenario.errorOutput {
+		if !strings.Contains(output, "SAM API request failed with 400") || strings.Contains(output, "café") {
+			t.Fatalf("API error disclosure changed: %q", output)
+		}
+	} else if !strings.Contains(output, "café") {
+		t.Fatalf("missing legitimate content: %q", output)
+	}
+	if strings.Contains(scenario.name, "JSON") {
+		requireTerminalJSON(t, scenario, payload, output)
+	}
+	if scenario.name == "chat text" && !strings.Contains(output, "café  世界\n\tanswer") {
+		t.Fatalf("chat layout changed: %q", output)
+	}
+	if scenario.response != nil && calls != 1 {
+		t.Fatalf("HTTP calls=%d want1", calls)
+	}
+}
+
+func requireTerminalJSON(t *testing.T, scenario terminalScenario, payload, output string) {
+	t.Helper()
+	var decoded any
+	if err := json.Unmarshal([]byte(output), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	// Full value equality checks controls, Unicode, spacing and multiline layout.
+	want := scenario.response
+	if scenario.response == nil {
+		want = map[string]any{"error": "CLI_ERROR", "message": "unknown command: " + payload + "\nRun `sam --help` for usage"}
+	}
+	if scenario.errorOutput && scenario.response != nil {
+		want = map[string]any{"error": "BAD_REQUEST", "message": "failed to list ports: BAD_REQUEST: SAM API request failed with 400; use the error code to reconcile or correct the request", "status": 400}
+	}
+	wantBytes, _ := json.Marshal(want)
+	gotBytes, _ := json.Marshal(decoded)
+	if !bytes.Equal(wantBytes, gotBytes) {
+		t.Fatalf("JSON semantic change: %s != %s", gotBytes, wantBytes)
 	}
 }
 
 func TestTerminalBoundaryTranscriptJSONAndNDJSON(t *testing.T) {
 	payload := "café  世界\n\t" + allTerminalControls()
 	for _, ndjson := range []bool{false, true} {
-		t.Run(fmt.Sprint(ndjson), func(t *testing.T) {
-			row := map[string]any{"id": "m1", "role": "assistant", "content": payload, "sequence": 1, "createdAt": 123}
-			encoded, _ := json.Marshal(map[string]any{"messages": []any{row}, "hasMore": false})
-			doer, captured := captureJSONRequest(t, string(encoded), 200)
-			args := []string{"chat", "export", "session_1"}
-			if ndjson {
-				args = append(args, "--ndjson")
-			}
-			runtime, stdout, stderr := testRuntime(t, args, doer, activeProjectEnv(t))
-			if code := Run(context.Background(), runtime); code != 0 {
-				t.Fatalf("exit=%d stderr=%q", code, stderr.String())
-			}
-			requireInertTerminal(t, stdout.String())
-			var result map[string]any
-			if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
-				t.Fatal(err)
-			}
-			message := result
-			if !ndjson {
-				message = result["messages"].([]any)[0].(map[string]any)
-			}
-			if message["content"] != payload {
-				t.Fatalf("export changed payload: %q", message["content"])
-			}
-			if !strings.Contains(captured.URL, "/sessions/session_1/messages?") {
-				t.Fatalf("wrong API trigger: %s", captured.URL)
-			}
-		})
+		t.Run(fmt.Sprint(ndjson), func(t *testing.T) { runTerminalTranscriptScenario(t, ndjson, payload) })
+	}
+}
+
+func runTerminalTranscriptScenario(t *testing.T, ndjson bool, payload string) {
+	t.Helper()
+	row := map[string]any{"id": "m1", "role": "assistant", "content": payload, "sequence": 1, "createdAt": 123}
+	encoded, _ := json.Marshal(map[string]any{"messages": []any{row}, "hasMore": false})
+	doer, captured := captureJSONRequest(t, string(encoded), 200)
+	args := []string{"chat", "export", "session_1"}
+	if ndjson {
+		args = append(args, "--ndjson")
+	}
+	runtime, stdout, stderr := testRuntime(t, args, doer, activeProjectEnv(t))
+	if code := Run(context.Background(), runtime); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+	}
+	requireInertTerminal(t, stdout.String())
+	var result map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	message := result
+	if !ndjson {
+		message = result["messages"].([]any)[0].(map[string]any)
+	}
+	if message["content"] != payload {
+		t.Fatalf("export changed payload: %q", message["content"])
+	}
+	if !strings.Contains(captured.URL, "/sessions/session_1/messages?") {
+		t.Fatalf("wrong API trigger: %s", captured.URL)
 	}
 }
 
