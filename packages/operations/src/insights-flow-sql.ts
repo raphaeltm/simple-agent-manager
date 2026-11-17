@@ -45,7 +45,8 @@ const TERMINAL = `('completed', 'failed', 'cancelled')`;
  * binds are added.
  *
  * With `setup` (Insights · Agent setups), each run also carries what it ran with and when:
- * `profile_id` (the agent session's resolved profile, else the task's profile hint), `skill_id`,
+ * `session_profile_id` (the agent session's resolved profile), `profile_hint` (the task's profile
+ * hint: a profile id, or a profile name the submitter typed), `skill_id`,
  * `model` (the session's runtime contract model; NULL means the harness default),
  * `agent_type`, `chat_session_id` (the task's, else its workspace's), the task's
  * `created_at` / `completed_at`, and both stored reservations (`workspace_reservation`,
@@ -61,7 +62,7 @@ export function runsCte(options: { account?: boolean; setup?: boolean } = {}): s
     : '';
   const setupColumns = options.setup
     ? `,
-           coalesce(s.agent_profile_id, t.agent_profile_hint) AS profile_id, t.skill_id,
+           s.agent_profile_id AS session_profile_id, t.agent_profile_hint AS profile_hint, t.skill_id,
            CASE WHEN json_valid(s.runtime_contract_json)
                 THEN json_extract(s.runtime_contract_json, '$.model') END AS model,
            s.agent_type AS agent_type, s.id AS agent_session_id,

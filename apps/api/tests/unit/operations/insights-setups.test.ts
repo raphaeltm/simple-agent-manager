@@ -478,16 +478,26 @@ describe('projectSetups', () => {
     run('hinted', { agent_profile_hint: 'alice-private-prod-deployer' });
     sqlite.prepare("DELETE FROM agent_sessions WHERE id = 's-hinted'").run();
     run('named', { agent_profile_hint: 'prof-mate' }); // control: an id resolves to the teammate row
+    // A hint naming one of the project's profiles resolves to it, as task submission does.
+    profile('prof-proj', 'Claude MCP Test (Instant)', 'p');
+    run('by-name', { agent_profile_hint: 'Claude MCP Test (Instant)' });
+    sqlite.prepare("DELETE FROM agent_sessions WHERE id = 's-by-name'").run();
     const result = await projectSetups(ctx(), { projectId: 'p', nowMs: NOW });
     expect(JSON.stringify(result)).not.toContain('alice-private-prod-deployer');
-    expect(result.groups.map((g) => [g.key, g.owner, g.runs])).toEqual([
-      ['prof-mate', 'teammate', 1],
-      ['__not_recorded__', 'not_recorded', 1],
+    expect(result.groups.map((g) => [g.key, g.label, g.owner, g.runs])).toEqual([
+      ['prof-mate', null, 'teammate', 1],
+      ['prof-proj', 'Claude MCP Test (Instant)', 'project', 1],
+      ['__not_recorded__', null, 'not_recorded', 1],
     ]);
   });
 
   it('never reads another project’s profile or skill through a run’s ids', async () => {
-    insert('projects', { id: 'p2', name: 'Other owned', repository: 'acme/other', user_id: 'owner' });
+    insert('projects', {
+      id: 'p2',
+      name: 'Other owned',
+      repository: 'acme/other',
+      user_id: 'owner',
+    });
     profile('prof-foreign', 'Foreign Profile Name', 'p2');
     insert('skills', {
       id: 'sk-foreign',

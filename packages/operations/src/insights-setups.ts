@@ -68,6 +68,7 @@ const RunRowSchema = v.object({
   running: v.number(),
   pr_rank: v.number(),
   profile_id: str,
+  profile_given: v.number(),
   skill_id: str,
   model: str,
   agent_type: str,
@@ -96,14 +97,15 @@ type RunRow = v.InferOutput<typeof RunRowSchema>;
 function ref(
   id: string | null | undefined,
   name: string | null | undefined,
-  owner: RunRow['profile_owner']
+  owner: RunRow['profile_owner'],
+  given: boolean = Boolean(id)
 ): SetupRef {
-  if (!id) return { id: null, name: null, owner: 'none' };
+  if (!given) return { id: null, name: null, owner: 'none' };
   // Joined by id but no row came back: deleted, a profile this project cannot see, or a profile
   // hint that is free text (a task can name a profile). The raw value is never echoed: it may be
   // a teammate's personal profile name.
   if (!owner) return { id: null, name: null, owner: 'not_recorded' };
-  return { id, name: owner === 'teammate' ? null : (name ?? null), owner };
+  return { id: id ?? null, name: owner === 'teammate' ? null : (name ?? null), owner };
 }
 
 function toRun(row: RunRow, nudges: number | null): SetupRun {
@@ -120,7 +122,7 @@ function toRun(row: RunRow, nudges: number | null): SetupRun {
     mergedClean: finished && merged && !row.reworked,
     toPullRequestMs:
       createdMs !== null && firstPrMs !== null ? Math.max(0, firstPrMs - createdMs) : null,
-    profile: ref(row.profile_id, row.profile_name, row.profile_owner),
+    profile: ref(row.profile_id, row.profile_name, row.profile_owner, row.profile_given === 1),
     skill: {
       ...ref(row.skill_id, row.skill_name, row.skill_owner),
       defaultProfileId: row.skill_default_profile_id ?? null,

@@ -60,15 +60,19 @@ export function setupRunsStatement(
      GROUP BY rs.task_id
   ),
   tok AS (${runTokenTotalsSql('picked', 'chat_session_id')})
-  SELECT k.id, k.status, k.running, k.pr_rank, k.profile_id, k.skill_id, k.model, k.agent_type,
+  SELECT k.id, k.status, k.running, k.pr_rank, k.skill_id, k.model, k.agent_type,
+         coalesce(ap.id, apn.id) AS profile_id,
+         (coalesce(k.session_profile_id, k.profile_hint) IS NOT NULL) AS profile_given,
          k.agent_session_id, k.chat_session_id, k.created_jd,
          julianday(k.completed_at) AS completed_jd, f.first_pr_jd,
          (k.id IN (SELECT task_id FROM reworked)) AS reworked,
          k.workspace_reservation, k.task_reservation,
          m.mem_rows, m.mem_peak, m.mem_oom, t.tokens,
-         ap.name AS profile_name,
-         CASE WHEN ap.id IS NULL THEN NULL WHEN ap.project_id = ? THEN 'project'
-              WHEN ap.user_id = ? THEN 'you' ELSE 'teammate' END AS profile_owner,
+         coalesce(ap.name, apn.name) AS profile_name,
+         CASE WHEN ap.id IS NOT NULL THEN
+                CASE WHEN ap.project_id = ? THEN 'project' WHEN ap.user_id = ? THEN 'you'
+                     ELSE 'teammate' END
+              WHEN apn.id IS NOT NULL THEN 'project' END AS profile_owner,
          sk.name AS skill_name,
          CASE WHEN sk.id IS NULL THEN NULL WHEN sk.project_id = ? THEN 'project'
               WHEN sk.user_id = ? THEN 'you' ELSE 'teammate' END AS skill_owner,
@@ -79,7 +83,14 @@ export function setupRunsStatement(
     LEFT JOIN pr_facts f ON f.task_id = k.id
     LEFT JOIN mem m ON m.task_id = k.id
     LEFT JOIN tok t ON t.id = k.id
-    LEFT JOIN agent_profiles ap ON ap.id = k.profile_id AND (ap.project_id = ? OR ap.project_id IS NULL)
+    LEFT JOIN agent_profiles ap
+      ON ap.id = coalesce(k.session_profile_id, k.profile_hint)
+     AND (ap.project_id = ? OR ap.project_id IS NULL)
+    -- A hint can name a profile instead of giving its id (tasks store what the submitter typed).
+    -- Only this project's profiles are resolved by name: a personal profile's name could be a
+    -- teammate's, and the (project_id, name) unique index makes this match at most one row.
+    LEFT JOIN agent_profiles apn
+      ON ap.id IS NULL AND apn.project_id = ? AND apn.name = k.profile_hint
     LEFT JOIN skills sk ON sk.id = k.skill_id AND (sk.project_id = ? OR sk.project_id IS NULL)
    ORDER BY k.created_jd DESC, k.id DESC`;
   return {
@@ -110,7 +121,8 @@ export function setupRunsStatement(
       options.viewerId,
       p,
       p,
-      // joins
+      // joins: profile by id, profile by project name, skill
+      p,
       p,
       p,
     ],
