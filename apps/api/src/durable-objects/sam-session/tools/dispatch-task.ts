@@ -387,36 +387,42 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
   const now = new Date().toISOString();
 
   // Task persistence is separate from placement and runtime startup.
-  await insertSamDispatchedTask(env, [
-    taskId,
-    input.projectId,
-    ctx.userId,
-    parentTaskId,
-    chatSessionId,
-    taskTitle,
-    childDescription,
-    priority,
-    dispatchDepth,
-    branchName,
-    ctx.userId,
-    resolvedTaskMode,
-    resolvedProfile?.profileId ?? null,
-    resolvedProfile?.skillId ?? null,
-    input.skillId ?? null,
-    input.missionId?.trim() || null,
-    resolvedVmSize,
-    vmSizeSource,
-    persistedResourceRequirementsJson,
-    persistedResourceRequirementPlanJson,
-    resolvedReservation.source,
-    JSON.stringify(resolvedReservation),
-    credentialAttributionUserId,
-    credentialAttributionProjectId,
-    credentialAttributionSource,
-    ...capacityPlacementSnapshotSqlValues(capacityPlacementSnapshot),
-    now,
-    now,
-  ]);
+  const inserted = await insertSamDispatchedTask(
+    env,
+    [
+      taskId,
+      input.projectId,
+      ctx.userId,
+      parentTaskId,
+      chatSessionId,
+      taskTitle,
+      childDescription,
+      priority,
+      dispatchDepth,
+      branchName,
+      ctx.userId,
+      resolvedTaskMode,
+      resolvedProfile?.profileId ?? null,
+      resolvedProfile?.skillId ?? null,
+      input.skillId ?? null,
+      input.missionId?.trim() || null,
+      resolvedVmSize,
+      vmSizeSource,
+      persistedResourceRequirementsJson,
+      persistedResourceRequirementPlanJson,
+      resolvedReservation.source,
+      JSON.stringify(resolvedReservation),
+      credentialAttributionUserId,
+      credentialAttributionProjectId,
+      credentialAttributionSource,
+      ...capacityPlacementSnapshotSqlValues(capacityPlacementSnapshot),
+      now,
+      now,
+    ],
+    { id: input.missionId?.trim() || null, projectId: input.projectId }
+  );
+
+  if (!inserted.meta.changes) return { error: 'Mission no longer accepts new tasks' };
 
   // Record status event: null -> queued
   const statusEventId = ulid();

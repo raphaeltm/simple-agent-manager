@@ -481,6 +481,7 @@ export async function handleDispatchTask(
       projectId: tokenData.projectId,
       maxPerTask: effectiveMaxPerTask,
       maxActive: effectiveMaxActive,
+      missionId: explicitMissionId ?? currentTask.missionId ?? null,
     }
   );
 
@@ -488,13 +489,16 @@ export async function handleDispatchTask(
     log.warn('mcp.dispatch_task.atomic_limit_breach', {
       taskId,
       projectId: tokenData.projectId,
+      missionId: explicitMissionId ?? currentTask.missionId ?? null,
       maxPerTask: effectiveMaxPerTask,
       maxActive: effectiveMaxActive,
     });
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      'Dispatch rate limit exceeded (concurrent dispatch detected). Please retry.'
+      (explicitMissionId ?? currentTask.missionId)
+        ? 'Dispatch admission rejected: the mission is unavailable or the concurrent dispatch limit was reached.'
+        : 'Dispatch rate limit exceeded (concurrent dispatch detected). Please retry.'
     );
   }
 

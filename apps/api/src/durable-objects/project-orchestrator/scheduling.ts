@@ -20,6 +20,7 @@ import {
 import type { WorkflowRunRow } from '../../services/workflow-runs';
 import { mapRows } from '../row-validation';
 import { autoDispatchSchedulableTasks } from './auto-dispatch';
+import { continueMissionCancellation } from './cancel-mission';
 import { logDecision } from './decision-log';
 import { buildHandoffContent, parseRoutableHandoff, type RoutableHandoff } from './handoff-content';
 import { detectStalls, resolveActiveSessionIdsForTaskIds } from './stall-detection';
@@ -68,7 +69,7 @@ export async function runSchedulingCycle(
       .exec(
         `SELECT mission_id, status, registered_at, workflow_registration_deadline
            FROM orchestrator_missions
-           WHERE status IN ('active', 'completing') ORDER BY last_checked_at, mission_id`
+           WHERE status IN ('active', 'completing', 'cancelling') ORDER BY last_checked_at, mission_id`
       )
       .toArray(),
     SchedulingMissionRowSchema,
@@ -82,6 +83,10 @@ export async function runSchedulingCycle(
   let workflowBudgetLoaded = false;
   for (const mission of missions) {
     try {
+      if (mission.status === 'cancelling') {
+        await continueMissionCancellation(sql, env, projectId, mission.mission_id);
+        continue;
+      }
       const workflow = await env.DATABASE.prepare(
         'SELECT * FROM missions WHERE id = ? AND project_id = ? AND workflow_plan_json IS NOT NULL'
       )
@@ -113,6 +118,15 @@ export async function runSchedulingCycle(
           cleanupMissionTracking(sql, mission.mission_id);
         continue;
       }
+      if (
+        !sql
+          .exec(
+            "SELECT 1 FROM orchestrator_missions WHERE mission_id=? AND status IN ('active','completing')",
+            mission.mission_id
+          )
+          .toArray().length
+      )
+        continue;
       const status = mission.status ?? 'active';
       if (status === 'completing') {
         cleanupMissionTracking(sql, mission.mission_id);
@@ -176,6 +190,12 @@ async function processMission(
     .bind(missionId)
     .all<TaskRow>();
 
+  if (
+    !sql
+      .exec("SELECT 1 FROM orchestrator_missions WHERE mission_id=? AND status='active'", missionId)
+      .toArray().length
+  )
+    return;
   const tasks = tasksResult.results ?? [];
   if (tasks.length === 0) {
     if (now - registeredAt >= config.zeroTaskGraceMs) {
@@ -198,6 +218,12 @@ async function processMission(
   // 3. Auto-dispatch schedulable tasks
   await autoDispatchSchedulableTasks(sql, env, projectId, missionId, config, now);
 
+  if (
+    !sql
+      .exec("SELECT 1 FROM orchestrator_missions WHERE mission_id=? AND status='active'", missionId)
+      .toArray().length
+  )
+    return;
   // 5. Find newly completed tasks — check for handoff packets to route
   const completedTasks = tasks.filter((t) => t.status === 'completed');
   for (const task of completedTasks) {
@@ -207,6 +233,12 @@ async function processMission(
   // 6. Detect stalled tasks
   await detectStalls(sql, env, projectId, missionId, tasks, config, now);
 
+  if (
+    !sql
+      .exec("SELECT 1 FROM orchestrator_missions WHERE mission_id=? AND status='active'", missionId)
+      .toArray().length
+  )
+    return;
   // 7. Check if mission is complete (all tasks terminal)
   const allTerminal = tasks.every(
     (t) => t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled'
@@ -254,6 +286,17 @@ async function terminalizeMission(
     .bind(status, new Date(now).toISOString(), missionId)
     .run();
 
+  // Cancellation can install its durable marker while the D1 write is suspended.
+  // Only the cancellation owner may remove that tracking row.
+  if (
+    sql
+      .exec(
+        "SELECT 1 FROM orchestrator_missions WHERE mission_id=? AND status IN ('cancelling','cancel_blocked')",
+        missionId
+      )
+      .toArray().length
+  )
+    return;
   cleanupMissionTracking(sql, missionId);
   log.info('orchestrator.mission_terminal', { projectId, missionId, status, reason });
 }

@@ -16,7 +16,7 @@ import type { AnthropicToolDef, ToolContext } from '../types';
 export const cancelMissionDef: AnthropicToolDef = {
   name: 'cancel_mission',
   description:
-    'Cancel a running mission and mark all its pending tasks as cancelled. ' +
+    'Request cancellation of a mission and its pending tasks. Check mission status for completion. ' +
     'Running tasks are NOT automatically stopped — use stop_subtask for those individually.',
   input_schema: {
     type: 'object',
@@ -32,7 +32,7 @@ export const cancelMissionDef: AnthropicToolDef = {
 
 export async function cancelMission(
   input: { missionId: string },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
   if (!input.missionId?.trim()) {
     return { error: 'missionId is required.' };
@@ -52,12 +52,7 @@ export async function cancelMission(
     })
     .from(schema.missions)
     .innerJoin(schema.projects, eq(schema.missions.projectId, schema.projects.id))
-    .where(
-      and(
-        eq(schema.missions.id, missionId),
-        eq(schema.projects.userId, ctx.userId),
-      ),
-    )
+    .where(and(eq(schema.missions.id, missionId), eq(schema.projects.userId, ctx.userId)))
     .limit(1);
 
   const mission = rows[0];
@@ -70,11 +65,12 @@ export async function cancelMission(
     return { error: 'Mission could not be cancelled — it may already be in a terminal state.' };
   }
 
-  log.info('sam.cancel_mission.completed', { missionId, projectId: mission.projectId });
+  log.info('sam.cancel_mission.requested', { missionId, projectId: mission.projectId });
 
   return {
-    cancelled: true,
+    cancellationRequested: true,
+    status: 'cancellation_requested',
     missionId,
-    message: `Mission '${mission.title || missionId}' has been cancelled. Note: already-running tasks continue until explicitly stopped.`,
+    message: `Mission '${mission.title || missionId}' cancellation has been requested. Already-running processes may require stop_subtask.`,
   };
 }

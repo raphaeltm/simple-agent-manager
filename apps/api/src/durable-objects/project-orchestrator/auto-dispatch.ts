@@ -1,11 +1,15 @@
 import type { OrchestratorConfig, VMSize } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
+
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import { ulid } from '../../lib/ulid';
-import { CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS, capacityPlacementSnapshotSqlValues } from '../../services/capacity-placement-snapshot';
+import {
+  CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
+  capacityPlacementSnapshotSqlValues,
+} from '../../services/capacity-placement-snapshot';
 import { resolveTaskStartPlacementCredentialAttribution } from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
@@ -221,6 +225,15 @@ export async function autoDispatchSchedulableTasks(
         );
       }
 
+      if (
+        !sql
+          .exec(
+            "SELECT 1 FROM orchestrator_missions WHERE mission_id=? AND status='active'",
+            missionId
+          )
+          .toArray().length
+      )
+        return;
       // Transition task to queued → provisioning via status update
       const dispatchTransition = await env.DATABASE.prepare(
         `UPDATE tasks
@@ -236,7 +249,8 @@ export async function autoDispatchSchedulableTasks(
              credential_attribution_source = ?,
              ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS},
              updated_at = ?
-         WHERE id = ? AND (chat_session_id IS NULL OR chat_session_id = ?)`
+         WHERE id = ? AND status='queued' AND (chat_session_id IS NULL OR chat_session_id = ?)
+           AND EXISTS (SELECT 1 FROM missions WHERE missions.id=tasks.mission_id AND missions.status='active')`
       )
         .bind(
           sessionId,
@@ -257,6 +271,16 @@ export async function autoDispatchSchedulableTasks(
         throw new Error('Task was already bound to a different chat session');
       }
 
+      // The cancellation marker can appear while the placement CAS is awaited.
+      if (
+        !sql
+          .exec(
+            "SELECT 1 FROM orchestrator_missions WHERE mission_id=? AND status='active'",
+            missionId
+          )
+          .toArray().length
+      )
+        return;
       // Start the TaskRunner DO
       await startTaskRunnerDO(env, {
         taskId: task.id,

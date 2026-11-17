@@ -9,7 +9,13 @@ import { ACTIVE_STATUSES } from './_helpers';
 export function insertDispatchedTask(
   env: Env,
   values: unknown[],
-  limits: { parentTaskId: string; projectId: string; maxPerTask: number; maxActive: number }
+  limits: {
+    parentTaskId: string;
+    projectId: string;
+    maxPerTask: number;
+    maxActive: number;
+    missionId: string | null;
+  }
 ): Promise<D1Result> {
   const statusPlaceholders = ACTIVE_STATUSES.map(() => '?').join(', ');
   return env.DATABASE.prepare(
@@ -35,7 +41,11 @@ export function insertDispatchedTask(
        SELECT count(*) FROM tasks
        WHERE project_id = ? AND status IN (${statusPlaceholders})
        AND dispatch_depth > 0
-     ) < ?`
+     ) < ?
+     AND (? IS NULL OR EXISTS (
+       SELECT 1 FROM missions WHERE id = ? AND project_id = ?
+       AND status NOT IN ('cancelled', 'completed', 'failed')
+     ))`
   )
     .bind(
       ...values,
@@ -45,7 +55,10 @@ export function insertDispatchedTask(
       limits.maxPerTask,
       limits.projectId,
       ...ACTIVE_STATUSES,
-      limits.maxActive
+      limits.maxActive,
+      limits.missionId,
+      limits.missionId,
+      limits.projectId
     )
     .run();
 }

@@ -9,14 +9,15 @@ export function quarantineUncertainPromptRetries(
   sql: SqlStorage,
   sessionId: string,
   senderScope?: { userIds: string[]; humanSources: readonly string[] },
-  projectId?: string | null
+  projectId?: string | null,
+  acceptedBefore?: number
 ): void {
   const retired = sql
     .exec(
       `UPDATE session_inbox SET delivery_state = 'ambiguous', terminal_reason = 'receipt_unavailable',
        last_error = 'Cancellation retained an uncertain prior submission; receipt evidence requires review',
        next_attempt_at = NULL, wake_ready_attempt_id = NULL
-     WHERE target_session_id = ? AND delivery_state = 'retry_wait'
+     WHERE target_session_id = ? AND (? IS NULL OR created_at <= ?) AND delivery_state = 'retry_wait'
        AND (prompt_delivery_phase = 'submitting' OR prompt_delivery_phase IS NULL)
        AND (? = 0 OR (
          sender_id IN (SELECT value FROM json_each(?))
@@ -24,6 +25,8 @@ export function quarantineUncertainPromptRetries(
            OR source_kind = 'scheduled_action')
        )) RETURNING id, source_kind`,
       sessionId,
+      acceptedBefore ?? null,
+      acceptedBefore ?? null,
       senderScope ? 1 : 0,
       JSON.stringify(senderScope?.userIds ?? []),
       JSON.stringify(senderScope?.humanSources ?? [])
@@ -58,12 +61,16 @@ export type CancelUnissuedSessionPromptsResult =
   | { matched: true; cancelled: number }
   | { matched: false; cancelled: 0; reason: 'missing' | 'task_mismatch' | 'task_unbound' };
 
-/** Run inside the caller's synchronous transaction, before any awaited side effects. */
+/**
+ * Run inside the caller's synchronous transaction. A bounded cancellation turn
+ * carries its original acceptance cutoff so a delayed RPC cannot retire newer intent.
+ */
 export function cancelUnissuedSessionPrompts(
   sql: SqlStorage,
   sessionId: string,
   taskId: string,
-  projectId: string | null
+  projectId: string | null,
+  acceptedBefore?: number
 ): CancelUnissuedSessionPromptsResult {
   const session = sql
     .exec('SELECT task_id FROM chat_sessions WHERE id = ?', sessionId)
@@ -75,15 +82,18 @@ export function cancelUnissuedSessionPrompts(
       cancelled: 0,
       reason: session.task_id === null ? 'task_unbound' : 'task_mismatch',
     };
-  quarantineUncertainPromptRetries(sql, sessionId, undefined, projectId);
+  quarantineUncertainPromptRetries(sql, sessionId, undefined, projectId, acceptedBefore);
   const cancelled = sql
     .exec(
       `UPDATE session_inbox SET delivery_state = 'failed', terminal_reason = 'task_cancelled',
       last_error = 'Task was cancelled before prompt submission', next_attempt_at = NULL,
       attempt_started_at = NULL, attempt_id = NULL, wake_ready_attempt_id = NULL
-     WHERE target_session_id = ? AND ${UNISSUED_PROMPT_DELIVERY_SQL}
+     WHERE target_session_id = ? AND (? IS NULL OR created_at <= ?)
+       AND ${UNISSUED_PROMPT_DELIVERY_SQL}
      RETURNING id, source_kind, prompt_message_id`,
-      sessionId
+      sessionId,
+      acceptedBefore ?? null,
+      acceptedBefore ?? null
     )
     .toArray();
   for (const row of cancelled) {

@@ -4,12 +4,6 @@
  * One instance per project, keyed by projectId:
  *   env.PROJECT_ORCHESTRATOR.idFromName(projectId)
  *
- * Coordinates agent work within a project:
- * - Watches missions and manages their lifecycle
- * - Routes handoff packets between tasks via durable messages
- * - Detects stalled tasks and sends them a non-cancelling status nudge
- * - Logs all scheduling decisions for auditability
- *
  * Alarm-driven: wakes on a configurable interval (default 30s) to run
  * the scheduling loop. Sleeps when no active missions exist.
  */
@@ -33,9 +27,10 @@ import { log } from '../../lib/logger';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import { mapRows, parseRowOrNull } from '../row-validation';
 import { cancelTrackedMission } from './cancel-mission';
-import { pauseTrackedMission, resumeTrackedMission } from './mission-lifecycle';
+import { continuationDelay } from './cancellation-config';
 import { logDecision, pruneDecisionLog } from './decision-log';
 import { runOrchestratorMigrations } from './migrations';
+import { pauseTrackedMission, resumeTrackedMission } from './mission-lifecycle';
 import { runSchedulingCycle } from './scheduling';
 
 // =============================================================================
@@ -140,20 +135,36 @@ export class ProjectOrchestrator extends DurableObject<Env> {
    * Pause a mission — stops scheduling new tasks but running tasks continue.
    */
   async pauseMission(projectId: string, missionId: string): Promise<boolean> {
-    return pauseTrackedMission(this.ctx.storage.sql, this.env, projectId, missionId, () => { this.projectId = projectId; });
+    return this.serializeLifecycle(() =>
+      pauseTrackedMission(this.ctx.storage.sql, this.env, projectId, missionId, () => {
+        this.projectId = projectId;
+      })
+    );
   }
 
   /**
    * Resume a paused mission — re-enables scheduling.
    */
   async resumeMission(projectId: string, missionId: string): Promise<boolean> {
-    return resumeTrackedMission(this.ctx.storage.sql, this.env, projectId, missionId, () => { this.projectId = projectId; }, () => this.armAlarm());
+    return this.serializeLifecycle(() =>
+      resumeTrackedMission(
+        this.ctx.storage.sql,
+        this.env,
+        projectId,
+        missionId,
+        () => {
+          this.projectId = projectId;
+        },
+        () => this.armAlarm()
+      )
+    );
   }
 
   async cancelMission(projectId: string, missionId: string): Promise<boolean> {
-    return cancelTrackedMission(this.ctx.storage.sql, this.env, projectId, missionId, () => {
-      this.projectId = projectId;
-    });
+    this.projectId = projectId;
+    return cancelTrackedMission(this.ctx.storage, this.env, projectId, missionId, (work) =>
+      this.serializeLifecycle(work)
+    );
   }
 
   /**
@@ -386,17 +397,30 @@ export class ProjectOrchestrator extends DurableObject<Env> {
 
     // Re-arm while active or legacy completing missions still need work.
     const activeMissions = this.ctx.storage.sql
-      .exec(`SELECT 1 FROM orchestrator_missions WHERE status IN ('active', 'completing') LIMIT 1`)
+      .exec(
+        `SELECT 1 FROM orchestrator_missions WHERE status IN ('active', 'completing', 'cancelling') LIMIT 1`
+      )
       .toArray();
 
     if (activeMissions.length > 0) {
-      await this.ctx.storage.setAlarm(Date.now() + config.schedulingIntervalMs);
+      await this.ctx.storage.setAlarm(
+        Date.now() + continuationDelay(this.ctx.storage.sql, this.env, config.schedulingIntervalMs)
+      );
     }
   }
 
   // =========================================================================
   // Helpers
   // =========================================================================
+
+  private serializeLifecycle<T>(work: () => Promise<T>): Promise<T> {
+    const result = this.cycleLock.then(work);
+    this.cycleLock = result.then(
+      () => undefined,
+      () => undefined
+    );
+    return result;
+  }
 
   private async armAlarm(): Promise<void> {
     const config = resolveOrchestratorConfig(this.env);

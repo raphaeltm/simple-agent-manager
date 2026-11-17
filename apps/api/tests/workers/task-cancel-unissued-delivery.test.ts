@@ -22,18 +22,14 @@ import { seedInstallation, seedProject, seedTask, seedUser } from './helpers/see
 const config = resolveDurableExecutionConfig({});
 const capabilities = versionedPromptCapabilities('cancel-runtime');
 
-async function fixture() {
+async function fixture(projectId?: string, owner = 'owner') {
   const stub = env.PROJECT_DATA.get(
-    env.PROJECT_DATA.newUniqueId()
+    projectId ? env.PROJECT_DATA.idFromName(projectId) : env.PROJECT_DATA.newUniqueId()
   ) as DurableObjectStub<ProjectData>;
-  const session = await stub.createSession(
-    null,
-    'Cancellation while waking',
-    'cancel-task',
-    'owner'
-  );
+  if (projectId) await stub.ensureProjectId(projectId);
+  const session = await stub.createSession(null, 'Cancellation while waking', 'cancel-task', owner);
   const now = Date.now();
-  const accept = (id: string) =>
+  const accept = (id: string, acceptedAt = now) =>
     runInDurableObject(stub, (_instance, state) =>
       acceptPromptDelivery(
         state.storage.sql,
@@ -43,11 +39,11 @@ async function fixture() {
           targetSessionId: session,
           displayContent: `Prompt ${id}`,
           senderType: 'human',
-          senderId: 'owner',
+          senderId: owner,
           sourceKind: 'user_followup',
           ttlMs: config.ttlMs,
         },
-        now
+        acceptedAt
       )
     );
   return { stub, session, now, accept };
@@ -63,6 +59,61 @@ const accepted = {
 };
 
 describe('task cancellation of unissued deliveries through ProjectData RPC', () => {
+  it('keeps newer accepted prompts intact when an older retirement RPC arrives late', async () => {
+    const suffix = crypto.randomUUID();
+    const projectId = `late-retirement-${suffix}`,
+      owner = `late-owner-${suffix}`;
+    await seedUser(owner);
+    await seedInstallation(`late-install-${suffix}`, owner);
+    await seedProject(projectId, owner, `late-install-${suffix}`);
+    const f = await fixture(projectId, owner);
+    await f.accept('old-queued');
+    await f.accept('old-uncertain');
+    await f.accept('new-queued', f.now + 60_000);
+    await f.accept('new-uncertain', f.now + 60_000);
+    await runInDurableObject(f.stub, (_instance, state) => {
+      state.storage.sql.exec(
+        `UPDATE session_inbox SET delivery_state='retry_wait',prompt_delivery_phase=NULL
+         WHERE id IN (?,?)`,
+        'old-uncertain',
+        'new-uncertain'
+      );
+    });
+    // Real client -> named DO -> synchronous SQL, delayed until after newer acceptance.
+    expect(
+      await projectData.cancelUnissuedSessionPrompts(
+        env as unknown as Env,
+        projectId,
+        f.session,
+        'cancel-task',
+        { acceptedBefore: f.now }
+      )
+    ).toEqual({ matched: true, cancelled: 1 });
+    await runInDurableObject(f.stub, (_instance, state) => {
+      const rows = state.storage.sql
+        .exec('SELECT id,delivery_state FROM session_inbox ORDER BY id')
+        .toArray();
+      expect(rows).toEqual([
+        { id: 'new-queued', delivery_state: 'queued' },
+        { id: 'new-uncertain', delivery_state: 'retry_wait' },
+        { id: 'old-queued', delivery_state: 'failed' },
+        { id: 'old-uncertain', delivery_state: 'ambiguous' },
+      ]);
+    });
+    // New cancellation intent still retires the current queue and preserves uncertainty.
+    expect(await f.stub.cancelUnissuedSessionPrompts(f.session, 'cancel-task')).toEqual({
+      matched: true,
+      cancelled: 1,
+    });
+    await runInDurableObject(f.stub, (_instance, state) => {
+      expect(
+        state.storage.sql
+          .exec("SELECT delivery_state FROM session_inbox WHERE id='new-uncertain'")
+          .one().delivery_state
+      ).toBe('ambiguous');
+    });
+  });
+
   it('fences the real client stop against a successor binding after exact retirement', async () => {
     const suffix = crypto.randomUUID(),
       projectId = `stop-project-${suffix}`,

@@ -645,7 +645,8 @@ export async function cancelUnissuedSessionPrompts(
   env: Env,
   projectId: string,
   sessionId: string,
-  taskId: string
+  taskId: string,
+  options?: { acceptedBefore: number }
 ): Promise<CancelUnissuedSessionPromptsResult> {
   await assertExactWriteAllowedIfArchiveEnabled(
     env,
@@ -654,7 +655,9 @@ export async function cancelUnissuedSessionPrompts(
     'cancelUnissuedSessionPrompts'
   );
   const stub = await getStub(env, projectId);
-  return stub.cancelUnissuedSessionPrompts(sessionId, taskId);
+  return options
+    ? stub.cancelUnissuedSessionPrompts(sessionId, taskId, options)
+    : stub.cancelUnissuedSessionPrompts(sessionId, taskId);
 }
 
 export async function stopSession(

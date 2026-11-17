@@ -368,7 +368,7 @@ export async function handleRetrySubtask(
   const checkoutBranch = branchName;
 
   // Insert replacement task
-  await insertMcpRetriedTask(db, {
+  const inserted = await insertMcpRetriedTask(db, {
     id: taskId,
     projectId: tokenData.projectId,
     userId: tokenData.userId,
@@ -385,7 +385,8 @@ export async function handleRetrySubtask(
     requestedVmSizeSource: vmSizeSource,
     agentProfileHint: childTask.agentProfileHint,
     skillId: childTask.skillId,
-    // The replacement keeps its predecessor's feature coordination channel.
+    // A replacement remains part of its predecessor's mission and coordination channel.
+    missionId: childTask.missionId,
     coordinationChannel: childTask.coordinationChannel,
     resourceRequirementsJson: persistedResourceRequirementsJson,
     resourceRequirementPlanJson: persistedResourceRequirementPlanJson,
@@ -399,6 +400,9 @@ export async function handleRetrySubtask(
     createdAt: now,
     updatedAt: now,
   });
+
+  if (!inserted.meta.changes)
+    return jsonRpcError(requestId, INVALID_PARAMS, 'Mission no longer accepts retried tasks');
 
   // Record status event
   await db.insert(schema.taskStatusEvents).values({

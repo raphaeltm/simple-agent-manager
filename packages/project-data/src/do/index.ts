@@ -965,15 +965,23 @@ export class ProjectData extends DurableObject<Env> {
   /** Retire only unissued prompts of the exact cancelled task; later messages stay eligible. */
   async cancelUnissuedSessionPrompts(
     sessionId: string,
-    taskId: string
+    taskId: string,
+    options?: { acceptedBefore: number }
   ): Promise<import('./prompt-delivery-cancellation').CancelUnissuedSessionPromptsResult> {
     const cancelled = await this.withArchiveTranscriptLock(() => {
       messages.assertTranscriptWriteAllowed(this.sql, sessionId, 'cancelUnissuedSessionPrompts');
       return this.meteredStorage.transactionSync(() =>
-        cancelUnissuedSessionPrompts(this.sql, sessionId, taskId, this.getProjectId())
+        cancelUnissuedSessionPrompts(
+          this.sql,
+          sessionId,
+          taskId,
+          this.getProjectId(),
+          options?.acceptedBefore
+        )
       );
     });
-    if (cancelled.matched && cancelled.cancelled) {
+    // An uncertain retry can settle a wake batch without increasing the cancelled count.
+    if (cancelled.matched) {
       this.recalculateAlarm().catch((error) =>
         log.warn('prompt_delivery.cancel_recalculate_alarm_failed', {
           sessionId,

@@ -689,6 +689,16 @@ retain the KV procedure in `.claude/rules/55-runaway-cost-emergency-ops.md`.
 | `DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS` | `1000`                         | Minimum delayed re-arm for an already-completed diagnosis step                                                                                |
 | `ORCHESTRATOR_ZERO_TASK_GRACE_MS`       | `600000` (10 min)              | Grace period before an active orchestration with no tasks ends                                                                                |
 | `ORCHESTRATOR_MAX_MISSION_LIFETIME_MS`  | `86400000` (24 hr)             | Backstop that force-completes active or completing orchestrations                                                                             |
+| `ORCHESTRATOR_CANCELLATION_PAGE_SIZE` | `25` | Maximum tasks visited in one mission cancellation turn. |
+| `ORCHESTRATOR_CANCELLATION_TURN_MS` | `5000` | Elapsed turn budget checked between task operations. |
+| `ORCHESTRATOR_CANCELLATION_RETRY_PASSES` | `3` | Maximum passes before failed cancellation is blocked for explicit retry. |
+| `ORCHESTRATOR_CANCELLATION_RESIDENCE_MS` | `900000` | Maximum cancellation episode residence before blocking. |
+| `ORCHESTRATOR_CANCELLATION_INTERVAL_MS` | `1000` | Alarm delay between pending cancellation turns. |
+
+Mission cancellation uses the existing orchestrator tracking and alarm (`project-orchestrator/cancel-mission.ts`, `cancellation-config.ts`). The mission stays paused while its tasks are being cancelled; completion is recorded only after no nonterminal task remains. A blocked cancellation stops rearming and requires an explicit cancellation retry. Completed task cancellations remain complete across retries.
+
+These bounds limit work rather than guarantee completion within one episode. At the defaults, 10,000 tasks require at least 400 turns. If every turn uses its full five-second work budget plus the one-second alarm delay, that is approximately 40 minutes before scheduler and RPC overhead, exceeding the fifteen-minute residence limit. Such a mission will require explicit retries; raise the bounds deliberately for larger workloads. The turn budget is checked between operations and does not interrupt an RPC already in progress.
+
 
 The scheduled Durable Object billing monitor reads these non-secret variables
 from the selected GitHub Environment, not from the API Worker runtime:

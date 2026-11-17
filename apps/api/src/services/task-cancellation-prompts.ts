@@ -18,7 +18,8 @@ export interface TaskCancellationTarget {
 export async function retireTaskCancellationPrompts(
   env: Env,
   target: TaskCancellationTarget,
-  beforeSideEffect?: () => Promise<unknown>
+  beforeSideEffect?: () => Promise<unknown>,
+  options?: { acceptedBefore: number }
 ): Promise<projectDataService.CancelUnissuedSessionPromptsResult & { sessionId: string | null }> {
   const db = drizzle(env.DATABASE, { schema });
   const task = await db
@@ -50,12 +51,15 @@ export async function retireTaskCancellationPrompts(
   const sessionId = task.chatSessionId ?? workspace?.chatSessionId ?? null;
   if (!sessionId) return { matched: false, reason: 'missing', cancelled: 0, sessionId };
   await beforeSideEffect?.();
-  let result = await projectDataService.cancelUnissuedSessionPrompts(
-    env,
-    task.projectId,
-    sessionId,
-    task.id
-  );
+  let result = await (options
+    ? projectDataService.cancelUnissuedSessionPrompts(
+        env,
+        task.projectId,
+        sessionId,
+        task.id,
+        options
+      )
+    : projectDataService.cancelUnissuedSessionPrompts(env, task.projectId, sessionId, task.id));
   if (!result.matched && result.reason === 'task_unbound' && task.chatSessionId === sessionId) {
     // Repair only a positively identified canonical NULL binding. Workspace pointers
     // alone are insufficient, and a newer member of a legacy recovery family wins.
@@ -87,12 +91,20 @@ export async function retireTaskCancellationPrompts(
       );
       if (linked) {
         await beforeSideEffect?.();
-        result = await projectDataService.cancelUnissuedSessionPrompts(
-          env,
-          task.projectId,
-          sessionId,
-          task.id
-        );
+        result = await (options
+          ? projectDataService.cancelUnissuedSessionPrompts(
+              env,
+              task.projectId,
+              sessionId,
+              task.id,
+              options
+            )
+          : projectDataService.cancelUnissuedSessionPrompts(
+              env,
+              task.projectId,
+              sessionId,
+              task.id
+            ));
       }
     }
   }

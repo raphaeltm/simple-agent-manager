@@ -5,7 +5,11 @@ import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
 } from '../../../services/capacity-placement-snapshot';
 
-export function insertSamDispatchedTask(env: Env, values: unknown[]): Promise<D1Result> {
+export function insertSamDispatchedTask(
+  env: Env,
+  values: unknown[],
+  mission: { id: string | null; projectId: string }
+): Promise<D1Result> {
   return env.DATABASE.prepare(
     `INSERT INTO tasks (id, project_id, user_id, parent_task_id, chat_session_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
@@ -14,13 +18,17 @@ export function insertSamDispatchedTask(env: Env, values: unknown[]): Promise<D1
      credential_attribution_user_id, credential_attribution_project_id, credential_attribution_source,
      ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
      created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
+     SELECT ?, ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
      ?, ?, ?, ?, ?, 'mcp',
      ?, ?, ?, ?, ?, ?,
      ?, ?, ?,
      ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
-     ?, ?)`
+     ?, ?
+     WHERE (? IS NULL OR EXISTS (
+       SELECT 1 FROM missions WHERE id = ? AND project_id = ?
+       AND status NOT IN ('cancelled', 'completed', 'failed')
+     ))`
   )
-    .bind(...values)
+    .bind(...values, mission.id, mission.id, mission.projectId)
     .run();
 }
