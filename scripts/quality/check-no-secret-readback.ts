@@ -92,7 +92,11 @@ export const RULES: readonly Rule[] = [
     pattern: new RegExp(String.raw`\bset\b${SAME_COMMAND}\s-[A-Za-z]*x[A-Za-z]*(?=\s|$|;)`),
   },
   // `set -o xtrace`, `set -eo xtrace`, `set -o pipefail -o xtrace`.
-  { id: 'xtrace', pattern: new RegExp(String.raw`\bset\b${SAME_COMMAND}\s-[A-Za-z]*o\s+xtrace\b`) },
+  // ...and the same option on a shell invocation: `bash -o xtrace script.sh`.
+  {
+    id: 'xtrace',
+    pattern: new RegExp(String.raw`\b(?:set|(?:ba|z)?sh)\b${SAME_COMMAND}\s-[A-Za-z]*o\s+xtrace\b`),
+  },
   // `bash -x`, `bash -e -x script.sh`, `shell: bash -x {0}`.
   {
     id: 'xtrace',
@@ -106,9 +110,9 @@ export const RULES: readonly Rule[] = [
   {
     id: 'env-dump',
     pattern: new RegExp(
-      // Options only, no command after them: `env -0`, `env -u NAME`, `env --unset=NAME` still
-      // print the rest of the environment.
-      String.raw`${COMMAND_START}(?:env(?:\s+(?:-u\s+\S+|--unset=\S+|-[-\w]+))*|printenv|export\s+-p|declare\s+-p)\s*(?:$|[|>;&])`
+      // Options only, no command or names after them: `env -0`, `env -u NAME`, a bare `export`
+      // or `declare -x` all print the (exported) environment.
+      String.raw`${COMMAND_START}(?:env(?:\s+(?:-u\s+\S+|--unset=\S+|-[-\w]+))*|printenv|export(?:\s+-p)?|(?:declare|typeset)(?:\s+-[A-Za-z]+)*)\s*(?:$|[|>;&])`
     ),
     shellOnly: true,
   },

@@ -217,11 +217,13 @@ It reports four kinds of finding:
   `require(...).decrypt*`, and any import, re-export or dynamic import that names `decrypt*` or
   loads the API's `services/encryption` module, including multi-line imports and inline JS in
   YAML.
-- `xtrace`: `set -x` in any flag cluster or position (`set -euxo`, `set -e -x`), `set -o xtrace`,
+- `xtrace`: `set -x` in any flag cluster or position (`set -euxo`, `set -e -x`), `set -o xtrace` or
+  `bash -o xtrace`,
   a `-x` shebang, and, in shell and YAML only, `bash -x`, `SHELLOPTS=…xtrace`, `BASH_XTRACEFD` and
   `trap … DEBUG`.
-- `env-dump`, in shell, YAML and Dockerfiles only: a bare `env`, `printenv`, `export -p` or
-  `declare -p` at the start of a command, including `run: env` and `RUN env`.
+- `env-dump`, in shell, YAML and Dockerfiles only: `env` with no command (options such as `-0`
+  or `-u NAME` allowed), `printenv`, and a bare `export`, `declare` or `typeset` (flags allowed,
+  no names) at the start of a command, including `run: env` and `RUN env`.
 
 The shell-only rules never apply to JS/TS, so code such as `value || env` is not reported.
 
