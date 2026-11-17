@@ -66,6 +66,22 @@ const POSITIVE: Array<[string, RuleId]> = [
   ['export -p', 'env-dump'],
   ['declare -p', 'env-dump'],
   ['printenv CF_API_TOKEN', 'env-dump'],
+  ['        run: env', 'env-dump'],
+  ['      - run: printenv | sort', 'env-dump'],
+  ['cd infra && env | grep KEY', 'env-dump'],
+  ['pulumi config get encryptionKey --stack staging', 'show-secrets'],
+  ['const outputs = await stack.outputs({ showSecrets });', 'show-secrets'],
+  ["const plain = await crypto.subtle['decrypt'](params, key, data);", 'decryption'],
+  ["const enc = await import('../../apps/api/src/services/encryption');", 'decryption'],
+  ["const { decrypt: open } = require('../api/src/services/encryption.js');", 'decryption'],
+  ['set -e -x', 'xtrace'],
+  ['set -euo pipefail -x', 'xtrace'],
+  ['set -eo xtrace', 'xtrace'],
+  ['set -o pipefail -o xtrace', 'xtrace'],
+  ['bash -e -x scripts/deploy/configure-secrets.sh staging', 'xtrace'],
+  ['export SHELLOPTS=errexit:xtrace', 'xtrace'],
+  ['exec 9>trace.log; BASH_XTRACEFD=9', 'xtrace'],
+  ['trap \'echo "$BASH_COMMAND"\' DEBUG', 'xtrace'],
 ];
 
 /** Nearby shapes that must not be reported. */
@@ -87,6 +103,13 @@ const NEGATIVE = [
   ' * set -x is banned in workflows.',
   'echo "::add-mask::$TARGET_ENCRYPTION_KEY"',
   "node -e 'process.stdout.write(JSON.stringify({ token: process.env.SMOKE_TEST_TOKEN }))'",
+  '        run: envsubst < template > out',
+  'pnpm --filter @simple-agent-manager/api exec wrangler deploy --env "$DEPLOY_ENV"',
+  'pulumi config set workersDevSubdomain "$WORKERS_DEV_SUBDOMAIN"',
+  'const outputs = await stack.outputs({ showSecrets: false });',
+  'bash scripts/deploy/configure-secrets.sh "$DEPLOY_ENV"',
+  'set -e; grep -x needle file',
+  'trap cleanup EXIT',
 ];
 
 describe('check-no-secret-readback rules', () => {
@@ -142,6 +165,52 @@ describe('check-no-secret-readback rules', () => {
       if (matching.length === 1) soleMatches.add(matching[0]);
     }
     expect([...soleMatches].sort((a, b) => a - b)).toEqual(RULES.map((_rule, index) => index));
+  });
+});
+
+describe('tracing shebangs', () => {
+  it.each(['#!/bin/bash -x', '#!/usr/bin/env -S bash -eux', '#!/bin/sh -x'])(
+    'reports %s on the first line',
+    (shebang) => {
+      expect(rulesOf(`${shebang}\necho hi`)).toEqual(['xtrace']);
+    }
+  );
+
+  it.each(['#!/bin/bash', '#!/usr/bin/env bash', '#!/bin/sh -e'])(
+    'does not report %s',
+    (shebang) => {
+      expect(rulesOf(`${shebang}\necho hi`)).toEqual([]);
+    }
+  );
+
+  it('does not treat a later comment as a shebang', () => {
+    expect(rulesOf('echo hi\n#!/bin/bash -x')).toEqual([]);
+  });
+});
+
+describe('JS/TS files', () => {
+  it.each([
+    'const target = process.env.TARGET || env;',
+    "headers.set('x-trace', '1');",
+    'seen.set(key, -x);',
+    "const shell = 'bash -x';",
+  ])('do not get shell-only rules: %s', (line) => {
+    expect(rulesOf(line, 'scripts/deploy/x.ts')).toEqual([]);
+  });
+
+  it('still get the shared rules', () => {
+    expect(rulesOf("execSync('set -x; deploy');", 'scripts/deploy/x.ts')).toEqual(['xtrace']);
+    expect(rulesOf('run(["pulumi", "stack", "output", "--show-secrets"]);', 'infra/x.ts')).toEqual([
+      'show-secrets',
+    ]);
+  });
+
+  it('import pass also runs on workflow YAML with inline JS', () => {
+    const yaml =
+      "        run: |\n          node --input-type=module <<'JS'\n          import { decryptToken } from './scripts/deploy/x.mjs';\n          JS";
+    expect(scanText('.github/workflows/x.yml', yaml, isOpen).findings).toEqual([
+      expect.objectContaining({ rule: 'decryption', line: 3 }),
+    ]);
   });
 });
 
@@ -219,6 +288,19 @@ describe('scanRepository', () => {
     const withoutTask = scanRepository(repo(files));
     expect(withoutTask.findings).toHaveLength(1);
     expect(withoutTask.invalidMarkers).toHaveLength(1);
+  });
+
+  it('does not let an open task excuse a read in a file it is not pinned to', () => {
+    const result = scanRepository(
+      repo({
+        [OPEN_TASK]: '# task\n',
+        'scripts/deploy/new-script.sh': `# sam:secret-readback-allowed ${OPEN_TASK}\npulumi stack output k --show-secrets\n`,
+      })
+    );
+    expect(result.findings.map((finding) => finding.file)).toEqual([
+      'scripts/deploy/new-script.sh',
+    ]);
+    expect(result.invalidMarkers).toHaveLength(1);
   });
 
   it('does not accept a marker naming an archived task, even though the file exists', () => {

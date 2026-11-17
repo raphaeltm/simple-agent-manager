@@ -24,13 +24,14 @@ mask_secret_value() {
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%$'\r'}"
     if [ -n "${line//[[:space:]]/}" ]; then
-      printf '::add-mask::%s\n' "$line"
+      # The runner decodes %25 in command data, so a literal % must be sent encoded.
+      printf '::add-mask::%s\n' "${line//%/%25}"
     fi
   done <<<"$value"
   escaped="$(printf '%s' "$value" | json_escape_stdin)"
   escaped="${escaped:1:${#escaped}-2}"
   if [ -n "$escaped" ] && [ "$escaped" != "$value" ]; then
-    printf '::add-mask::%s\n' "$escaped"
+    printf '::add-mask::%s\n' "${escaped//%/%25}"
   fi
 }
 
@@ -520,9 +521,10 @@ AGENT_SIGN_IN_TRUST="${AGENT_SIGN_IN_TRUST:-}"
 if [ -n "$AGENT_SIGN_IN_TRUST" ]; then
   set_worker_secret "AGENT_SIGN_IN_TRUST" "$AGENT_SIGN_IN_TRUST" "$ENVIRONMENT" "false"
 elif [ "${AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET:-false}" = "true" ]; then
-  # A secondary installation's trust is its own GitHub secret (AGENT_SIGN_IN_TRUST_<INSTALLATION>)
-  # or a Worker secret an admin set by hand; deploys never derive one, so an unset GitHub secret
-  # leaves whatever the Worker has.
+  # A secondary installation's trust is its own GitHub secret (AGENT_SIGN_IN_TRUST_STAGING2 for
+  # staging2) or a Worker secret an admin set by hand; deploys never derive one, so an unset GitHub
+  # secret leaves whatever the Worker has. Revoking it therefore means deleting the Worker secret
+  # by hand, not just the GitHub secret.
   echo -e "${YELLOW}ℹ  AGENT_SIGN_IN_TRUST not supplied for this installation — leaving the Worker secret unchanged${NC}"
 else
   echo -e "${YELLOW}ℹ  AGENT_SIGN_IN_TRUST not set — agent sign-in disabled; removing any previous value${NC}"

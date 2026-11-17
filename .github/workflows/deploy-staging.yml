@@ -116,9 +116,10 @@ jobs:
       base_domain: ${{ steps.target.outputs.base_domain }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # The lease is keyed by installation. A secondary installation (staging2) has no secrets of
-      # its own: its jobs run with the environment the allowlist names (scripts/deploy/
-      # staging-installations.mjs) and it is deployed to its own domain, stack and prefix.
+      # The lease is keyed by installation. A secondary installation (staging2) has no GitHub
+      # Environment secrets of its own: its jobs run with the environment the allowlist names
+      # (scripts/deploy/staging-installations.mjs), whose AGENT_SIGN_IN_TRUST_STAGING2 secret is its
+      # sign-in trust, and it is deployed to its own domain, stack and prefix.
       - name: Resolve installation target
         id: target
         env:
@@ -257,6 +258,8 @@ jobs:
           status="$(node -e 'process.stdout.write(JSON.stringify({ token: process.env.SMOKE_TEST_TOKEN }))' |
             curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' \
               --data-binary @- "$SMOKE_TEST_API_URL/api/auth/token-login")" || status="request failed"
+          # Only a refusal skips: any other failure (5xx, network) still runs the tests, which then
+          # report the broken installation.
           if [ "$status" = "401" ]; then
             echo "::warning::The smoke token is not registered on $INSTALLATION; smoke tests skipped (see 'Two Staging Installations')."
             echo "skip=true" >> "$GITHUB_OUTPUT"

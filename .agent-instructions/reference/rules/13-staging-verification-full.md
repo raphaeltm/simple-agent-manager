@@ -55,7 +55,7 @@ cookie for `.sammy2.party`. The issuer and allowed source project/user are the s
 `staging`. The trust comes from the `staging` Environment's GitHub secret
 `AGENT_SIGN_IN_TRUST_STAGING2`, which deploys hand straight to `configure-secrets.sh`. Deploys
 never derive it from staging's trust. While that secret is unset, a deploy leaves staging2's
-Worker secret as it is. The staging smoke token works on staging2 only where a
+Worker secret as it is, so revoking it means deleting the Worker secret by hand as well. The staging smoke token works on staging2 only where a
 registration row already exists (the one made before 2026-11-17 does). Deploys no longer register it,
 because that needs staging2's `ENCRYPTION_KEY` in the runner. When staging2 refuses the token,
 the deploy's smoke tests are skipped with a warning.
@@ -102,8 +102,9 @@ include it, and the deploy-time migration preflight stays the backstop). Use `st
 when you are done on `staging2`, tear it down (Actions → Teardown → `staging2` → `DELETE`, after
 deleting test workspaces and nodes) and redeploy `main` to it (`gh workflow run deploy-staging.yml
 --ref main -f environment=staging2 -f sam_task_id=<id>`) before you release. staging2 rebuilds
-from nothing, so main-based branches can use it again, but without credentials until Raphaël
-redoes the manual setup (file an inbox item for him). Nothing does this automatically.
+from nothing, so main-based branches can use it again. Teardown erases the manual setup above
+(credentials, pool, sign-in trust Worker value), so file an inbox item asking Raphaël to redo it;
+until he does, staging2 cannot run VMs or agent sessions. Nothing does this automatically.
 
 Adding a third: one entry in `scripts/deploy/staging-installations.mjs` plus a zone in the
 staging Cloudflare account that the staging deploy token can edit.

@@ -56,19 +56,19 @@ regardless.
 
 ## Implementation checklist
 
-- [ ] staging2 bootstrap: remove credential decryption/copying, smoke token registration, pool
+- [x] staging2 bootstrap: remove credential decryption/copying, smoke token registration, pool
       seeding, derive-trust, every `--show-secrets` read; keep user seeding (+ claude-code `sam`
       opt-in) with the D1 ID looked up by database name; delete the dead modules and their tests
-- [ ] secondary `AGENT_SIGN_IN_TRUST` from `AGENT_SIGN_IN_TRUST_<INSTALLATION>`; untouched when unset
-- [ ] smoke tests skip with a warning on a secondary installation whose smoke token is not registered
-- [ ] configure-secrets.sh: `::add-mask::` every Pulumi value (each line + JSON form) right after
+- [x] secondary `AGENT_SIGN_IN_TRUST` from `AGENT_SIGN_IN_TRUST_<INSTALLATION>`; untouched when unset
+- [x] smoke tests skip with a warning on a secondary installation whose smoke token is not registered
+- [x] configure-secrets.sh: `::add-mask::` every Pulumi value (each line + JSON form) right after
       the read, plus the derived VAPID private key; comment beside the read naming the tracking task
-- [ ] backlog task + idea for removing the Pulumi readback entirely (rule 42)
-- [ ] audit findings fixed or tracked
-- [ ] `pnpm quality:no-secret-readback` (check + tests, incident reintroduction, controls,
+- [x] backlog task + idea for removing the Pulumi readback entirely (rule 42)
+- [x] audit findings fixed or tracked
+- [x] `pnpm quality:no-secret-readback` (check + tests, incident reintroduction, controls,
       guard-deletion proof, noise on tree + sampled history), blocking in CI, README entry
-- [ ] path-scoped rule for `.github/workflows/**`, `scripts/deploy/**`, `infra/**`; indexes regenerated
-- [ ] docs: staging reference "Two Staging Installations", any doc saying staging2 copies credentials
+- [x] path-scoped rule for `.github/workflows/**`, `scripts/deploy/**`, `infra/**`; indexes regenerated
+- [x] docs: staging reference "Two Staging Installations", any doc saying staging2 copies credentials
 - [ ] ONE inbox item for Raphaël (inbox_write assign) with the manual staging2 steps
 - [ ] deploy staging2 and staging from the branch; logs show no `--show-secrets`/decryption except
       the masked, tracked configure-secrets reads; staging2 users exist

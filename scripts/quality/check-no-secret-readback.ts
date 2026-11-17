@@ -5,23 +5,29 @@
  * Actions runner, or that could print one (policy 795e72a6,
  * `.claude/rules/83-no-secret-readback-in-ci.md`):
  *
- *   show-secrets  reading secret values back out of Pulumi (`--show-secrets`, `showSecrets: true`)
+ *   show-secrets  reading secret values back out of Pulumi (`--show-secrets`, `showSecrets`
+ *                 unless `false`, `pulumi config get`)
  *   decryption    decrypting stored credentials (`subtle.decrypt`, `createDecipheriv`, importing
- *                 a decrypt helper or the API's encryption module, including multi-line imports)
- *   xtrace        shell tracing (`set -x`, `set -euxo`, `set -o xtrace`, `bash -x`)
+ *                 a decrypt helper or the API's encryption module: multi-line, re-export and
+ *                 dynamic imports included)
+ *   xtrace        shell tracing (`set -x` in any flag cluster or position, `set -o xtrace`,
+ *                 `bash -x`, a `-x` shebang, SHELLOPTS=xtrace, BASH_XTRACEFD, `trap ... DEBUG`)
  *   env-dump      dumping the environment (`env`, `printenv`, `export -p`, `declare -p`)
  *
  * It scans workflow, action, deploy, infra and CI-script code: every file under `.github/`,
  * `scripts/` and `infra/` with a shell, YAML or JS/TS extension, except tests and this checker.
  * Comment lines are skipped.
  *
+ * Shell-only rules (`bash -x`, SHELLOPTS, `trap DEBUG`, environment dumps) apply to `.sh` and
+ * workflow YAML only, so JS/TS such as `value || env` is not reported.
+ *
  * A legacy line that cannot be removed yet is accepted only with a marker on the same line or
- * up to three lines above it, naming an open task file under tasks/backlog/ or tasks/active/:
+ * up to three lines above it, naming its tracking task, and only when that file and task are an
+ * entry in ALLOWED_LEGACY_READS and the task is still open (under tasks/backlog/ or tasks/active/):
  *
  *   # sam:secret-readback-allowed tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md
  *
- * A marker naming an archived or missing task does not count: finishing the task must remove
- * the read.
+ * A marker naming an archived or missing task, or one not pinned to its file, does not count.
  *
  * Usage: tsx scripts/quality/check-no-secret-readback.ts [--root <dir>]
  */
@@ -44,26 +50,75 @@ export interface AllowedRead extends Finding {
 export interface ScanResult {
   findings: Finding[];
   allowed: AllowedRead[];
-  /** Marker lines whose task is not an open task file: reported so a stale marker is visible. */
+  /** Markers that excuse nothing (task not open, or file/task not in ALLOWED_LEGACY_READS). */
   invalidMarkers: Array<{ file: string; line: number; task: string }>;
 }
 
 interface Rule {
   id: RuleId;
   pattern: RegExp;
+  /** Shell syntax: only matched in shell scripts and workflow YAML, never in JS/TS. */
+  shellOnly?: boolean;
 }
+
+/** Shell options that follow `set`/`bash` on one command, up to a separator or comment. */
+const SAME_COMMAND = String.raw`[^#\n;|&]*?`;
+/** The start of a shell command: line start, a YAML `run:` value, or after `;`, `&&`, `||`, `|`. */
+const COMMAND_START = String.raw`(?:^\s*(?:-\s*)?(?:run:\s*)?|[;&|]\s*)`;
 
 export const RULES: readonly Rule[] = [
   { id: 'show-secrets', pattern: /--show-secrets\b/ },
-  { id: 'show-secrets', pattern: /\bshowSecrets\s*:\s*true\b/ },
-  { id: 'decryption', pattern: /\bsubtle\s*\.\s*decrypt\s*\(/ },
+  // Any use of the Automation API flag other than an explicit `false`, shorthand included.
+  { id: 'show-secrets', pattern: /\bshowSecrets\b(?!\s*:\s*false\b)/ },
+  // `pulumi config get` prints a secret config value decrypted.
+  { id: 'show-secrets', pattern: /\bpulumi\s+config\s+get\b/ },
+  { id: 'decryption', pattern: /\bsubtle\s*(?:\.\s*decrypt|\[\s*['"`]decrypt['"`]\s*\])\s*\(/ },
   { id: 'decryption', pattern: /\bcreateDecipher(?:iv)?\s*\(/ },
   { id: 'decryption', pattern: /\brequire\s*\([^)]*\)\s*\.\s*decrypt\w*/i },
-  { id: 'xtrace', pattern: /\bset\s+-[A-Za-z]*x[A-Za-z]*(?:\s|$|;)/ },
-  { id: 'xtrace', pattern: /\bset\s+-o\s+xtrace\b/ },
-  { id: 'xtrace', pattern: /(?:^|[\s;&|(])(?:ba|z)?sh\s+-[A-Za-z]*x[A-Za-z]*(?:\s|$)/ },
-  { id: 'env-dump', pattern: /^\s*(?:env|printenv|export\s+-p|declare\s+-p)\s*(?:$|[|>;])/ },
-  { id: 'env-dump', pattern: /^\s*printenv\b/ },
+  // Dynamic import or require of the API's encryption module.
+  {
+    id: 'decryption',
+    pattern: /\b(?:import|require)\s*\(\s*['"`][^'"`]*\/services\/encryption(?:\.[cm]?[jt]s)?['"`]/,
+  },
+  // `set -x`, `set -euxo pipefail`, `set -e -x`, `set -euo pipefail -x`.
+  {
+    id: 'xtrace',
+    pattern: new RegExp(String.raw`\bset\b${SAME_COMMAND}\s-[A-Za-z]*x[A-Za-z]*(?=\s|$|;)`),
+  },
+  // `set -o xtrace`, `set -eo xtrace`, `set -o pipefail -o xtrace`.
+  { id: 'xtrace', pattern: new RegExp(String.raw`\bset\b${SAME_COMMAND}\s-[A-Za-z]*o\s+xtrace\b`) },
+  // `bash -x`, `bash -e -x script.sh`, `shell: bash -x {0}`.
+  {
+    id: 'xtrace',
+    pattern: new RegExp(
+      String.raw`(?:^|[\s;&|(])(?:ba|z)?sh\b${SAME_COMMAND}\s-[A-Za-z]*x[A-Za-z]*(?=\s|$)`
+    ),
+    shellOnly: true,
+  },
+  { id: 'xtrace', pattern: /\bSHELLOPTS=\S*xtrace|\bBASH_XTRACEFD\b/, shellOnly: true },
+  { id: 'xtrace', pattern: /\btrap\b[^#\n]*\bDEBUG\b/, shellOnly: true },
+  {
+    id: 'env-dump',
+    pattern: new RegExp(
+      String.raw`${COMMAND_START}(?:env|printenv|export\s+-p|declare\s+-p)\s*(?:$|[|>;&])`
+    ),
+    shellOnly: true,
+  },
+  { id: 'env-dump', pattern: new RegExp(String.raw`${COMMAND_START}printenv\b`), shellOnly: true },
+];
+
+const SHELL_FILE = /\.(?:ya?ml|sh|bash)$/;
+
+/**
+ * The legacy reads that may stay for now, each pinned to the file it lives in and the open task
+ * that removes it. A marker counts only when its file and task match an entry here, so naming an
+ * unrelated open task cannot excuse a new read.
+ */
+export const ALLOWED_LEGACY_READS: ReadonlyArray<{ file: string; task: string }> = [
+  {
+    file: 'scripts/deploy/configure-secrets.sh',
+    task: 'tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md',
+  },
 ];
 
 /**
@@ -101,6 +156,9 @@ export function isScannedPath(path: string): boolean {
   return true;
 }
 
+/** A shebang that turns on tracing (`#!/bin/bash -x`, `#!/usr/bin/env -S bash -ex`). */
+const XTRACE_SHEBANG = /^#!.*\b(?:ba|z)?sh\s+-[A-Za-z]*x/;
+
 function isCommentLine(line: string): boolean {
   return /^\s*(?:#|\/\/|\/\*|\*)/.test(line);
 }
@@ -111,31 +169,43 @@ export function openTaskExists(root: string, task: string): boolean {
   return existsSync(join(root, task));
 }
 
+/**
+ * Scan one file. `isAllowed(task)` says whether a marker naming `task` may excuse a read in this
+ * file (scanRepository: an ALLOWED_LEGACY_READS entry for the file, and the task still open).
+ */
 export function scanText(
   file: string,
   text: string,
-  isOpenTask: (task: string) => boolean
+  isAllowed: (task: string) => boolean
 ): ScanResult {
   const lines = text.split(/\r?\n/);
   const result: ScanResult = { findings: [], allowed: [], invalidMarkers: [] };
   const report = (index: number, rule: RuleId): void => {
     const finding: Finding = { file, line: index + 1, rule, text: lines[index].trim() };
-    const task = markerTask(lines, index, isOpenTask);
+    const task = markerTask(lines, index, isAllowed);
     if (task) result.allowed.push({ ...finding, task });
     else result.findings.push(finding);
   };
+  const shell = SHELL_FILE.test(file);
+  // Every file type: workflow YAML and shell heredocs carry inline JS.
   const importLines = new Set(decryptImportLines(text).map((line) => line - 1));
   lines.forEach((line, index) => {
     const marker = line.match(MARKER);
-    if (marker && !isOpenTask(marker[1])) {
+    if (marker && !isAllowed(marker[1])) {
       result.invalidMarkers.push({ file, line: index + 1, task: marker[1] });
     }
     if (importLines.has(index)) {
       report(index, 'decryption');
       return;
     }
+    if (index === 0 && XTRACE_SHEBANG.test(line)) {
+      report(index, 'xtrace');
+      return;
+    }
     if (isCommentLine(line)) return;
-    const rule = RULES.find((candidate) => candidate.pattern.test(line));
+    const rule = RULES.find(
+      (candidate) => (!candidate.shellOnly || shell) && candidate.pattern.test(line)
+    );
     if (rule) report(index, rule.id);
   });
   return result;
@@ -144,11 +214,11 @@ export function scanText(
 function markerTask(
   lines: string[],
   index: number,
-  isOpenTask: (task: string) => boolean
+  isAllowed: (task: string) => boolean
 ): string | null {
   for (let i = index; i >= Math.max(0, index - MARKER_REACH); i -= 1) {
     const marker = lines[i].match(MARKER);
-    if (marker && isOpenTask(marker[1])) return marker[1];
+    if (marker && isAllowed(marker[1])) return marker[1];
   }
   return null;
 }
@@ -180,10 +250,12 @@ export function scanRepository(root: string): ScanResult & { files: number; line
     files: 0,
     lines: 0,
   };
-  const isOpenTask = (task: string) => openTaskExists(root, task);
   for (const file of listFiles(root)) {
     const text = readFileSync(join(root, file), 'utf8');
-    const result = scanText(file, text, isOpenTask);
+    const isAllowed = (task: string) =>
+      ALLOWED_LEGACY_READS.some((read) => read.file === file && read.task === task) &&
+      openTaskExists(root, task);
+    const result = scanText(file, text, isAllowed);
     total.files += 1;
     total.lines += text.split('\n').length;
     total.findings.push(...result.findings);

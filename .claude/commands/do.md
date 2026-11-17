@@ -227,8 +227,9 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
    workload identity only; see "Two Staging Installations" in the full reference.
    A branch that adds a Durable Object migration tag `origin/main` lacks is refused
    on primary `staging`: use `staging2`, and if the branch has not merged when you
-   are done, tear `staging2` down and redeploy `main` before releasing (full
-   reference, "Branches that add a Durable Object migration").
+   are done, tear `staging2` down and redeploy `main` before releasing, then file an
+   inbox item asking Raphaël to redo its manual credential setup, which teardown
+   erases (full reference, "Branches that add a Durable Object migration").
 
 2. **Reserve first, then deploy only on your turn.** Reserving takes seconds and
    deploys nothing:

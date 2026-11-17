@@ -59,10 +59,11 @@ masked, and one stray `echo`, `set -x` or error message prints it.
 ## Enforcement
 
 - **Mechanical, blocking in CI:** `pnpm quality:no-secret-readback`
-  (`scripts/quality/check-no-secret-readback.ts`) reports `--show-secrets`/`showSecrets: true`,
-  credential decryption and decrypt-helper imports, shell tracing and environment dumps in
-  `.github/`, `scripts/` and `infra/`. It accepts a marked line only while the named task is
-  still open. Coverage and noise measurements are in `scripts/quality/README.md`.
+  (`scripts/quality/check-no-secret-readback.ts`) reports Pulumi readback (`--show-secrets`,
+  `showSecrets`, `pulumi config get`), credential decryption and decrypt-helper imports, shell
+  tracing and environment dumps in `.github/`, `scripts/` and `infra/`. It accepts a marked line
+  only when the file and task are pinned in its `ALLOWED_LEGACY_READS` and the task is still
+  open. Coverage and noise measurements are in `scripts/quality/README.md`.
 - **Judgment, in review:** printing a variable that holds a secret, transformed secrets (base64,
   JSON, HMAC or derived keys), secrets in step outputs, summaries or artifacts, and secrets on
   command lines. The check cannot tell which variables are secret.

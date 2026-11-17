@@ -201,36 +201,64 @@ are created, so a lint would be mostly noise.
 
 ## No secret readback in CI code (policy 795e72a6)
 
-`pnpm quality:no-secret-readback` (`scripts/quality/check-no-secret-readback.ts`, blocking in
-Code Quality Checks) scans every `.yml`, `.yaml`, `.sh` and JS/TS file under `.github/`,
-`scripts/` and `infra/` except tests (`*.test.*`, `*.spec.*`, `test-*.sh`, `__tests__/`,
-`fixtures/`) and itself. Comment lines are skipped. It reports:
+`pnpm quality:no-secret-readback` (`scripts/quality/check-no-secret-readback.ts`) is blocking in
+Code Quality Checks. It scans every `.yml`, `.yaml`, `.sh` and JS/TS file under `.github/`,
+`scripts/` and `infra/`, except tests (`*.test.*`, `*.spec.*`, `test-*.sh`, `__tests__/`,
+`fixtures/`) and itself. Comment lines are skipped, apart from a tracing shebang on line 1.
 
-- `show-secrets`: `--show-secrets`, `showSecrets: true` (Pulumi secret readback);
-- `decryption`: `subtle.decrypt(`, `createDecipher(iv)(`, `require(...).decrypt*`, and any
-  import or re-export, single- or multi-line, that names `decrypt*` or loads the API's
-  `services/encryption` module;
-- `xtrace`: `set -x` in any flag cluster (`set -euxo`), `set -o xtrace`, `bash -x`/`sh -x`;
-- `env-dump`: a bare `env`, `printenv` (with or without a name), `export -p`, `declare -p`.
+It reports four kinds of finding:
 
-A legacy line that cannot go yet carries `# sam:secret-readback-allowed <task>` on the line or
-up to three lines above it. The task must be an existing file under `tasks/backlog/` or
-`tasks/active/`; an archived or missing task makes the line a finding and the marker is
-reported. Today the only such line is the Pulumi readback in `scripts/deploy/configure-secrets.sh`,
-tracked by `tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md` (idea
-01M7M5PJCY4T3CR715AFKRM74R), and every value it reads is masked before any other use.
+- `show-secrets`: `--show-secrets`, any `showSecrets` other than `showSecrets: false`, and
+  `pulumi config get`.
+- `decryption`: `subtle.decrypt(` or `subtle['decrypt'](`, `createDecipher(iv)(`,
+  `require(...).decrypt*`, and any import, re-export or dynamic import that names `decrypt*` or
+  loads the API's `services/encryption` module, including multi-line imports and inline JS in
+  YAML.
+- `xtrace`: `set -x` in any flag cluster or position (`set -euxo`, `set -e -x`), `set -o xtrace`,
+  a `-x` shebang, and, in shell and YAML only, `bash -x`, `SHELLOPTS=…xtrace`, `BASH_XTRACEFD` and
+  `trap … DEBUG`.
+- `env-dump`, in shell and YAML only: a bare `env`, `printenv`, `export -p` or `declare -p` at the
+  start of a command, including `run: env`.
 
-Measured 2026-11-17. Current tree: 206 files and 42,008 lines scanned, 0 findings, 1 tracked
-read. History: 25 first-parent commits on `main` sampled evenly back to 2026-06-11. Every one
-reported only real instances of the class: the `configure-secrets.sh` readback, the three
-`set -euxo pipefail` in `devcontainer-cache-experiments.yml`, and `set -eux` in a fixture
-Dockerfile. At the newest sample (2026-11-17, before this fix) it also reported the staging2
-bootstrap's `--show-secrets` read and its `crypto.subtle.decrypt`. There were no false positives, so the
-check was blocking from the start (policy f9ae7f88). The tests reintroduce the staging2 bootstrap
-step and its decrypt helper and import, and include negative controls for nearby shapes. Each
-guard (each pattern, the import pass, the comment skip and the open-task check) was deleted once
-and the tests went red. A test also requires every pattern to be the only match for at least one
-reintroduced line.
+The shell-only rules never apply to JS/TS, so code such as `value || env` is not reported.
+
+A legacy line that cannot go yet is accepted only when all of these hold:
+
+- it carries `# sam:secret-readback-allowed <task>` on the same line or up to three lines above;
+- `ALLOWED_LEGACY_READS` in the checker pins that file and task together;
+- the task is still open, under `tasks/backlog/` or `tasks/active/`.
+
+A marker that fails any of these makes the line a finding, and the marker itself is reported.
+Today the only entry is the Pulumi readback in `scripts/deploy/configure-secrets.sh`, tracked by
+`tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md` (idea 01M7M5PJCY4T3CR715AFKRM74R).
+Every value that read returns is masked before any other use.
+
+The CI path filter runs the check when `.github/**`, `infra/**`, the deploy, CI, diagnostics, e2e,
+opencode or vm script directories, or the check itself change. It also runs on every change that
+triggers Code Quality Checks for other reasons.
+
+### Measurements (2026-11-17)
+
+- Current tree: 206 files and 42,024 lines scanned, 0 findings, 1 tracked read.
+- History: 25 first-parent commits on `main`, sampled evenly back to 2026-06-11. Every finding was
+  a real instance of the class, and there were no false positives:
+  - the `configure-secrets.sh` readback;
+  - the three `set -euxo pipefail` in `devcontainer-cache-experiments.yml`;
+  - `set -eux` in a fixture Dockerfile;
+  - at the newest sample (2026-11-17, before this fix), also the staging2 bootstrap's
+    `--show-secrets` read and its `crypto.subtle.decrypt`.
+
+  The patterns added after review (YAML `run:` forms, shebangs, `pulumi config get`, SHELLOPTS,
+  `trap DEBUG`, dynamic imports) found nothing new in the same sample. Because there were no false
+  positives, the check was blocking from the start (policy f9ae7f88).
+
+### How the tests prove it
+
+- They reintroduce the staging2 bootstrap step, its decrypt helper and its multi-line import, and
+  include negative controls for nearby shapes.
+- Each guard was deleted once and the tests went red: every pattern, the import pass, the comment
+  skip, the shebang check, the shell-only gate, the open-task check and the file pinning.
+- A test also requires every pattern to be the only match for at least one reintroduced line.
 
 ## Runtime workflow state
 
