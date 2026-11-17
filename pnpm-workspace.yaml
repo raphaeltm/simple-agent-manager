@@ -59,7 +59,7 @@ catalog:
   # One copy each in the worker bundle: apps/api and app-deployment must never diverge.
   '@aws-sdk/client-s3': 3.1141.0
   '@aws-sdk/s3-request-presigner': 3.1141.0
-  yaml: 2.9.0
+  yaml: 2.9.1
   # One jose copy: the API worker and repo-hosting both sign and verify JWTs.
   jose: 6.2.3
   execa: 9.6.1
