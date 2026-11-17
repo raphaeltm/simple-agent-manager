@@ -127,7 +127,48 @@ Regression coverage here must drive the real writer rather than hand-seed the an
 - Full root tests passed: 39 Turbo tasks; API 16,620 passed / 4 skipped across 1,089 files
   (1,086 passed / 3 skipped), web 5,366 passed. No failed suite summaries.
   Format ratchet passed (2,118/2,180 baseline unformatted files); new test/task format checks pass.
-- Manual full CI finishing; quick CI passed. Staging reservation run `44054221451`;
-  primary staging turn estimated 10:43:57 UTC. No staging deployment yet.
+- Full CI `44063465393` passed on `5676a096d6910698025cde49d2d0cba1910f0aa4`: all
+  three API shards, seven Workers shards, CLI, aggregate tests, quality, build, typecheck,
+  lint and secret scanning. Quick CI, E2E smoke and SonarCloud also passed.
 - No production deployment, merge, or readiness action permitted.
 - Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/2853 (held in SAM).
+
+## Draft delivery and deferred live validation
+
+The implementation is delivered as **draft PR #2853 only**. The live staging acceptance
+criterion above remains unchecked, and this task record stays active rather than being
+archived as fully verified. The canonical idea remains open while the fix is unmerged.
+
+- Primary staging was reserved at 09:18:39 UTC through workflow `44054221451`.
+  Turn estimates shifted from 10:43 to 12:08 to 13:26 UTC.
+- Final bounded check at **2026-11-17 13:26:52 UTC**: primary was held by
+  task `01M7M4PMFV7ATSA5GJNXGKCXDT`, branch `sam/remove-every-path-handles-gkcxdt`,
+  SHA `6360a75f9587f4d3635780b99da1b9590aa1a773`, until 14:12:49 UTC. Our position-one
+  turn moved to 14:12:49–14:22:49 UTC. Secondary was also held until 14:00:34 UTC
+  with three queued reservations. No deployment slot was reached during the four-hour wait.
+- Ended the bounded shared-environment attempt and released only our queued reservation
+  via successful workflow `44092944005`. Readback at 13:30:43 UTC confirmed our queue
+  entry absent and the other holder unchanged; deploy and smoke jobs were skipped. No deployment of this branch, provider VM,
+  workspace, project or attachment fixture was created; there is no runtime cleanup debt.
+- Authenticated read-only readiness passed at 12:35 UTC: smoke login, accessible small
+  repository fixture, three owned active Hetzner configurations and active backing
+  credential/configuration. This is environment preflight, **not live fix verification**.
+- The reviewed, credential-free staging kit is linked to the canonical idea as library file
+  `01M7MQ3EF0MP4K32TEJVDYQBD2`, SHA256
+  `8e602139c03e87c5465020d22118ca1feb6c0281e7b2655b2ac201987faaec7b`.
+  It includes real project/attachment reconciliation, one `cx23/fsn1` allocation,
+  stable pinned reuse, identical pinned source-exclusion control and strict scoped cleanup.
+  Contract review corrected asynchronous fresh-workspace node linking and added exact
+  selected candidate/source/machine proof. No paid agent session is required.
+- Code inspection identified a separate existing error-mapping gap: pinned workspace
+  creation calls the plain-error allocation guard directly, so intentionally stale
+  authority currently reaches the global HTTP 500 handler. The prepared live check does
+  not count a 5xx as a designed refusal. This behavior was **not exercised live** here;
+  allocation/reuse and negative HTTP behavior remain explicit staging gaps.
+
+No production deployment, readiness action, merge or GitHub issue creation occurred.
+
+- Final task-completion validation: **WARN**, with no blocking implementation findings.
+  Checks A/B/E passed, D not applicable, F passed locally; C warns only for the explicitly
+  deferred live provider lifecycle. Security, Cloudflare, test, docs and constitution
+  reviews pass within scope. Keep the active task and unchecked live criterion intact.
