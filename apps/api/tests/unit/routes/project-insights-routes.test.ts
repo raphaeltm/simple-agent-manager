@@ -1,9 +1,10 @@
 /**
- * `GET /api/projects/:projectId/insights/accounts` through the real `projectInsightsRoutes` mount
- * and the production error handler, on a real SQL engine. Session auth is replaced by a fixed
- * viewer (the route relies on `requireAuth` + `requireApproved` and the operation's membership
- * check). Proves the mount, the range parsing, the private no-store header, the outsider refusal,
- * and that another member's account name never reaches the body.
+ * `GET /api/projects/:projectId/insights/accounts` and `/people` through the real
+ * `projectInsightsRoutes` mount and the production error handler, on a real SQL engine. Session
+ * auth is replaced by a fixed viewer (the routes rely on `requireAuth` + `requireApproved` and
+ * each operation's membership check). Proves the mounts, the range parsing, the private no-store
+ * header, the outsider refusal, and that another member's private data never reaches the body:
+ * an account name (Accounts) or an inbox item title (People).
  */
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
@@ -20,7 +21,7 @@ vi.mock('../../../src/middleware/auth', async (importOriginal) => {
   };
 });
 
-import type { ProjectAccountsResponse } from '@simple-agent-manager/shared';
+import type { ProjectAccountsResponse, ProjectPeopleResponse } from '@simple-agent-manager/shared';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
@@ -76,6 +77,63 @@ describe('GET /api/projects/:projectId/insights/accounts', () => {
       ['teammate:claude-code:subscription', null, 1],
     ]);
     expect(JSON.stringify(body)).not.toContain('Mate Secret Name');
+  });
+
+  it('rejects an unknown range with 400', async () => {
+    expect((await get('?range=365d')).status).toBe(400);
+  });
+
+  it('refuses a caller who is not a member of the project', async () => {
+    viewer.id = 'outsider';
+    const response = await get();
+    expect([403, 404]).toContain(response.status);
+    // Owner control.
+    viewer.id = 'owner';
+    expect((await get()).status).toBe(200);
+  });
+});
+
+describe('GET /api/projects/:projectId/insights/people', () => {
+  let sqlite: Database.Database;
+  let env: Env;
+  const app = new Hono<{ Bindings: Env }>();
+  app.onError(handleAppError);
+  app.route('/api/projects/:projectId/insights', projectInsightsRoutes);
+
+  beforeEach(() => {
+    viewer.id = 'owner';
+    sqlite = new Database(':memory:');
+    createAllSchemaTables(sqlite, schema);
+    const day = Date.now() - 86_400_000;
+    sqlite.exec(`
+      INSERT INTO projects (id, name, repository) VALUES ('p', 'Project', 'acme/app');
+      INSERT INTO users (id, name, email) VALUES ('owner','Owner','o@example.com'),
+        ('mate','Mate','m@example.com'), ('outsider','Out','x@example.com');
+      INSERT INTO project_members (project_id, user_id, role, status) VALUES
+        ('p','owner','owner','active'), ('p','mate','member','active');
+      INSERT INTO asks (id, project_id, assignee_kind, assignee_user_id, kind, title, status, created_at, updated_at) VALUES
+        ('a1', 'p', 'user', 'owner', 'question', 'Owner question', 'open', ${day}, ${day}),
+        ('a2', 'p', 'user', 'mate', 'question', 'Mate Secret Question', 'open', ${day}, ${day});
+    `);
+    env = { DATABASE: createSqliteD1(sqlite), BASE_DOMAIN: 'example.test' } as unknown as Env;
+  });
+  afterEach(() => sqlite.close());
+
+  const get = (query = '') => app.request(`/api/projects/p/insights/people${query}`, {}, env);
+
+  it('returns who work waits on, private and uncached', async () => {
+    const response = await get('?range=7d');
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+    const body = (await response.json()) as ProjectPeopleResponse;
+    expect(body.range).toBe('7d');
+    expect(body.waiting.total).toBe(2);
+    expect(body.waiting.groups.map((g) => [g.key, g.items[0]?.title ?? null])).toEqual([
+      ['mate', null],
+      ['owner', 'Owner question'],
+    ]);
+    expect(JSON.stringify(body)).not.toContain('Mate Secret Question');
+    expect(body.reviewPickup.state).toBe('not_recorded');
   });
 
   it('rejects an unknown range with 400', async () => {
