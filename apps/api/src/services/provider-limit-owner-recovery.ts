@@ -158,7 +158,14 @@ export async function repairOwnerApprovedRecovery(
     (await credentialLimitReferenceKey(snapshot.agent_credential_reference)) === wait.credentialKey
   );
   if (valid && task.chatSessionId) {
-    valid &&= await savedSessionAuthorityMatches(env, task, approval, task.chatSessionId);
+    // Only this read is raced. A late response has no continuation capable of
+    // spending consent or dispatching recovery; an uncertain read defers repair.
+    const chatSessionId = task.chatSessionId;
+    const authority = await withinRecoveryRpcBudget(env, async () => ({
+      matches: await savedSessionAuthorityMatches(env, task, approval, chatSessionId),
+    }));
+    if (!authority) return;
+    valid &&= authority.matches;
   }
   if (valid && snapshot) {
     const profile = await resolveProfileCredentialContext(db, {
@@ -400,10 +407,14 @@ async function blockRevokedOwnerApproval(
     )
     .run();
   if (!blocked.meta.changes) return;
-  if (task.chatSessionId)
-    await projectData
-      .syncProviderLimitAttention(env, task.projectId, task.id, task.chatSessionId)
-      .catch(() => undefined);
+  if (task.chatSessionId) {
+    const chatSessionId = task.chatSessionId;
+    // The blocked CAS is durable. This best-effort notification reads current
+    // task state; late completion cannot authorize recovery or change its claim.
+    await withinRecoveryRpcBudget(env, () =>
+      projectData.syncProviderLimitAttention(env, task.projectId, task.id, chatSessionId)
+    ).catch(() => undefined);
+  }
 }
 
 /** Retry only the approved task; an ambiguous response preserves its pending receipt. */
