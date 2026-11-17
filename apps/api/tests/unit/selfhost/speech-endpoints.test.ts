@@ -427,6 +427,77 @@ describe('server read-aloud through an OpenAI-compatible endpoint', () => {
     expect(stored.size).toBe(1); // only final audio, never partial backend chunks
   });
 
+  it('rejects declared audio that does not match requested MP3 without caching', async () => {
+    const { r2, stored } = createR2();
+    const { env } = boxEnv({ R2: r2 });
+    await configure(env, {
+      'speech.synthesis.baseUrl': 'https://tts.example.com/v1',
+      'speech.synthesis.model': 'kokoro',
+      'speech.synthesis.voice': 'af_heart',
+    });
+    fetchMock.mockResolvedValueOnce(
+      new Response(AUDIO_BYTES, { headers: { 'Content-Type': 'audio/wav' } })
+    );
+    expect((await postSynthesize(env)).status).toBe(503);
+    expect(stored.size).toBe(0);
+    fetchMock.mockResolvedValueOnce(
+      new Response(AUDIO_BYTES, { headers: { 'Content-Type': 'audio/mp3' } })
+    );
+    expect((await postSynthesize(env)).status).toBe(200);
+  });
+
+  it('bounds the combined audio from all chunks and resets the budget for a new request', async () => {
+    const { r2, stored } = createR2();
+    const { env } = boxEnv({ R2: r2, TTS_CHUNK_SIZE: '40' });
+    await configure(env, {
+      'speech.synthesis.baseUrl': 'https://tts.example.com/v1',
+      'speech.synthesis.model': 'kokoro',
+      'speech.synthesis.voice': 'af_heart',
+      'speech.synthesis.maxAudioBytes': 12,
+    });
+    const cancel = vi.fn();
+    fetchMock.mockResolvedValueOnce(new Response(AUDIO_BYTES)); // eight of twelve
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(AUDIO_BYTES);
+      },
+      cancel,
+    });
+    fetchMock.mockResolvedValueOnce(new Response(stream)); // individually fits; total exceeds
+    const res = await app().request(
+      '/api/tts/synthesize',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: 'A short sentence here. Another sentence to read. A final sentence now.',
+          storageId: 'aggregate',
+        }),
+      },
+      env
+    );
+    expect(res.status).toBe(503);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(stored.size).toBe(0);
+    fetchMock.mockResolvedValueOnce(new Response(AUDIO_BYTES));
+    fetchMock.mockResolvedValueOnce(new Response(AUDIO_BYTES.slice(0, 4)));
+    const exact = await app().request(
+      '/api/tts/synthesize',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: 'A short sentence here. Another sentence to read.',
+          storageId: 'exact-total',
+        }),
+      },
+      env
+    );
+    expect(exact.status).toBe(200);
+    expect([...stored.values()][0]?.byteLength).toBe(12);
+  });
+
   it('rate-limits per user and hides endpoint errors from the client', async () => {
     const { env } = boxEnv();
     await configure(env, {

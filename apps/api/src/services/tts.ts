@@ -320,7 +320,7 @@ export function simpleHash(str: string): string {
 }
 
 /** Content-Type mapping for audio encodings. */
-function audioContentType(encoding: string): string {
+export function audioContentType(encoding: string): string {
   const types: Record<string, string> = {
     mp3: 'audio/mpeg',
     wav: 'audio/wav',

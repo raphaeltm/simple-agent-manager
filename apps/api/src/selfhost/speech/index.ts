@@ -52,6 +52,9 @@ function transcriptionBackend(endpoint: SpeechEndpoint): SpeechTranscriptionBack
 }
 
 function synthesisBackend(endpoint: SpeechEndpoint): SpeechSynthesisBackend {
+  // A fresh backend is resolved per request. Bound combined payload bytes across chunks;
+  // concatenation retains those buffers plus one final copy (up to twice this payload cap).
+  let audioBytes = 0;
   return {
     // Every request spends the admin's endpoint: bound it per user (KV, per hour).
     admit: async (env, userId) => {
@@ -66,7 +69,13 @@ function synthesisBackend(endpoint: SpeechEndpoint): SpeechSynthesisBackend {
         throw new RateLimitError(Math.max(1, result.resetAt - Math.floor(Date.now() / 1000)));
       }
     },
-    synthesize: (text, encoding) => synthesizeWithEndpoint(endpoint, text, encoding),
+    synthesize: async (text, encoding) => {
+      const remaining = endpoint.maxAudioBytes - audioBytes;
+      if (remaining <= 0) throw new Error('Speech response exceeds configured byte limit');
+      const audio = await synthesizeWithEndpoint(endpoint, text, encoding, remaining);
+      audioBytes += audio.byteLength;
+      return audio;
+    },
   };
 }
 

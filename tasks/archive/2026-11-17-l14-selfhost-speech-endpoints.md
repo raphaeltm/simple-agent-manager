@@ -95,3 +95,5 @@ compatible raw-byte endpoints; known non-audio is refused. Endpoint partial retr
 instead of introducing a new cache-identity contract. The existing final-audio cache behavior is unchanged.
 
 - [x] Sixth automated finding (transcription JSON unbounded): reuse shared bounded stream reader before JSON parsing, configurable speech.transcription.maxResponseBytes (1MiB default,4MiB max); three route regressions RED before fix and GREEN with exact13-byte control; delta security/Cloudflare/completion PASS.
+
+- [x] Seventh/eighth review findings: request-wide maxAudioBytes across sequential chunks (not multiplied per chunk), remaining budget enforced during streaming; declared MIME must match requested encoding using existing storage mapping and explicit aliases. Both regressions RED before fix, then158focusedtestsGREEN; request budget reset/exact aggregate boundary controls. Fresh security/Cloudflare/completion PASS. Buffer concatenation holds a second bounded copy; the setting caps payload size, not exact peak process memory.

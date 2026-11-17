@@ -13,6 +13,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { resolveAdminSettingDetailsMany } from '../../services/admin-settings-resolution';
 import { outboundMaxRedirectsValue } from '../../services/outbound-fetch-settings';
+import { audioContentType } from '../../services/tts';
 import {
   DEFAULT_SPEECH_ENDPOINT_TIMEOUT_MS,
   DEFAULT_SPEECH_SYNTHESIS_MAX_AUDIO_BYTES,
@@ -176,7 +177,8 @@ export async function transcribeWithEndpoint(
 export async function synthesizeWithEndpoint(
   endpoint: SpeechEndpoint,
   text: string,
-  format: string
+  format: string,
+  maxBytes = endpoint.maxAudioBytes
 ): Promise<ArrayBuffer> {
   const response = await send(endpoint, '/audio/speech', {
     method: 'POST',
@@ -189,19 +191,25 @@ export async function synthesizeWithEndpoint(
     }),
   });
   const contentType = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
+  const aliases: Readonly<Record<string, string>> = {
+    'audio/mp3': 'audio/mpeg',
+    'audio/x-wav': 'audio/wav',
+    'audio/x-flac': 'audio/flac',
+  };
+  const declared = contentType ? (aliases[contentType] ?? contentType) : null;
   if (
-    contentType &&
-    !contentType.startsWith('audio/') &&
-    contentType !== 'application/octet-stream'
+    declared &&
+    declared !== 'application/octet-stream' &&
+    declared !== audioContentType(format)
   ) {
     await response.body?.cancel().catch(() => undefined);
     throw new SpeechEndpointError(
       'synthesis',
       response.status,
-      'The synthesis endpoint returned non-audio content'
+      'The synthesis endpoint returned an unexpected audio content type'
     );
   }
-  return readSpeechResponse(response, endpoint.maxAudioBytes);
+  return readSpeechResponse(response, maxBytes);
 }
 
 /** Bound actual streamed bytes even when Content-Length is absent or untruthful. */

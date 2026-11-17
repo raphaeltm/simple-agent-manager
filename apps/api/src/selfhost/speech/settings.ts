@@ -30,7 +30,7 @@ export const DEFAULT_SPEECH_ENDPOINT_TIMEOUT_MS = 60_000;
  */
 export const DEFAULT_SPEECH_SYNTHESIS_REQUESTS_PER_HOUR = 120;
 
-/** Per-chunk audio ceiling; about two minutes of uncompressed mono speech. */
+/** Request-wide audio ceiling; shared across every read-aloud chunk. */
 export const DEFAULT_SPEECH_SYNTHESIS_MAX_AUDIO_BYTES = 8 * 1024 * 1024;
 /** Bound provider JSON before parsing it (speech.transcription.maxResponseBytes). */
 export const DEFAULT_SPEECH_TRANSCRIPTION_MAX_RESPONSE_BYTES = 1024 * 1024;
@@ -159,7 +159,7 @@ export const SPEECH_ENDPOINT_SETTINGS: readonly AdminSettingDefinition[] = [
     speechSettingName('synthesis', 'maxAudioBytes'),
     DEFAULT_SPEECH_SYNTHESIS_MAX_AUDIO_BYTES,
     'AI models',
-    'Maximum audio response bytes per read-aloud chunk. Oversized responses are refused before caching.',
+    'Maximum combined audio response bytes per read-aloud request, shared across chunks. Oversized responses are refused before caching.',
     { min: 1, max: 32 * 1024 * 1024 }
   ),
   integerDefinition(
