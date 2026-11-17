@@ -244,16 +244,18 @@ libraryRoutes.get('/:fileId/download', requireAuth(), requireApproved(), async (
   try {
     const { data, file } = owned.value;
     assertDebugPackageVisibleTo(auth.user.role, file.directory);
-    return new Response(owned.stream(), {
-      status: 200,
-      headers: {
-        'Content-Type': downloadContentType(file.mimeType),
-        'Content-Length': String(data.byteLength),
-        'Content-Disposition': `attachment; filename="${contentDispositionFilename(file.filename)}"`,
-        'Cache-Control': 'private, no-store',
-        'X-Content-Type-Options': 'nosniff',
-      },
-    });
+    const headers = {
+      'Content-Type': downloadContentType(file.mimeType),
+      'Content-Length': String(data.byteLength),
+      'Content-Disposition': `attachment; filename="${contentDispositionFilename(file.filename)}"`,
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+    };
+    if (c.req.method === 'HEAD') {
+      owned.dispose();
+      return new Response(null, { status: 200, headers });
+    }
+    return new Response(owned.stream(), { status: 200, headers });
   } catch (error) {
     owned.dispose();
     throw error;
@@ -366,6 +368,10 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
     const end = range ? range.end + 1 : data.byteLength;
     headers['Content-Length'] = String(end - start);
     if (range) headers['Content-Range'] = `bytes ${range.start}-${range.end}/${data.byteLength}`;
+    if (c.req.method === 'HEAD') {
+      owned.dispose();
+      return new Response(null, { status: range ? 206 : 200, headers });
+    }
     return new Response(owned.stream(start, end), { status: range ? 206 : 200, headers });
   } catch (error) {
     owned.dispose();
