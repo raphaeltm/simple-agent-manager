@@ -13,6 +13,7 @@ const mockUpdateTags = vi.hoisted(() => vi.fn());
 const mockListDirectories = vi.hoisted(() => vi.fn());
 const mockMoveFile = vi.hoisted(() => vi.fn());
 const mockGetUploadMaxBytes = vi.hoisted(() => vi.fn());
+const mockGetMultipartBodyMaxBytes = vi.hoisted(() => vi.fn());
 const mockGetDownloadTimeoutMs = vi.hoisted(() => vi.fn().mockReturnValue(60000));
 const mockGetListMaxPageSize = vi.hoisted(() => vi.fn().mockReturnValue(200));
 const mockValidateFilename = vi.hoisted(() => vi.fn());
@@ -60,6 +61,7 @@ vi.mock('../../../src/services/file-library', () => ({
   listDirectories: mockListDirectories,
   moveFile: mockMoveFile,
   getUploadMaxBytes: mockGetUploadMaxBytes,
+  getMultipartBodyMaxBytes: mockGetMultipartBodyMaxBytes,
   getDownloadTimeoutMs: mockGetDownloadTimeoutMs,
   getListMaxPageSize: mockGetListMaxPageSize,
   validateFilename: mockValidateFilename,
@@ -108,6 +110,8 @@ function makeApp(env: Env) {
 describe('library routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetUploadMaxBytes.mockReturnValue(50 * 1024 * 1024);
+    mockGetMultipartBodyMaxBytes.mockReturnValue(51 * 1024 * 1024);
     mockGetDownloadTimeoutMs.mockReturnValue(60000);
     authRole.value = 'user';
   });
@@ -232,11 +236,10 @@ describe('library routes', () => {
       expect(res.status).toBe(201);
       const json = (await res.json()) as Record<string, unknown>;
       expect(json['id']).toBe('file-123');
+      expect(mockUploadFile.mock.calls[0]?.[8]).toBeInstanceOf(File);
     });
 
     it('returns 400 when file field is missing', async () => {
-      mockGetUploadMaxBytes.mockReturnValue(50 * 1024 * 1024);
-
       const { app, env } = makeApp(makeEnv());
       const formData = new FormData();
       formData.append('description', 'no file here');
@@ -250,6 +253,94 @@ describe('library routes', () => {
       );
 
       expect(res.status).toBe(400);
+    });
+
+    it('rejects an excessive declared multipart length before reading the body', async () => {
+      mockGetMultipartBodyMaxBytes.mockReturnValue(64);
+      const pull = vi.fn();
+      const body = new ReadableStream<Uint8Array>({ pull }, { highWaterMark: 0 });
+      const { app, env } = makeApp(makeEnv());
+      const request = new Request(`${BASE_URL}/projects/test-project-id/library/upload`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'multipart/form-data; boundary=bounded',
+          'Content-Length': '65',
+        },
+        body,
+        duplex: 'half',
+      } as RequestInit & { duplex: 'half' });
+
+      const res = await app.fetch(request, env);
+
+      expect(res.status).toBe(400);
+      expect(pull).not.toHaveBeenCalled();
+      expect(mockUploadFile).not.toHaveBeenCalled();
+    });
+
+    it('aborts an oversized stream even when Content-Length is forged smaller', async () => {
+      mockGetMultipartBodyMaxBytes.mockReturnValue(64);
+      const cancel = vi.fn();
+      let sent = false;
+      const body = new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            if (sent) {
+              controller.close();
+              return;
+            }
+            sent = true;
+            controller.enqueue(new TextEncoder().encode('x'.repeat(65)));
+          },
+          cancel,
+        },
+        { highWaterMark: 0 }
+      );
+      const { app, env } = makeApp(makeEnv());
+      const request = new Request(`${BASE_URL}/projects/test-project-id/library/upload`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'multipart/form-data; boundary=bounded',
+          'Content-Length': '1',
+        },
+        body,
+        duplex: 'half',
+      } as RequestInit & { duplex: 'half' });
+
+      const res = await app.fetch(request, env);
+
+      expect(res.status).toBe(400);
+      expect(cancel).toHaveBeenCalled();
+      expect(mockUploadFile).not.toHaveBeenCalled();
+    });
+
+    it('allows only one materializing upload at a time per isolate', async () => {
+      let finishFirstUpload!: (value: { id: string }) => void;
+      mockUploadFile.mockImplementationOnce(
+        () =>
+          new Promise<{ id: string }>((resolve) => {
+            finishFirstUpload = resolve;
+          })
+      );
+      const { app, env } = makeApp(makeEnv());
+      const makeUploadRequest = () => {
+        const formData = new FormData();
+        formData.append('file', new File(['hello'], 'report.txt'));
+        return new Request(`${BASE_URL}/projects/test-project-id/library/upload`, {
+          method: 'POST',
+          body: formData,
+        });
+      };
+
+      const firstResponse = app.fetch(makeUploadRequest(), env);
+      await vi.waitFor(() => expect(mockUploadFile).toHaveBeenCalledTimes(1));
+      const concurrentResponse = await app.fetch(makeUploadRequest(), env);
+
+      expect(concurrentResponse.status).toBe(429);
+      expect(mockUploadFile).toHaveBeenCalledTimes(1);
+      finishFirstUpload({ id: 'file-123' });
+      expect((await firstResponse).status).toBe(201);
+      mockUploadFile.mockResolvedValue({ id: 'file-456' });
+      expect((await app.fetch(makeUploadRequest(), env)).status).toBe(201);
     });
   });
 
@@ -279,6 +370,7 @@ describe('library routes', () => {
       expect(res.status).toBe(200);
       const json = (await res.json()) as Record<string, unknown>;
       expect(json['filename']).toBe('updated.pdf');
+      expect(mockReplaceFile.mock.calls[0]?.[9]).toBeInstanceOf(File);
     });
 
     it('returns 400 when file field is missing', async () => {
@@ -295,6 +387,24 @@ describe('library routes', () => {
       );
 
       expect(res.status).toBe(400);
+    });
+
+    it('rejects an oversized replacement before copying or calling the service', async () => {
+      mockGetUploadMaxBytes.mockReturnValue(4);
+      const { app, env } = makeApp(makeEnv());
+      const formData = new FormData();
+      formData.append('file', new File(['12345'], 'oversized.txt'));
+
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/replace`, {
+          method: 'PUT',
+          body: formData,
+        }),
+        env
+      );
+
+      expect(res.status).toBe(400);
+      expect(mockReplaceFile).not.toHaveBeenCalled();
     });
   });
 

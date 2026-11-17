@@ -336,11 +336,18 @@ and saved plans; do not drop columns or recreate tables as a rollback step.
 
 Activity coalescing and binding caches are per Worker isolate, so burst reduction scales with the number of active isolates for the same session. Delayed flushes carry their original observed event time, and ProjectData rejects stale writes so a delayed intermediate report cannot overwrite a newer idle/error state from another isolate.
 
-### Project file library cleanup
+### Project file library uploads and cleanup
 
-| Variable                                    | Default | Description                                                                                                                                          |
-| ------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE` | `1000`  | Maximum project-owned library objects listed and deleted per R2 page after project deletion. Values above R2's 1,000-object page maximum are capped. |
+| Variable                                    | Default    | Description                                                                                                                                             |
+| ------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LIBRARY_UPLOAD_MAX_BYTES`                  | `52428800` | Maximum plaintext bytes accepted for one library file (`apps/api/src/services/file-library-config.ts:getUploadMaxBytes`).                                |
+| `LIBRARY_MULTIPART_OVERHEAD_MAX_BYTES`      | `1048576`  | Multipart metadata and framing bytes allowed beyond the file limit before parsing aborts (`file-library-config.ts:getMultipartBodyMaxBytes`).            |
+| `LIBRARY_ENCRYPTION_CHUNK_BYTES`            | `1048576`  | Plaintext bytes encrypted per independently authenticated streaming chunk (`file-library-config.ts:getEncryptionChunkBytes`).                            |
+| `LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE` | `1000`     | Maximum project-owned library objects listed and deleted per R2 page after project deletion. Values above R2's 1,000-object page maximum are capped.    |
+
+Browser upload and replacement requests are admitted one at a time per Worker isolate; a
+concurrent request receives `429` and can retry after the active stream finishes
+(`apps/api/src/routes/library-upload-request.ts:limitLibraryUploadConcurrency`).
 
 ### Deployment release and compose artifact retention
 

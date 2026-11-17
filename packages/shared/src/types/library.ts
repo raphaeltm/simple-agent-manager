@@ -46,7 +46,7 @@ export interface ProjectFileTag {
 // Encryption metadata (stored alongside ciphertext in R2 custom metadata)
 // -----------------------------------------------------------------------------
 
-export interface FileEncryptionMetadata {
+interface FileEncryptionMetadataBase {
   /** Base64-encoded DEK wrapped by platform KEK */
   wrappedDek: string;
   /** Base64-encoded IV used for DEK wrapping */
@@ -58,6 +58,24 @@ export interface FileEncryptionMetadata {
   /** KEK version identifier (for future key rotation) */
   keyVersion: string;
 }
+
+/**
+ * Encryption metadata for legacy whole-file objects and bounded-memory chunked objects.
+ * An absent format identifies objects written before chunked encryption was introduced.
+ */
+export type FileEncryptionMetadata = FileEncryptionMetadataBase &
+  (
+    | {
+        format?: undefined;
+        chunkSize?: undefined;
+        plaintextSize?: undefined;
+      }
+    | {
+        format: 'chunked-v1';
+        chunkSize: number;
+        plaintextSize: number;
+      }
+  );
 
 // -----------------------------------------------------------------------------
 // Request / Response types
@@ -145,6 +163,10 @@ export interface FileMetadataResponse {
 export const LIBRARY_DEFAULTS = {
   /** Maximum file size per upload in bytes (default: 50MB). Env: LIBRARY_UPLOAD_MAX_BYTES */
   UPLOAD_MAX_BYTES: 50 * 1024 * 1024,
+  /** Multipart metadata/header allowance beyond file bytes (default: 1MB). */
+  MULTIPART_OVERHEAD_MAX_BYTES: 1024 * 1024,
+  /** Plaintext bytes encrypted per independently authenticated chunk (default: 1MB). */
+  ENCRYPTION_CHUNK_BYTES: 1024 * 1024,
   /** Maximum files per project (default: 10000). Env: LIBRARY_MAX_FILES_PER_PROJECT */
   MAX_FILES_PER_PROJECT: 10_000,
   /** Maximum total storage bytes per project (default: 2GB). Env: LIBRARY_MAX_TOTAL_BYTES_PER_PROJECT */

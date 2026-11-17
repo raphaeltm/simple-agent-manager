@@ -10,9 +10,7 @@
 
 import type {
   FileEncryptionMetadata,
-  FileStatus,
   FileTagSource,
-  FileUploadSource,
   ListFilesRequest,
   ListFilesResponse,
   ProjectFile,
@@ -26,32 +24,26 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { chunk } from '../lib/d1-limits';
 import { log } from '../lib/logger';
-import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import type { AppDb } from '../middleware/project-auth';
 import {
   decryptFile,
-  encryptFile,
-  metadataToR2CustomMetadata,
   r2CustomMetadataToMetadata,
 } from './file-encryption';
 import {
-  getKeyVersion,
   getListMaxPageSize,
-  getMaxDirectoriesPerProject,
-  getMaxFilesPerProject,
   getMaxTagsPerFile,
-  getMaxTotalBytesPerProject,
   getTagQueryBatchSize,
-  getUploadMaxBytes,
   validateDirectory,
   validateFilename,
   validateTag,
 } from './file-library-config';
+import { rowToProjectFile, rowToTag } from './file-library-mappers';
 
 // Re-export config, validation, and directory functions for consumers
 export {
   getDownloadTimeoutMs,
+  getEncryptionChunkBytes,
   getKeyVersion,
   getListMaxPageSize,
   getMaxDirectoriesPerProject,
@@ -61,6 +53,7 @@ export {
   getMaxFilesPerProject,
   getMaxTagLength,
   getMaxTagsPerFile,
+  getMultipartBodyMaxBytes,
   getProjectDeleteCleanupBatchSize,
   getTagQueryBatchSize,
   getUploadMaxBytes,
@@ -70,6 +63,8 @@ export {
   validateTag,
 } from './file-library-config';
 export { listDirectories, moveFile } from './file-library-directories';
+export { replaceFile, uploadFile } from './file-library-mutations';
+export type { UploadFileOptions } from './file-library-mutations';
 
 export interface ProjectLibraryObjectCleanupStats {
   prefix: string;
@@ -138,275 +133,6 @@ export async function deleteProjectLibraryObjects(
   } while (cursor);
 
   return stats;
-}
-
-// ---------------------------------------------------------------------------
-// Row → API type mapping
-// ---------------------------------------------------------------------------
-
-function rowToProjectFile(row: schema.ProjectFileRow): ProjectFile {
-  return {
-    id: row.id,
-    projectId: row.projectId,
-    filename: row.filename,
-    directory: row.directory,
-    mimeType: row.mimeType,
-    sizeBytes: row.sizeBytes,
-    description: row.description,
-    uploadedBy: row.uploadedBy,
-    uploadSource: row.uploadSource as FileUploadSource,
-    uploadSessionId: row.uploadSessionId,
-    uploadTaskId: row.uploadTaskId,
-    replacedAt: row.replacedAt,
-    replacedBy: row.replacedBy,
-    status: row.status as FileStatus,
-    extractedTextPreview: row.extractedTextPreview,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
-
-function rowToTag(row: schema.ProjectFileTagRow): ProjectFileTag {
-  return {
-    fileId: row.fileId,
-    tag: row.tag,
-    tagSource: row.tagSource as FileTagSource,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Upload
-// ---------------------------------------------------------------------------
-
-export interface UploadFileOptions {
-  description?: string;
-  tags?: string[];
-  uploadSource?: FileUploadSource;
-  uploadSessionId?: string;
-  uploadTaskId?: string;
-  tagSource?: FileTagSource;
-  /** Directory to upload into (default: '/'). Will be validated and normalized. */
-  directory?: string;
-}
-
-export async function uploadFile(
-  db: AppDb,
-  r2: R2Bucket,
-  encryptionKey: string,
-  env: Env,
-  projectId: string,
-  userId: string,
-  filename: string,
-  mimeType: string,
-  data: ArrayBuffer,
-  options: UploadFileOptions = {}
-): Promise<ProjectFile & { tags: ProjectFileTag[] }> {
-  validateFilename(filename, env);
-
-  // Validate and normalize directory
-  const directory = options.directory ? validateDirectory(options.directory, env) : '/';
-
-  // Check file size limit
-  const maxBytes = getUploadMaxBytes(env);
-  if (data.byteLength > maxBytes) {
-    throw errors.badRequest(`File exceeds maximum size of ${maxBytes} bytes`);
-  }
-
-  // Check project file count and total size limits
-  const maxFiles = getMaxFilesPerProject(env);
-  const maxTotalBytes = getMaxTotalBytesPerProject(env);
-  const usageResult = await db
-    .select({ count: sql<number>`count(*)`, totalBytes: sql<number>`coalesce(sum(size_bytes), 0)` })
-    .from(schema.projectFiles)
-    .where(eq(schema.projectFiles.projectId, projectId));
-  const currentCount = usageResult[0]?.count ?? 0;
-  const currentTotalBytes = usageResult[0]?.totalBytes ?? 0;
-  if (currentCount >= maxFiles) {
-    throw errors.badRequest(`Project has reached the maximum of ${maxFiles} files`);
-  }
-  const maxTotalMB = Math.round(maxTotalBytes / (1024 * 1024));
-  if (currentTotalBytes + data.byteLength > maxTotalBytes) {
-    const usedMB = Math.round(currentTotalBytes / (1024 * 1024));
-    throw errors.badRequest(
-      `Project library would exceed the ${maxTotalMB} MB storage limit (currently using ${usedMB} MB)`
-    );
-  }
-
-  // Check directory count limit (only when uploading to a new directory)
-  if (directory !== '/') {
-    const maxDirs = getMaxDirectoriesPerProject(env);
-    const existingDirs = await db
-      .select({ directory: schema.projectFiles.directory })
-      .from(schema.projectFiles)
-      .where(eq(schema.projectFiles.projectId, projectId))
-      .groupBy(schema.projectFiles.directory);
-    const isNewDirectory = !existingDirs.some((d) => d.directory === directory);
-    if (isNewDirectory && existingDirs.length >= maxDirs) {
-      throw errors.badRequest(`Project has reached the maximum of ${maxDirs} directories`);
-    }
-  }
-
-  // Check for duplicate filename in the same directory
-  const existing = await db
-    .select({ id: schema.projectFiles.id })
-    .from(schema.projectFiles)
-    .where(
-      and(
-        eq(schema.projectFiles.projectId, projectId),
-        eq(schema.projectFiles.directory, directory),
-        eq(schema.projectFiles.filename, filename)
-      )
-    )
-    .limit(1);
-  if (existing.length > 0) {
-    throw errors.conflict(
-      `File "${filename}" already exists in directory "${directory}". Use replace to update it.`
-    );
-  }
-
-  // Validate tags
-  const tags = options.tags ?? [];
-  const maxTags = getMaxTagsPerFile(env);
-  if (tags.length > maxTags) {
-    throw errors.badRequest(`Maximum ${maxTags} tags per file`);
-  }
-  for (const tag of tags) {
-    validateTag(tag, env);
-  }
-
-  // Encrypt file data
-  const { ciphertext, metadata } = await encryptFile(data, encryptionKey, getKeyVersion(env));
-
-  const fileId = ulid();
-  const r2Key = buildLibraryR2Key(projectId, fileId);
-  const now = new Date().toISOString();
-
-  // Store encrypted data in R2 with encryption metadata
-  await r2.put(r2Key, ciphertext, {
-    customMetadata: metadataToR2CustomMetadata(metadata),
-    httpMetadata: { contentType: 'application/octet-stream' },
-  });
-
-  // Insert D1 metadata
-  const fileRow: schema.NewProjectFile = {
-    id: fileId,
-    projectId,
-    filename,
-    directory,
-    mimeType,
-    sizeBytes: data.byteLength,
-    description: options.description ?? null,
-    uploadedBy: userId,
-    uploadSource: options.uploadSource ?? 'user',
-    uploadSessionId: options.uploadSessionId ?? null,
-    uploadTaskId: options.uploadTaskId ?? null,
-    status: 'ready',
-    r2Key,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  await db.insert(schema.projectFiles).values(fileRow);
-
-  // Insert tags
-  const tagRows: ProjectFileTag[] = [];
-  if (tags.length > 0) {
-    const tagSource = options.tagSource ?? (options.uploadSource === 'agent' ? 'agent' : 'user');
-    const tagInserts = tags.map((tag) => ({
-      fileId,
-      tag,
-      tagSource,
-    }));
-    await db.insert(schema.projectFileTags).values(tagInserts);
-    tagRows.push(
-      ...tagInserts.map((t) => ({
-        fileId: t.fileId,
-        tag: t.tag,
-        tagSource: t.tagSource as FileTagSource,
-      }))
-    );
-  }
-
-  log.info('file_library_upload', { projectId, fileId, filename, sizeBytes: data.byteLength });
-
-  return { ...rowToProjectFile(fileRow as schema.ProjectFileRow), tags: tagRows };
-}
-
-// ---------------------------------------------------------------------------
-// Replace
-// ---------------------------------------------------------------------------
-
-export async function replaceFile(
-  db: AppDb,
-  r2: R2Bucket,
-  encryptionKey: string,
-  env: Env,
-  projectId: string,
-  fileId: string,
-  userId: string,
-  filename: string,
-  mimeType: string,
-  data: ArrayBuffer,
-  options: { description?: string } = {}
-): Promise<ProjectFile> {
-  // Fetch existing file
-  const existing = await db
-    .select()
-    .from(schema.projectFiles)
-    .where(and(eq(schema.projectFiles.id, fileId), eq(schema.projectFiles.projectId, projectId)))
-    .limit(1);
-  if (!existing[0]) {
-    throw errors.notFound('File');
-  }
-
-  // Check file size
-  const maxBytes = getUploadMaxBytes(env);
-  if (data.byteLength > maxBytes) {
-    throw errors.badRequest(`File exceeds maximum size of ${maxBytes} bytes`);
-  }
-
-  // Encrypt new content
-  const { ciphertext, metadata } = await encryptFile(data, encryptionKey, getKeyVersion(env));
-
-  const r2Key = buildLibraryR2Key(projectId, fileId);
-  const now = new Date().toISOString();
-
-  // Upload new encrypted data to R2 (overwrites existing object — key is stable)
-  await r2.put(r2Key, ciphertext, {
-    customMetadata: metadataToR2CustomMetadata(metadata),
-    httpMetadata: { contentType: 'application/octet-stream' },
-  });
-
-  // Update D1
-  await db
-    .update(schema.projectFiles)
-    .set({
-      filename,
-      mimeType,
-      sizeBytes: data.byteLength,
-      description:
-        options.description !== undefined ? options.description : existing[0].description,
-      replacedAt: now,
-      replacedBy: userId,
-      r2Key: r2Key,
-      updatedAt: now,
-    })
-    .where(eq(schema.projectFiles.id, fileId));
-
-  log.info('file_library_replace', { projectId, fileId, filename, sizeBytes: data.byteLength });
-
-  const updated = await db
-    .select()
-    .from(schema.projectFiles)
-    .where(eq(schema.projectFiles.id, fileId))
-    .limit(1);
-
-  const updatedRow = updated[0];
-  if (!updatedRow) {
-    throw errors.internal('File metadata disappeared after replace');
-  }
-
-  return rowToProjectFile(updatedRow);
 }
 
 // ---------------------------------------------------------------------------

@@ -1295,6 +1295,8 @@ export interface Env
   // Project file library (all configurable per constitution Principle XI)
   LIBRARY_ENCRYPTION_KEY?: string; // Purpose-specific KEK for file library (falls back to ENCRYPTION_KEY)
   LIBRARY_UPLOAD_MAX_BYTES?: string; // Max file size per upload (default: 50MB)
+  LIBRARY_MULTIPART_OVERHEAD_MAX_BYTES?: string; // Multipart metadata/header bytes allowed beyond file size (default: 1MB)
+  LIBRARY_ENCRYPTION_CHUNK_BYTES?: string; // Plaintext bytes per authenticated encryption chunk (default: 1MB)
   FILE_PREVIEW_MAX_BYTES?: string; // Max file size for inline preview (default: 50MB)
   LIBRARY_MAX_FILES_PER_PROJECT?: string; // Max files per project (default: 10000)
   LIBRARY_MAX_TOTAL_BYTES_PER_PROJECT?: string; // Max total storage bytes per project (default: 2GB)

@@ -5,7 +5,14 @@ import { describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import { getTagQueryBatchSize, listFiles, validateFilename, validateTag } from '../../../src/services/file-library';
+import {
+  getEncryptionChunkBytes,
+  getMultipartBodyMaxBytes,
+  getTagQueryBatchSize,
+  listFiles,
+  validateFilename,
+  validateTag,
+} from '../../../src/services/file-library';
 
 interface D1QueryStats {
   tagLookupParamCounts: number[];
@@ -105,6 +112,8 @@ describe('file-library contracts', () => {
   describe('LIBRARY_DEFAULTS', () => {
     it('has expected default values', () => {
       expect(LIBRARY_DEFAULTS.UPLOAD_MAX_BYTES).toBe(50 * 1024 * 1024); // 50MB
+      expect(LIBRARY_DEFAULTS.MULTIPART_OVERHEAD_MAX_BYTES).toBe(1024 * 1024);
+      expect(LIBRARY_DEFAULTS.ENCRYPTION_CHUNK_BYTES).toBe(1024 * 1024);
       expect(LIBRARY_DEFAULTS.MAX_FILES_PER_PROJECT).toBe(10_000);
       expect(LIBRARY_DEFAULTS.MAX_TOTAL_BYTES_PER_PROJECT).toBe(2 * 1024 * 1024 * 1024);
       expect(LIBRARY_DEFAULTS.MAX_TAGS_PER_FILE).toBe(20);
@@ -113,6 +122,17 @@ describe('file-library contracts', () => {
       expect(LIBRARY_DEFAULTS.LIST_DEFAULT_PAGE_SIZE).toBe(50);
       expect(LIBRARY_DEFAULTS.LIST_MAX_PAGE_SIZE).toBe(200);
       expect(LIBRARY_DEFAULTS.TAG_QUERY_BATCH_SIZE).toBe(80);
+    });
+
+    it('resolves multipart and encryption memory bounds from deployment configuration', () => {
+      const env = {
+        LIBRARY_UPLOAD_MAX_BYTES: '100',
+        LIBRARY_MULTIPART_OVERHEAD_MAX_BYTES: '20',
+        LIBRARY_ENCRYPTION_CHUNK_BYTES: '10',
+      } as Env;
+
+      expect(getMultipartBodyMaxBytes(env)).toBe(120);
+      expect(getEncryptionChunkBytes(env)).toBe(10);
     });
   });
 

@@ -21,6 +21,7 @@ import {
   downloadFile,
   getDownloadTimeoutMs,
   getFile,
+  getMultipartBodyMaxBytes,
   getUploadMaxBytes,
   listDirectories,
   listFiles,
@@ -51,6 +52,11 @@ import {
   mintPreviewPath,
 } from '../services/interactive-preview';
 import { getEncryptionKey, requireParam, validateSearchLength } from './library-route-helpers';
+import {
+  getMultipartText,
+  limitLibraryUploadConcurrency,
+  parseLibraryMultipartBody,
+} from './library-upload-request';
 
 const libraryRoutes = new Hono<{ Bindings: Env }>();
 
@@ -58,123 +64,118 @@ const libraryRoutes = new Hono<{ Bindings: Env }>();
 // POST /upload — multipart file upload
 // ---------------------------------------------------------------------------
 
-libraryRoutes.post('/upload', requireAuth(), requireApproved(), async (c) => {
-  const auth = getAuth(c);
-  const userId = auth.user.id;
-  const projectId = requireParam(c.req.param('projectId'), 'projectId');
-  const db = drizzle(c.env.DATABASE, { schema });
+libraryRoutes.post(
+  '/upload',
+  requireAuth(),
+  requireApproved(),
+  limitLibraryUploadConcurrency,
+  async (c) => {
+    const auth = getAuth(c);
+    const userId = auth.user.id;
+    const projectId = requireParam(c.req.param('projectId'), 'projectId');
+    const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireProjectCapability(db, projectId, userId, 'project:update');
-
-  // Parse multipart form data
-  let formData: Record<string, string | File>;
-  try {
-    formData = await c.req.parseBody();
-  } catch {
-    throw errors.badRequest('Failed to parse multipart form data');
-  }
-
-  const file = formData['file'];
-  if (!(file instanceof File)) {
-    throw errors.badRequest('Missing "file" field in multipart form data');
-  }
-
-  // Check file size before reading
-  const maxBytes = getUploadMaxBytes(c.env);
-  if (file.size > maxBytes) {
-    throw errors.badRequest(`File exceeds maximum size of ${maxBytes} bytes`);
-  }
-
-  const filename = (formData['filename'] as string) || file.name || 'unnamed';
-  validateFilename(filename, c.env);
-
-  const mimeType = (formData['mimeType'] as string) || file.type || 'application/octet-stream';
-  const description = formData['description'] as string | undefined;
-  const tagsRaw = formData['tags'] as string | undefined;
-  const tags = tagsRaw
-    ? tagsRaw
-        .split(',')
-        .map((t) => t.trim())
-        .filter(Boolean)
-    : undefined;
-  const directory = formData['directory'] as string | undefined;
-
-  const data = await file.arrayBuffer();
-  const encryptionKey = getEncryptionKey(c.env);
-
-  const result = await uploadFile(
-    db,
-    c.env.R2,
-    encryptionKey,
-    c.env,
-    projectId,
-    userId,
-    filename,
-    mimeType,
-    data,
-    {
-      description,
-      tags,
-      // A browser upload has user provenance. Agent/task identities must come from
-      // authenticated server context, never from multipart fields supplied by a client.
-      uploadSource: 'user',
-      directory,
+    await requireProjectCapability(db, projectId, userId, 'project:update');
+    const formData = await parseLibraryMultipartBody(c.req.raw, getMultipartBodyMaxBytes(c.env));
+    const file = formData.get('file');
+    if (!(file instanceof File)) {
+      throw errors.badRequest('Missing "file" field in multipart form data');
     }
-  );
 
-  return c.json(result, 201);
-});
+    const maxBytes = getUploadMaxBytes(c.env);
+    if (file.size > maxBytes) {
+      throw errors.badRequest(`File exceeds maximum size of ${maxBytes} bytes`);
+    }
+
+    const filename = getMultipartText(formData, 'filename') || file.name || 'unnamed';
+    validateFilename(filename, c.env);
+    const mimeType =
+      getMultipartText(formData, 'mimeType') || file.type || 'application/octet-stream';
+    const description = getMultipartText(formData, 'description');
+    const tagsRaw = getMultipartText(formData, 'tags');
+    const tags = tagsRaw
+      ? tagsRaw
+          .split(',')
+          .map((t) => t.trim())
+          .filter(Boolean)
+      : undefined;
+    const directory = getMultipartText(formData, 'directory');
+    const encryptionKey = getEncryptionKey(c.env);
+
+    const result = await uploadFile(
+      db,
+      c.env.R2,
+      encryptionKey,
+      c.env,
+      projectId,
+      userId,
+      filename,
+      mimeType,
+      file,
+      {
+        description,
+        tags,
+        // A browser upload has user provenance. Agent/task identities must come from
+        // authenticated server context, never from multipart fields supplied by a client.
+        uploadSource: 'user',
+        directory,
+      }
+    );
+    return c.json(result, 201);
+  }
+);
 
 // ---------------------------------------------------------------------------
 // PUT /:fileId/replace — replace file content
 // ---------------------------------------------------------------------------
 
-libraryRoutes.put('/:fileId/replace', requireAuth(), requireApproved(), async (c) => {
-  const auth = getAuth(c);
-  const userId = auth.user.id;
-  const projectId = requireParam(c.req.param('projectId'), 'projectId');
-  const fileId = requireParam(c.req.param('fileId'), 'fileId');
-  const db = drizzle(c.env.DATABASE, { schema });
+libraryRoutes.put(
+  '/:fileId/replace',
+  requireAuth(),
+  requireApproved(),
+  limitLibraryUploadConcurrency,
+  async (c) => {
+    const auth = getAuth(c);
+    const userId = auth.user.id;
+    const projectId = requireParam(c.req.param('projectId'), 'projectId');
+    const fileId = requireParam(c.req.param('fileId'), 'fileId');
+    const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireProjectCapability(db, projectId, userId, 'project:update');
+    await requireProjectCapability(db, projectId, userId, 'project:update');
+    const formData = await parseLibraryMultipartBody(c.req.raw, getMultipartBodyMaxBytes(c.env));
+    const file = formData.get('file');
+    if (!(file instanceof File)) {
+      throw errors.badRequest('Missing "file" field in multipart form data');
+    }
 
-  let formData: Record<string, string | File>;
-  try {
-    formData = await c.req.parseBody();
-  } catch {
-    throw errors.badRequest('Failed to parse multipart form data');
+    const maxBytes = getUploadMaxBytes(c.env);
+    if (file.size > maxBytes) {
+      throw errors.badRequest(`File exceeds maximum size of ${maxBytes} bytes`);
+    }
+
+    const filename = getMultipartText(formData, 'filename') || file.name || 'unnamed';
+    validateFilename(filename, c.env);
+    const mimeType =
+      getMultipartText(formData, 'mimeType') || file.type || 'application/octet-stream';
+    const description = getMultipartText(formData, 'description');
+    const encryptionKey = getEncryptionKey(c.env);
+
+    const result = await replaceFile(
+      db,
+      c.env.R2,
+      encryptionKey,
+      c.env,
+      projectId,
+      fileId,
+      userId,
+      filename,
+      mimeType,
+      file,
+      { description }
+    );
+    return c.json(result, 200);
   }
-
-  const file = formData['file'];
-  if (!(file instanceof File)) {
-    throw errors.badRequest('Missing "file" field in multipart form data');
-  }
-
-  const filename = (formData['filename'] as string) || file.name || 'unnamed';
-  validateFilename(filename, c.env);
-
-  const mimeType = (formData['mimeType'] as string) || file.type || 'application/octet-stream';
-  const description = formData['description'] as string | undefined;
-
-  const data = await file.arrayBuffer();
-  const encryptionKey = getEncryptionKey(c.env);
-
-  const result = await replaceFile(
-    db,
-    c.env.R2,
-    encryptionKey,
-    c.env,
-    projectId,
-    fileId,
-    userId,
-    filename,
-    mimeType,
-    data,
-    { description }
-  );
-
-  return c.json(result, 200);
-});
+);
 
 // ---------------------------------------------------------------------------
 // GET / — list files with filters

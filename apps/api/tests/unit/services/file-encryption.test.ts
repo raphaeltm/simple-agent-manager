@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   decryptFile,
   encryptFile,
+  encryptFileStream,
   metadataToR2CustomMetadata,
   r2CustomMetadataToMetadata,
 } from '../../../src/services/file-encryption';
@@ -115,6 +116,63 @@ describe('file-encryption', () => {
     });
   });
 
+  describe('chunked streaming encryption', () => {
+    it('round-trips a file spanning multiple authenticated chunks', async () => {
+      const kek = generateTestKey();
+      const original = new TextEncoder().encode('chunked file content');
+      const { ciphertext, completion, metadata } = await encryptFileStream(
+        new Blob([original]),
+        kek,
+        5
+      );
+      const [encrypted] = await Promise.all([
+        new Response(ciphertext).arrayBuffer(),
+        completion,
+      ]);
+
+      expect(metadata).toMatchObject({
+        format: 'chunked-v1',
+        chunkSize: 5,
+        plaintextSize: original.byteLength,
+      });
+      expect(encrypted.byteLength).toBe(original.byteLength + Math.ceil(original.length / 5) * 16);
+      const decrypted = await decryptFile(encrypted, metadata, kek);
+      expect(new Uint8Array(decrypted)).toEqual(original);
+    });
+
+    it('round-trips an empty streamed file as one authenticated chunk', async () => {
+      const kek = generateTestKey();
+      const { ciphertext, completion, metadata } = await encryptFileStream(new Blob(), kek, 1024);
+      const [encrypted] = await Promise.all([
+        new Response(ciphertext).arrayBuffer(),
+        completion,
+      ]);
+
+      expect(encrypted.byteLength).toBe(16);
+      await expect(decryptFile(encrypted, metadata, kek)).resolves.toHaveProperty(
+        'byteLength',
+        0
+      );
+    });
+
+    it('rejects chunked ciphertext whose length contradicts metadata', async () => {
+      const kek = generateTestKey();
+      const { ciphertext, completion, metadata } = await encryptFileStream(
+        new Blob(['content']),
+        kek,
+        4
+      );
+      const [encrypted] = await Promise.all([
+        new Response(ciphertext).arrayBuffer(),
+        completion,
+      ]);
+
+      await expect(decryptFile(encrypted.slice(0, -1), metadata, kek)).rejects.toThrow(
+        'length does not match'
+      );
+    });
+  });
+
   describe('metadata serialization', () => {
     it('round-trips metadata through R2 custom metadata format', async () => {
       const kek = generateTestKey();
@@ -137,6 +195,18 @@ describe('file-encryption', () => {
       expect(() =>
         r2CustomMetadataToMetadata({ 'x-enc-wrapped-dek': 'abc' })
       ).toThrow('Missing encryption metadata');
+    });
+
+    it('round-trips chunked format metadata', async () => {
+      const kek = generateTestKey();
+      const { ciphertext, completion, metadata } = await encryptFileStream(
+        new Blob(['content']),
+        kek,
+        4
+      );
+      await Promise.all([new Response(ciphertext).arrayBuffer(), completion]);
+
+      expect(r2CustomMetadataToMetadata(metadataToR2CustomMetadata(metadata))).toEqual(metadata);
     });
   });
 });

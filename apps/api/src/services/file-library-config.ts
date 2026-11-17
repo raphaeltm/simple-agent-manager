@@ -22,6 +22,22 @@ export function getUploadMaxBytes(env: Env): number {
   return parsePositiveInt(env.LIBRARY_UPLOAD_MAX_BYTES, LIBRARY_DEFAULTS.UPLOAD_MAX_BYTES);
 }
 
+export function getMultipartBodyMaxBytes(env: Env): number {
+  const fileBytes = getUploadMaxBytes(env);
+  const overheadBytes = parsePositiveInt(
+    env.LIBRARY_MULTIPART_OVERHEAD_MAX_BYTES,
+    LIBRARY_DEFAULTS.MULTIPART_OVERHEAD_MAX_BYTES
+  );
+  return Math.min(Number.MAX_SAFE_INTEGER, fileBytes + overheadBytes);
+}
+
+export function getEncryptionChunkBytes(env: Env): number {
+  return parsePositiveInt(
+    env.LIBRARY_ENCRYPTION_CHUNK_BYTES,
+    LIBRARY_DEFAULTS.ENCRYPTION_CHUNK_BYTES
+  );
+}
+
 export function getMaxFilesPerProject(env: Env): number {
   return parsePositiveInt(
     env.LIBRARY_MAX_FILES_PER_PROJECT,
