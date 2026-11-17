@@ -2018,9 +2018,13 @@ export class ProjectData extends DurableObject<Env> {
   // matches, delivery batches, and attempts in this per-project DO. They do not
   // inject prompts, steer runtimes, spawn tasks, or expose API/MCP producers.
 
-  admitProjectEvent(
+  async admitProjectEvent(
     input: projectEvents.AdmitProjectEventInput
-  ): projectEvents.ProjectEventAdmissionResult {
+  ): Promise<projectEvents.ProjectEventAdmissionResult> {
+    const ciEvent = projectEvents.isGitHubCiProjectEvent(input);
+    const skipUnsubscribedGitHubCi = ciEvent
+      ? ((await projectDataPorts().operations.skipUnsubscribedGitHubCi?.(this.env)) ?? true)
+      : false;
     this.ensureProjectId(input.projectId);
     const now = Date.now();
     const previousRetentionAt = projectEvents.readSchedulerState(
@@ -2034,8 +2038,17 @@ export class ProjectData extends DurableObject<Env> {
       now
     );
     const result = this.meteredStorage.transactionSync(() =>
-      projectEvents.admitProjectEvent(this.sql, this.env, this.getProjectId(), input)
+      projectEvents.admitProjectEvent(
+        this.sql,
+        this.env,
+        this.getProjectId(),
+        input,
+        false,
+        skipUnsubscribedGitHubCi
+      )
     );
+    if (ciEvent) this.rowUsage.setProjectEventStoragePolicy(skipUnsubscribedGitHubCi);
+    if (result.outcome === 'skipped_no_subscriber') return result;
     const nextRetentionAt = projectEvents.readSchedulerState(
       this.sql,
       input.projectId
@@ -2567,13 +2580,16 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
-  getProjectEventRecentStatus(
+  async getProjectEventRecentStatus(
     input: projectEvents.GetProjectEventRecentStatusInput
-  ): projectEvents.ProjectEventRecentStatus {
+  ): Promise<projectEvents.ProjectEventRecentStatus> {
     this.ensureProjectId(input.projectId);
-    return this.meteredStorage.transactionSync(() =>
+    const enabled =
+      (await projectDataPorts().operations.skipUnsubscribedGitHubCi?.(this.env)) ?? true;
+    const status = this.meteredStorage.transactionSync(() =>
       projectEvents.getProjectEventRecentStatus(this.sql, this.env, this.getProjectId(), input)
     );
+    return { ...status, admission: this.rowUsage.projectEventAdmissions(enabled) };
   }
 
   validateProjectEventWakeRecoveryAuthority(
