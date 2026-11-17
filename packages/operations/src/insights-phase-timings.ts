@@ -59,14 +59,15 @@ export interface PhaseDurationStat {
   count: number;
   medianMs: number;
   p90Ms: number;
-  /** This pair had more successful rows in the window than its sample: median and p90 are over
-   *  its newest `count` rows. Also true for every pair when the total row bound was reached. */
+  /** This pair had more successful rows in the window than `count`: median and p90 are over its
+   *  newest `count` rows (cut by its sample, or by the total row bound). */
   truncated: boolean;
 }
 
 export interface PhaseDurationStatsResult {
   windowDays: number;
-  /** True when any stat is `truncated`. Every pair still gets its newest rows. */
+  /** True when any stat is `truncated`, or the total row bound was reached (which can also drop
+   *  a pair entirely). Every pair that is returned holds its newest rows. */
   truncated: boolean;
   /** Only phases with at least one successful sample; ordered by operation, then phase. */
   stats: PhaseDurationStat[];
@@ -251,11 +252,14 @@ export async function phaseDurationStats(
             ${phaseFilter}
             ${operationFilter}
        )
-       SELECT operation, phase, duration_ms, rn FROM (
+       SELECT operation, phase, duration_ms, rn, pair_rows FROM (
          SELECT operation, phase, duration_ms,
                 ROW_NUMBER() OVER (
                   PARTITION BY operation, phase ORDER BY created_at DESC, id DESC
-                ) AS rn
+                ) AS rn,
+                -- Rows the pair read before the total bound (at most sample + 1), so each stat
+                -- can say whether it is complete however the total bound cut the response.
+                COUNT(*) OVER (PARTITION BY operation, phase) AS pair_rows
            FROM sampled
        )
        ORDER BY rn, operation, phase
@@ -266,15 +270,16 @@ export async function phaseDurationStats(
   const rows = result.results ?? [];
 
   const groups = new Map<string, { operation: string; phase: string; durations: number[] }>();
-  // The total bound trims by row number across every pair, so when it is reached no pair can be
-  // shown to be complete.
+  // The total bound trims by row number, so it can also drop a pair entirely: the response says
+  // so even when every pair that came back is complete.
   const totalBoundReached = rows.length >= MAX_PHASE_STATS_TOTAL_ROWS;
-  const cutPairs = new Set<string>();
+  // Per pair, how many rows it read before the total bound. A stat with fewer durations than that
+  // was cut, by its own sample (the extra row) or by the total bound.
+  const pairRows = new Map<string, number>();
   for (const raw of rows) {
-    if (typeof raw.rn === 'number' && raw.rn > sampleLimit) {
-      cutPairs.add(`${String(raw.operation)}\u0000${String(raw.phase)}`);
-      continue;
-    }
+    const pairKey = `${String(raw.operation)}\u0000${String(raw.phase)}`;
+    if (typeof raw.pair_rows === 'number') pairRows.set(pairKey, raw.pair_rows);
+    if (typeof raw.rn === 'number' && raw.rn > sampleLimit) continue;
     // One malformed row costs that row, not the read (`apps/api/.claude/rules/50`).
     const parsed = v.safeParse(DurationRowSchema, raw);
     if (!parsed.success) {
@@ -301,11 +306,15 @@ export async function phaseDurationStats(
         count: sorted.length,
         medianMs: nearestRankPercentile(sorted, 0.5),
         p90Ms: nearestRankPercentile(sorted, 0.9),
-        truncated: totalBoundReached || cutPairs.has(`${operation}\u0000${phase}`),
+        truncated: (pairRows.get(`${operation}\u0000${phase}`) ?? 0) > sorted.length,
       };
     })
     .sort((a, b) => a.operation.localeCompare(b.operation) || a.phase.localeCompare(b.phase));
-  return { windowDays, truncated: stats.some((stat) => stat.truncated), stats };
+  return {
+    windowDays,
+    truncated: totalBoundReached || stats.some((stat) => stat.truncated),
+    stats,
+  };
 }
 
 /**

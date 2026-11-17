@@ -6,6 +6,7 @@
 import {
   listPhaseTimings,
   MAX_PHASE_STATS_PHASES,
+  MAX_PHASE_STATS_SAMPLE_LIMIT,
   nearestRankPercentile,
   OperationError,
   phaseDurationStats,
@@ -248,6 +249,37 @@ describe('insights phase timings reads', () => {
       ['wake', 2, 90],
       ['workspace', 2, 20],
     ]);
+  });
+
+  it('marks only the cut pairs when the total row bound is reached', async () => {
+    // Eleven dense pairs at the maximum sample exceed the total bound; a one-row pair is read in
+    // full and must not be reported as sampled. The response still says the bound was reached.
+    const insertDense = sqlite.prepare(
+      `INSERT INTO lifecycle_phase_timings
+         (operation, phase, outcome, duration_ms, project_id, skill_id, created_at)
+       VALUES ('workspace', ?, 'success', ?, 'p', 'skill-1', ?)`
+    );
+    sqlite.transaction(() => {
+      for (let pair = 0; pair < 11; pair += 1) {
+        for (let i = 0; i <= MAX_PHASE_STATS_SAMPLE_LIMIT; i += 1) {
+          insertDense.run(`dense_${pair}`, 100 + i, NOW - DAY + i);
+        }
+      }
+    })();
+    insert({ project: 'p', phase: 'rare', durationMs: 7, operation: 'wake' });
+
+    const result = await phaseDurationStats(db, {
+      projectId: 'p',
+      skillId: 'skill-1',
+      sampleLimit: MAX_PHASE_STATS_SAMPLE_LIMIT,
+      now: NOW,
+    });
+    expect(result.truncated).toBe(true);
+    const rare = result.stats.find((stat) => stat.phase === 'rare');
+    expect(rare).toMatchObject({ operation: 'wake', count: 1, truncated: false });
+    const dense = result.stats.filter((stat) => stat.phase.startsWith('dense_'));
+    expect(dense.length).toBeGreaterThan(0);
+    expect(dense.every((stat) => stat.truncated)).toBe(true);
   });
 
   it('cuts equal timestamps by id, the same way on every call', async () => {
