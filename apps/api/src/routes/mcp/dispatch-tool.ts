@@ -21,11 +21,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { generateBranchName } from '../../services/branch-name';
-import {
-  CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS,
-  CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
-  capacityPlacementSnapshotSqlValues,
-} from '../../services/capacity-placement-snapshot';
+import { capacityPlacementSnapshotSqlValues } from '../../services/capacity-placement-snapshot';
 import {
   PlacementResolutionError,
   resolveTaskStartPlacement,
@@ -62,6 +58,7 @@ import {
   launchDispatchedInstantSession,
 } from './dispatch-instant';
 import { buildDispatchTaskSuccessResponse } from './dispatch-task-response';
+import { insertDispatchedTask } from './dispatch-task-storage';
 import { parseDispatchTaskParams } from './dispatch-tool-params';
 import { requireMcpTaskWriteProject } from './task-project-access';
 
@@ -445,35 +442,10 @@ export async function handleDispatchTask(
     }
   }
 
-  // ── Atomic conditional INSERT (prevents TOCTOU race) ─────────────────
-  const statusPlaceholders = ACTIVE_STATUSES.map(() => '?').join(', ');
-  const conditionalInsertResult = await env.DATABASE.prepare(
-    `INSERT INTO tasks (id, project_id, user_id, parent_task_id, chat_session_id, title, description,
-     status, execution_step, priority, dispatch_depth, output_branch, created_by,
-     task_mode, agent_profile_hint, skill_id, skill_hint, mission_id, coordination_channel, triggered_by,
-     requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirement_plan_json, resource_requirements_source, resolved_reservation_json,
-     credential_attribution_user_id, credential_attribution_project_id, credential_attribution_source,
-     ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
-     created_at, updated_at)
-     SELECT ?, ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
-     ?, ?, ?, ?, ?, ?, 'mcp',
-     ?, ?, ?, ?, ?, ?,
-     ?, ?, ?,
-     ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
-     ?, ?
-     WHERE (
-       SELECT count(*) FROM tasks
-       WHERE parent_task_id = ? AND project_id = ?
-       AND status IN (${statusPlaceholders})
-     ) < ?
-     AND (
-       SELECT count(*) FROM tasks
-       WHERE project_id = ? AND status IN (${statusPlaceholders})
-       AND dispatch_depth > 0
-     ) < ?`
-  )
-    .bind(
-      // INSERT values
+  // Atomic persistence includes the existing project/parent dispatch limits.
+  const conditionalInsertResult = await insertDispatchedTask(
+    env,
+    [
       taskId,
       tokenData.projectId,
       tokenData.userId,
@@ -503,17 +475,14 @@ export async function handleDispatchTask(
       ...capacityPlacementSnapshotSqlValues(capacityPlacementSnapshot),
       now,
       now,
-      // Per-task child count subquery
-      tokenData.taskId,
-      tokenData.projectId,
-      ...ACTIVE_STATUSES,
-      effectiveMaxPerTask,
-      // Per-project active count subquery
-      tokenData.projectId,
-      ...ACTIVE_STATUSES,
-      effectiveMaxActive
-    )
-    .run();
+    ],
+    {
+      parentTaskId: tokenData.taskId,
+      projectId: tokenData.projectId,
+      maxPerTask: effectiveMaxPerTask,
+      maxActive: effectiveMaxActive,
+    }
+  );
 
   if (!conditionalInsertResult.meta.changes || conditionalInsertResult.meta.changes === 0) {
     log.warn('mcp.dispatch_task.atomic_limit_breach', {
