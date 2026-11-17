@@ -210,6 +210,11 @@ The common messages:
 | **The sign-in sandbox hit a network error talking to Claude.**   | Wait a moment, then try again.                                                 |
 | **The Claude sign-in process stopped before returning a token.** | Try again. If it keeps happening, report it.                                   |
 
+For both Claude Code and Codex, **… sign-in is unavailable right now: the sign-in sandbox could not
+start** means the container runtime refused to start the sign-in sandbox (for example, its image is
+missing). Retrying will not help until an administrator fixes it; use the manual API key or token
+fields in the same panel meanwhile.
+
 When reporting a failure, include the message and approximate time; never share the code or token.
 
 ## Managing agent accounts

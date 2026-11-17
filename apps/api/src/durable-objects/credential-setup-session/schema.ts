@@ -28,6 +28,12 @@ export type SetupSessionRow = {
   error_code: string | null;
   error_message: string | null;
   completed_at: number | null;
+  /** 1 while teardown's sandbox cleanup has not finished; NULL/0 otherwise. */
+  cleanup_pending: number | null;
+  /** Status the session had when teardown claimed it (decides whether to scrub). */
+  cleanup_from_status: string | null;
+  /** Number of alarm-driven recoveries of an interrupted cleanup. */
+  cleanup_attempts: number | null;
 };
 
 export type DeviceAuthDetailsRow = {
@@ -35,7 +41,21 @@ export type DeviceAuthDetailsRow = {
   user_code: string | null;
 };
 
-/** Create the tables if absent. Runs in the DO constructor; idempotent. */
+/**
+ * Teardown-recovery columns, added after the table first shipped. Each carries its full
+ * literal statement (DDL cannot take placeholders, and a literal is what the safety check
+ * scans). Nullable with no default, so existing rows read as "no cleanup owed".
+ */
+const CLEANUP_COLUMNS: ReadonlyArray<readonly [name: string, ddl: string]> = [
+  ['cleanup_pending', 'ALTER TABLE setup_session ADD COLUMN cleanup_pending INTEGER'],
+  ['cleanup_from_status', 'ALTER TABLE setup_session ADD COLUMN cleanup_from_status TEXT'],
+  ['cleanup_attempts', 'ALTER TABLE setup_session ADD COLUMN cleanup_attempts INTEGER'],
+];
+
+/**
+ * Create the tables if absent and add any missing additive column. Runs in the DO
+ * constructor; idempotent. The PRAGMA is one local SQLite read per constructor run.
+ */
 export function ensureSetupSessionSchema(sql: SqlStorage): void {
   sql.exec(
     `CREATE TABLE IF NOT EXISTS setup_session (
@@ -64,4 +84,13 @@ export function ensureSetupSessionSchema(sql: SqlStorage): void {
       user_code        TEXT
     )`
   );
+  const existingColumns = new Set(
+    sql
+      .exec<{ name: string }>('PRAGMA table_info(setup_session)')
+      .toArray()
+      .map((column) => column.name)
+  );
+  for (const [name, ddl] of CLEANUP_COLUMNS) {
+    if (!existingColumns.has(name)) sql.exec(ddl);
+  }
 }

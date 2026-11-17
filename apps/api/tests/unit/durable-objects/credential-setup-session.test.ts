@@ -136,6 +136,9 @@ interface FakeRow {
   error_code: string | null;
   error_message: string | null;
   completed_at: number | null;
+  cleanup_pending: number | null;
+  cleanup_from_status: string | null;
+  cleanup_attempts: number | null;
 }
 
 function createFakeSql() {
@@ -182,6 +185,9 @@ function createFakeSql() {
         error_code: null,
         error_message: null,
         completed_at: null,
+        cleanup_pending: null,
+        cleanup_from_status: null,
+        cleanup_attempts: null,
       };
       return { toArray: () => [] };
     }
@@ -201,6 +207,23 @@ function createFakeSql() {
 
     if (q.includes('delete from device_auth_details')) {
       deviceAuthDetails = undefined;
+      return { toArray: () => [] };
+    }
+
+    // Teardown-cleanup bookkeeping (index.ts teardown/resumeCleanup/runCleanup).
+    if (q.includes('update setup_session') && q.includes('set cleanup_pending = 1')) {
+      const [fromStatus] = args;
+      if (row) {
+        row = { ...row, cleanup_pending: 1, cleanup_from_status: fromStatus, cleanup_attempts: 0 };
+      }
+      return { toArray: () => [] };
+    }
+    if (q.includes('update setup_session set cleanup_pending = 0')) {
+      if (row) row = { ...row, cleanup_pending: 0 };
+      return { toArray: () => [] };
+    }
+    if (q.includes('update setup_session set cleanup_attempts = ?')) {
+      if (row) row = { ...row, cleanup_attempts: args[0] };
       return { toArray: () => [] };
     }
 
@@ -301,7 +324,9 @@ beforeEach(() => {
   vi.mocked(destroySandboxInstance).mockReset().mockResolvedValue(undefined);
   vi.mocked(releaseSetupSlot).mockReset().mockResolvedValue(undefined);
   vi.mocked(saveAgentCredentialForUser).mockReset();
-  vi.mocked(requireProjectCapability).mockReset().mockResolvedValue({} as never);
+  vi.mocked(requireProjectCapability)
+    .mockReset()
+    .mockResolvedValue({} as never);
 });
 
 // ---------------------------------------------------------------------------
@@ -967,15 +992,18 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
     expect((await instance.getState())?.status).toBe('admitting');
     await instance.alarm();
 
-    const message = 'The Claude sign-in process stopped before returning a token. Please try again.';
+    const message =
+      'The Claude sign-in process stopped before returning a token. Please try again.';
     expect(await instance.getState()).toMatchObject({
       status: 'failed',
       errorCode: 'process_exited',
       errorMessage: message,
     });
-    expect(database._calls.some((call) =>
-      call.args.includes('process_exited') && call.args.includes(message)
-    )).toBe(true);
+    expect(
+      database._calls.some(
+        (call) => call.args.includes('process_exited') && call.args.includes(message)
+      )
+    ).toBe(true);
     expect(JSON.stringify(database._calls)).not.toContain('private terminal output');
     expect(destroySandboxInstance).toHaveBeenCalledWith(expect.anything(), 'setup-startup-exit', {
       sandboxId: 'setup-startup-exit',

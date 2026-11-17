@@ -25,6 +25,23 @@ export const DEFAULT_CLAUDE_SETUP_OUTPUT_BUFFER_BYTES = 32_768;
 export const DEFAULT_CLAUDE_VERIFICATION_CODE_MAX_LENGTH = 1_024;
 export const DEFAULT_CLAUDE_SETUP_ERROR_DETAIL_MAX_LENGTH = 160;
 export const DEFAULT_CLAUDE_OAUTH_TOKEN_MAX_LENGTH = 8_192;
+/**
+ * Alarm-driven re-runs of a teardown cleanup that an isolate death interrupted, before
+ * giving up. Every cleanup step is best-effort and catches its own errors, so a run only
+ * fails to finish when the isolate dies; three deaths in a row means retrying is not
+ * helping. A crash-loop circuit breaker, not an operator setting: the retry spacing is
+ * the session's capture poll interval (`SETUP_SESSION_CAPTURE_POLL_MS`).
+ */
+export const DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS = 3;
+/**
+ * The message `@cloudflare/sandbox` puts on its own permanent container start failure
+ * (HTTP 500 from `containerFetch`: no such image, no matching container application,
+ * out of memory, too many subprocesses). The SDK does not retry it, and the session
+ * reports it as `sandbox_runtime_unavailable`. Pinned against the installed SDK by
+ * tests/unit/durable-objects/credential-setup-session-teardown.test.ts.
+ */
+export const SANDBOX_PERMANENT_STARTUP_MESSAGE =
+  'Container failed to start due to a permanent error. Check your container configuration.';
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(raw ?? '', 10);
@@ -110,11 +127,7 @@ export const ACTIVE_SETUP_STATUSES = [
 ] as const;
 
 export type SetupSessionStatus =
-  | (typeof ACTIVE_SETUP_STATUSES)[number]
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'expired';
+  (typeof ACTIVE_SETUP_STATUSES)[number] | 'completed' | 'failed' | 'cancelled' | 'expired';
 
 export function isTerminalSetupStatus(status: string): boolean {
   return (

@@ -6,13 +6,18 @@
  */
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import type { SetupSessionStatus } from '../../services/credential-setup-config';
+import {
+  ACTIVE_SETUP_STATUSES,
+  type SetupSessionStatus,
+} from '../../services/credential-setup-config';
 
 export interface SetupSessionD1Extra {
   errorCode?: string;
   errorMessage?: string;
   completed?: boolean;
   started?: boolean;
+  /** Only write while the D1 row is still active: a repair, never an overwrite. */
+  onlyIfActive?: boolean;
 }
 
 export async function updateSetupSessionD1Status(
@@ -41,9 +46,14 @@ export async function updateSetupSessionD1Status(
     binds.push(extra.errorMessage);
   }
   binds.push(id);
+  let where = 'id = ?';
+  if (extra?.onlyIfActive) {
+    where += ` AND status IN (${ACTIVE_SETUP_STATUSES.map(() => '?').join(', ')})`;
+    binds.push(...ACTIVE_SETUP_STATUSES);
+  }
   try {
     await env.DATABASE.prepare(
-      `UPDATE agent_credential_setup_sessions SET ${set.join(', ')} WHERE id = ?`
+      `UPDATE agent_credential_setup_sessions SET ${set.join(', ')} WHERE ${where}`
     )
       .bind(...binds)
       .run();
