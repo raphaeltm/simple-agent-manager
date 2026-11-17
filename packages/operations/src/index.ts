@@ -63,7 +63,49 @@ export {
   validateIdeaStatusTransition,
 } from './idea-transitions';
 export { addIdeaUpdate, deleteIdeaUpdate, listIdeaUpdates } from './idea-update-core';
+export {
+  type AgentAskInput,
+  AgentAskInputSchema,
+  AgentCancelInputSchema,
+  type AgentFileResult,
+  type AgentLinkInput,
+  type AgentReviewInput,
+  AgentReviewInputSchema,
+  AgentUpdateInputSchema,
+  cancelAgentAsk,
+  fileAgentAsk,
+  fileAgentReview,
+  updateAgentAsk,
+} from './inbox-agent-core';
+export {
+  type AgentInboxSource,
+  type AgentListInput,
+  findSimilarAsks,
+  getAgentAsk,
+  listAgentAsks,
+  titleSimilarity,
+} from './inbox-agent-reads';
+export {
+  type AgentAssignInput,
+  type AgentAssignResult,
+  agentTaskDetail,
+  assignAgentTask,
+  attachAgentTask,
+  commentAgentTask,
+  getAgentItem,
+} from './inbox-agent-tasks';
 export { createAsk, type CreateAskInput } from './inbox-ask-create-core';
+export {
+  fileSystemError,
+  quotedName,
+  resolveSystemError,
+  SYSTEM_ERROR_SOURCES,
+  type SystemErrorFiled,
+  type SystemErrorInput,
+  systemErrorKey,
+  type SystemErrorResolution,
+  type SystemErrorSource,
+} from './inbox-error-core';
 export { getInboxItem, resolveInboxItem } from './inbox-item-core';
 export { countInbox, listInbox } from './inbox-list-core';
 export {
@@ -85,12 +127,66 @@ export { inboxTitle } from './inbox-rows';
 export { defaultInboxLimits, getInboxLimits, type InboxLimits } from './inbox-settings';
 export { INBOX_SETTINGS, type InboxSettingName } from './inbox-settings-definition';
 export {
+  archiveTask,
+  claimTask,
+  commentOnTask,
+  completeTask,
+  getTaskDetailForPerson,
+  reassignTask,
+  reopenTask,
+  setTaskStep,
+  TASK_NOT_FOUND,
+} from './inbox-task-core';
+export type {
+  InboxTaskCommentNotice,
+  InboxTaskCommentWakeDecision,
+  InboxTaskCommentWakeInput,
+  InboxTaskEventActor,
+  InboxTaskEventInput,
+  InboxTaskWatchInput,
+  OperationInboxTaskPort,
+} from './inbox-task-ports';
+export { canWriteTask, TASK_READABLE_SQL } from './inbox-task-rows';
+export {
   answerInboxItem,
   archiveInboxItem,
   type InboxAnswerInput,
   loadAskNoticeRow,
   notifyClosedAsk,
 } from './inbox-write-core';
+export { projectAccounts, type ProjectAccountsInput } from './insights-accounts';
+export {
+  INSIGHTS_CLOUDFLARE_COST_SETTINGS,
+  type InsightsCloudflareCostSettingName,
+} from './insights-cloudflare-cost-settings-definition';
+export { projectFlow, type ProjectFlowInput } from './insights-flow';
+export {
+  installationHealth,
+  installationHealthBounds,
+  type InstallationHealthInput,
+  utcWeekStart,
+} from './insights-installation';
+export {
+  readCloudflareCost,
+  summarizeCloudflareCost,
+} from './insights-installation-cloudflare';
+export {
+  densityFromRuns,
+  newMachineReasonsFor,
+  NO_CANDIDATE_REASON,
+  NOT_RECORDED_REASON,
+} from './insights-installation-placements';
+export {
+  INSIGHTS_INSTALLATION_SETTINGS,
+  type InsightsInstallationSettingName,
+} from './insights-installation-settings-definition';
+export {
+  getInsightsPageLimits,
+  INSIGHTS_PAGE_SETTINGS,
+  type InsightsPageLimits,
+  type InsightsPageSettingName,
+} from './insights-page-settings';
+export { projectPeople, type ProjectPeopleInput } from './insights-people';
 export {
   DEFAULT_PHASE_STATS_SAMPLE_LIMIT,
   DEFAULT_PHASE_STATS_WINDOW_DAYS,
@@ -108,6 +204,19 @@ export {
   type PhaseDurationStatsResult,
   type PhaseTimingRow,
 } from './insights-phase-timings';
+export { runReceipt, type RunReceiptInput } from './insights-receipt';
+export {
+  INSIGHTS_RECEIPT_SETTINGS,
+  type InsightsReceiptSettingName,
+} from './insights-receipt-settings-definition';
+export {
+  estimateModelSpendUsd,
+  readRunUsage,
+  type RunUsageModelRow,
+  type RunUsageRead,
+  summarizeRunTokens,
+} from './insights-run-usage';
+export { projectSetups, type ProjectSetupsInput } from './insights-setups';
 export { getPlatformOperationLimits } from './limits';
 export {
   getFileContext,
@@ -150,6 +259,7 @@ export {
 } from './platform-operations';
 export { type ProfileAccountBinding } from './port-types';
 export {
+  type InboxAskAnnouncement,
   type InboxAskNoticeOutcome,
   type InboxAskNoticeRow,
   type InboxAttentionMarker,
@@ -157,10 +267,41 @@ export {
   type OperationPorts,
   type ProjectEventErrorKind,
 } from './ports';
+export {
+  BRIEF_ASKS_SQL,
+  BRIEF_FACT_TEXT_MAX_CHARS,
+  BRIEF_FAILED_CHATS_SQL,
+  BRIEF_FAILING_AUTOMATIONS_SQL,
+  BRIEF_MERGED_PULL_REQUESTS_SQL,
+  BRIEF_NEW_IDEAS_SQL,
+  type BriefFacts,
+  briefFactsAreQuiet,
+  briefFactsFingerprint,
+  briefText,
+  readBriefFacts,
+} from './project-brief-facts';
+export {
+  BRIEF_MAX_SENTENCES,
+  BRIEF_PENDING_TTL_MS,
+  readProjectBrief,
+  type StoredBrief,
+  StoredBriefSchema,
+} from './project-brief-read';
+export {
+  defaultProjectBriefSettings,
+  getProjectBriefSettings,
+  type ProjectBriefSettings,
+} from './project-brief-settings';
+export {
+  PROJECT_BRIEF_ENABLED_SETTING,
+  PROJECT_BRIEF_INTEGER_SETTINGS,
+  type ProjectBriefSettingName,
+} from './project-brief-settings-definition';
 export { projectOverviewGet, type ProjectOverviewInput } from './project-overview';
 export {
   ensurePullRequest,
   getPullRequestStates,
+  openingHeadExistsSql,
   parseProjectPullRequestUrl,
   type PullRequestSnapshot,
   upsertPullRequestSnapshot,

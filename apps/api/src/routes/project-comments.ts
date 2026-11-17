@@ -15,7 +15,9 @@
  * a VM-agent callback, so .claude/rules/34 does not apply. The handler still
  * asserts the caller's project capability explicitly before touching data.
  */
+import { TASK_READABLE_SQL } from '@simple-agent-manager/operations';
 import type { ProjectCommentListResponse } from '@simple-agent-manager/shared';
+import { chunk, D1_MAX_BOUND_PARAMETERS } from '@simple-agent-manager/worker-core';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -66,9 +68,36 @@ projectCommentRoutes.get('/', async (c) => {
             columns: { id: true, filename: true },
           });
 
+    // Task discussion (inbox slice H1) shares the one ranked read above. A team task is readable
+    // by every member; a person's task only by its assignee and the person whose chat filed it,
+    // so threads on items this viewer cannot read are dropped here (the DO cannot read D1).
+    // `?? []`: an object still running the previous build returns no inbox-item threads.
+    const itemThreads = inbox.inboxItemThreads ?? [];
+    const itemIds = [...new Set(itemThreads.map((thread) => thread.itemId))];
+    // Chunked under the D1 bind limit: projectId and two userId binds ride with each chunk.
+    const readableItems: Array<{ id: string; title: string }> = [];
+    for (const ids of chunk(itemIds, D1_MAX_BOUND_PARAMETERS - 3)) {
+      const rows = await c.env.DATABASE.prepare(
+        `SELECT a.id, a.title FROM asks a
+          WHERE a.project_id = ? AND a.kind = 'task'
+            AND a.id IN (${ids.map(() => '?').join(', ')})
+            AND ${TASK_READABLE_SQL}`
+      )
+        .bind(projectId, ...ids, userId, userId)
+        .all<{ id: string; title: string }>();
+      readableItems.push(...(rows.results ?? []));
+    }
+    const readable = new Set(readableItems.map((item) => item.id));
+
     const response: ProjectCommentListResponse = {
       messageThreads: inbox.messageThreads,
       fileThreads: inbox.fileThreads,
+      inboxItemThreads: itemThreads.filter((thread) => readable.has(thread.itemId)),
+      inboxItems: readableItems.map((item) => ({
+        ref: `ask:${item.id}`,
+        id: item.id,
+        title: item.title,
+      })),
       sessions: inbox.sessions,
       files,
       hasMore: inbox.hasMore,

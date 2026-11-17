@@ -150,7 +150,8 @@ describe('SidebarProjectList', () => {
     );
 
     await user.click(screen.getByText('SAM'));
-    expect(onNavigate).toHaveBeenCalledWith('/projects/p1/chat');
+    // A project in the sidebar opens its Overview, the project landing page (inbox slice F2).
+    expect(onNavigate).toHaveBeenCalledWith('/projects/p1');
   });
 
   it('marks current project as active', () => {

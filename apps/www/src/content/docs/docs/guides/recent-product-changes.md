@@ -5,16 +5,137 @@ description: User-facing SAM changes from the latest development cycles, with pr
 
 This page summarizes recent changes that affect how people use SAM. Use it as a quick orientation when returning to the product after a week away, then follow the linked guides for the full workflow.
 
-## This cycle: 3 – 10 November 2026
+## This cycle: 10 – 17 November 2026
 
 ### For everyone
 
-- **One Inbox for everything agents need from you.** Questions, permission requests, secrets,
-  approvals and reviews from every project are in one list, with **Inbox** in the navigation and an
-  inbox icon where the notification bell was. Answer from the item, with the answer buttons pinned at
-  the bottom; the next item opens with a one-line receipt. **Archive** closes an item and tells the
-  agent, with a few seconds to **Undo**. Other notifications are under **Updates**.
+- **One Inbox for everything waiting on you.** Questions, permission requests, secrets,
+  approvals, reviews and tasks from every project are in one list, with **Inbox** in the navigation
+  and an inbox icon where the notification bell was. Answer from the item, with the answer buttons
+  pinned at the bottom; the next item opens with a one-line receipt. **Archive** closes an item and
+  tells the agent, with a few seconds to **Undo**. Other notifications are under **Updates**.
   → [Inbox](/docs/guides/inbox/)
+- **SAM tells you when something of yours fails.** A task that couldn't start or stopped before
+  finishing, a chat that couldn't wake, a sleep that may have lost work, an automation that keeps
+  failing and an answer that never reached its agent each file a **Problem** in your Inbox, with the
+  fix as its button (**Retry**, **Wake the chat**, **Resume**). It closes by itself once the thing
+  recovers. → [Problems SAM files for you](/docs/guides/inbox/#problems-sam-files-for-you)
+- **Permission requests, forms and sign-in links now notify you**, and open in your Inbox, so you
+  no longer have to watch a chat to see that its agent is waiting.
+  → [When the agent needs you](/docs/guides/chat-features/#when-the-agent-needs-you)
+- **Agents can hand you a task or ask for a review.** Work only a person can do, such as adding a
+  production secret, arrives as a **Task**; something to evaluate arrives as a **Review** with
+  **Looks good**. To give a teammate a task, ask the agent to assign it to them.
+  → [Tasks for people](/docs/guides/inbox/#tasks-for-people)
+- **Projects open on their Overview.** Opening a project shows **Needs you** (the first items of its
+  Inbox) above what is running, this week's numbers, budgets, automations and recent work, with a
+  task box that starts work without leaving the page. Chat is one tap away: **Chat** in the project
+  navigation, or the **Chat** button in the phone app bar.
+  → [Project Overview](/docs/guides/project-overview/)
+- **Insights shows how work moves.** A new project page: the median time from idea to merged pull
+  request, how often CI passes first try, how long questions wait for a person, why runs stopped,
+  flaky checks. **Agent setups** compares profiles, skills or models by how often their runs merge
+  without rework, and **Accounts** shows which accounts carried the work and when they ran out.
+  → [Insights](/docs/guides/insights/)
+- **Every task has a receipt.** **Receipt** in the chat's tool rail shows how the run ended, where
+  its time went, whether its first push passed CI, and its tokens per model, with an estimated cost
+  for runs on an API key. → [Run Receipt](/docs/guides/chat-features/#run-receipt)
+- **Run one chat on another account.** When you have several accounts for an agent, **To** says
+  which one a new chat will run on (for example **on Work Max**); select it to pick another for this
+  chat only. A chat's details show the account it ran on, why, and what it actually ran with (model,
+  effort, permissions, skill). → [Using another account for one chat](/docs/guides/agents/#using-another-account-for-one-chat)
+- **Agents ask for secrets in the chat.** A card with a secure field lets you save an API key or
+  token the agent needs; the agent never sees the value. Codex chats show the card too.
+  → [Let the agent ask you for a secret](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret)
+- **Decide which policies every agent reads.** On **Agent Context → Policies**, set a policy to
+  **On demand** so agents get only its title until a task matches it, and see how many characters
+  your pinned policies add to every session. → [Agent Context](/docs/guides/agent-context/)
+- **Connect Slack, or any service that signs its webhooks.** A webhook automation can verify Slack
+  or HMAC signatures, so a mention of your Slack app can start an agent.
+  → [Webhook triggers](/docs/guides/webhook-triggers/)
+- **The compute pool decides the cloud and region.** Projects and agent profiles no longer have
+  provider and location settings. The pool editor lists machines by region, lets you switch a whole
+  cloud account off, and adds nothing on its own.
+  → [Compute pools](/docs/guides/compute-pools/)
+- **Comments you quoted are highlighted** in the chat and in Library files; click one to open its
+  thread. → [Collaboration](/docs/guides/collaboration/)
+- **A task waiting for a usage limit can be cancelled**, or started anyway by its owner, from the
+  chat. → [Waiting for a provider limit reset](/docs/guides/session-troubleshooting/#waiting-for-a-provider-limit-reset)
+
+Also changed this week:
+
+- **The manual "create workspace" screen is gone.** Workspaces come from chats; its old address
+  opens **Nodes**. → [Workspaces](/docs/guides/creating-workspaces/)
+- **Google Cloud nodes hold more workspaces**: boot disks grow with the machine (20 GB per vCPU,
+  50 GB minimum), and a regional quota refusal skips only that region and machine family.
+  → [A task skipped a region](/docs/guides/google-cloud/#a-task-skipped-a-region-or-failed-with-quota--exceeded)
+- **A pool whose machine list failed to refresh says so** and keeps working from the list it last
+  read. → [Pool states](/docs/guides/compute-pools/#pool-states-and-what-to-do-about-them)
+- **Codex runs your repository's hooks** in SAM sessions. → [OpenAI Codex](/docs/guides/agents/#openai-codex)
+- **The sign-in page waits for your instance** to say which sign-in options it has, instead of
+  briefly showing a GitHub button that might not work.
+- **A task waiting on a usage limit is no longer failed as "stuck"** when the limit resets.
+
+### For self-hosters & admins
+
+Which release brought what, if you update a self-hosted instance:
+
+- **v2026.11.10**: pool region rows and account switches, the optional VM Cloudflare Tunnel
+  transport, the sign-in page waiting for its options.
+- **v2026.11.12**: signed webhooks, agent secret requests, Cloudflare Tunnel hardening, provider-limit
+  **Cancel task** / **Start anyway**, agent sign-in to test instances.
+- **v2026.11.13**: session details configuration, secret cards for Codex.
+- **v2026.11.14**: per-chat account choice, comment quote highlights, deploys wait for container
+  rollout, portable deployment build contexts.
+- **v2026.11.15**: setup closes on owned installs, Admin Integrations source labels and **Clear**,
+  Google Cloud boot disk sizing and quota handling.
+- **v2026.11.16**: the Inbox in the web app, the Project Overview, Cloudflare Container deployment
+  builds, container image reuse, the provisioning attempt deadline.
+- **The next release after v2026.11.16** (not yet tagged when this was written): Overview as the
+  landing page, Problems, agent inbox tools and tasks for people, Insights (Flow, Agent setups,
+  Accounts), run receipts, Health & cost, Pinned / On demand policies, Codex repository hooks.
+
+Also for admins:
+
+- **Check that your setup is closed.** After you sign in as the first superadmin, `/api/setup/status`
+  should answer `410`. → [Verification](/docs/guides/self-hosting/#verification)
+- **Admin → Health & cost** shows what the installation's machines and Cloudflare account cost, with
+  a daily Cloudflare estimate (needs **Account Analytics → Read** on the Worker's token).
+  **Admin → Analytics** no longer has the funnel, geography and retention views.
+  → [Health & cost](/docs/guides/admin-settings/#health--cost)
+- **Admin is grouped** into **People**, **Platform**, **Spend and health** and **Operations**;
+  Settings is under **Platform**. A stored setting that is no longer valid is flagged, and the
+  others still load.
+- **Admin → Integrations** shows where each value comes from (stored in SAM, the Worker environment,
+  or not configured) and can **Clear** a stored one.
+- **Optional VM tunnels**: set `VM_AGENT_TRANSPORT=cloudflare-tunnel` and grant the token
+  **Cloudflare One Connector: cloudflared → Edit** to have new VMs connect outbound only.
+  → [Self-hosting](/docs/guides/self-hosting/)
+- **Deploys wait for container rollouts** to finish, and skip rebuilding container images that did
+  not change. → [Deploys wait for container rollout](/docs/guides/self-hosting/#deploys-wait-for-container-rollout)
+- **Installations without Workers AI** hide the microphone and the agent model settings instead of
+  offering controls that fail. → [AI models for agents](/docs/guides/ai-models-for-agents/#for-administrators)
+- **New Admin Settings** include the inbox's limits and timings (`inbox.*`), on-demand policy
+  budgets (`instructions.*`), the provisioning attempt deadline
+  (`operations.nodeProvisioningAttemptDeadlineMs`), Google Cloud boot disks
+  (`gcpCatalog.bootDiskGbPerVcpu`, `gcpCatalog.bootDiskMinGb`) and the deployment build executor
+  (`deployments.buildExecutor`). → [Admin settings](/docs/guides/admin-settings/)
+
+Nothing needs doing when you update: every new permission and setting above is optional.
+
+### Model changes
+
+- **Claude Sonnet 4.5** is marked deprecated and **retires on 30 November 2026**: move profiles off
+  it.
+- Added **Mistral Large 4** and **Z.ai GLM 5.3 Flash** for Vibe (**Mistral Large 3** is now
+  **Mistral Large (latest)**), **Gemini 4 Carbon** and **Hydrogen** for Gemini CLI, and for OpenCode
+  Gemini 4 Carbon and Hydrogen, Claude Fable 5.2, Muse Ember 1.0, Qwen4 Max and several free
+  models; **Crouton Alpha** was removed. → [Choosing a model](/docs/guides/agents/#choosing-a-model)
+
+## Previous cycle: 3 – 10 November 2026
+
+### For everyone
+
 - **Claude Fable 5.2.** Anthropic's newest frontier model (1M-token context) is selectable for
   Claude Code in an agent profile and through the SAM AI proxy. Sessions that start after the
   update run a Claude Code version that supports it. → [Agent profiles](/docs/guides/agents/#agent-profiles)
@@ -107,8 +228,9 @@ Which release brought what, if you update a self-hosted instance:
   picker, one memory policy for placement.
 - **v2026.11.09**: the provider order editor, the 15 GB disk default, hosted trials removed,
   hardened deployment publishing.
-- **The next release after v2026.11.09** (not yet tagged when this was written): the new first-run
-  setup and onboarding, email sign-in, SAM-hosted repositories during onboarding.
+- **v2026.11.10**: the new first-run setup and onboarding, email sign-in, SAM-hosted repositories
+  during onboarding, Claude Fable 5.2 (it also brought the first items of the next cycle: pool region
+  rows, the optional VM tunnel transport and the sign-in page change).
 
 Also for admins:
 
@@ -136,7 +258,7 @@ Also for admins:
 - **Vibe GLM 5.2** was removed; **Mistral Medium 3.5** moved to a **Legacy (Deprecated)** group.
   → [Choosing a model](/docs/guides/agents/#choosing-a-model)
 
-## Previous cycle: 27 October – 3 November 2026
+## Earlier: 27 October – 3 November 2026
 
 ### For everyone
 
@@ -300,7 +422,8 @@ in the first release after v2026.10.26.
   default ($50 at most); `aiModels.enabled` in **Admin → Settings** turns them off.
   → [AI models for agents](/docs/guides/ai-models-for-agents/)
 - **SAM assistant** is off until each person turns it on; setting `operations.samOperatorDisabled` to
-  **Enabled** turns it off for everyone. It uses `SAM_MODEL` (GLM 5.3 Flash on Workers AI by default).
+  **Enabled** turns it off for everyone. It uses `SAM_MODEL`; the current default is DeepSeek V4.1
+  Flash 1017 on Workers AI. See the [current assistant configuration](/docs/guides/sam-assistant/#for-self-hosters).
 - **Workload identity** tokens come from `https://api.<your-domain>/oidc`, which the services that
   trust them must be able to reach. Their lifetime is `operations.workloadIdentityTokenTtlSeconds`
   (5 minutes).

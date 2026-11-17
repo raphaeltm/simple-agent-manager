@@ -13,6 +13,7 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { isAgentMessageChannelName } from './agent-message-notice';
+import { isInboxEvent, subscriptionNamesInboxItem } from './inbox-event-wake';
 
 function metadataText(
   metadata: Record<string, ProjectEventJsonValue> | undefined,
@@ -114,6 +115,8 @@ export function subscriptionCanMatchProjectEvent(
   if (isAgentMessageEvent(event)) {
     return subscriptionTargetsAgentMessageParticipant(subscription, event);
   }
+  // A person's change on a task reaches only the chats watching that task (rule 68).
+  if (isInboxEvent(event)) return subscriptionNamesInboxItem(subscription, event);
   if (!isCredentialEvent(event)) return true;
   const audience = authorizedCredentialAudience(event);
   if (!audience) return false;

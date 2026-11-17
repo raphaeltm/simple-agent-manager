@@ -193,7 +193,11 @@ export async function resolveProfileAccountBindings(
           case 'unknown':
             return { ...base, state: 'unknown' };
           case 'none':
-            return samProxyFallbackAvailable(env, agentType, providerModes.get(agentType) ?? null)
+            return (await samProxyFallbackAvailable(
+              env,
+              agentType,
+              providerModes.get(agentType) ?? null
+            ))
               ? { ...base, state: 'sam_ai_proxy', poolId: SAM_AI_PROXY_POOL_ID }
               : { ...base, state: 'none' };
         }

@@ -12,7 +12,7 @@
  * Kept out of groups on purpose: library tools (the web UI and vm-agent recognise the
  * write tools by name, and `download_library_file` writes into the workspace, so it
  * cannot share a read-only tool with `list_library_files`),
- * `request_human_input`, `ops_request_action`, `request_secret`), task lifecycle and dispatch, agent
+ * `request_human_input` (an alias of `inbox_write` method `ask`), `ops_request_action`, `request_secret`), task lifecycle and dispatch, agent
  * messaging/eventing/orchestration (pending a backend unification), triggers (create and
  * update schemas disagree on nullability), hard deletes, and Operations-only tools.
  */
@@ -91,6 +91,58 @@ export const MCP_TOOL_GROUPS: readonly McpToolGroup[] = [
     },
   },
   {
+    name: 'inbox_read',
+    kind: 'read',
+    requiresTask: true,
+    summary:
+      "Read the person's inbox items you and other agents filed. Check before filing a new one.",
+    methods: {
+      list: {
+        tool: 'inbox_list_items',
+        summary: 'open items from this chat, or with scope project from the whole project',
+      },
+      get: {
+        tool: 'inbox_get_item',
+        summary:
+          "one item with its status, the person's answer and outcome; a task with steps, assignee, activity and discussion",
+      },
+    },
+  },
+  {
+    name: 'inbox_write',
+    kind: 'write',
+    destructive: true,
+    requiresTask: true,
+    summary:
+      'File what you need from a person in their inbox; they read the inbox, not chats. One ask per item. You are woken in this chat when they answer.',
+    methods: {
+      ask: {
+        tool: 'inbox_ask',
+        summary:
+          'one question with one answer shape (options, text or confirm); blocking only when you cannot continue',
+      },
+      review: {
+        tool: 'inbox_review',
+        summary: 'ask the person to evaluate something you made; answered "Looks good" or a reply',
+      },
+      assign: {
+        tool: 'inbox_assign',
+        summary:
+          'hand a person (or the team) non-blocking work only a person can do; you keep working and are woken when they act',
+      },
+      comment: { tool: 'inbox_comment', summary: "reply in a task's discussion" },
+      attach: {
+        tool: 'inbox_attach',
+        summary: 'watch a task another of your chats assigned instead of assigning a duplicate',
+      },
+      update: { tool: 'inbox_update_item', summary: 'edit the wording or links of your open item' },
+      cancel: {
+        tool: 'inbox_cancel_item',
+        summary: 'close your open item when it is moot, saying why',
+      },
+    },
+  },
+  {
     name: 'knowledge_read',
     kind: 'read',
     summary: 'Read the project knowledge graph of remembered facts and preferences.',
@@ -154,7 +206,10 @@ export const MCP_TOOL_GROUPS: readonly McpToolGroup[] = [
         summary:
           'save a rule or preference a human stated. Work-specific one-shot rules need scope "task" and expiresAt',
       },
-      update: { tool: 'update_policy', summary: 'change a policy, or give it an expiry' },
+      update: {
+        tool: 'update_policy',
+        summary: 'change a policy, give it an expiry, or set its inject mode (pinned or on_demand)',
+      },
       remove: { tool: 'remove_policy', summary: 'deactivate a policy' },
     },
   },

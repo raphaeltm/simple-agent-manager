@@ -1,3 +1,9 @@
+import {
+  INSIGHTS_CLOUDFLARE_COST_SETTINGS,
+  INSIGHTS_INSTALLATION_SETTINGS,
+  INSIGHTS_PAGE_SETTINGS,
+  INSIGHTS_RECEIPT_SETTINGS,
+} from '@simple-agent-manager/operations';
 import { DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS } from '@simple-agent-manager/shared';
 
 import { DEFAULT_USER_ACCESS_TOKEN_LOCK_TIMEOUT_MS } from '../durable-objects/user-access-token-lock-config';
@@ -143,6 +149,42 @@ export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
       setting.name,
       setting.defaultValue,
       'Chat',
+      setting.description,
+      setting.range
+    )
+  ),
+  ...INSIGHTS_RECEIPT_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Chat',
+      setting.description,
+      setting.range
+    )
+  ),
+  ...INSIGHTS_PAGE_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Operations',
+      setting.description,
+      setting.range
+    )
+  ),
+  ...INSIGHTS_INSTALLATION_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Operations',
+      setting.description,
+      setting.range
+    )
+  ),
+  ...INSIGHTS_CLOUDFLARE_COST_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Operations',
       setting.description,
       setting.range
     )
@@ -331,6 +373,7 @@ export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
     OPERATOR_DEFAULTS.disabled,
     'Operations',
     'Disable the private SAM assistant for every account. Does not opt users in.',
-    {}
+    // Inverse polarity: containment requires the disabled switch to be true.
+    { unavailableValue: true }
   ),
 ];

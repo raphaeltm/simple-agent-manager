@@ -393,6 +393,18 @@ export async function runSessionSleepFallback(
       fallback: true,
       requirement,
     });
+    // The workspace is released and unsaved work may be lost: tell the owner in their inbox
+    // (slice E). Only after the teardown, so a teardown that fails and retries files nothing.
+    // Never throws.
+    const { fileSleepLossError } = await import('./inbox/system-errors');
+    await fileSleepLossError(env, {
+      projectId: workspace.projectId,
+      sessionId: chatSessionId,
+      userId: workspace.userId,
+      exactRestore: Boolean(
+        point && point.snapshotStatus === 'available' && point.degradation === 'none'
+      ),
+    });
     await finishSleepCleanup(
       db,
       env,

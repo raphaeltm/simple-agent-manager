@@ -9,6 +9,12 @@ import type { CommentMention, ProjectMembersResponse } from '@simple-agent-manag
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// Cloudflare behaviour: every platform service present. The absent case runs through the real
+// capabilities query in platform-capabilities-ui.test.tsx.
+vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
+  usePlatformCapabilities: () => ({ speechToText: true, textToSpeech: true }),
+}));
+
 const mocks = vi.hoisted(() => ({ getProjectMembers: vi.fn() }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({

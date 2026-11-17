@@ -131,6 +131,7 @@ jobs:
               - 'scripts/deploy/deploy-signing-keys.ts'
               - 'scripts/deploy/types.ts'
               - 'scripts/deploy/vapid-keys.ts'
+              - 'scripts/selfhost/reverse-tunnel-migrations.ts'
               - 'scripts/quality/node-pool-boundary.ts'
               - 'scripts/quality/node-pool-boundary/**'
               - 'tests/fixtures/acp-activity-report-v1.json'
@@ -408,6 +409,14 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # Policy 795e72a6 / rule 83: no Pulumi secret readback, credential decryption, shell
+      # tracing or environment dumps in workflow, deploy, infra or CI-script code. Here, not in a
+      # path-filtered job, so every PR runs it whatever it touches. Blocking from the start: zero
+      # findings outside real instances in 25 sampled commits since June 2026
+      # (scripts/quality/README.md).
+      - name: No secret readback in CI code (policy 795e72a6)
+        run: pnpm quality:no-secret-readback
 
       - name: Install verified Gitleaks release
         env:

@@ -3,6 +3,7 @@ import type {
   CommentMention,
   CommentReply,
   CommentStatus,
+  InboxItemCommentThread,
   LibraryFileCommentThread,
   MessageCommentReply,
   MessageCommentThread,
@@ -159,6 +160,11 @@ export type ProjectCommentSessionTopic = {
 export type ProjectCommentInboxResult = {
   messageThreads: MessageCommentThread[];
   fileThreads: LibraryFileCommentThread[];
+  /**
+   * Discussion on inbox items (human tasks, slice H1). The API filters these to the items the
+   * viewer may read before returning them; the DO cannot read D1 `asks`.
+   */
+  inboxItemThreads: InboxItemCommentThread[];
   /** Topics for the sessions referenced by `messageThreads`, joined in-DO. */
   sessions: ProjectCommentSessionTopic[];
   hasMore: boolean;

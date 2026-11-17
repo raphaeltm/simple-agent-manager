@@ -91,22 +91,25 @@ export async function assertWorkspaceCallbackResourceById(
   return assertWorkspaceAcceptsCallback(env, workspace, workspaceId, callback, allowedStatuses);
 }
 
+/** Shared projection keeps every callback's lifecycle and incarnation fence identical. */
+export const workspaceCallbackIdentityFields = {
+  workspaceId: schema.workspaces.id,
+  userId: schema.workspaces.userId,
+  projectId: schema.workspaces.projectId,
+  chatSessionId: schema.workspaces.chatSessionId,
+  status: schema.workspaces.status,
+  nodeId: schema.workspaces.nodeId,
+  nodeStatus: schema.nodes.status,
+  callbackGeneration: schema.workspaces.callbackGeneration,
+};
+
 export async function loadWorkspaceCallbackIdentity(
   env: Env,
   workspaceId: string
 ): Promise<WorkspaceCallbackIdentitySnapshot | null> {
   const db = drizzle(env.DATABASE, { schema });
   const rows = await db
-    .select({
-      workspaceId: schema.workspaces.id,
-      userId: schema.workspaces.userId,
-      projectId: schema.workspaces.projectId,
-      chatSessionId: schema.workspaces.chatSessionId,
-      status: schema.workspaces.status,
-      nodeId: schema.workspaces.nodeId,
-      nodeStatus: schema.nodes.status,
-      callbackGeneration: schema.workspaces.callbackGeneration,
-    })
+    .select(workspaceCallbackIdentityFields)
     .from(schema.workspaces)
     .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
     .where(eq(schema.workspaces.id, workspaceId))

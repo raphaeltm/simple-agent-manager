@@ -242,6 +242,78 @@ describe('POST /tasks/submit with sourceIdeaId', () => {
     mocks.enrichMessageWithMentions.mockResolvedValue({ enrichedMessage: 'Match the window.' });
   });
 
+  it.each(['creating', 'running'])(
+    'accepts an owned %s pinned node and passes the pin to TaskRunner',
+    async (status) => {
+      const { sqlite, env } = await createEnv();
+      try {
+        sqlite
+          .prepare(
+            `INSERT INTO nodes
+             (id, user_id, name, status, vm_size, vm_location, created_at, updated_at)
+           VALUES ('pinned-node', 'user-1', 'Pinned node', ?, 'small', 'nbg1', ?, ?)`
+          )
+          .run(status, NOW, NOW);
+        const before = linkRows(sqlite);
+        const response = await submit(createApp(), env, {
+          message: 'Wait for my pinned node.',
+          taskMode: 'task',
+          nodeId: 'pinned-node',
+        });
+        expect(response.status).toBe(202);
+        expect(linkRows(sqlite)).toBe(before + 1);
+        expect(mocks.createSession).toHaveBeenCalledTimes(1);
+        expect(mocks.startTaskRunnerDO).toHaveBeenCalledExactlyOnceWith(
+          env,
+          expect.objectContaining({
+            preferredNodeId: 'pinned-node',
+            userId: 'user-1',
+            projectId: 'project-1',
+          })
+        );
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
+  it.each([
+    { condition: 'stopped', status: 'stopped', owner: 'user-1', expectedStatus: 400 },
+    { condition: 'deleted', status: 'deleted', owner: 'user-1', expectedStatus: 400 },
+    { condition: 'foreign', status: 'creating', owner: 'user-2', expectedStatus: 404 },
+    { condition: 'missing', status: null, owner: 'user-1', expectedStatus: 404 },
+  ])(
+    'refuses a $condition pinned node before any task effects',
+    async ({ status, owner, expectedStatus }) => {
+      const { sqlite, env } = await createEnv();
+      try {
+        if (status) {
+          sqlite
+            .prepare(
+              `INSERT INTO nodes
+             (id, user_id, name, status, vm_size, vm_location, created_at, updated_at)
+           VALUES ('pinned-node', ?, 'Pinned node', ?, 'small', 'nbg1', ?, ?)`
+            )
+            .run(owner, status, NOW, NOW);
+        }
+        const before = linkRows(sqlite);
+        const response = await submit(createApp(), env, {
+          message: 'Use my pinned node.',
+          taskMode: 'task',
+          nodeId: 'pinned-node',
+        });
+        expect(response.status).toBe(expectedStatus);
+        expect(linkRows(sqlite)).toBe(before);
+        expect(mocks.createSession).not.toHaveBeenCalled();
+        expect(mocks.persistMessage).not.toHaveBeenCalled();
+        expect(mocks.recordActivityEvent).not.toHaveBeenCalled();
+        expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
   it('records works_on before the task runner starts (VM path)', async () => {
     const { sqlite, env } = await createEnv();
     try {

@@ -1,3 +1,4 @@
+import { configureProjectDataPort } from '@simple-agent-manager/project-data';
 import { processPromptDeliveryAlarm } from '@simple-agent-manager/project-data/internal/do/durability-foundation';
 import type { DurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
 import * as mailbox from '@simple-agent-manager/project-data/internal/do/mailbox';
@@ -88,7 +89,10 @@ describe('ProjectData durable prompt delivery', () => {
   let db: Database.Database;
   let sql: SqlStorage;
 
+  const fileWakeFailure = vi.fn();
   beforeEach(() => {
+    fileWakeFailure.mockReset().mockResolvedValue({ ref: 'ask:w1', id: 'w1', created: true });
+    configureProjectDataPort('inboxErrors', { fileWakeFailure });
     vi.clearAllMocks();
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
@@ -1050,15 +1054,14 @@ describe('ProjectData durable prompt delivery', () => {
       deliveryState: 'failed',
       terminalReason: 'wake_refused',
     });
-    expect(
-      sql
-        .exec(
-          `SELECT kind, reason, task_id
-             FROM session_attention_markers
-            WHERE session_id = 'chat-1' AND resolved_at IS NULL`
-        )
-        .toArray()
-    ).toEqual([{ kind: 'wake_failed', reason: 'wake_refused', task_id: 'task-1' }]);
+    // The failure is one inbox error item (slice E), never an attention marker.
+    expect(fileWakeFailure).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ projectId: 'project-1', sessionId: 'chat-1' })
+    );
+    expect(sql.exec(`SELECT COUNT(*) AS n FROM session_attention_markers`).toArray()[0]).toEqual({
+      n: 0,
+    });
     expect(
       sql
         .exec(
@@ -1084,6 +1087,41 @@ describe('ProjectData durable prompt delivery', () => {
       'chat-1'
     );
     expect(hooks.scheduleSummarySync).toHaveBeenCalled();
+  });
+
+  it('posts no second chat message while the wake failure item is still open', async () => {
+    sql.exec(
+      "UPDATE chat_sessions SET status = 'sleeping', task_id = 'task-1' WHERE id = 'chat-1'"
+    );
+    fileWakeFailure.mockResolvedValue({ ref: 'ask:a1', id: 'a1', created: false });
+    accept('wake-refused-again');
+    const [claim] = claimDuePromptDeliveries(sql, config, 10_000);
+    const before = sql.exec(`SELECT COUNT(*) AS n FROM chat_messages`).toArray()[0];
+    await runPromptDeliveryClaim(
+      sql,
+      {},
+      config,
+      claim!,
+      {
+        submit: vi.fn<VmPromptDeliveryAdapter['submit']>().mockResolvedValue({
+          kind: 'failed',
+          reason: 'wake_refused',
+          error: 'still refused',
+          runtimeIdentity: null,
+          capabilities: null,
+        }),
+        reconcile: vi.fn(),
+      },
+      hooks
+    );
+    // Liveness: the item was updated for this failure.
+    expect(fileWakeFailure).toHaveBeenCalledTimes(1);
+    expect(sql.exec(`SELECT COUNT(*) AS n FROM chat_messages`).toArray()[0]).toEqual(before);
+    expect(hooks.broadcastEvent).not.toHaveBeenCalledWith(
+      'session.wake_failed',
+      expect.anything(),
+      'chat-1'
+    );
   });
 
   it('marks cross-runtime uncertainty ambiguous and never requeues it', () => {
@@ -1130,7 +1168,7 @@ describe('ProjectData durable prompt delivery', () => {
     expect(claimDuePromptDeliveries(sql, config, 10_100)).toHaveLength(0);
   });
 
-  it('raises a visible wake failure when the real alarm expires a sleeping wake delivery', () => {
+  it('raises a visible wake failure when the real alarm expires a sleeping wake delivery', async () => {
     sql.exec(
       "UPDATE chat_sessions SET status = 'sleeping', task_id = 'task-1' WHERE id = 'chat-1'"
     );
@@ -1151,20 +1189,20 @@ describe('ProjectData durable prompt delivery', () => {
 
     vi.setSystemTime(10_100);
     processPromptDeliveryAlarm(sql, {}, alarmHooks);
+    // Filing the item is a D1 write, run through `waitUntil` after the synchronous step.
+    await Promise.all(waitUntil.mock.calls.map(([promise]) => promise));
 
     expect(mailbox.getMessage(sql, 'ttl-wake')).toMatchObject({
       deliveryState: 'expired',
       terminalReason: 'ttl_expired',
     });
-    expect(
-      sql
-        .exec(
-          `SELECT kind, reason, task_id
-             FROM session_attention_markers
-            WHERE session_id = 'chat-1' AND resolved_at IS NULL`
-        )
-        .toArray()
-    ).toEqual([{ kind: 'wake_failed', reason: 'ttl_expired', task_id: 'task-1' }]);
+    expect(fileWakeFailure).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ projectId: 'project-1', sessionId: 'chat-1' })
+    );
+    expect(sql.exec(`SELECT COUNT(*) AS n FROM session_attention_markers`).toArray()[0]).toEqual({
+      n: 0,
+    });
     expect(
       sql
         .exec(

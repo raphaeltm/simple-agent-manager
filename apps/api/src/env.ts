@@ -1246,8 +1246,6 @@ export interface Env
   ANALYTICS_DEFAULT_PERIOD_DAYS?: string; // Default query period (default: 30)
   ANALYTICS_DATASET?: string; // Dataset name (set by deployment from resource prefix)
   ANALYTICS_TOP_EVENTS_LIMIT?: string; // Max events in top events query (default: 50)
-  ANALYTICS_GEO_LIMIT?: string; // Max countries in geo distribution (default: 50)
-  ANALYTICS_RETENTION_WEEKS?: string; // Retention cohort lookback weeks (default: 12)
   ANALYTICS_WEBSITE_TRAFFIC_TOP_PAGES_LIMIT?: string; // Max top pages per section in website traffic (default: 20)
   // Analytics ingest endpoint (Phase 2 — client-side events)
   ANALYTICS_INGEST_ENABLED?: string; // "true" (default) or "false"
@@ -1375,7 +1373,6 @@ export interface Env
   AI_PROXY_RATE_LIMIT_WINDOW_SECONDS?: string; // Rate limit window in seconds (default: 60)
   // Cost Monitoring
   COST_MONITORING_ENABLED?: string; // Enable/disable cost monitoring endpoint (default: true)
-  COMPUTE_VCPU_HOUR_COST_USD?: string; // Estimated cost per vCPU-hour in USD (default: 0.003)
   /** Deployment environment name ("staging" | "production"), set by the deploy pipeline. */
   ENVIRONMENT?: string;
   // Cloudflare Artifacts (GitHub-optional project creation)
@@ -1393,7 +1390,7 @@ export interface Env
   /** Max changed files returned by an Artifacts compare before truncating (default: 300). */
   REPO_BROWSE_MAX_COMPARE_FILES?: string;
   // SAM Agent (Top-Level Agent) configuration
-  SAM_MODEL?: string; // LLM model (default: claude-sonnet-5)
+  SAM_MODEL?: string; // LLM model (default: @cf/deepseek-ai/deepseek-v4.1-flash-1017)
   SAM_MAX_TOKENS?: string; // Max output tokens per turn (default: 4096)
   SAM_MAX_TURNS?: string; // Max tool-use loop iterations (default: 20)
   SAM_SYSTEM_PROMPT_APPEND?: string; // Additional system prompt text

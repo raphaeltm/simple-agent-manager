@@ -1,4 +1,5 @@
 import {
+  openingHeadExistsSql,
   parseProjectPullRequestUrl,
   type PullRequestSnapshot,
   upsertPullRequestSnapshot,
@@ -11,6 +12,10 @@ import {
   findProjectsForGitHubRepository,
   type GitHubProjectCandidate,
 } from './github-project-repositories';
+import {
+  ingestPullRequestReviewWebhook,
+  isReviewCycleDelivery,
+} from './github-pull-request-reviews';
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -27,7 +32,9 @@ export async function ingestPullRequestWebhook(
   event: string,
   payload: Record<string, unknown>
 ): Promise<void> {
-  if (!['pull_request', 'check_run', 'check_suite'].includes(event)) return;
+  const reviewCycles = isReviewCycleDelivery(event, payload.action);
+  // Review events matter only for review cycles: anything else returns before the project lookup.
+  if (!['pull_request', 'check_run', 'check_suite'].includes(event) && !reviewCycles) return;
   const repo = record(payload.repository);
   const repositoryFullName = string(repo?.full_name)?.toLowerCase() ?? null;
   const repositoryId = typeof repo?.id === 'number' ? repo.id : null;
@@ -41,9 +48,13 @@ export async function ingestPullRequestWebhook(
   );
   if (projects.length === 0 || !repositoryFullName) return;
 
+  // Review cycles for Insights · People; never throws, so it cannot hold up the work below.
+  if (reviewCycles)
+    await ingestPullRequestReviewWebhook(env, event, repositoryFullName, projects, payload);
   if (event === 'pull_request')
     await ingestLifecycleWebhook(env, repositoryFullName, projects, payload);
-  else await ingestChecksWebhook(env, event, repositoryFullName, projects, payload);
+  else if (event === 'check_run' || event === 'check_suite')
+    await ingestChecksWebhook(env, event, repositoryFullName, projects, payload);
 }
 
 async function ingestLifecycleWebhook(
@@ -91,6 +102,7 @@ async function ingestLifecycleWebhook(
     closedAt: string(pr?.closed_at),
     createdAt,
     updatedAt,
+    opened: action === 'opened',
   };
   await Promise.all(
     projects.map((project) => upsertPullRequestSnapshot(env, project.id, snapshot))
@@ -173,14 +185,26 @@ async function ingestChecksWebhook(
   await Promise.all(
     projects.map(async (project) => {
       await env.DATABASE.prepare(
-        `INSERT INTO pull_request_checks (project_id, repository, head_sha, check_key, state, updated_at)
-         SELECT ?, ?, ?, ?, ?, ? WHERE ? = 1 OR EXISTS (
+        // `first_failed_at` records the first failure this check reported on this commit and
+        // is never cleared, so a failure that a rerun turns green stays visible to Insights
+        // (first try, flaky checks). It is written even when the observation is older than the
+        // stored one, so a failure delivered after its rerun's success is not lost; `state` and
+        // `updated_at` still only move forward.
+        `INSERT INTO pull_request_checks (project_id, repository, head_sha, check_key, state, updated_at, first_failed_at)
+         SELECT ?, ?, ?, ?, ?, ?, CASE WHEN ? = 'failure' THEN ? END WHERE ? = 1 OR EXISTS (
            SELECT 1 FROM pull_requests WHERE project_id = ? AND repository = ? AND head_sha = ?)
+           OR EXISTS (${openingHeadExistsSql()})
          ON CONFLICT(project_id, repository, head_sha, check_key) DO UPDATE SET
-           state = excluded.state, updated_at = excluded.updated_at
-         WHERE excluded.updated_at > pull_request_checks.updated_at
-            OR (excluded.updated_at = pull_request_checks.updated_at
-                AND pull_request_checks.state = 'pending' AND excluded.state != 'pending')`
+           state = CASE WHEN ${CHECK_OBSERVATION_IS_NEWER_SQL} THEN excluded.state ELSE pull_request_checks.state END,
+           updated_at = CASE WHEN ${CHECK_OBSERVATION_IS_NEWER_SQL} THEN excluded.updated_at ELSE pull_request_checks.updated_at END,
+           first_failed_at = CASE
+             WHEN excluded.first_failed_at IS NULL THEN pull_request_checks.first_failed_at
+             WHEN pull_request_checks.first_failed_at IS NULL THEN excluded.first_failed_at
+             ELSE min(pull_request_checks.first_failed_at, excluded.first_failed_at) END
+         WHERE ${CHECK_OBSERVATION_IS_NEWER_SQL}
+            OR (excluded.first_failed_at IS NOT NULL
+                AND (pull_request_checks.first_failed_at IS NULL
+                     OR excluded.first_failed_at < pull_request_checks.first_failed_at))`
       )
         .bind(
           project.id,
@@ -189,7 +213,14 @@ async function ingestChecksWebhook(
           checkKey,
           checksState,
           updatedAt,
+          checksState,
+          updatedAt,
           Number(associated),
+          project.id,
+          repositoryFullName,
+          sha,
+          // A late result for the commit a pull request opened with is still kept after a push
+          // moved the pull request on: GitHub no longer associates it, and Insights reads it.
           project.id,
           repositoryFullName,
           sha
@@ -229,6 +260,7 @@ async function ingestChecksWebhook(
                  SELECT 1 FROM pull_requests p
                  WHERE p.project_id = c.project_id AND p.repository = c.repository
                    AND p.head_sha = c.head_sha)
+               AND NOT EXISTS (${openingHeadExistsSql('c')})
              ORDER BY c.updated_at DESC, c.rowid DESC LIMIT -1 OFFSET ?)`
         )
           .bind(project.id, repositoryFullName, pendingCap)
@@ -239,6 +271,14 @@ async function ingestChecksWebhook(
     })
   );
 }
+
+/**
+ * True when the incoming observation is newer than the stored one, or the same instant moving a
+ * pending check to a result: the only cases that may replace `state` and `updated_at`.
+ */
+const CHECK_OBSERVATION_IS_NEWER_SQL = `(excluded.updated_at > pull_request_checks.updated_at
+            OR (excluded.updated_at = pull_request_checks.updated_at
+                AND pull_request_checks.state = 'pending' AND excluded.state != 'pending'))`;
 
 function checkState(
   conclusion: string | null,

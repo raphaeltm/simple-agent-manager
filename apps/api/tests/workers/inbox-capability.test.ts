@@ -6,169 +6,29 @@
  * D1. Only the VM agent HTTP edge (the live-agent prompt) is stubbed, and it is asserted on.
  */
 import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
-import { env, runInDurableObject, SELF } from 'cloudflare:test';
-import { Hono } from 'hono';
+import { runInDurableObject, SELF } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Env } from '../../src/env';
-import { handleAppError } from '../../src/middleware/app-error-handler';
-import { requireApproved, requireAuth } from '../../src/middleware/auth';
 import { webOperationContext } from '../../src/operation-ports';
-import { inboxRoutes, projectInboxRoutes } from '../../src/routes/inbox';
 import { runInboxAskSweep } from '../../src/services/inbox/sweep';
-import { storeMcpToken } from '../../src/services/mcp-token';
 import {
-  seedAgentSession,
-  seedInstallation,
-  seedNode,
-  seedProject,
-  seedSignedInUser,
-  seedTask,
-  seedUser,
-  seedWorkspace,
-} from './helpers/seed-d1';
-
-const testEnv = env as unknown as Env;
-const ORIGIN = `https://app.${testEnv.BASE_DOMAIN}`;
-const fetchMock = vi.fn<typeof fetch>();
-
-function browserApp() {
-  const app = new Hono<{ Bindings: Env }>();
-  app.onError(handleAppError);
-  app.use('/api/*', requireAuth(), requireApproved());
-  app.route('/api/inbox', inboxRoutes);
-  app.route('/api/projects/:projectId/inbox', projectInboxRoutes);
-  return app;
-}
-
-interface Seeded {
-  projectId: string;
-  ownerId: string;
-  colleagueId: string;
-  ownerCookie: string;
-  colleagueCookie: string;
-  chatSessionId: string;
-  colleagueSessionId: string;
-  workspaceId: string;
-  agentSessionId: string;
-  taskId: string;
-  token: string;
-  project: DurableObjectStub<ProjectData>;
-}
-
-async function seed(): Promise<Seeded> {
-  const suffix = crypto.randomUUID().slice(0, 8);
-  const ownerId = `inbox-owner-${suffix}`;
-  const colleagueId = `inbox-colleague-${suffix}`;
-  const installationId = `inbox-install-${suffix}`;
-  const projectId = `inbox-project-${suffix}`;
-  const nodeId = `inbox-node-${suffix}`;
-  const workspaceId = `inbox-ws-${suffix}`;
-  const agentSessionId = `inbox-agent-${suffix}`;
-  const taskId = `inbox-task-${suffix}`;
-  await seedUser(ownerId, { githubId: `gh-${ownerId}` });
-  await seedUser(colleagueId, { githubId: `gh-${colleagueId}` });
-  await seedInstallation(installationId, ownerId, { installationIdValue: `inst-${suffix}` });
-  await seedProject(projectId, ownerId, installationId);
-  await testEnv.DATABASE.prepare(
-    `INSERT INTO project_members (project_id, user_id, role, status) VALUES (?, ?, 'maintainer', 'active')`
-  )
-    .bind(projectId, colleagueId)
-    .run();
-  await seedNode(nodeId, ownerId);
-  const project = testEnv.PROJECT_DATA.get(
-    testEnv.PROJECT_DATA.idFromName(projectId)
-  ) as DurableObjectStub<ProjectData>;
-  await project.ensureProjectId(projectId);
-  const chatSessionId = await project.createSession(workspaceId, 'Inbox chat', taskId, ownerId);
-  const colleagueSessionId = await project.createSession(
-    null,
-    'Colleague private chat',
-    null,
-    colleagueId
-  );
-  await seedWorkspace(workspaceId, nodeId, ownerId, {
-    projectId,
-    chatSessionId,
-    status: 'running',
-  });
-  await seedTask(taskId, projectId, ownerId, {
-    title: 'Inbox task',
-    status: 'in_progress',
-    taskMode: 'task',
-    chatSessionId,
-  });
-  await seedAgentSession(agentSessionId, workspaceId, ownerId, { status: 'running' });
-  const token = `inbox-token-${suffix}`;
-  await storeMcpToken(testEnv.KV, token, {
-    taskId,
-    taskMode: 'task',
-    projectId,
-    userId: ownerId,
-    workspaceId,
-    chatSessionId,
-    agentSessionId,
-    createdAt: new Date().toISOString(),
-  });
-  return {
-    projectId,
-    ownerId,
-    colleagueId,
-    ownerCookie: await seedSignedInUser(ownerId),
-    colleagueCookie: await seedSignedInUser(colleagueId),
-    chatSessionId,
-    colleagueSessionId,
-    workspaceId,
-    agentSessionId,
-    taskId,
-    token,
-    project,
-  };
-}
-
-async function callTool(token: string, name: string, args: Record<string, unknown>) {
-  const response = await SELF.fetch(`https://api.${testEnv.BASE_DOMAIN}/mcp`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: `${name}-1`,
-      method: 'tools/call',
-      params: { name, arguments: args },
-    }),
-  });
-  expect(response.status).toBe(200);
-  const body = await response.json<{
-    error?: unknown;
-    result?: { content?: { text: string }[] };
-  }>();
-  expect(body.error).toBeUndefined();
-  return JSON.parse(body.result?.content?.[0]?.text ?? '{}') as Record<string, unknown>;
-}
+  browserApp,
+  callTool,
+  fetchMock,
+  get,
+  ORIGIN,
+  post,
+  seed,
+  type Seeded,
+  testEnv,
+} from './helpers/inbox-harness';
+import { seedSignedInUser } from './helpers/seed-d1';
 
 /** The summary index is written on a debounce; flush it the way the timer would. */
 async function syncSummaries(project: DurableObjectStub<ProjectData>) {
   await runInDurableObject(project, async (instance) => {
     await (instance as unknown as { runSummarySyncLocked(): Promise<void> }).runSummarySyncLocked();
   });
-}
-
-async function get<T>(path: string, cookie: string): Promise<{ status: number; body: T }> {
-  const response = await browserApp().request(path, { headers: { Cookie: cookie } }, testEnv);
-  return { status: response.status, body: (await response.json()) as T };
-}
-
-async function post(path: string, cookie: string, body: unknown = {}) {
-  const response = await browserApp().request(
-    path,
-    {
-      method: 'POST',
-      headers: { Cookie: cookie, 'Content-Type': 'application/json', Origin: ORIGIN },
-      body: JSON.stringify(body),
-    },
-    testEnv
-  );
-  return { status: response.status, body: (await response.json()) as Record<string, unknown> };
 }
 
 type ListBody = { items: { ref: string; kind: string; canAct: boolean; projectId: string }[] };
@@ -532,6 +392,55 @@ describe('inbox capability through the real entry points', () => {
   });
 
   // Inbox slice G: what a question marker did inside ProjectData, through the real Durable Object.
+  it('a system error item: the route rejects a bad action, and an agent sign-in session can neither fix nor archive it', async () => {
+    const s = await seed();
+    const askId = `err-${crypto.randomUUID()}`;
+    const now = Date.now();
+    await testEnv.DATABASE.prepare(
+      `INSERT INTO asks (id, project_id, assignee_kind, assignee_user_id, kind, blocking, title,
+          body_md, answer_spec_json, links_json, source_session_id, source_task_id, dedupe_key,
+          status, created_at, updated_at)
+       VALUES (?, ?, 'user', ?, 'error', 0, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`
+    )
+      .bind(
+        askId,
+        s.projectId,
+        s.ownerId,
+        "“Ship” couldn't start",
+        'The agent could not complete this request.',
+        JSON.stringify({ type: 'actions', actions: [{ id: 'retry', label: 'Retry' }] }),
+        JSON.stringify([{ kind: 'task', id: s.taskId, label: null }]),
+        s.chatSessionId,
+        s.taskId,
+        `error:task:${s.taskId}`,
+        now,
+        now
+      )
+      .run();
+    const base = `/api/projects/${s.projectId}/inbox/items/ask:${askId}`;
+
+    // The person's own session: an unknown action is refused by the route's schema.
+    expect((await post(`${base}/answer`, s.ownerCookie, { action: 'reboot' })).status).toBe(400);
+
+    // The same person through an agent sign-in session (workload identity).
+    const agentCookie = await seedSignedInUser(s.ownerId);
+    const agentToken = agentCookie.split('=')[1]!.split('.')[0]!;
+    await testEnv.DATABASE.prepare('UPDATE sessions SET hard_expires_at = ? WHERE token = ?')
+      .bind(now + 3_600_000, agentToken)
+      .run();
+    expect((await post(`${base}/answer`, agentCookie, { action: 'retry' })).status).toBe(403);
+    expect((await post(`${base}/archive`, agentCookie)).status).toBe(403);
+    const row = await testEnv.DATABASE.prepare('SELECT status FROM asks WHERE id = ?')
+      .bind(askId)
+      .first<{ status: string }>();
+    expect(row?.status).toBe('open');
+
+    // Control: the person's own session archives it.
+    const archived = await post(`${base}/archive`, s.ownerCookie);
+    expect(archived.status).toBe(200);
+    expect(archived.body).toMatchObject({ outcome: 'archived', agentNotified: false });
+  });
+
   describe('asks-era questions inside ProjectData', () => {
     // The expiry path stops the task run on its VM; stub that edge and keep it off the network.
     beforeEach(() => {

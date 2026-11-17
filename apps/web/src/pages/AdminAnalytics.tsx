@@ -8,11 +8,8 @@ import {
   EventsTable,
   FeatureAdoptionChart,
   ForwardingStatus,
-  FunnelChart,
-  GeoDistribution,
   KpiSummary,
   PeriodSelector,
-  RetentionCohorts,
   WebsiteTraffic,
 } from './admin-analytics';
 
@@ -31,10 +28,7 @@ export function AdminAnalytics() {
   const {
     dau,
     events,
-    funnel,
     featureAdoption,
-    geo,
-    retention,
     forwardStatus,
     websiteTraffic,
     aiUsage,
@@ -57,11 +51,8 @@ export function AdminAnalytics() {
     if (prevLoadingRef.current && !loading) {
       setLastRefreshed(new Date());
     }
-    if (!prevLoadingRef.current && !loading && !isRefreshing) {
-      // Also update after a manual refresh completes
-    }
     prevLoadingRef.current = loading;
-  }, [loading, isRefreshing]);
+  }, [loading]);
 
   // Update lastRefreshed when a refresh cycle completes
   const prevRefreshingRef = useRef(isRefreshing);
@@ -72,7 +63,7 @@ export function AdminAnalytics() {
     prevRefreshingRef.current = isRefreshing;
   }, [isRefreshing]);
 
-  if (error && !dau && !events && !funnel) {
+  if (error && !dau && !events) {
     return (
       <Card>
         <div className="p-4 flex flex-col items-center gap-3">
@@ -116,7 +107,7 @@ export function AdminAnalytics() {
       </div>
 
       {/* KPI Summary Cards */}
-      <KpiSummary dau={dau} funnel={funnel} events={events} />
+      <KpiSummary dau={dau} events={events} />
 
       {/* AI Usage — full width */}
       <Card>
@@ -138,46 +129,13 @@ export function AdminAnalytics() {
         </div>
       </Card>
 
-      {/* Two-column grid for medium charts on desktop */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Conversion Funnel */}
-        <Card>
-          <div className="p-4">
-            <h3 className="text-base font-semibold text-fg-primary mb-3">
-              Conversion Funnel ({funnel?.periodDays ?? 30}d)
-            </h3>
-            <FunnelChart data={funnel?.funnel ?? []} />
-          </div>
-        </Card>
-
-        {/* Feature Adoption */}
-        <Card>
-          <div className="p-4">
-            <h3 className="text-base font-semibold text-fg-primary mb-3">
-              Feature Adoption ({featureAdoption?.period ?? '30d'})
-            </h3>
-            <FeatureAdoptionChart data={featureAdoption} />
-          </div>
-        </Card>
-      </div>
-
-      {/* Geographic Distribution — full width (map needs space) */}
+      {/* Feature Adoption — full width */}
       <Card>
         <div className="p-4">
           <h3 className="text-base font-semibold text-fg-primary mb-3">
-            Geographic Distribution ({geo?.period ?? '30d'})
+            Feature Adoption ({featureAdoption?.period ?? '30d'})
           </h3>
-          <GeoDistribution data={geo} />
-        </div>
-      </Card>
-
-      {/* Retention Cohorts — full width (wide table) */}
-      <Card>
-        <div className="p-4">
-          <h3 className="text-base font-semibold text-fg-primary mb-3">
-            Weekly Retention Cohorts ({retention?.weeks ?? 12}w)
-          </h3>
-          <RetentionCohorts data={retention} />
+          <FeatureAdoptionChart data={featureAdoption} />
         </div>
       </Card>
 

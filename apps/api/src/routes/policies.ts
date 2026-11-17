@@ -4,11 +4,14 @@
  * Mounted at /api/projects/:projectId/policies
  * Provides CRUD for dynamic project policies (Phase 4: Policy Propagation).
  */
-import type { PolicyScope, UpdatePolicyRequest } from '@simple-agent-manager/shared';
+import type { PolicyInjectMode, PolicyScope, UpdatePolicyRequest } from '@simple-agent-manager/shared';
 import {
+  DEFAULT_POLICY_INJECT_MODE,
   isPolicyCategory,
+  isPolicyInjectMode,
   isPolicyScope,
   isPolicySource,
+  POLICY_INJECT_MODES,
   POLICY_SCOPES,
   resolvePolicyLimits,
   validatePolicyLifecycle,
@@ -56,6 +59,15 @@ function parseLifecycleFields(body: { scope?: string; expiresAt?: unknown }): {
   }
 
   return { scope, expiresAt };
+}
+
+/** Parse the optional `injectMode` field. Absent stays undefined (rule 73). */
+function parseInjectModeField(body: { injectMode?: string }): PolicyInjectMode | undefined {
+  if (body.injectMode === undefined) return undefined;
+  if (!isPolicyInjectMode(body.injectMode)) {
+    throw errors.badRequest(`injectMode must be one of: ${POLICY_INJECT_MODES.join(', ')}`);
+  }
+  return body.injectMode;
 }
 
 // ─── Middleware ──────────────────────────────────────────────────────────────
@@ -157,6 +169,7 @@ policyRoutes.post('/', jsonValidator(CreatePolicySchema), async (c) => {
     maxExpiryMs: limits.maxExpiryMs,
   });
   if (lifecycleError) throw errors.badRequest(lifecycleError);
+  const injectMode = parseInjectModeField(body) ?? DEFAULT_POLICY_INJECT_MODE;
 
   const result = await projectDataService.createPolicy(
     c.env,
@@ -168,7 +181,8 @@ policyRoutes.post('/', jsonValidator(CreatePolicySchema), async (c) => {
     null, // sourceSessionId — REST has no task context
     body.confidence ?? limits.defaultConfidence,
     scope,
-    expiresAt
+    expiresAt,
+    injectMode
   );
 
   return c.json(result, 201);
@@ -228,6 +242,8 @@ policyRoutes.patch('/:policyId', jsonValidator(UpdatePolicySchema), async (c) =>
   const lifecycle = parseLifecycleFields(body);
   if (lifecycle.scope !== undefined) updates.scope = lifecycle.scope;
   if (lifecycle.expiresAt !== undefined) updates.expiresAt = lifecycle.expiresAt;
+  const injectMode = parseInjectModeField(body);
+  if (injectMode !== undefined) updates.injectMode = injectMode;
 
   if (Object.keys(updates).length === 0) {
     throw errors.badRequest('At least one update field must be provided');

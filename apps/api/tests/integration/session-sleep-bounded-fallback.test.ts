@@ -43,6 +43,7 @@ import {
   recordSessionSnapshotProgress,
 } from '../../src/services/session-snapshots';
 import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
+import { seedSnapshotGeneration, type SnapshotSeedMode } from '../helpers/session-snapshot-seed';
 import { createAllSchemaTables, createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 import { createRouteTestApp } from '../unit/routes/route-test-app';
 
@@ -287,61 +288,9 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
     chatSessionId: string,
     workspaceId: string,
     generation: string,
-    mode: 'complete' | 'home-skipped' | 'wip-skipped'
+    mode: SnapshotSeedMode
   ) {
-    const prefix = `session-snapshots/${chatSessionId}/${generation}`;
-    const home = mode === 'complete' || mode === 'wip-skipped';
-    const wip = mode === 'complete' || mode === 'home-skipped';
-    if (home) r2Objects.set(`${prefix}/home.tar`, { size: 4, sha256: HOME_SHA256 });
-    if (wip) r2Objects.set(`${prefix}/wip.bundle`, { size: 9, sha256: WIP_SHA256 });
-    r2Objects.set(`${prefix}/manifest.json`, { size: 512, sha256: null });
-    const status = mode === 'complete' ? 'available' : 'degraded';
-    const degradation = mode === 'complete' ? 'none' : mode;
-    sqlite
-      .prepare(
-        `UPDATE session_snapshots
-         SET status = ?, degradation = ?, snapshot_generation = ?, capture_generation = NULL,
-             capture_error = NULL, base_commit = ?,
-             home_r2_key = ?, home_sha256 = ?, wip_r2_key = ?, wip_sha256 = ?,
-             manifest_r2_key = ?, manifest_json = ?, expires_at = ?
-         WHERE chat_session_id = ?`
-      )
-      .run(
-        status,
-        degradation,
-        generation,
-        BASE_COMMIT,
-        home ? `${prefix}/home.tar` : null,
-        home ? HOME_SHA256 : null,
-        wip ? `${prefix}/wip.bundle` : null,
-        wip ? WIP_SHA256 : null,
-        `${prefix}/manifest.json`,
-        JSON.stringify({
-          version: 1,
-          chatSessionId,
-          workspaceId,
-          agentSessionId: workspaceId.replace('ws-', 'agent-'),
-          acpSessionId: 'acp-1',
-          agentType: 'claude-code',
-          baseCommit: BASE_COMMIT,
-          git: {
-            branch: 'sam/feature',
-            upstream: 'origin/sam/feature',
-            remote: 'origin',
-            detached: false,
-          },
-          status,
-          degradation,
-          skipped: mode === 'complete' ? [] : [{ path: '$HOME', reason: 'budget exhausted' }],
-          artifacts: {
-            ...(home ? { home: { sizeBytes: 4, sha256: HOME_SHA256 } } : {}),
-            ...(wip ? { wip: { sizeBytes: 9, sha256: WIP_SHA256 } } : {}),
-          },
-          createdAt: new Date().toISOString(),
-        }),
-        new Date(Date.now() + 7 * DAY_MS).toISOString(),
-        chatSessionId
-      );
+    seedSnapshotGeneration(sqlite, r2Objects, chatSessionId, workspaceId, generation, mode);
   }
 
   /** Run the sweep as the scheduled handler does, then drain its background work. */

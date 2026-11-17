@@ -1,10 +1,10 @@
-import type { CredentialSource } from '@simple-agent-manager/shared';
+import { type CredentialSource, NODE_BILLING_ENDED_STATUSES } from '@simple-agent-manager/shared';
 
 // =============================================================================
 // Node status helpers
 // =============================================================================
 
-export const ENDED_STATUSES_ARRAY = ['destroyed', 'destroying', 'deleted', 'error'] as const;
+export const ENDED_STATUSES_ARRAY = NODE_BILLING_ENDED_STATUSES;
 
 export const ENDED_STATUSES = new Set<string>(ENDED_STATUSES_ARRAY);
 

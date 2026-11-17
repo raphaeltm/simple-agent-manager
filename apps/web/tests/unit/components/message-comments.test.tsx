@@ -12,6 +12,11 @@ import { CommentComposer } from '../../../src/components/project-message-view/co
 import { CommentThreadList } from '../../../src/components/project-message-view/comments/CommentThread';
 import type { MessageCommentAuthor, MessageCommentThread } from '../../../src/lib/api/comments';
 
+// Cloudflare behaviour: every platform service present (absent case: platform-capabilities-ui.test.tsx).
+vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
+  usePlatformCapabilities: () => ({ speechToText: true, textToSpeech: true }),
+}));
+
 const author: MessageCommentAuthor = {
   id: 'user-1',
   name: 'Ada Lovelace',

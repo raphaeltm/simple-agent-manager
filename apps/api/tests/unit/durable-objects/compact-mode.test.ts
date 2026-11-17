@@ -588,3 +588,43 @@ describe('stripToolMetadataContent — secret request card', () => {
     expect(failed.rawOutput).toBeUndefined();
   });
 });
+
+describe('stripToolMetadataContent — inbox item card (inbox_write)', () => {
+  const strip = (title: string, text: string) =>
+    stripToolMetadataContent({
+      toolCallId: 'tc-inbox',
+      title,
+      status: 'completed',
+      content: [{ type: 'content', text }],
+    }) as Record<string, unknown>;
+  const kept = (result: Record<string, unknown>) =>
+    result.rawOutput === undefined
+      ? undefined
+      : JSON.parse((result.rawOutput as Array<{ text: string }>)[0]!.text);
+
+  it('keeps only the item reference of an ask or a review, for the Claude and Codex tool names', () => {
+    for (const kind of ['question', 'review']) {
+      const text = JSON.stringify({
+        message: 'Filed in the person’s inbox.',
+        inboxItem: { ref: 'ask:01ASK', id: '01ASK', sessionId: 'session-1', kind, blocking: false },
+        created: true,
+        similar: [{ ref: 'ask:01OTHER', kind: 'question', title: 'Other', match: 'title' }],
+      });
+      for (const title of ['mcp__sam-mcp__inbox_write', 'sam-mcp/inbox_write']) {
+        expect(kept(strip(title, text))).toEqual({
+          inboxItem: { ref: 'ask:01ASK', sessionId: 'session-1' },
+        });
+      }
+    }
+  });
+
+  it('keeps no card payload for an update or cancel, a non-ask ref, or a missing chat', () => {
+    for (const text of [
+      JSON.stringify({ ref: 'ask:01ASK', status: 'cancelled' }),
+      JSON.stringify({ inboxItem: { ref: 'secret:01X', sessionId: 'session-1' } }),
+      JSON.stringify({ inboxItem: { ref: 'ask:01ASK' } }),
+    ]) {
+      expect(kept(strip('mcp__sam-mcp__inbox_write', text))).toBeUndefined();
+    }
+  });
+});

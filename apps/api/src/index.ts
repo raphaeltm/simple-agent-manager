@@ -59,6 +59,7 @@ import { adminCcBackfillRoutes } from './routes/admin-cc-backfill';
 import { adminCostRoutes } from './routes/admin-costs';
 import { adminGithubInstallationLeakSweepRoutes } from './routes/admin-github-installation-leak-sweep';
 import { adminGithubRepoIdBackfillRoutes } from './routes/admin-github-repo-id-backfill';
+import { adminHealthCostRoutes } from './routes/admin-health-cost';
 import { adminOperationsApprovalRoutes } from './routes/admin-operations-approvals';
 import { adminPlatformConfigRoutes } from './routes/admin-platform-config';
 import { adminPlatformCredentialRoutes } from './routes/admin-platform-credentials';
@@ -114,6 +115,7 @@ import { googleAuthRoutes } from './routes/google-auth';
 import { ideaUpdateRoutes } from './routes/idea-updates';
 import { ideaRoutes } from './routes/ideas';
 import { inboxRoutes, projectInboxRoutes } from './routes/inbox';
+import { projectInboxTaskRoutes } from './routes/inbox-tasks';
 import {
   handleInteractivePreviewRequest,
   isInteractivePreviewRequest,
@@ -132,6 +134,7 @@ import { nodesRoutes } from './routes/nodes';
 import { notificationRoutes } from './routes/notifications';
 import { observabilityIngestRoutes } from './routes/observability-ingest';
 import { orchestratorRoutes } from './routes/orchestrator';
+import { platformCapabilitiesRoutes } from './routes/platform-capabilities';
 import { policyRoutes } from './routes/policies';
 import { profileRuntimeRoutes } from './routes/profile-runtime';
 import { projectAgentRoutes } from './routes/project-agent';
@@ -143,6 +146,7 @@ import {
 } from './routes/project-deployment';
 import { projectEventChannelRoutes } from './routes/project-event-channels';
 import { projectEventSubscriptionRoutes } from './routes/project-event-subscriptions';
+import { projectInsightsRoutes } from './routes/project-insights';
 import { projectOverviewRoutes } from './routes/project-overview';
 import { projectsRoutes } from './routes/projects';
 import { acpInteractionCallbackRoute } from './routes/projects/acp-interaction-callback';
@@ -272,6 +276,8 @@ app.get('/api/config/artifacts-enabled', (c) => {
   applyCacheHeaders(c, 'public-config');
   return c.json({ enabled: c.env.ARTIFACTS_ENABLED === 'true' && !!c.env.ARTIFACTS });
 });
+
+app.route('/api/config', platformCapabilitiesRoutes);
 
 // Public config — whether agents can run on Instant (Cloudflare Containers) with no cloud account.
 app.get('/api/config/instant-runtime', (c) => {
@@ -421,7 +427,10 @@ app.route('/api/projects', workspaceResourceHistoryCallbackRoute); // Must be be
 app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/ideas', ideaRoutes);
 app.route('/api/projects/:projectId/overview', projectOverviewRoutes);
+app.route('/api/projects/:projectId/insights', projectInsightsRoutes);
 app.route('/api/projects/:projectId/inbox', projectInboxRoutes);
+// Human tasks (inbox slice H1): steps, comments, claim, reassign, done, reopen.
+app.route('/api/projects/:projectId/inbox', projectInboxTaskRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/operation-receipts', cliOperationReceiptRoutes);
 app.route('/api/projects/:projectId/cli', cliProjectMetadataRoutes);
@@ -476,6 +485,7 @@ app.route('/api/admin/operations/approvals', adminOperationsApprovalRoutes);
 app.route('/api/admin/settings', adminSettingsRoutes);
 app.route('/api/admin/usage', adminUsageRoutes);
 app.route('/api/admin/costs', adminCostRoutes);
+app.route('/api/admin/health-cost', adminHealthCostRoutes);
 app.route('/api/admin/cc-backfill', adminCcBackfillRoutes);
 app.route('/api/admin/github-repo-id-backfill', adminGithubRepoIdBackfillRoutes);
 app.route('/api/admin/github-installation-leak-sweep', adminGithubInstallationLeakSweepRoutes);

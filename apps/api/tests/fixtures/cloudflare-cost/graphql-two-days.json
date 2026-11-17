@@ -1,0 +1,98 @@
+{
+  "data": {
+    "viewer": {
+      "accounts": [
+        {
+          "durableObjectsPeriodicGroups": [
+            {
+              "dimensions": { "date": "2026-11-14" },
+              "sum": {
+                "activeTime": 98000000000,
+                "duration": 12544,
+                "rowsRead": 1600000000,
+                "rowsWritten": 3900000,
+                "storageReadUnits": 310000,
+                "storageWriteUnits": 66000
+              }
+            },
+            {
+              "dimensions": { "date": "2026-11-15" },
+              "sum": {
+                "activeTime": 101640817676,
+                "duration": 13010.024662527998,
+                "rowsRead": 1779514328,
+                "rowsWritten": 4102951,
+                "storageReadUnits": 332214,
+                "storageWriteUnits": 70249
+              }
+            }
+          ],
+          "durableObjectsInvocationsAdaptiveGroups": [
+            { "dimensions": { "date": "2026-11-14" }, "sum": { "requests": 310000 } },
+            { "dimensions": { "date": "2026-11-15" }, "sum": { "requests": 329723 } }
+          ],
+          "workersInvocationsAdaptive": [
+            {
+              "dimensions": { "date": "2026-11-14", "eventType": "fetch" },
+              "sum": { "cpuTimeUs": 2582366637, "requests": 239740 }
+            },
+            {
+              "dimensions": { "date": "2026-11-14", "eventType": "tail" },
+              "sum": { "cpuTimeUs": 97175866, "requests": 548747 }
+            },
+            {
+              "dimensions": { "date": "2026-11-15", "eventType": "cron" },
+              "sum": { "cpuTimeUs": 224486837, "requests": 311 }
+            },
+            {
+              "dimensions": { "date": "2026-11-15", "eventType": "fetch" },
+              "sum": { "cpuTimeUs": 2950138482, "requests": 261618 }
+            },
+            {
+              "dimensions": { "date": "2026-11-15", "eventType": "tail" },
+              "sum": { "cpuTimeUs": 113113779, "requests": 590939 }
+            }
+          ],
+          "kvOperationsAdaptiveGroups": [
+            { "dimensions": { "actionType": "delete", "date": "2026-11-15" }, "sum": { "requests": 2 } },
+            { "dimensions": { "actionType": "read", "date": "2026-11-15" }, "sum": { "requests": 45849 } },
+            { "dimensions": { "actionType": "write", "date": "2026-11-15" }, "sum": { "requests": 3516 } }
+          ],
+          "kvStorageAdaptiveGroups": [
+            {
+              "dimensions": { "date": "2026-11-15", "namespaceId": "kv-namespace-a" },
+              "max": { "byteCount": 732963 }
+            },
+            {
+              "dimensions": { "date": "2026-11-15", "namespaceId": "kv-namespace-b" },
+              "max": { "byteCount": 23744 }
+            }
+          ],
+          "aiInferenceAdaptiveGroups": [
+            { "dimensions": { "date": "2026-11-15" }, "sum": { "totalNeurons": 21000 } }
+          ],
+          "r2StorageAdaptiveGroups": [
+            {
+              "dimensions": { "bucketName": "assets", "date": "2026-11-15", "storageClass": "Standard" },
+              "max": { "metadataSize": 1000000, "payloadSize": 173999000000 }
+            }
+          ],
+          "d1AnalyticsAdaptiveGroups": [
+            { "dimensions": { "date": "2026-11-14" }, "sum": { "rowsRead": 98723108, "rowsWritten": 434738 } },
+            { "dimensions": { "date": "2026-11-15" }, "sum": { "rowsRead": 130725339, "rowsWritten": 490822 } }
+          ],
+          "d1StorageAdaptiveGroups": [
+            {
+              "dimensions": { "databaseId": "d1-database-a", "date": "2026-11-15" },
+              "max": { "databaseSizeBytes": 544700000 }
+            }
+          ],
+          "containersUsageAdaptiveGroups": [
+            { "dimensions": { "date": "2026-11-15" }, "sum": { "allocatedMemory": 15032385536000 } }
+          ]
+        }
+      ]
+    }
+  },
+  "errors": null
+}

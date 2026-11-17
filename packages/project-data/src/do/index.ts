@@ -8,6 +8,7 @@
  * See: specs/018-project-first-architecture/research.md
  * See: specs/018-project-first-architecture/data-model.md
  */
+import type { RunNudgeWindow, RunReceiptFactsInput } from '@simple-agent-manager/shared';
 import {
   type AcpSessionEventActorType,
   type AcpSessionStatus,
@@ -64,6 +65,8 @@ import * as groupedFtsWallRecovery from './grouped-fts-wall-recovery';
 import * as ideaUpdates from './idea-updates';
 import * as ideaWork from './idea-work';
 import * as idleCleanup from './idle-cleanup';
+import { countInboxItemWatchers, renewInboxItemWatches } from './inbox-event-wake';
+import * as inboxItemComments from './inbox-item-comments';
 import * as knowledge from './knowledge';
 import * as libraryFileComments from './library-file-comments';
 import * as links from './links';
@@ -118,6 +121,8 @@ import * as reconciliation from './reconciliation';
 import { releaseQuestionHold } from './reconciliation-candidate-state';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import { instrumentRowUsage, RowUsage } from './row-usage';
+import { countRunNudges } from './run-nudges';
+import { getRunReceiptFacts } from './run-receipt-facts';
 import { checkRuntimeHeartbeatTimeouts } from './runtime-heartbeat-policy';
 import { withoutSamNotice } from './sam-notice-metadata';
 import * as sessionAccess from './session-access';
@@ -125,6 +130,7 @@ import * as sessionActivityProbe from './session-activity-probe';
 import * as sessionActivityReconciliation from './session-activity-reconciliation';
 import * as sessionReads from './session-reads';
 import { guardedSessionSleep, type SessionSleepRuntimeGuard } from './session-sleep-runtime-guard';
+import { countLegacyToolSockets } from './session-sockets';
 import {
   admitBrowserSocket,
   broadcastToBrowserSockets,
@@ -145,6 +151,7 @@ import { resolveTaskWaitConfig } from './task-wait-config';
 import { processTaskWaits } from './task-wait-supervisor';
 import * as taskWaits from './task-waits';
 import * as terminalSessionReconciliation from './terminal-session-reconciliation';
+import { readToolChanges, sealToolMerging } from './tool-call-changes';
 import * as toolPayloadArchive from './tool-payload-archive';
 import type {
   ProjectDataManualToolPayloadCleanupInput,
@@ -918,6 +925,7 @@ export class ProjectData extends DurableObject<Env> {
       // Informational only: project sockets get no transcript frames and never gate merging.
       metrics.legacyProjectSocketsMax = legacy.project;
       const legacyClient = legacy.session > 0;
+      const toolLegacyClient = countLegacyToolSockets(this.ctx, sessionId);
       if (!config.enabled) refuseMerge(metrics, 'setting_disabled');
       else if (legacyClient) refuseMerge(metrics, 'legacy_client');
       return messagePersistence.persistMessageBatchWithSideEffects(
@@ -926,7 +934,11 @@ export class ProjectData extends DurableObject<Env> {
         this.messagePersistenceHooks(),
         sessionId,
         batchMessages,
-        { source, config: { ...config, enabled: config.enabled && !legacyClient }, metrics }
+        {
+          source,
+          config: { ...config, enabled: config.enabled && !legacyClient, toolLegacyClient },
+          metrics,
+        }
       );
     });
   }
@@ -1012,11 +1024,19 @@ export class ProjectData extends DurableObject<Env> {
     messageId: string | null,
     messageCreatedAt: number
   ): Promise<number> {
-    const closed = await questionAsks.closeQuestionAsksForHumanMessage(
-      this.env,
-      { projectId: this.getProjectId(), sessionId, messageId, messageCreatedAt },
-      (type, payload, targetSessionId) => this.broadcastEvent(type, payload, targetSessionId)
-    );
+    // The person is back in the chat: its open questions are answered and its system error
+    // items (inbox slice E) close too. Two independent D1 writes, sent together.
+    const [closed] = await Promise.all([
+      questionAsks.closeQuestionAsksForHumanMessage(
+        this.env,
+        { projectId: this.getProjectId(), sessionId, messageId, messageCreatedAt },
+        (type, payload, targetSessionId) => this.broadcastEvent(type, payload, targetSessionId)
+      ),
+      questionAsks.closeChatErrorAsksForHumanMessage(this.env, {
+        projectId: this.getProjectId(),
+        sessionId,
+      }),
+    ]);
     if (closed > 0 && releaseQuestionHold(this.sql, sessionId)) await this.recalculateAlarm();
     return closed;
   }
@@ -1063,6 +1083,7 @@ export class ProjectData extends DurableObject<Env> {
 
   private messagePersistenceHooks(): messagePersistence.MessagePersistenceHooks {
     return {
+      isLegacyToolClient: (sessionId) => countLegacyToolSockets(this.ctx, sessionId),
       recordMessageIngest: (metrics) => this.rowUsage.recordMessageIngest(metrics),
       transactionSync: (fn) => this.meteredStorage.transactionSync(fn),
       recalculateAlarm: () => this.recalculateAlarm(),
@@ -1138,6 +1159,18 @@ export class ProjectData extends DurableObject<Env> {
   async getSession(sessionId: string): Promise<Record<string, unknown> | null> {
     const result = sessionReads.getSession(this.sql, sessionId);
     return result ? this.addBaseDomain(result) : null;
+  }
+
+  async getToolChanges(sessionId: string, afterRevision?: number, legacyClient = false) {
+    if (legacyClient) {
+      const config = await projectDataPorts().operations.messageMergeConfig?.(this.env);
+      if (config?.toolUpdatesEnabled && sealToolMerging(this.sql, sessionId)) {
+        const metrics = emptyMessageIngestMetrics();
+        metrics.toolSealedSessions = 1;
+        this.rowUsage.recordMessageIngest(metrics);
+      }
+    }
+    return readToolChanges(this.sql, this.env, sessionId, afterRevision);
   }
 
   async getMessages(
@@ -1985,9 +2018,13 @@ export class ProjectData extends DurableObject<Env> {
   // matches, delivery batches, and attempts in this per-project DO. They do not
   // inject prompts, steer runtimes, spawn tasks, or expose API/MCP producers.
 
-  admitProjectEvent(
+  async admitProjectEvent(
     input: projectEvents.AdmitProjectEventInput
-  ): projectEvents.ProjectEventAdmissionResult {
+  ): Promise<projectEvents.ProjectEventAdmissionResult> {
+    const ciEvent = projectEvents.isGitHubCiProjectEvent(input);
+    const skipUnsubscribedGitHubCi = ciEvent
+      ? ((await projectDataPorts().operations.skipUnsubscribedGitHubCi?.(this.env)) ?? true)
+      : false;
     this.ensureProjectId(input.projectId);
     const now = Date.now();
     const previousRetentionAt = projectEvents.readSchedulerState(
@@ -2001,8 +2038,17 @@ export class ProjectData extends DurableObject<Env> {
       now
     );
     const result = this.meteredStorage.transactionSync(() =>
-      projectEvents.admitProjectEvent(this.sql, this.env, this.getProjectId(), input)
+      projectEvents.admitProjectEvent(
+        this.sql,
+        this.env,
+        this.getProjectId(),
+        input,
+        false,
+        skipUnsubscribedGitHubCi
+      )
     );
+    if (ciEvent) this.rowUsage.setProjectEventStoragePolicy(skipUnsubscribedGitHubCi);
+    if (result.outcome === 'skipped_no_subscriber') return result;
     const nextRetentionAt = projectEvents.readSchedulerState(
       this.sql,
       input.projectId
@@ -2534,13 +2580,16 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
-  getProjectEventRecentStatus(
+  async getProjectEventRecentStatus(
     input: projectEvents.GetProjectEventRecentStatusInput
-  ): projectEvents.ProjectEventRecentStatus {
+  ): Promise<projectEvents.ProjectEventRecentStatus> {
     this.ensureProjectId(input.projectId);
-    return this.meteredStorage.transactionSync(() =>
+    const enabled =
+      (await projectDataPorts().operations.skipUnsubscribedGitHubCi?.(this.env)) ?? true;
+    const status = this.meteredStorage.transactionSync(() =>
       projectEvents.getProjectEventRecentStatus(this.sql, this.env, this.getProjectId(), input)
     );
+    return { ...status, admission: this.rowUsage.projectEventAdmissions(enabled) };
   }
 
   validateProjectEventWakeRecoveryAuthority(
@@ -2599,6 +2648,41 @@ export class ProjectData extends DurableObject<Env> {
       libraryFileComments.updateFileCommentThreadStatus(this.sql, this.env, input)
     );
     return { thread: result.thread, idempotent: result.idempotent };
+  }
+
+  // --- Inbox item comments (inbox slice H1) -----------------------------------
+  // Discussion on a human task, scoped to its asks id (DO migration 081). Callers must have
+  // already verified the item belongs to this project and the reader may see it; the DO has no D1.
+
+  listInboxItemCommentThreads(
+    input: inboxItemComments.ListInboxItemCommentThreadsInput
+  ): ReturnType<typeof inboxItemComments.listInboxItemCommentThreads> {
+    return inboxItemComments.listInboxItemCommentThreads(this.sql, this.env, input);
+  }
+
+  countInboxItemWatchers(projectId: string, itemId: string): number {
+    return countInboxItemWatchers(this.sql, projectId, itemId);
+  }
+
+  renewInboxItemWatches(input: {
+    projectId: string;
+    itemId: string;
+    open: boolean;
+    closedGraceMs: number;
+  }): number {
+    return renewInboxItemWatches(this.sql, {
+      ...input,
+      now: Date.now(),
+      lifetimeMs: resolveProjectEventLimits(this.env).wakeSubscriptionLifetimeMs,
+    });
+  }
+
+  createInboxItemComment(
+    input: inboxItemComments.CreateInboxItemCommentInput
+  ): inboxItemComments.InboxItemCommentMutationResult {
+    return this.meteredStorage.transactionSync(() =>
+      inboxItemComments.createInboxItemComment(this.sql, this.env, input)
+    );
   }
 
   materializeSession(sessionId: string): void {
@@ -2877,6 +2961,20 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   /**
+   * The agent cancelled its blocking question in D1 `asks` (`inbox_write` method `cancel`, inbox
+   * slice D): the chat stops showing it as paused, as when a question is answered. Nothing is
+   * stored here; the row is already closed.
+   */
+  async recordQuestionWithdrawn(input: { sessionId: string; askId: string }): Promise<void> {
+    if (releaseQuestionHold(this.sql, input.sessionId)) await this.recalculateAlarm();
+    this.broadcastEvent(
+      'attention.resolved',
+      { sessionId: input.sessionId, markerId: input.askId, reason: 'cancelled' },
+      input.sessionId
+    );
+  }
+
+  /**
    * The outcome of an expired question held in D1 `asks` (the inbox sweep expired the row): the
    * same task outcome a question marker's expiry has. A chat message from the person after the
    * question answered it, so then the task is left alone.
@@ -3055,6 +3153,16 @@ export class ProjectData extends DurableObject<Env> {
 
   listActiveAttentionMarkers(sessionId: string) {
     return attention.listActiveAttentionMarkers(this.sql, sessionId);
+  }
+
+  /** One chat's run-receipt facts: tool calls, questions, last agent message (`run-receipt-facts.ts`). */
+  getRunReceiptFacts(input: RunReceiptFactsInput) {
+    return getRunReceiptFacts(this.sql, input);
+  }
+
+  /** Human follow-ups per run window, for Insights · Agent setups (`run-nudges.ts`). */
+  countRunNudges(windows: RunNudgeWindow[], maxWindows: number) {
+    return countRunNudges(this.sql, windows, maxWindows);
   }
 
   async createAcpSession(opts: {
@@ -3709,7 +3817,11 @@ export class ProjectData extends DurableObject<Env> {
       const upgradeHeader = request.headers.get('Upgrade');
       if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket')
         return new Response('Expected WebSocket upgrade', { status: 426 });
-      return admitBrowserSocket(this.ctx, this.sql, url);
+      return admitBrowserSocket(this.ctx, this.sql, url, () => {
+        const metrics = emptyMessageIngestMetrics();
+        metrics.toolSealedSessions = 1;
+        this.rowUsage.recordMessageIngest(metrics);
+      });
     }
     return new Response('Not found', { status: 404 });
   }
@@ -4086,7 +4198,8 @@ export class ProjectData extends DurableObject<Env> {
     sourceSessionId: string | null,
     confidence: number,
     scope: import('@simple-agent-manager/shared').PolicyScope = 'always',
-    expiresAt: number | null = null
+    expiresAt: number | null = null,
+    injectMode: import('@simple-agent-manager/shared').PolicyInjectMode = 'pinned'
   ) {
     const result = policies.createPolicy(
       this.sql,
@@ -4098,7 +4211,8 @@ export class ProjectData extends DurableObject<Env> {
       sourceSessionId,
       confidence,
       scope,
-      expiresAt
+      expiresAt,
+      injectMode
     );
     this.broadcastEvent('policy.created', { id: result.id, category, title });
     return result;
@@ -4122,6 +4236,7 @@ export class ProjectData extends DurableObject<Env> {
       confidence?: number;
       scope?: import('@simple-agent-manager/shared').PolicyScope;
       expiresAt?: number | null;
+      injectMode?: import('@simple-agent-manager/shared').PolicyInjectMode;
     }
   ) {
     const result = policies.updatePolicy(this.sql, policyId, updates);

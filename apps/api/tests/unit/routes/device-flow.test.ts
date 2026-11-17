@@ -162,10 +162,20 @@ describe('device flow routes', () => {
 
     const tokenRes = await app.request('/api/auth/device/token', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'CF-Connecting-IP': '203.0.113.7',
+        'X-Forwarded-For': '198.51.100.66',
+      },
       body: JSON.stringify({ deviceCode: code.deviceCode }),
     });
     expect(tokenRes.status).toBe(200);
+    expect(mockCreateSession).toHaveBeenCalledWith(
+      'user-1',
+      false,
+      { ipAddress: '203.0.113.7' },
+      false
+    );
     const tokenBody = await tokenRes.json();
     expect(tokenBody.sessionCookie).toMatch(/better-auth\.session_token=/);
     expect(tokenRes.headers.get('Set-Cookie')).toContain(tokenBody.sessionCookie);

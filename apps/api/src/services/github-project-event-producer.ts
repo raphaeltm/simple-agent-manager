@@ -32,8 +32,8 @@ export type GitHubProjectEventAdmission = {
   projectId: string;
   eventType: string;
   outcome: ProjectEventAdmissionOutcome;
-  eventId: string;
-  state: string;
+  eventId: string | null;
+  state: string | null;
 };
 
 export type AdmitGitHubWebhookProjectEventsResult = {
@@ -54,7 +54,7 @@ export interface AdmitGitHubWebhookProjectEventsInput {
 /**
  * Admit bounded ProjectData events for verified GitHub webhooks that already
  * flow through SAM. This is intentionally independent from GitHub trigger task
- * routing: admission records the project-scoped fact, while delivery matching
+ * routing: admission retains subscribed CI facts and other project facts, while delivery matching
  * and prompt/runtime injection remain owned by the B4 subscription layer.
  */
 export async function admitGitHubWebhookProjectEvents(
@@ -110,8 +110,8 @@ export async function admitGitHubWebhookProjectEvents(
       projectId: project.id,
       eventType: eventInput.eventType,
       outcome: result.outcome,
-      eventId: result.event.id,
-      state: result.event.state,
+      eventId: result.event?.id ?? null,
+      state: result.event?.state ?? null,
     });
   }
 
