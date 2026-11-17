@@ -165,9 +165,9 @@ export class RateLimitError extends AppError {
 
 type RateLimitResult = { allowed: boolean; remaining: number; resetAt: number };
 
-// The table's CHECK (migration 0174) also admits the retired 'session-summarize' bucket;
-// adding a bucket needs a migration that widens it.
-export type AiSpendRateLimitBucket = 'transcribe';
+// Migration 0174 also admits the retired 'session-summarize' bucket. Synthesis uses
+// the additive 0259 table so existing counters/constraints never need rebuilding.
+export type AiSpendRateLimitBucket = 'transcribe' | 'speech-synthesis';
 
 interface AiSpendRateLimitRow {
   count: number;
@@ -175,7 +175,7 @@ interface AiSpendRateLimitRow {
 }
 
 /**
- * Atomically check and update a Workers AI spend rate limit in D1.
+ * Atomically check and update an AI/endpoint spend rate limit in D1.
  *
  * The generic KV helper above is intentionally left for low-stakes buckets; these
  * buckets guard direct Workers AI spend and must not lose increments under parallel
@@ -188,15 +188,19 @@ export async function checkAiSpendRateLimit(
   limit: number,
   windowSeconds: number
 ): Promise<RateLimitResult> {
+  // These internal literals are the only SQL identifiers interpolated below.
+  const table = bucket === 'speech-synthesis'
+    ? 'speech_synthesis_rate_limits'
+    : 'ai_spend_rate_limits';
   const windowStart = getCurrentWindowStart(windowSeconds);
   const row = await db
     .prepare(
-      `INSERT INTO ai_spend_rate_limits (bucket, user_id, window_start, count)
+      `INSERT INTO ${table} (bucket, user_id, window_start, count)
        VALUES (?, ?, ?, 1)
        ON CONFLICT(bucket, user_id) DO UPDATE SET
          count = CASE
-           WHEN ai_spend_rate_limits.window_start = excluded.window_start
-             THEN ai_spend_rate_limits.count + 1
+           WHEN ${table}.window_start = excluded.window_start
+             THEN ${table}.count + 1
            ELSE 1
          END,
          window_start = excluded.window_start
