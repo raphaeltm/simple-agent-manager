@@ -75,7 +75,7 @@ vi.mock('../../src/services/workspace-cleanup', () => ({
 }));
 vi.mock('../../src/services/project-data', () => ({
   recordActivityEvent: vi.fn(async () => undefined),
-  cancelUnissuedSessionPrompts: vi.fn(async () => 0),
+  cancelUnissuedSessionPrompts: vi.fn(async () => ({ matched: true, cancelled: 0 })),
   stopSession: vi.fn(async () => undefined),
   repairFailedSessionForSnapshotRecovery: vi.fn(async () => undefined),
   linkSessionToWorkspace: vi.fn(async () => undefined),
@@ -332,9 +332,9 @@ describe('session recovery stable task identity', () => {
         const prior = new Date(Date.now() + 60_000).toISOString();
         sqlite
           .prepare(
-            "UPDATE tasks SET status = ?, completed_at = ?, workspace_id = NULL WHERE id = 'task-1'"
+            "UPDATE tasks SET status = ?, completed_at = ?, updated_at = ?, workspace_id = NULL WHERE id = 'task-1'"
           )
-          .run(status, prior);
+          .run(status, prior, prior);
         const database = createSqliteD1(sqlite);
         const db = drizzle(database, { schema });
         const batch = database.batch.bind(database);
@@ -352,9 +352,12 @@ describe('session recovery stable task identity', () => {
           ensureSessionRecovery({ DATABASE: database } as Env, 'project-1', 'chat-1')
         ).resolves.toMatchObject({ status: 'unavailable' });
         expect(taskRow(sqlite)).toMatchObject({ status, workspace_id: null });
+        expect(sqlite.prepare("SELECT updated_at FROM tasks WHERE id='task-1'").pluck().get()).toBe(
+          new Date(Date.parse(prior) + 1).toISOString()
+        );
         expect(
           sqlite.prepare("SELECT completed_at FROM tasks WHERE id='task-1'").pluck().get()
-        ).toBe(new Date(Date.parse(prior) + 1).toISOString());
+        ).toBe(prior);
         expect(
           sqlite.prepare('SELECT recovery_attempt_id FROM session_snapshots').pluck().get()
         ).toBeNull();
@@ -382,7 +385,7 @@ describe('session recovery stable task identity', () => {
       vi.mocked(projectDataService.cancelUnissuedSessionPrompts).mockImplementationOnce(
         async () => {
           expect(taskRow(sqlite)).toMatchObject({ status: 'sleeping' });
-          return 1;
+          return { matched: true, cancelled: 1 };
         }
       );
       await cancelTask({ DATABASE: database } as Env, db, task!, 'user-1');

@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { cancelTask } from '../../src/services/cancel-task';
+import * as projectData from '../../src/services/project-data';
 import { versionedPromptCapabilities } from '../helpers/vm-prompt-delivery-fixtures';
 import { seedInstallation, seedProject, seedTask, seedUser } from './helpers/seed-d1';
 
@@ -62,6 +63,50 @@ const accepted = {
 };
 
 describe('task cancellation of unissued deliveries through ProjectData RPC', () => {
+  it('fences the real client stop against a successor binding after exact retirement', async () => {
+    const suffix = crypto.randomUUID(),
+      projectId = `stop-project-${suffix}`,
+      userId = `stop-user-${suffix}`;
+    await seedUser(userId);
+    await seedInstallation(`stop-install-${suffix}`, userId);
+    await seedProject(projectId, userId, `stop-install-${suffix}`);
+    const stub = env.PROJECT_DATA.get(
+      env.PROJECT_DATA.idFromName(projectId)
+    ) as DurableObjectStub<ProjectData>;
+    await stub.ensureProjectId(projectId);
+    const sessionId = await stub.createSession(null, 'Successor binding', 'old-task', userId);
+    expect(await stub.cancelUnissuedSessionPrompts(sessionId, 'old-task')).toEqual({
+      matched: true,
+      cancelled: 0,
+    });
+    // Successor takes the same chat after cancellation proved the old identity.
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        'UPDATE chat_sessions SET task_id=? WHERE id=?',
+        'successor-task',
+        sessionId
+      );
+    });
+    expect(
+      await projectData.stopSession(env as unknown as Env, projectId, sessionId, {
+        guard: { taskId: 'old-task' },
+      })
+    ).toBe(false);
+    expect(await stub.getSession(sessionId)).toMatchObject({
+      taskId: 'successor-task',
+      status: 'active',
+    });
+    expect(
+      await projectData.stopSession(env as unknown as Env, projectId, sessionId, {
+        guard: { taskId: 'successor-task' },
+      })
+    ).toBe(true);
+    expect(await stub.getSession(sessionId)).toMatchObject({
+      taskId: 'successor-task',
+      status: 'stopped',
+    });
+  });
+
   it('invalidates an in-flight preparation before its stale completion can requeue or submit', async () => {
     const f = await fixture();
     await f.accept('old');
@@ -71,7 +116,10 @@ describe('task cancellation of unissued deliveries through ProjectData RPC', () 
     );
     expect(claim.mode).toBe('submit');
     // The awaited RPC is the controlled barrier between claim and completion.
-    expect(await f.stub.cancelUnissuedSessionPrompts(f.session, 'cancel-task')).toBe(1);
+    expect(await f.stub.cancelUnissuedSessionPrompts(f.session, 'cancel-task')).toEqual({
+      matched: true,
+      cancelled: 1,
+    });
     await runInDurableObject(f.stub, (_instance, state) => {
       const sql = state.storage.sql;
       expect(markPromptDeliverySubmitting(sql, claim, capabilities)).toBe(false);
@@ -107,7 +155,10 @@ describe('task cancellation of unissued deliveries through ProjectData RPC', () 
           .one().reason
       ).toBe('task_cancelled');
     });
-    expect(await f.stub.cancelUnissuedSessionPrompts(f.session, 'cancel-task')).toBe(0);
+    expect(await f.stub.cancelUnissuedSessionPrompts(f.session, 'cancel-task')).toEqual({
+      matched: true,
+      cancelled: 0,
+    });
     await f.accept('fresh');
     await runInDurableObject(f.stub, (_instance, state) => {
       const fresh = claimDuePromptDeliveries(state.storage.sql, config, f.now)[0]!;
@@ -135,7 +186,10 @@ describe('task cancellation of unissued deliveries through ProjectData RPC', () 
           submit: async (input) => {
             adapterReached = true;
             // Completion of the cancellation RPC is the explicit preparation barrier.
-            expect(await instance.cancelUnissuedSessionPrompts(f.session, 'cancel-task')).toBe(1);
+            expect(await instance.cancelUnissuedSessionPrompts(f.session, 'cancel-task')).toEqual({
+              matched: true,
+              cancelled: 1,
+            });
             return (await input.beforeSideEffect?.()) ?? accepted;
           },
           reconcile: async () => {
@@ -186,7 +240,10 @@ describe('task cancellation of unissued deliveries through ProjectData RPC', () 
         f.session
       );
     });
-    expect(await f.stub.cancelUnissuedSessionPrompts(f.session, 'cancel-task')).toBe(1);
+    expect(await f.stub.cancelUnissuedSessionPrompts(f.session, 'cancel-task')).toEqual({
+      matched: true,
+      cancelled: 1,
+    });
   });
 
   it('cancels a workspace-less task through the real D1 service, RPC and delivery runner', async () => {
@@ -334,7 +391,10 @@ describe('task cancellation of unissued deliveries through ProjectData RPC', () 
           );
         return current;
       });
-      expect(await f.stub.cancelUnissuedSessionPrompts(f.session, 'cancel-task')).toBe(0);
+      expect(await f.stub.cancelUnissuedSessionPrompts(f.session, 'cancel-task')).toEqual({
+        matched: true,
+        cancelled: 0,
+      });
       await runInDurableObject(f.stub, async (_instance, state) => {
         const reconcile = claimDuePromptDeliveries(
           state.storage.sql,
@@ -411,16 +471,15 @@ describe('task cancellation of unissued deliveries through ProjectData RPC', () 
       );
     });
 
-    const rejected = await runInDurableObject(f.stub, async (instance) => {
-      try {
-        await instance.cancelUnissuedSessionPrompts(f.session, 'different-task');
-        return false;
-      } catch (error) {
-        return error instanceof Error && error.message.includes('binding changed');
-      }
+    expect(await f.stub.cancelUnissuedSessionPrompts(f.session, 'different-task')).toEqual({
+      matched: false,
+      cancelled: 0,
+      reason: 'task_mismatch',
     });
-    expect(rejected).toBe(true);
-    expect(await f.stub.cancelUnissuedSessionPrompts(f.session, 'cancel-task')).toBe(2);
+    expect(await f.stub.cancelUnissuedSessionPrompts(f.session, 'cancel-task')).toEqual({
+      matched: true,
+      cancelled: 2,
+    });
     await runInDurableObject(f.stub, (_instance, state) => {
       expect(
         state.storage.sql

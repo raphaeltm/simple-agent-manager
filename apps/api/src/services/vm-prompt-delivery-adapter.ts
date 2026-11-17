@@ -155,8 +155,6 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
         capabilities,
       };
     }
-    const checkpointFailure = checkpointVmPromptSubmission(input.beforeSubmit, capabilities);
-    if (checkpointFailure) return checkpointFailure;
     try {
       const raw = await sendPromptToAgentOnNode(
         target.nodeId,
@@ -178,6 +176,13 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
           beforeExternalMutation: async () => {
             const denied = await runSideEffectGuard(input);
             if (denied) throw new PromptDeliveryGuardError(denied);
+            // A denied pre-fetch guard proves no send. Persist possible-send only
+            // after that guard succeeds, immediately before transport begins.
+            const checkpointFailure = checkpointVmPromptSubmission(
+              input.beforeSubmit,
+              capabilities
+            );
+            if (checkpointFailure) throw new PromptDeliveryGuardError(checkpointFailure);
           },
         }
       );

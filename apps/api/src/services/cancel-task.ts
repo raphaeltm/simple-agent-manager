@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -8,6 +8,7 @@ import { errors } from '../middleware/error';
 import { setTaskStatus } from '../routes/tasks/_helpers';
 import * as projectDataService from './project-data';
 import { recordTaskLifecycleEventBestEffort } from './project-lifecycle-events';
+import { retireTaskCancellationPrompts } from './task-cancellation-prompts';
 import { taskRecoveryCancellationQuery } from './task-recovery-cancellation';
 import { canTransitionTaskStatus, isTaskStatus } from './task-status';
 import { cleanupTerminalTaskResourcesOrThrow } from './task-terminal-cleanup';
@@ -31,53 +32,37 @@ export async function cancelTask(
     throw errors.conflict('Task cannot be cancelled in its current state');
   // Revoke accepted, unissued deliveries before publishing the terminal D1
   // state: an old delivery must not mistake that state for fresh human intent.
-  const workspaceSession =
-    !task.chatSessionId && task.workspaceId
-      ? await db
-          .select({ chatSessionId: schema.workspaces.chatSessionId })
-          .from(schema.workspaces)
-          .where(
-            and(
-              eq(schema.workspaces.id, task.workspaceId),
-              eq(schema.workspaces.projectId, task.projectId),
-              eq(schema.workspaces.userId, task.userId)
-            )
-          )
-          .get()
-      : null;
-  const chatSessionId = task.chatSessionId ?? workspaceSession?.chatSessionId;
-  if (chatSessionId) {
-    await projectDataService.cancelUnissuedSessionPrompts(
-      env,
-      task.projectId,
-      chatSessionId,
-      task.id
-    );
-  }
+  await retireTaskCancellationPrompts(env, task);
   let updated: schema.Task;
   if (terminal) {
     // A repeated stop is NEW cancellation intent, even when the verdict is
-    // already terminal. Move its terminal fence without changing that verdict
+    // already terminal. Move its row-version fence without changing that verdict
     // or repeating completion events/trigger side effects. A same-ms retry must
-    // also invalidate a wake that observed the previous terminal outcome.
-    const prior = Date.parse(task.completedAt ?? '');
+    // also invalidate a wake that observed the previous row version. Completion time
+    // remains the original UI and cleanup-grace clock.
+    const prior = Date.parse(task.updatedAt);
     const now = new Date(
       Math.max(Date.now(), Number.isFinite(prior) ? prior + 1 : 0)
     ).toISOString();
     const [rows] = await db.batch([
       db
         .update(schema.tasks)
-        .set({ completedAt: now, updatedAt: now })
+        .set({ updatedAt: now })
         .where(
           and(
             eq(schema.tasks.id, task.id),
             eq(schema.tasks.projectId, task.projectId),
             eq(schema.tasks.status, task.status),
-            sql`${schema.tasks.completedAt} IS ${task.completedAt}`
+            eq(schema.tasks.updatedAt, task.updatedAt)
           )
         )
         .returning(),
-      taskRecoveryCancellationQuery(db, task, now),
+      taskRecoveryCancellationQuery(
+        db,
+        task,
+        now,
+        task.status as 'completed' | 'failed' | 'cancelled'
+      ),
     ]);
     if (!rows[0]) throw errors.conflict('Task changed before cancellation; retry the stop');
     updated = rows[0];

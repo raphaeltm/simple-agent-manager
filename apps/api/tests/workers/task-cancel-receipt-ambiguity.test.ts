@@ -7,11 +7,29 @@ import {
   claimDuePromptDeliveries,
   markPromptDeliverySubmitting,
 } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import { quarantineUncertainPromptRetries } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-cancellation';
 import { runPromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-runner';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { Env } from '../../src/env';
+import * as nodeAgent from '../../src/services/node-agent';
+import { DefaultVmPromptDeliveryAdapter } from '../../src/services/vm-prompt-delivery-adapter';
+import * as runtimeQueries from '../../src/services/vm-prompt-delivery-runtime-queries';
 import { versionedPromptCapabilities } from '../helpers/vm-prompt-delivery-fixtures';
+import {
+  type ChannelReceipt,
+  okBody,
+  twoAgentProject,
+  withAgentMessageChannels,
+} from './helpers/agent-message-channels';
+import {
+  materialize,
+  onlyWake,
+  wakeBatches,
+  wakeDueAt,
+  withQuietAlarms,
+} from './helpers/event-wake-harness';
 
 const config = resolveDurableExecutionConfig({});
 const capabilities = versionedPromptCapabilities('uncertain-cancel-runtime');
@@ -58,9 +76,89 @@ const hooks = {
   scheduleSummarySync: () => {},
 };
 
+/** Real adapter and runner; the controlled node transport owns the pre-fetch/after-fetch barrier. */
+function actualAdapter(
+  f: Awaited<ReturnType<typeof fixture>>,
+  beforeFetch: () => void,
+  afterFetch: () => void
+) {
+  let sends = 0;
+  const probe = vi.spyOn(runtimeQueries, 'getDeliveryCapabilities').mockResolvedValue(capabilities);
+  const send = vi
+    .spyOn(nodeAgent, 'sendPromptToAgentOnNode')
+    .mockImplementation(async (...args) => {
+      beforeFetch();
+      await args[7]?.beforeExternalMutation?.();
+      sends++;
+      afterFetch();
+      throw new Error('Injected lost prompt response after fetch');
+    });
+  const real = new DefaultVmPromptDeliveryAdapter(env as unknown as Env);
+  return {
+    adapter: {
+      submit: (input: Parameters<typeof real.submit>[0]) =>
+        real.submit({
+          ...input,
+          resolvedTarget: {
+            projectId: hooks.projectId,
+            chatSessionId: f.sessionId,
+            workspaceId: 'workspace',
+            nodeId: 'node',
+            agentSessionId: 'acp',
+            userId: 'owner',
+            runtimeIdentity: capabilities.runtimeIdentity,
+            runtime: 'vm',
+          },
+        }),
+      reconcile: (input: Parameters<typeof real.reconcile>[0]) => real.reconcile(input),
+    },
+    sends: () => sends,
+    restore: () => {
+      send.mockRestore();
+      probe.mockRestore();
+    },
+  };
+}
+
 describe('cancellation does not erase possible-send receipt evidence', () => {
-  it.each(['preparing', 'submitting'] as const)(
-    'handles an actual source guard read failure in %s phase',
+  it.each(['missing', 'task_unbound'] as const)(
+    'returns a typed %s miss without changing queued prompts',
+    async (reason) => {
+      const f = await fixture();
+      await runInDurableObject(f.stub, (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE session_inbox SET delivery_state='queued',attempt_id=NULL,attempt_started_at=NULL"
+        );
+      });
+      if (reason === 'task_unbound')
+        await runInDurableObject(f.stub, (_instance, state) => {
+          state.storage.sql.exec('UPDATE chat_sessions SET task_id=NULL WHERE id=?', f.sessionId);
+        });
+      expect(
+        await f.stub.cancelUnissuedSessionPrompts(
+          reason === 'missing' ? 'absent-session' : f.sessionId,
+          'task'
+        )
+      ).toEqual({ matched: false, cancelled: 0, reason });
+      await runInDurableObject(f.stub, (_instance, state) => {
+        expect(
+          state.storage.sql
+            .exec("SELECT delivery_state,terminal_reason FROM session_inbox WHERE id='delivery'")
+            .one()
+        ).toMatchObject({ delivery_state: 'queued', terminal_reason: null });
+        expect(
+          state.storage.sql
+            .exec(
+              "SELECT json_extract(tool_metadata,'$.deliveryCancelled') AS cancelled FROM chat_messages"
+            )
+            .one().cancelled
+        ).toBeNull();
+      });
+    }
+  );
+
+  it.each(['before_fetch', 'after_fetch'] as const)(
+    'classifies actual adapter authority read failure %s truthfully',
     async (phase) => {
       const f = await fixture('checkpoint_continuation');
       await runInDurableObject(f.stub, async (_instance, state) => {
@@ -71,61 +169,58 @@ describe('cancellation does not erase possible-send receipt evidence', () => {
             if (failRead) throw new Error('Injected authority read unavailable');
             return true;
           });
+        const transport = actualAdapter(
+          f,
+          () => {
+            if (phase === 'before_fetch') failRead = true;
+          },
+          () => {
+            failRead = true;
+          }
+        );
         try {
           const result = await runPromptDeliveryClaim(
             state.storage.sql,
             env,
             config,
             f.claim,
-            {
-              submit: async (input) => {
-                if (phase === 'submitting') expect(input.beforeSubmit?.(capabilities)).toBe(true);
-                failRead = true;
-                const denied = await input.beforeSideEffect?.();
-                expect(denied).not.toBeNull();
-                return denied!;
-              },
-              reconcile: async () => {
-                throw new Error('Unexpected receipt lookup');
-              },
-            },
+            transport.adapter,
             hooks
           );
           expect(sourceGuard).toHaveBeenCalled();
+          expect(transport.sends()).toBe(phase === 'before_fetch' ? 0 : 1);
           expect(result).toMatchObject(
-            phase === 'submitting'
-              ? {
+            phase === 'before_fetch'
+              ? { kind: 'retry', reason: 'not_ready' }
+              : {
                   kind: 'ambiguous',
                   reason: 'receipt_unavailable',
                   runtimeIdentity: capabilities.runtimeIdentity,
                 }
-              : { kind: 'retry', reason: 'not_ready' }
           );
           expect(
             state.storage.sql
-              .exec('SELECT delivery_state,runtime_identity,receipt_supported FROM session_inbox')
+              .exec('SELECT delivery_state,prompt_delivery_phase FROM session_inbox')
               .one()
           ).toMatchObject(
-            phase === 'submitting'
-              ? {
-                  delivery_state: 'ambiguous',
-                  runtime_identity: capabilities.runtimeIdentity,
-                  receipt_supported: 1,
-                }
-              : { delivery_state: 'retry_wait' }
+            phase === 'before_fetch'
+              ? { delivery_state: 'retry_wait', prompt_delivery_phase: 'preparing' }
+              : { delivery_state: 'ambiguous', prompt_delivery_phase: 'submitting' }
           );
         } finally {
+          transport.restore();
           sourceGuard.mockRestore();
         }
       });
-      expect(await f.stub.cancelUnissuedSessionPrompts(f.sessionId, 'task')).toBe(
-        phase === 'preparing' ? 1 : 0
-      );
+      expect(await f.stub.cancelUnissuedSessionPrompts(f.sessionId, 'task')).toEqual({
+        matched: true,
+        cancelled: phase === 'before_fetch' ? 1 : 0,
+      });
     }
   );
 
-  it.each(['preparing', 'submitting'] as const)(
-    'preserves truthful sender revocation facts in %s phase',
+  it.each(['before_fetch', 'after_fetch'] as const)(
+    'preserves truthful sender revocation facts in actual adapter %s',
     async (phase) => {
       const f = await fixture('user_followup', 'grantee');
       const grant = await f.stub.createSessionAccessGrant({
@@ -137,56 +232,130 @@ describe('cancellation does not erase possible-send receipt evidence', () => {
       });
       expect(grant.result.status).toBe('created');
       await runInDurableObject(f.stub, async (instance, state) => {
-        let transportCalled = false;
-        const result = await runPromptDeliveryClaim(
-          state.storage.sql,
-          env,
-          config,
-          f.claim,
-          {
-            submit: async (input) => {
-              if (phase === 'submitting') expect(input.beforeSubmit?.(capabilities)).toBe(true);
-              const revoked = instance.revokeSessionAccessGrant({
-                sessionId: f.sessionId,
-                granteeUserId: 'grantee',
-                actorUserId: 'owner',
+        const revoke = () => {
+          expect(
+            instance.revokeSessionAccessGrant({
+              sessionId: f.sessionId,
+              granteeUserId: 'grantee',
+              actorUserId: 'owner',
+            }).result.status
+          ).toBe('revoked');
+        };
+        const transport = actualAdapter(
+          f,
+          () => {
+            if (phase === 'before_fetch') revoke();
+          },
+          () => {
+            revoke();
+          }
+        );
+        try {
+          const result = await runPromptDeliveryClaim(
+            state.storage.sql,
+            env,
+            config,
+            f.claim,
+            transport.adapter,
+            hooks
+          );
+          expect(transport.sends()).toBe(phase === 'before_fetch' ? 0 : 1);
+          expect(result.kind).toBe(phase === 'before_fetch' ? 'failed' : 'ambiguous');
+          const marker = state.storage.sql
+            .exec(
+              "SELECT json_extract(tool_metadata,'$.deliveryCancelled') AS reason FROM chat_messages"
+            )
+            .one().reason;
+          expect(marker).toBe(phase === 'before_fetch' ? 'sender_access_revoked' : null);
+        } finally {
+          transport.restore();
+        }
+      });
+    }
+  );
+
+  it.each(['queued', 'uncertain_retry'] as const)(
+    'retires a %s event wake through the durable batch checkpoint and frees its target',
+    async (phase) => {
+      const f = await twoAgentProject();
+      await withAgentMessageChannels(async () => {
+        okBody<ChannelReceipt>(
+          await f.b.tool('send_durable_message', {
+            targetTaskId: f.a.taskId,
+            message: 'Old queued wake',
+            messageClass: 'deliver',
+          })
+        );
+        await withQuietAlarms(f, async () => {
+          const now = Date.now();
+          expect(await materialize(f, now)).toMatchObject({
+            status: 'materialized',
+            materialized: 1,
+          });
+          const old = await onlyWake(f, f.a.sessionId);
+          expect(old.state).toBe('pending');
+          if (phase === 'uncertain_retry')
+            await runInDurableObject(f.stub, (_instance, state) => {
+              const claim = claimDuePromptDeliveries(state.storage.sql, config, now)[0]!;
+              expect(markPromptDeliverySubmitting(state.storage.sql, claim, capabilities)).toBe(
+                true
+              );
+              state.storage.sql.exec(
+                "UPDATE session_inbox SET delivery_state='retry_wait' WHERE id=?",
+                old.id
+              );
+            });
+          expect(await f.stub.cancelUnissuedSessionPrompts(f.a.sessionId, f.a.taskId)).toEqual({
+            matched: true,
+            cancelled: phase === 'queued' ? 1 : 0,
+          });
+          if (phase === 'uncertain_retry')
+            await runInDurableObject(f.stub, (_instance, state) => {
+              expect(
+                state.storage.sql
+                  .exec(
+                    'SELECT delivery_state,runtime_identity,terminal_reason FROM session_inbox WHERE id=?',
+                    old.id
+                  )
+                  .one()
+              ).toMatchObject({
+                delivery_state: 'ambiguous',
+                runtime_identity: capabilities.runtimeIdentity,
+                terminal_reason: 'receipt_unavailable',
               });
-              expect(revoked.result.status).toBe('revoked');
-              const denied = await input.beforeSideEffect?.();
-              if (!denied) transportCalled = true;
-              return (
-                denied ?? {
-                  kind: 'retry',
-                  reason: 'not_ready',
-                  error: 'Unexpected send allowed',
-                  runtimeIdentity: null,
-                  capabilities: null,
-                }
+            });
+          expect(await wakeBatches(f, f.a.sessionId)).toEqual([
+            expect.objectContaining({
+              id: old.id,
+              state: phase === 'queued' ? 'failed' : 'ambiguous',
+            }),
+          ]);
+          await withAgentMessageChannels(
+            async () => {
+              okBody<ChannelReceipt>(
+                await f.b.tool('send_durable_message', {
+                  targetTaskId: f.a.taskId,
+                  message: 'Fresh independent wake',
+                  messageClass: 'deliver',
+                })
               );
             },
-            reconcile: async () => {
-              throw new Error('Unexpected reconcile');
-            },
-          },
-          hooks
-        );
-        expect(transportCalled).toBe(false);
-        expect(result.kind).toBe(phase === 'submitting' ? 'ambiguous' : 'failed');
-        const marker = state.storage.sql
-          .exec(
-            "SELECT json_extract(tool_metadata,'$.deliveryCancelled') AS reason FROM chat_messages"
-          )
-          .one().reason;
-        expect(marker).toBe(phase === 'submitting' ? null : 'sender_access_revoked');
-        if (phase === 'submitting')
-          expect(
-            state.storage.sql
-              .exec('SELECT delivery_state,runtime_identity FROM session_inbox')
-              .one()
-          ).toMatchObject({
-            delivery_state: 'ambiguous',
-            runtime_identity: capabilities.runtimeIdentity,
+            { DURABLE_PROMPT_DELIVERY_ENABLED: 'true' }
+          );
+          const due = await wakeDueAt(f, now + 31_000);
+          expect(due).not.toBeNull();
+          expect(await materialize(f, Math.max(due!, now + 31_000))).toMatchObject({
+            status: 'materialized',
+            materialized: 1,
           });
+          expect(await wakeBatches(f, f.a.sessionId)).toEqual([
+            expect.objectContaining({
+              id: old.id,
+              state: phase === 'queued' ? 'failed' : 'ambiguous',
+            }),
+            expect.objectContaining({ state: 'pending' }),
+          ]);
+        });
       });
     }
   );
@@ -238,8 +407,27 @@ describe('cancellation does not erase possible-send receipt evidence', () => {
           "UPDATE session_inbox SET delivery_state='retry_wait',prompt_delivery_phase=?",
           phase
         );
+        const sql = state.storage.sql;
+        // Sender-scoped revocation cannot quarantine another person's uncertain send.
+        quarantineUncertainPromptRetries(sql, f.sessionId, {
+          userIds: ['other'],
+          humanSources: ['user_followup'],
+        });
+        expect(sql.exec('SELECT delivery_state FROM session_inbox').one().delivery_state).toBe(
+          'retry_wait'
+        );
+        quarantineUncertainPromptRetries(sql, f.sessionId, {
+          userIds: ['owner'],
+          humanSources: ['user_followup'],
+        });
+        expect(sql.exec('SELECT delivery_state FROM session_inbox').one().delivery_state).toBe(
+          'ambiguous'
+        );
       });
-      expect(await f.stub.cancelUnissuedSessionPrompts(f.sessionId, 'task')).toBe(0);
+      expect(await f.stub.cancelUnissuedSessionPrompts(f.sessionId, 'task')).toEqual({
+        matched: true,
+        cancelled: 0,
+      });
       await runInDurableObject(f.stub, (_instance, state) => {
         const row = state.storage.sql
           .exec(
@@ -295,7 +483,10 @@ describe('cancellation does not erase possible-send receipt evidence', () => {
             .one()
         ).toMatchObject({ delivery_state: 'retry_wait', prompt_delivery_phase: 'preparing' });
       });
-      expect(await f.stub.cancelUnissuedSessionPrompts(f.sessionId, 'task')).toBe(1);
+      expect(await f.stub.cancelUnissuedSessionPrompts(f.sessionId, 'task')).toEqual({
+        matched: true,
+        cancelled: 1,
+      });
     }
   );
 });

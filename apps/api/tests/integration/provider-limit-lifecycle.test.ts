@@ -247,6 +247,35 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
     );
   }
 
+  it('retires accepted prompts before a public VM cancellation callback publishes terminal state', async () => {
+    d1.prepare(
+      `UPDATE session_snapshots SET recovery_status='waking', recovery_task_id=?,
+      recovery_attempt_id='callback-cancel-attempt' WHERE chat_session_id=?`
+    ).run(TASK, CHAT);
+    const retire = mocks.cancelUnissuedSessionPrompts.mockImplementationOnce(async () => {
+      expect(d1.prepare('SELECT status FROM tasks WHERE id=?').pluck().get(TASK)).toBe(
+        'in_progress'
+      );
+      expect(
+        d1
+          .prepare('SELECT recovery_attempt_id FROM session_snapshots WHERE chat_session_id=?')
+          .pluck()
+          .get(CHAT)
+      ).toBe('callback-cancel-attempt');
+      return { matched: true, cancelled: 1 };
+    });
+    const response = await callback({ toStatus: 'cancelled', reason: 'VM observed cancellation' });
+    expect(response.status, await response.text()).toBe(200);
+    expect(retire).toHaveBeenCalledWith(env, PROJECT, CHAT, TASK);
+    expect(d1.prepare('SELECT status FROM tasks WHERE id=?').pluck().get(TASK)).toBe('cancelled');
+    expect(
+      d1
+        .prepare('SELECT recovery_attempt_id FROM session_snapshots WHERE chat_session_id=?')
+        .pluck()
+        .get(CHAT)
+    ).toBeNull();
+  });
+
   /** Distinct rejected prompts, each after the previous wait's retry time (4 exhaust the budget). */
   async function rejectDistinctIncidents(agentPrefix: string, afterEach?: () => void) {
     for (let incident = 0; incident < 4; incident++) {
@@ -582,8 +611,12 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
           path.includes('capabilities') ? capabilities : acceptedReceipt
         );
         mocks.sendPrompt.mockImplementation(async (...args: unknown[]) => {
+          const opts = args[7] as {
+            deliveryId: string;
+            beforeExternalMutation?: () => Promise<void>;
+          };
+          await opts.beforeExternalMutation?.();
           if (missingReceipt) return { status: 'accepted', sessionId: 'agent-1' };
-          const opts = args[7] as { deliveryId: string };
           if (staleGeneration)
             d1.prepare(
               "UPDATE agent_sessions SET agent_credential_generation=2 WHERE id='agent-1'"

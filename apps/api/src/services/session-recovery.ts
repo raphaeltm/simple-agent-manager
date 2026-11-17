@@ -86,6 +86,8 @@ export async function reactivateSleepingTask(
     // D1 batches are transactional. The task update is the parent-state
     // compare-and-set: if an automated wake has terminalized or no longer owns this
     // conversation when the transaction begins, every later statement is a no-op.
+    // The observed row version also fences repeated stops of terminal tasks.
+    // A fresh human follow-up reads the newer version and can still resume.
     // A fresh human follow-up may reactivate an observed terminal outcome, but
     // cannot overwrite cancellation that landed while placement was awaited.
     const results = await database.batch([
@@ -109,7 +111,7 @@ export async function reactivateSleepingTask(
                   updated_at = ?
             WHERE id = ?
               AND project_id = ?
-              AND status = ? AND completed_at IS ?
+              AND status = ? AND updated_at IS ?
               AND (? = 0 OR status NOT IN ('completed', 'failed', 'cancelled'))
               ${sleepingRepair ? "AND status = 'sleeping' AND workspace_id IS ?" : ''}
               ${approvalFence.sql}
@@ -135,7 +137,7 @@ export async function reactivateSleepingTask(
           taskId,
           context.project.id,
           context.sourceTask?.status ?? existing.status,
-          context.sourceTask ? context.sourceTask.completedAt : existing.completedAt,
+          context.sourceTask?.updatedAt ?? existing.updatedAt,
           sourceTaskGuard ? 1 : 0,
           ...(sleepingRepair ? [sleepingRepair.workspaceId] : []),
           ...approvalFence.params,
