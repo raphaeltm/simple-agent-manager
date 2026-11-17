@@ -55,6 +55,7 @@ import {
   SANDBOX_PERMANENT_STARTUP_MESSAGE,
   type SetupSessionStatus,
 } from '../../services/credential-setup-config';
+import { persistError } from '../../services/observability-errors';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import { getSandboxConfig, getSandboxInstance, shellQuote } from '../../services/sandbox';
 import { CredentialValidator } from '../../services/validation';
@@ -646,6 +647,12 @@ export class CredentialSetupSession extends DurableObject<Env> {
       await inline;
       return;
     }
+    // cap + 1 is a durable quarantine marker. Keep cleanup_pending=1 as evidence
+    // that teardown is unresolved, but never restart work or repeat the alert.
+    if ((row.cleanup_attempts ?? 0) > DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS) {
+      await this.deleteAlarmBestEffort();
+      return;
+    }
     const attempts = (row.cleanup_attempts ?? 0) + 1;
     if (attempts > DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS) {
       log.error('credential_setup.cleanup_abandoned', {
@@ -654,8 +661,24 @@ export class CredentialSetupSession extends DurableObject<Env> {
         cleanupFromStatus: row.cleanup_from_status,
         attempts: row.cleanup_attempts,
       });
-      this.sql.exec(`UPDATE setup_session SET cleanup_pending = 0 WHERE id = ?`, row.id);
+      this.sql.exec(`UPDATE setup_session SET cleanup_attempts = ? WHERE id = ?`, attempts, row.id);
       await this.deleteAlarmBestEffort();
+      // Persist a safe operator-visible error; no credential material or captured
+      // sandbox error text belongs in the alert. Pool leases independently expire
+      // on admission, while this row preserves the unresolved cleanup obligation.
+      if (this.env.OBSERVABILITY_DATABASE) {
+        await persistError(
+          this.env.OBSERVABILITY_DATABASE,
+          {
+            source: 'api',
+            level: 'error',
+            message: 'credential_setup.cleanup_abandoned',
+            sessionId: row.id,
+            context: { status: row.status, cleanupFromStatus: row.cleanup_from_status, attempts },
+          },
+          this.env
+        );
+      }
       return;
     }
     this.sql.exec(`UPDATE setup_session SET cleanup_attempts = ? WHERE id = ?`, attempts, row.id);
@@ -676,7 +699,12 @@ export class CredentialSetupSession extends DurableObject<Env> {
 
   private runCleanup(row: SetupSessionRow, resumed: boolean): Promise<void> {
     return runSetupSessionCleanup(
-      { env: this.env, sql: this.sql, deleteAlarm: () => this.deleteAlarmBestEffort() },
+      {
+        env: this.env,
+        sql: this.sql,
+        deleteAlarm: () => this.deleteAlarmBestEffort(),
+        rearmAlarm: () => this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms),
+      },
       row,
       resumed
     );
@@ -746,7 +774,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
     id: string,
     status: SetupSessionStatus,
     extra?: SetupSessionD1Extra
-  ): Promise<void> {
+  ): Promise<boolean> {
     return updateSetupSessionD1Status(this.env, id, status, extra);
   }
 }

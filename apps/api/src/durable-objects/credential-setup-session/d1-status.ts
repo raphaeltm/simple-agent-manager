@@ -25,7 +25,7 @@ export async function updateSetupSessionD1Status(
   id: string,
   status: SetupSessionStatus,
   extra?: SetupSessionD1Extra
-): Promise<void> {
+): Promise<boolean> {
   const now = new Date().toISOString();
   const set = ['status = ?', 'updated_at = ?'];
   const binds: unknown[] = [status, now];
@@ -57,11 +57,13 @@ export async function updateSetupSessionD1Status(
     )
       .bind(...binds)
       .run();
+    return true;
   } catch (err) {
     log.warn('credential_setup.d1_update_failed', {
       sessionId: id,
       status,
       error: err instanceof Error ? err.message : String(err),
     });
+    return false;
   }
 }

@@ -26,11 +26,11 @@ export const DEFAULT_CLAUDE_VERIFICATION_CODE_MAX_LENGTH = 1_024;
 export const DEFAULT_CLAUDE_SETUP_ERROR_DETAIL_MAX_LENGTH = 160;
 export const DEFAULT_CLAUDE_OAUTH_TOKEN_MAX_LENGTH = 8_192;
 /**
- * Alarm-driven re-runs of a teardown cleanup that an isolate death interrupted, before
- * giving up. Every cleanup step is best-effort and catches its own errors, so a run only
- * fails to finish when the isolate dies; three deaths in a row means retrying is not
- * helping. A crash-loop circuit breaker, not an operator setting: the retry spacing is
- * the session's capture poll interval (`SETUP_SESSION_CAPTURE_POLL_MS`).
+ * Alarm-driven re-runs of interrupted or failed teardown cleanup before quarantine.
+ * The unresolved marker remains after this cap and an operator-visible error is
+ * persisted; no further alarms are armed. A crash-loop circuit breaker, not an
+ * operator setting: retry spacing is the session's capture poll interval
+ * (`SETUP_SESSION_CAPTURE_POLL_MS`).
  */
 export const DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS = 3;
 /**

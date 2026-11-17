@@ -29,6 +29,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import ts from 'typescript';
+
 export const DO_MIGRATION_FILES = [
   resolve(
     import.meta.dirname,
@@ -88,64 +90,44 @@ const ALLOWLISTED_VIOLATIONS = new Set<string>([]);
  * Rule 31 calls this gate one that "cannot be bypassed", so a quoting style must
  * never be able to bypass it.
  *
- * The file is tokenized in one left-to-right pass that skips `//` and `/* *\/`
- * comments, rather than matching each quote style with its own regex over the whole
- * file. Per-style regexes pair delimiters globally, so a single apostrophe in a
- * comment (`teardown's`) shifted every later single-quoted string out of phase and
- * a `sql.exec('DROP TABLE ...')` after it reported PASS.
+ * Use TypeScript's parser so regex literals cannot masquerade as comments or
+ * strings. Retain raw string bodies (including template interpolations) and
+ * source line numbers for the existing SQL checks and diagnostics.
  */
 export function extractSqlFromTypeScript(
   content: string
 ): { sql: string; lineStart: number }[] {
   const results: { sql: string; lineStart: number }[] = [];
   const SQL_KEYWORDS = /\b(CREATE|DROP|DELETE|INSERT|UPDATE|ALTER|TRUNCATE|SELECT)\b/i;
-  let line = 1;
-  let i = 0;
-  while (i < content.length) {
-    const char = content[i];
-    const next = content[i + 1];
-    if (char === '/' && next === '/') {
-      const end = content.indexOf('\n', i);
-      i = end === -1 ? content.length : end; // the newline itself is counted below
-      continue;
-    }
-    if (char === '/' && next === '*') {
-      const end = content.indexOf('*/', i + 2);
-      const stop = end === -1 ? content.length : end + 2;
-      for (let k = i; k < stop; k++) if (content[k] === '\n') line++;
-      i = stop;
-      continue;
-    }
-    if (char === "'" || char === '"' || char === '`') {
-      const lineStart = line;
-      let body = '';
-      let j = i + 1;
-      while (j < content.length && content[j] !== char) {
-        if (content[j] === '\\') {
-          body += content[j] + (content[j + 1] ?? '');
-          if (content[j + 1] === '\n') line++;
-          j += 2;
-          continue;
-        }
-        // A newline ends an unterminated '...' or "..." (not a string after all).
-        if (content[j] === '\n') {
-          if (char !== '`') break;
-          line++;
-        }
-        body += content[j];
-        j++;
+  const source = ts.createSourceFile(
+    'migration.ts',
+    content,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS
+  );
+  function visit(node: ts.Node): void {
+    if (
+      ts.isStringLiteral(node) ||
+      ts.isNoSubstitutionTemplateLiteral(node) ||
+      ts.isTemplateExpression(node)
+    ) {
+      const start = node.getStart(source);
+      const sql = content.slice(start + 1, node.end - 1);
+      if (SQL_KEYWORDS.test(sql)) {
+        results.push({
+          sql,
+          lineStart: source.getLineAndCharacterOfPosition(start).line + 1,
+        });
       }
-      if (SQL_KEYWORDS.test(body)) results.push({ sql: body, lineStart });
-      i = j < content.length && content[j] === char ? j + 1 : j;
-      continue;
     }
-    if (char === '\n') line++;
-    i++;
+    ts.forEachChild(node, visit);
   }
+  visit(source);
   return results;
 }
 
-function scanDoMigrations(filePath: string): Violation[] {
+export function scanDoMigrations(filePath: string): Violation[] {
   const violations: Violation[] = [];
   const content = readFileSync(filePath, 'utf-8');
   const basename = filePath.split('/').pop() ?? filePath;

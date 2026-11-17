@@ -6,12 +6,15 @@
  */
 
 import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { extractSqlFromTypeScript } from './check-do-migration-safety';
+import {
+  extractSqlFromTypeScript,
+  scanDoMigrations,
+} from './check-do-migration-safety';
 
 /**
  * The extractor is what decides whether the danger checks get to see a statement
@@ -89,6 +92,14 @@ describe('DO migration safety — comments cannot shift string pairing', () => {
     expect(found.find((r) => r.sql.startsWith('DROP'))?.lineStart).toBe(3);
   });
 
+  it('still sees same-line SQL after URL and quote-containing regex literals', () => {
+    const content = String.raw`const url = /https?:\/\//; const quote = /['"\x60]/; sql.exec('DROP TABLE device_auth_details');`;
+    expect(extractSqlFromTypeScript(content)).toContainEqual({
+      sql: 'DROP TABLE device_auth_details',
+      lineStart: 1,
+    });
+  });
+
   it('does not scan prose in comments, and keeps // inside strings', () => {
     const content = [
       `// DROP TABLE in a comment is documentation, not a statement`,
@@ -103,6 +114,27 @@ describe('DO migration safety — comments cannot shift string pairing', () => {
 });
 
 describe('DO migration safety check', () => {
+  it('reports a destructive statement after a regex through the actual safety gate', () => {
+    const scratch = join(import.meta.dirname, '../../.tmp');
+    mkdirSync(scratch, { recursive: true });
+    const dir = mkdtempSync(join(scratch, 'do-migration-regex-'));
+    const file = join(dir, 'migration.ts');
+    try {
+      writeFileSync(
+        file,
+        String.raw`const url = /https?:\/\//; sql.exec('DROP TABLE device_auth_details');`
+      );
+      expect(scanDoMigrations(file)).toMatchObject([
+        {
+          file: 'migration.ts',
+          line: 1,
+          pattern: 'DROP TABLE in DO migration',
+        },
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it('passes on the current codebase DO migrations', () => {
     const result = execSync(
       'npx tsx scripts/quality/check-do-migration-safety.ts',
@@ -113,7 +145,7 @@ describe('DO migration safety check', () => {
       }
     );
     expect(result).toContain('DO migration safety check passed');
-  });
+  }, 30_000);
 
   it('reports on all scanned migration files', () => {
     const result = execSync(
@@ -129,7 +161,7 @@ describe('DO migration safety check', () => {
     // A missing file only logs SKIPPED, so pin that the setup-session DDL is scanned.
     expect(result).toContain('schema.ts: PASS');
     expect(result).not.toContain('SKIPPED');
-  });
+  }, 30_000);
 });
 
 describe('DO migration safety — current migrations are non-destructive', () => {
