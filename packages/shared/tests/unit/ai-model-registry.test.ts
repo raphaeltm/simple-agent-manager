@@ -43,6 +43,19 @@ describe('AI Model Registry', () => {
       expect(DEFAULT_AI_PROXY_ALLOWED_MODELS.split(',')).toContain('gpt-6.1-terra');
     });
 
+    it('registers the SAM DeepSeek default with published pricing and tool support', () => {
+      expect(DEFAULT_SAM_MODEL).toBe('@cf/deepseek-ai/deepseek-v4.1-flash-1017');
+      expect(PLATFORM_AI_MODELS.find((model) => model.id === DEFAULT_SAM_MODEL)).toMatchObject({
+        provider: 'workers-ai',
+        costPer1kInputTokens: 0.0003,
+        costPer1kCachedInputTokens: 0.000006,
+        costPer1kOutputTokens: 0.0012,
+        contextWindow: 1048576,
+        toolCallSupport: 'good',
+      });
+      expect(DEFAULT_AI_PROXY_ALLOWED_MODELS.split(',')).toContain(DEFAULT_SAM_MODEL);
+    });
+
     it('has unique model IDs', () => {
       const ids = PLATFORM_AI_MODELS.map((m) => m.id);
       expect(new Set(ids).size).toBe(ids.length);

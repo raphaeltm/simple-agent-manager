@@ -18,7 +18,7 @@ type History = {
   nextCursor: string | null;
 };
 
-const MODEL = '@cf/google/gemma-4-26b-a4b-it';
+const MODEL = '@cf/deepseek-ai/deepseek-v4.1-flash-1017';
 const modelRequests: Array<{ url: string; body: Record<string, unknown>; headers: Headers }> = [];
 const http = vi.fn<typeof fetch>();
 let modelDelay: Promise<void> | null = null;
@@ -47,7 +47,8 @@ async function setup(enabled = true) {
   testStubs.push(stub);
   await stub.testEnvironment({
     SAM_RATE_LIMIT_RPM: '30',
-    SAM_MODEL: MODEL,
+    // The test-only env object is shared: clear any previous case's model override.
+    SAM_MODEL: '',
   });
   const request = (path: string, method = 'GET', body?: unknown, asUser = userId) =>
     stub.fetch(`https://sam-session${path}`, {
@@ -177,6 +178,7 @@ describe('SamSession durable operator in workerd', () => {
     expect(modelRequests).toHaveLength(1);
     expect(modelRequests[0]?.url).toContain('/workers-ai/v1/chat/completions');
     expect(modelRequests[0]?.body.model).toBe(MODEL);
+    expect(modelRequests[0]?.body.reasoning_effort).toBe('low');
     expect(modelRequests[0]?.headers.get('cf-aig-metadata')).toContain(accepted.turn.id);
     const date = new Date().toISOString().slice(0, 10);
     expect(await env.KV.get(`ai-budget:${userId}:${date}`, 'json')).toEqual({
@@ -272,6 +274,10 @@ describe('SamSession durable operator in workerd', () => {
       response: 'Hello from the actual Mastra runtime',
     });
     expect(modelRequests).toHaveLength(2);
+    for (const request of modelRequests) {
+      expect(request.body.model).toBe(MODEL);
+      expect(request.body.reasoning_effort).toBe('low');
+    }
     expect(modelRequests[0]?.body.tools).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

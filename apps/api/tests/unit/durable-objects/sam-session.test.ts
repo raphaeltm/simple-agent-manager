@@ -89,7 +89,7 @@ vi.mock('../../../src/services/platform-credentials', () => ({
 
 describe('SAM Constants and Config', () => {
   it('has correct default values', () => {
-    expect(DEFAULT_SAM_MODEL).toBe('claude-sonnet-5');
+    expect(DEFAULT_SAM_MODEL).toBe('@cf/deepseek-ai/deepseek-v4.1-flash-1017');
     expect(DEFAULT_SAM_MAX_TOKENS).toBe(4096);
     expect(DEFAULT_SAM_MAX_TURNS).toBe(20);
     expect(DEFAULT_SAM_RATE_LIMIT_RPM).toBe(30);
@@ -564,7 +564,7 @@ describe('Agent Loop — Anthropic Streaming', () => {
     const { writer, events } = createCollectingWriter();
     const persisted: Array<{ role: string; content: string }> = [];
 
-    const config = resolveSamConfig({});
+    const config = resolveSamConfig({ SAM_MODEL: 'claude-sonnet-5' });
     const mockEnv = {
       DATABASE: {},
       AI_GATEWAY_ID: '',
@@ -649,7 +649,7 @@ describe('Agent Loop — Anthropic Streaming', () => {
     const { writer, events } = createCollectingWriter();
     const persisted: Array<{ role: string; content: string }> = [];
 
-    const config = resolveSamConfig({});
+    const config = resolveSamConfig({ SAM_MODEL: 'claude-sonnet-5' });
     const mockEnv = {
       DATABASE: {},
       AI_GATEWAY_ID: '',
@@ -701,7 +701,7 @@ describe('Agent Loop — Anthropic Streaming', () => {
 
     const { writer, events } = createCollectingWriter();
 
-    const config = resolveSamConfig({});
+    const config = resolveSamConfig({ SAM_MODEL: 'claude-sonnet-5' });
     const mockEnv = {
       DATABASE: {},
       AI_GATEWAY_ID: '',
@@ -750,7 +750,7 @@ describe('Agent Loop — Anthropic Streaming', () => {
 
     const { writer, events } = createCollectingWriter();
 
-    const config = resolveSamConfig({ SAM_MAX_TURNS: '3' });
+    const config = resolveSamConfig({ SAM_MODEL: 'claude-sonnet-5', SAM_MAX_TURNS: '3' });
     const mockEnv = {
       DATABASE: {},
       AI_GATEWAY_ID: '',
@@ -817,7 +817,7 @@ describe('Agent Loop — Anthropic Streaming', () => {
 
     const { writer } = createCollectingWriter();
 
-    const config = resolveSamConfig({});
+    const config = resolveSamConfig({ SAM_MODEL: 'claude-sonnet-5' });
     const mockEnv = {
       DATABASE: {},
       AI_GATEWAY_ID: '',
@@ -1061,7 +1061,7 @@ describe('Agent Loop — Fetch Error Handling', () => {
 
     const { writer, events } = createCollectingWriter();
 
-    const config = resolveSamConfig({});
+    const config = resolveSamConfig({ SAM_MODEL: 'claude-sonnet-5' });
     const mockEnv = {
       DATABASE: {},
       AI_GATEWAY_ID: '',
@@ -1085,7 +1085,7 @@ describe('Agent Loop — Fetch Error Handling', () => {
 
     const { writer, events } = createCollectingWriter();
 
-    const config = resolveSamConfig({});
+    const config = resolveSamConfig({ SAM_MODEL: 'claude-sonnet-5' });
     const mockEnv = {
       DATABASE: {},
       AI_GATEWAY_ID: '',

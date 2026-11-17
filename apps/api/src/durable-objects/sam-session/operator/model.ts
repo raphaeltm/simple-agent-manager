@@ -111,8 +111,9 @@ function chatHeadersWithoutAuth(
 /** Model quirks live in one explicit boundary (compare `getTaskTitleModelControls`). */
 export function operatorProviderOptions(modelId: string) {
   switch (modelId) {
+    case '@cf/deepseek-ai/deepseek-v4.1-flash-1017':
     case '@cf/zai-org/glm-5.3-flash':
-      // Reasoning cannot be disabled on this model; low effort keeps tool turns responsive.
+      // Low effort keeps tool turns responsive (DeepSeek otherwise defaults to high).
       return { [WORKERS_AI_PROVIDER_ID]: { reasoningEffort: 'low' } };
     default:
       return undefined;

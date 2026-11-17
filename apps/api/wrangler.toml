@@ -183,11 +183,10 @@ AI_PROXY_ENABLED = "true"
 AI_PROXY_DEFAULT_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
 AI_PROXY_REQUEST_BODY_MAX_BYTES = "1048576"
 AI_GATEWAY_ID = "sam"
-# SAM Agent — Workers AI for zero-config usage (no API key needed). GLM 5.3 Flash
-# (2026-10-21): larger than Gemma 4 26B at similar per-turn cost once the repeated
-# prompt prefix is billed at its cached-input price. It needs the Workers Paid plan
-# (or prepaid AI Gateway credits), which every SAM install already requires.
-SAM_MODEL = "@cf/zai-org/glm-5.3-flash"
+# SAM Agent — Workers AI for zero-config usage (no API key needed).
+# DeepSeek V4.1 Flash 1017 replaces GLM 5.3 Flash before its 2026-11-20 retirement.
+# Requires Workers Paid or prepaid AI Gateway credits, as SAM already does.
+SAM_MODEL = "@cf/deepseek-ai/deepseek-v4.1-flash-1017"
 # Triggers (Event-Driven Agent Triggers)
 MAX_TRIGGERS_PER_PROJECT = "10"
 CRON_MIN_INTERVAL_MINUTES = "15"

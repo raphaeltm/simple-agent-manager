@@ -1334,8 +1334,10 @@ describe('Worker vars omitted because they equal the code default', () => {
   it('pins original bindings to retained values, deliberate retunes or proven runtime defaults', () => {
     const current = readCheckedInWrangler().vars ?? {};
     // Approved 2026-11-14 archive throughput tuning. Preserve the dated audit snapshot;
-    // only these two retained bindings intentionally differ from that historical baseline.
+    // These retained bindings intentionally differ from that historical baseline.
     const retuned: Record<string, string> = {
+      // Replace the assistant model before Cloudflare retires GLM 5.3 Flash (2026-11-20).
+      SAM_MODEL: '@cf/deepseek-ai/deepseek-v4.1-flash-1017',
       PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: '6000000',
       PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS: '540000',
     };

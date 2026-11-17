@@ -385,6 +385,20 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     fallbackGroup: 'workers-coding',
   }),
   workersAIModel({
+    // https://developers.cloudflare.com/workers-ai/models/deepseek-v4.1-flash-1017/
+    // Pricing and limits verified 2026-11-17; USD per 1K tokens.
+    id: '@cf/deepseek-ai/deepseek-v4.1-flash-1017',
+    label: 'DeepSeek V4.1 Flash 1017',
+    tier: 'low-cost',
+    costPer1kInputTokens: 0.0003,
+    costPer1kCachedInputTokens: 0.000006,
+    costPer1kOutputTokens: 0.0012,
+    contextWindow: 1048576,
+    toolCallSupport: 'good',
+    intendedRole: 'utility',
+    fallbackGroup: 'workers-general',
+  }),
+  workersAIModel({
     // Pricing and limits from the Cloudflare model page, verified 2026-10-21.
     id: '@cf/zai-org/glm-5.3-flash',
     label: 'GLM 5.3 Flash',

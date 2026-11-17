@@ -122,7 +122,7 @@ project's members, as usual, and SAM is told to pass them only what the request 
 The assistant arrived in v2026.10.21, and live answers in v2026.10.22. Each person turns it on for
 themselves. A superadmin can turn it off for everyone by setting `operations.samOperatorDisabled`
 to **Enabled** in **Admin → Settings** (the setting is named for turning SAM off). It runs on the
-`SAM_MODEL` model (GLM 5.3 Flash on Workers AI unless you change it, to a model from SAM's
+`SAM_MODEL` model (DeepSeek V4.1 Flash 1017 on Workers AI unless you change it, to a model from SAM's
 platform model list), billed to your Cloudflare account. See
 [configuration](/docs/reference/configuration/#private-sam-assistant-runtime-controls) and the
 [API contract](/docs/reference/api/#private-sam-account-assistant).
