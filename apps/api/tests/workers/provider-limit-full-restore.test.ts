@@ -954,6 +954,16 @@ describe('owner consent survives credential release and placed recovery', () => 
         release = resolve;
       });
       let repairNudgeCompleted = false;
+      const repairBudgetMs = 30_001;
+      let expireRepairBudget: (() => void) | undefined;
+      const nativeSetTimeout = globalThis.setTimeout;
+      const timeoutSpy = vi
+        .spyOn(globalThis, 'setTimeout')
+        .mockImplementation((handler, ms, ...args) => {
+          if (ms === repairBudgetMs && typeof handler === 'function')
+            expireRepairBudget = () => handler(...args);
+          return nativeSetTimeout(handler, ms, ...args);
+        });
       let restoreSpy = () => {};
       await runInDurableObject(taskRunner(f.taskId), async (instance) => {
         // Workers RPC exposes prototype methods, not instance-owned functions.
@@ -985,12 +995,12 @@ describe('owner consent survives credential release and placed recovery', () => 
         expect(pending.wait.ownerOverride?.firstInjection).toBeUndefined();
         const repairEnv = {
           ...testEnv,
-          PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS: outcome === 'acknowledged' ? '30000' : '1',
+          PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS: String(repairBudgetMs),
         };
         const repair = preserveProviderLimitWait(repairEnv, f.taskId, Date.now());
         // Poll from the test's I/O context instead of resolving a test promise
-        // inside the TaskRunner DO. A tiny caller budget may settle before RPC
-        // transit reaches nudge; the late operation must still reach this gate.
+        // inside the TaskRunner DO. Let the bounded authority read complete,
+        // then expire the dispatch budget only after the real nudge is in flight.
         let repairFailure: unknown;
         let repairFailed = false;
         void repair.catch((error) => {
@@ -1004,7 +1014,12 @@ describe('owner consent survives credential release and placed recovery', () => 
           },
           { timeout: 5_000, interval: 10 }
         );
-        if (outcome !== 'acknowledged') await repair;
+        if (outcome !== 'acknowledged') {
+          expect(expireRepairBudget).toBeTypeOf('function');
+          expireRepairBudget!();
+          await repair;
+          expect(repairNudgeCompleted).toBe(false);
+        }
         // The real restore invokes the public agent-key callback and changes only
         // firstInjection while repair still owns the older consent JSON receipt.
         await driveMove(f);
@@ -1059,6 +1074,7 @@ describe('owner consent survives credential release and placed recovery', () => 
       } finally {
         release();
         restoreSpy();
+        timeoutSpy.mockRestore();
       }
     },
     30_000
