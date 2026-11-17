@@ -34,6 +34,17 @@ function expiresAtFromSeconds(seconds: number | undefined): Date | undefined {
   return new Date(Date.now() + seconds * 1000);
 }
 
+function githubRefreshHttpError(status: number): AppError {
+  const unavailable = status >= 500 || status === 429;
+  return new AppError(
+    unavailable ? 503 : 401,
+    unavailable ? 'GITHUB_UNAVAILABLE' : 'GITHUB_REAUTH_REQUIRED',
+    unavailable
+      ? 'GitHub is temporarily unavailable. Please try again later.'
+      : 'Your GitHub authorization needs to be renewed. Sign out and back in.'
+  );
+}
+
 export async function refreshGitHubAccessToken(env: Env, refreshToken: string) {
   const githubOAuth = await repoHostingPorts().platformConfig.githubOAuth(env);
   if (!githubOAuth) {
@@ -59,14 +70,7 @@ export async function refreshGitHubAccessToken(env: Env, refreshToken: string) {
   const body = await response.json().catch(() => null);
   if (!response.ok) {
     log.warn('github_oauth_refresh_failed', { status: response.status });
-    const unavailable = response.status >= 500 || response.status === 429;
-    throw new AppError(
-      unavailable ? 503 : 401,
-      unavailable ? 'GITHUB_UNAVAILABLE' : 'GITHUB_REAUTH_REQUIRED',
-      unavailable
-        ? 'GitHub is temporarily unavailable. Please try again later.'
-        : 'Your GitHub authorization needs to be renewed. Sign out and back in.'
-    );
+    throw githubRefreshHttpError(response.status);
   }
 
   const errorResult = v.safeParse(githubRefreshTokenErrorSchema, body);
