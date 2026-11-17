@@ -5,6 +5,7 @@ import {
   DigitalOceanProvider,
   GcpProvider,
   HetznerProvider,
+  INFOMANIAK_BOOT_VOLUME_MAX_GB,
   InfomaniakProvider,
   ScalewayProvider,
   UpCloudProvider,
@@ -172,7 +173,11 @@ describe('provider native VM request contracts', () => {
     await provider.createVM({
       ...nativeConfig('large'),
       location: 'fr-par-1',
-      native: { ...nativeConfig('large').native!, instanceType: 'native-exact-type', architecture: 'arm64' },
+      native: {
+        ...nativeConfig('large').native!,
+        instanceType: 'native-exact-type',
+        architecture: 'arm64',
+      },
     });
 
     expect(bodies).toHaveLength(2);
@@ -492,7 +497,9 @@ describe('provider native VM request contracts', () => {
       image: 'projects/custom-images/global/images/sam-node-v20260907',
     });
 
-    const body = bodies[0] as { disks: Array<{ initializeParams: { diskSizeGb: string; sourceImage: string } }> };
+    const body = bodies[0] as {
+      disks: Array<{ initializeParams: { diskSizeGb: string; sourceImage: string } }>;
+    };
     expect(body.disks[0]?.initializeParams.diskSizeGb).toBe('200');
     expect(body.disks[0]?.initializeParams.sourceImage).toBe(
       'projects/custom-images/global/images/sam-node-v20260907'
@@ -640,12 +647,16 @@ describe('provider native VM request contracts', () => {
       expected: 'projects/custom-images/global/images/family/custom-family',
     },
     {
-      image: 'https://www.googleapis.com/compute/v1/projects/custom-images/global/images/custom-image',
-      expected: 'https://www.googleapis.com/compute/v1/projects/custom-images/global/images/custom-image',
+      image:
+        'https://www.googleapis.com/compute/v1/projects/custom-images/global/images/custom-image',
+      expected:
+        'https://www.googleapis.com/compute/v1/projects/custom-images/global/images/custom-image',
     },
     {
-      image: 'https://compute.googleapis.com/compute/v1/projects/custom-images/global/images/family/custom-family',
-      expected: 'https://compute.googleapis.com/compute/v1/projects/custom-images/global/images/family/custom-family',
+      image:
+        'https://compute.googleapis.com/compute/v1/projects/custom-images/global/images/family/custom-family',
+      expected:
+        'https://compute.googleapis.com/compute/v1/projects/custom-images/global/images/family/custom-family',
     },
   ])('GCP normalizes image reference $image', async ({ image, expected }) => {
     const bodies: unknown[] = [];
@@ -687,7 +698,9 @@ describe('provider native VM request contracts', () => {
         }),
         location: 'us-central1-a',
       })
-    ).rejects.toThrow('GCP image must be an image family name or a Compute Engine image/family reference');
+    ).rejects.toThrow(
+      'GCP image must be an image family name or a Compute Engine image/family reference'
+    );
     expect(bodies).toEqual([]);
   });
 
@@ -705,10 +718,22 @@ describe('provider native VM request contracts', () => {
             token: {
               project: { id: 'project' },
               catalog: [
-                { type: 'compute', endpoints: [{ interface: 'public', region: 'dc4-a', url: compute }] },
-                { type: 'image', endpoints: [{ interface: 'public', region: 'dc4-a', url: image }] },
-                { type: 'network', endpoints: [{ interface: 'public', region: 'dc4-a', url: network }] },
-                { type: 'volumev3', endpoints: [{ interface: 'public', region: 'dc4-a', url: 'v' }] },
+                {
+                  type: 'compute',
+                  endpoints: [{ interface: 'public', region: 'dc4-a', url: compute }],
+                },
+                {
+                  type: 'image',
+                  endpoints: [{ interface: 'public', region: 'dc4-a', url: image }],
+                },
+                {
+                  type: 'network',
+                  endpoints: [{ interface: 'public', region: 'dc4-a', url: network }],
+                },
+                {
+                  type: 'volumev3',
+                  endpoints: [{ interface: 'public', region: 'dc4-a', url: 'v' }],
+                },
               ],
             },
           },
@@ -736,9 +761,17 @@ describe('provider native VM request contracts', () => {
             name: 'sam-native-node',
             status: 'ACTIVE',
             addresses: { ext: [{ version: 4, addr: '203.0.113.10' }] },
-            flavor: { id: 'flavor-1', original_name: 'native-exact-type', vcpus: 7, ram: 14_336, disk: 96 },
+            // Volume-booted: flavor.disk is the flavor's unused local disk, the root is the volume.
+            flavor: {
+              id: 'flavor-1',
+              original_name: 'native-exact-type',
+              vcpus: 7,
+              ram: 14_336,
+              disk: 20,
+            },
+            image: '',
             created: '2026-09-07T00:00:00Z',
-            metadata: {},
+            metadata: { 'sam-root-disk-gb': '96' },
           },
         });
       }
@@ -755,6 +788,10 @@ describe('provider native VM request contracts', () => {
     expect(bodies).toHaveLength(2);
     expect(bodies[0]).toEqual(bodies[1]);
     expect((bodies[0] as { server: { flavorRef: string } }).server.flavorRef).toBe('flavor-1');
+    expect(
+      (bodies[0] as { server: { block_device_mapping_v2: Array<{ volume_size: number }> } }).server
+        .block_device_mapping_v2[0]?.volume_size
+    ).toBe(96);
     expect(first.observedHardware.resources).toEqual({
       value: { vcpuCount: 7, memoryMb: 14_336, diskGb: 96 },
       source: 'observed',
@@ -762,17 +799,25 @@ describe('provider native VM request contracts', () => {
     expect(second.serverType).toBe('native-exact-type');
   });
 
-  it('Infomaniak rejects unsupported fixed-root boot disk requests before allocation', async () => {
+  it('Infomaniak rejects out-of-range boot volume requests before allocation', async () => {
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock as typeof fetch;
 
     const provider = new InfomaniakProvider('id', 'secret', { authUrl: 'https://auth.example/v3' });
-    await expect(
-      provider.createVM({
-        ...unsupportedBootDiskConfig('arbitrary-infomaniak-flavor', 20),
-        location: 'dc4-a',
-      })
-    ).rejects.toThrow('cannot satisfy requested native.bootDiskSizeGb');
+    // Larger than the flavor's 20 GB local disk is now valid (it is a volume); only the volume
+    // bounds apply.
+    for (const bootDiskSizeGb of [19, INFOMANIAK_BOOT_VOLUME_MAX_GB + 1, 40.5]) {
+      await expect(
+        provider.createVM({
+          ...nativeOnlyConfig({
+            instanceType: 'arbitrary-infomaniak-flavor',
+            bootDiskSizeGb,
+            resources: { vcpuCount: 2, memoryMb: 4096, diskGb: 20 },
+          }),
+          location: 'dc4-a',
+        })
+      ).rejects.toMatchObject({ category: 'invalid_config' });
+    }
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -813,7 +858,9 @@ describe('provider native VM request contracts', () => {
             memory_amount: 14_336,
             created: '2026-09-07T00:00:00Z',
             labels: { label: [] },
-            ip_addresses: { ip_address: [{ access: 'public', family: 'IPv4', address: '203.0.113.10' }] },
+            ip_addresses: {
+              ip_address: [{ access: 'public', family: 'IPv4', address: '203.0.113.10' }],
+            },
             storage_devices: { storage_device: [] },
           },
         });
@@ -821,7 +868,10 @@ describe('provider native VM request contracts', () => {
       throw new Error(`Unexpected request ${url}`);
     }) as typeof fetch;
 
-    const provider = new UpCloudProvider('user', 'password', { zone: 'de-fra1', ipPollTimeoutMs: 1 });
+    const provider = new UpCloudProvider('user', 'password', {
+      zone: 'de-fra1',
+      ipPollTimeoutMs: 1,
+    });
     const first = await provider.createVM({
       ...nativeOnlyConfig(nativeConfig('small').native!),
       location: 'de-fra1',
@@ -830,7 +880,9 @@ describe('provider native VM request contracts', () => {
 
     expect(bodies).toHaveLength(2);
     expect(bodies[0]).toEqual(bodies[1]);
-    const body = bodies[0] as { server: { plan: string; storage_devices: { storage_device: Array<{ size: number }> } } };
+    const body = bodies[0] as {
+      server: { plan: string; storage_devices: { storage_device: Array<{ size: number }> } };
+    };
     expect(body.server.plan).toBe('native-exact-type');
     expect(body.server.storage_devices.storage_device[0]?.size).toBe(96);
     expect(first.observedHardware.resources).toEqual({
@@ -886,7 +938,10 @@ describe('provider native VM request contracts', () => {
       throw new Error(`Unexpected request ${url}`);
     }) as typeof fetch;
 
-    const provider = new UpCloudProvider('user', 'password', { zone: 'de-fra1', ipPollTimeoutMs: 1 });
+    const provider = new UpCloudProvider('user', 'password', {
+      zone: 'de-fra1',
+      ipPollTimeoutMs: 1,
+    });
     await provider.createVM({
       ...nativeOnlyConfig({
         instanceType: 'DEV-64xCPU-384GB',
@@ -895,7 +950,9 @@ describe('provider native VM request contracts', () => {
       location: 'de-fra1',
     });
 
-    const body = bodies[0] as { server: { storage_devices: { storage_device: Array<{ size: number }> } } };
+    const body = bodies[0] as {
+      server: { storage_devices: { storage_device: Array<{ size: number }> } };
+    };
     expect(body.server.storage_devices.storage_device[0]?.size).toBe(480);
   });
 
@@ -945,7 +1002,10 @@ describe('provider native VM request contracts', () => {
       throw new Error(`Unexpected request ${url}`);
     }) as typeof fetch;
 
-    const provider = new UpCloudProvider('user', 'password', { zone: 'de-fra1', ipPollTimeoutMs: 1 });
+    const provider = new UpCloudProvider('user', 'password', {
+      zone: 'de-fra1',
+      ipPollTimeoutMs: 1,
+    });
     await provider.createVM({
       name: 'sam-native-node',
       instanceType: '4xCPU-8GB',
@@ -953,7 +1013,9 @@ describe('provider native VM request contracts', () => {
       userData: '#cloud-config\n',
     });
 
-    const body = bodies[0] as { server: { storage_devices: { storage_device: Array<{ size: number }> } } };
+    const body = bodies[0] as {
+      server: { storage_devices: { storage_device: Array<{ size: number }> } };
+    };
     expect(body.server.storage_devices.storage_device[0]?.size).toBe(80);
   });
 });
