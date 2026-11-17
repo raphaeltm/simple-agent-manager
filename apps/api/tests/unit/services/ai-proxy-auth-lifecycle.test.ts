@@ -36,6 +36,8 @@ beforeEach(() => {
     JWT_PRIVATE_KEY: keys.privateKey,
     JWT_PUBLIC_KEY: keys.publicKey,
     BASE_DOMAIN: 'example.test',
+    AI_GATEWAY_ID: 'test-gateway',
+    CF_ACCOUNT_ID: 'test-account',
   } as unknown as Env;
 });
 

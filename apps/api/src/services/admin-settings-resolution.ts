@@ -35,11 +35,11 @@ export const cache = new AdminSettingsCache();
 let generations = new WeakMap<D1Database, number>();
 let generationClock = 0;
 let resetGeneration = 0;
-function generationOf(db: D1Database): number {
+export function adminSettingsGeneration(db: D1Database): number {
   return generations.get(db) ?? resetGeneration;
 }
 function assertGeneration(db: D1Database, generation: number): void {
-  if (generationOf(db) !== generation) throw new AdminSettingsUnavailableError();
+  if (adminSettingsGeneration(db) !== generation) throw new AdminSettingsUnavailableError();
 }
 export type CredentialRow = {
   provider: string;
@@ -68,7 +68,7 @@ export async function credentialRows(
   if (attempt >= 3) throw new AdminSettingsUnavailableError();
   const db = resolveD1BindingIdentity(env.DATABASE);
   if (!db || typeof db.prepare !== 'function') throw new AdminSettingsUnavailableError();
-  const generation = generationOf(db);
+  const generation = adminSettingsGeneration(db);
   const ttlMs = adminSettingCacheMs(env, 'integration.github.clientSecret');
   const useCache = !fresh && ttlMs > 0;
   const existing = credentialCache.get(db);
@@ -111,7 +111,7 @@ export async function credentialRows(
     if (useCache && credentialCache.get(db) !== entry)
       return credentialRows(env, false, attempt + 1);
     if (
-      generationOf(db) !== generation ||
+      adminSettingsGeneration(db) !== generation ||
       Date.now() >= entry.deadlineAt ||
       (ttlMs > 0 && Date.now() >= entry.expiresAt)
     )
@@ -153,7 +153,7 @@ async function legacyKv(
   }
   if (attempt >= 3) throw new AdminSettingsUnavailableError();
   const db = resolveD1BindingIdentity(env.DATABASE);
-  const generation = generationOf(db);
+  const generation = adminSettingsGeneration(db);
   let map = kvCache.get(db);
   if (!map) {
     map = new Map();
@@ -170,7 +170,7 @@ async function legacyKv(
     const value = await cached.promise;
     if (map.get(key) !== cached) return legacyKv(env, key, false, ttlMs, attempt + 1);
     if (
-      generationOf(db) !== generation ||
+      adminSettingsGeneration(db) !== generation ||
       Date.now() >= Math.min(cached.expiresAt, cached.startedAt + ttlMs)
     )
       throw new AdminSettingsUnavailableError();
@@ -188,7 +188,7 @@ async function legacyKv(
     const value = await entry.promise;
     if (useCache && map.get(key) !== entry) return legacyKv(env, key, false, ttlMs, attempt + 1);
     if (
-      generationOf(db) !== generation ||
+      adminSettingsGeneration(db) !== generation ||
       Date.now() >= entry.deadlineAt ||
       (ttlMs > 0 && Date.now() >= entry.expiresAt)
     )
@@ -372,7 +372,7 @@ export async function resolveAdminSettingDetailsMany(
   const primary = resolveD1BindingIdentity(env.DATABASE);
   const maxAge = Math.min(...names.map((name) => adminSettingCacheMs(env, name)));
   for (let attempt = 0; attempt < 3; attempt++) {
-    const generation = generationOf(primary);
+    const generation = adminSettingsGeneration(primary);
     try {
       const [rows, credentials] = await Promise.all([
         cache.read(primary, options.fresh ?? false, maxAge, DEFAULT_CONFIG_READ_TIMEOUT_MS),
@@ -383,10 +383,10 @@ export async function resolveAdminSettingDetailsMany(
       const values = await Promise.all(
         definitions.map((def) => resolved(env, def, rows, true, credentials))
       );
-      if (generationOf(primary) !== generation) continue;
+      if (adminSettingsGeneration(primary) !== generation) continue;
       return values;
     } catch {
-      if (generationOf(primary) !== generation) continue;
+      if (adminSettingsGeneration(primary) !== generation) continue;
       throw new AdminSettingsUnavailableError();
     }
   }
@@ -495,5 +495,4 @@ export async function readAdminSettings(env: Env, options: { fresh?: boolean } =
   }
 }
 export type AdminSettingsView = Awaited<ReturnType<typeof readAdminSettings>>;
-
 export { adminSettingCacheMs } from './admin-settings-cache';

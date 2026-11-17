@@ -99,7 +99,11 @@ describe('resolveProfileAccountBindings', () => {
       schema.credentials,
       schema.agentSettings,
     ]);
-    env = { DATABASE: createSqliteD1(sqlite) } as unknown as Env;
+    env = {
+      DATABASE: createSqliteD1(sqlite),
+      CF_ACCOUNT_ID: 'account-test',
+      AI_GATEWAY_ID: 'gateway-test',
+    } as unknown as Env;
 
     // owner: one Max account stored twice with identical ciphertext (a dual-write mirror).
     maxCipher = await cred('max', 'owner', 'Work Max', 'oauth-token', 'sk-ant-max');
