@@ -107,10 +107,16 @@ describe('Insights · People through the real entry points', () => {
     const done = await people(s, s.ownerCookie);
     expect(done.firstPerson).toEqual({ closed: 2, firstPerson: 1, share: 0.5 });
     expect(done.waiting.total).toBe(1); // the question is still open
-    // The colleague sees the owner's question only as its kind and age.
+    // The colleague sees the owner's question only as its age.
     const asColleague = await people(s, s.colleagueCookie);
     const ownerGroup = asColleague.waiting.groups.find((g) => g.key === s.ownerId)!;
-    expect(ownerGroup.items[0]).toMatchObject({ ref: null, title: null, kind: 'question' });
+    expect(ownerGroup.items[0]).toMatchObject({
+      private: true,
+      ref: null,
+      title: null,
+      kind: null,
+      blocking: null,
+    });
     expect(JSON.stringify(asColleague)).not.toContain('refund job');
   });
 });

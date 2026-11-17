@@ -7,8 +7,8 @@
  *
  * What the viewer may see of an item mirrors the Inbox's own read rule
  * (`inbox-item-core.ts readStoreRow`): a person's item is readable by that person, a team item by
- * every member, a task also by its filer. The title of an item the viewer may not read is never
- * selected, so it cannot leave D1.
+ * every member, a task also by its filer. Of an item the viewer may not read, only its age and
+ * waiter are selected (no title, kind or flags), so the rest cannot leave D1.
  */
 import { INSIGHTS_PEOPLE_ASK_KINDS } from '@simple-agent-manager/shared';
 
@@ -24,10 +24,15 @@ const WAITER_SQL = `CASE WHEN a.assignee_kind = 'user' THEN a.assignee_user_id
 const OPEN_WHERE_SQL = `a.project_id = ? AND a.status = 'open' AND a.kind IN (${KINDS_SQL})
   AND (a.expires_at IS NULL OR a.expires_at > ?)`;
 
-/** Open items per waiter, with the waiter's display name. */
+/**
+ * Open items per waiter, with the waiter's display name. A name is shown only for an active
+ * member of this project; anyone else (a departed member) reads as a former member.
+ */
 export function waitingGroupsStatement(projectId: string, nowMs: number): FlowStatement {
   return {
-    sql: `SELECT g.waiter, g.open, g.blocking, g.oldest, u.name AS name
+    sql: `SELECT g.waiter, g.open, g.blocking, g.oldest,
+        CASE WHEN pm.user_id IS NOT NULL THEN u.name END AS name,
+        CASE WHEN pm.user_id IS NOT NULL THEN 1 ELSE 0 END AS member
       FROM (
         SELECT ${WAITER_SQL} AS waiter, COUNT(*) AS open, TOTAL(a.blocking) AS blocking,
           MIN(a.created_at) AS oldest
@@ -35,9 +40,11 @@ export function waitingGroupsStatement(projectId: string, nowMs: number): FlowSt
         WHERE ${OPEN_WHERE_SQL}
         GROUP BY waiter
       ) g
-      LEFT JOIN users u ON u.id = g.waiter
+      LEFT JOIN project_members pm ON pm.project_id = ? AND pm.user_id = g.waiter
+        AND pm.status = 'active'
+      LEFT JOIN users u ON u.id = pm.user_id
       ORDER BY g.oldest, g.waiter`,
-    binds: [projectId, nowMs],
+    binds: [projectId, nowMs, projectId],
   };
 }
 
@@ -54,29 +61,44 @@ export function waitingItemsStatement(
   listed: number
 ): FlowStatement {
   const roles = writerRoles.length > 0 ? writerRoles.map(() => '?').join(', ') : 'NULL';
-  const readable = `(a.assignee_kind = 'team' OR a.assignee_user_id = ?
-    OR (a.kind = 'task' AND ${TASK_FILER_SQL} = ?))`;
+  // `ranked` is a thin window over every open ask (id, waiter, order). Only the `listed` rows per
+  // waiter are joined back and evaluated, and the viewer's role is read once. The outer select
+  // returns only the age and waiter of an item the viewer may not read.
   return {
-    sql: `SELECT id, kind, blocking, title, created_at, claimed, waiter, readable, can_reassign
-      FROM (
-        SELECT a.id, a.kind, a.blocking, a.created_at,
-          CASE WHEN ${readable} THEN a.title END AS title,
-          CASE WHEN ${readable} THEN 1 ELSE 0 END AS readable,
-          CASE WHEN a.assignee_kind = 'team' AND a.claimed_by_user_id IS NOT NULL THEN 1 ELSE 0
-            END AS claimed,
-          CASE WHEN a.kind = 'task' AND pm.role IN (${roles}) AND ${TASK_WRITABLE_SQL}
-            THEN 1 ELSE 0 END AS can_reassign,
-          ${WAITER_SQL} AS waiter,
+    sql: `WITH ranked AS (
+        SELECT a.id, ${WAITER_SQL} AS waiter,
           ROW_NUMBER() OVER (PARTITION BY ${WAITER_SQL} ORDER BY a.created_at, a.id) AS rn
         FROM asks a
-        LEFT JOIN project_members pm ON pm.project_id = a.project_id AND pm.user_id = ?
-          AND pm.status = 'active'
         WHERE ${OPEN_WHERE_SQL}
+      ),
+      viewer AS (
+        SELECT (SELECT pm.role FROM project_members pm WHERE pm.project_id = ? AND pm.user_id = ?
+          AND pm.status = 'active') AS role
+      ),
+      picked AS (
+        SELECT a.id, a.created_at, r.waiter, a.kind AS raw_kind, a.blocking AS raw_blocking,
+          a.title AS raw_title,
+          CASE WHEN a.assignee_kind = 'team' AND a.claimed_by_user_id IS NOT NULL THEN 1 ELSE 0
+            END AS raw_claimed,
+          CASE WHEN a.assignee_kind = 'team' OR a.assignee_user_id = ?
+              OR (a.kind = 'task' AND ${TASK_FILER_SQL} = ?) THEN 1 ELSE 0 END AS readable,
+          CASE WHEN a.kind = 'task' AND (SELECT role FROM viewer) IN (${roles})
+              AND ${TASK_WRITABLE_SQL} THEN 1 ELSE 0 END AS can_reassign
+        FROM ranked r
+        JOIN asks a ON a.id = r.id AND a.project_id = ?
+        WHERE r.rn <= ?
       )
-      WHERE rn <= ?
+      SELECT id, created_at, waiter, readable, can_reassign,
+        CASE WHEN readable = 1 THEN raw_kind END AS kind,
+        CASE WHEN readable = 1 THEN raw_blocking END AS blocking,
+        CASE WHEN readable = 1 THEN raw_title END AS title,
+        CASE WHEN readable = 1 THEN raw_claimed END AS claimed
+      FROM picked
       ORDER BY created_at, id`,
     binds: [
-      viewerId,
+      projectId,
+      nowMs,
+      projectId,
       viewerId,
       viewerId,
       viewerId,
@@ -84,9 +106,7 @@ export function waitingItemsStatement(
       viewerId,
       viewerId,
       viewerId,
-      viewerId,
       projectId,
-      nowMs,
       listed,
     ],
   };
@@ -136,8 +156,8 @@ export function firstPersonStatement(
       ORDER BY r.created_at, r.id LIMIT 1), a.assignee_kind)`;
   return {
     sql: `SELECT COUNT(*) AS closed,
-        TOTAL(CASE WHEN NOT EXISTS (${reassigned}) AND a.assignee_kind = 'user'
-          AND a.resolved_by_user_id = a.assignee_user_id THEN 1 ELSE 0 END) AS first_person
+        TOTAL(CASE WHEN a.assignee_kind = 'user' AND a.resolved_by_user_id = a.assignee_user_id
+          AND NOT EXISTS (${reassigned}) THEN 1 ELSE 0 END) AS first_person
       FROM asks a
       WHERE a.project_id = ? AND a.status IN ('answered', 'done') AND a.kind IN (${KINDS_SQL})
         AND a.resolved_at >= ? AND a.resolved_at < ?

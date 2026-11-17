@@ -8,15 +8,18 @@
  * H1). The server decides who may do it; the tab only offers it where the API says it may.
  */
 import type { InsightsPeopleSection, ProjectPeopleResponse } from '@simple-agent-manager/shared';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useQuery } from '@tanstack/react-query';
-import { useCallback, useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { LoadError, Loading, Notice } from '../../components/page-kit/page';
 import { useProjectMembers } from '../../hooks/useProjectMembers';
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { reassignInboxTask } from '../../lib/api';
-import { insightsQueryKeys, projectPeopleQueryOptions } from '../../lib/query-options';
+import {
+  inboxQueryKeys,
+  insightsQueryKeys,
+  projectPeopleQueryOptions,
+} from '../../lib/query-options';
 import { useProjectContext } from '../ProjectContext';
 import { Empty, FlowSection, Tile } from './flow-parts';
 import { formatDuration, formatPercent } from './format';
@@ -170,8 +173,8 @@ export function PeopleBody({ data }: { data: ProjectPeopleResponse }) {
       </div>
 
       <p className="m-0 px-1 text-[12.5px] text-fg-muted">
-        This page shows where work waits, not how much anyone did. You see the titles of items you
-        can open in your inbox; others show only their kind and age.
+        This page shows where work waits, not how much anyone did. You see the items you can open in
+        your inbox; for the rest, only how long they have waited.
       </p>
     </div>
   );
@@ -180,25 +183,44 @@ export function PeopleBody({ data }: { data: ProjectPeopleResponse }) {
 // Hoisted on purpose: a stable control for lists with nothing to reassign.
 const NO_REASSIGN: ReassignControl = {
   members: [],
+  membersLoading: false,
   pendingRef: null,
   error: null,
   onReassign: () => undefined,
 };
 
-/** The waiting list with reassign wired: loads the member list only when something can move. */
+/**
+ * The waiting list with reassign wired: loads the member list only when something can move. One
+ * hand-on runs at a time; on success the People read and the Inbox are refreshed, the move is
+ * announced, and focus goes to the list (the row the person acted on has moved away).
+ */
 function WaitingWithReassign({ data }: { data: ProjectPeopleResponse }) {
   const queryScope = useQueryScope();
   const queryClient = useQueryClient();
-  const { members } = useProjectMembers(data.projectId);
+  const { members, isPending: membersLoading } = useProjectMembers(data.projectId);
   const [error, setError] = useState<{ ref: string; message: string } | null>(null);
+  const [announcement, setAnnouncement] = useState('');
+  const listRef = useRef<HTMLDivElement>(null);
   const mutation = useMutation({
     mutationFn: ({ ref, target }: { ref: string; target: ReassignTarget }) =>
       reassignInboxTask(data.projectId, ref, target),
-    onMutate: () => setError(null),
-    onSuccess: () =>
-      queryClient.invalidateQueries({
+    onMutate: () => {
+      setError(null);
+      setAnnouncement('');
+    },
+    onSuccess: (_result, { target }) => {
+      const who =
+        'team' in target
+          ? 'the team'
+          : (members.find((member) => member.userId === target.assigneeUserId)?.name ??
+            'the new person');
+      setAnnouncement(`Handed on to ${who}.`);
+      listRef.current?.focus();
+      void queryClient.invalidateQueries({ queryKey: inboxQueryKeys.all(queryScope) });
+      return queryClient.invalidateQueries({
         queryKey: insightsQueryKeys.peopleAll(queryScope, data.projectId),
-      }),
+      });
+    },
     onError: (err, { ref }) =>
       setError({
         ref,
@@ -212,8 +234,20 @@ function WaitingWithReassign({ data }: { data: ProjectPeopleResponse }) {
   );
   const pendingRef = mutation.isPending ? (mutation.variables?.ref ?? null) : null;
   const control = useMemo<ReassignControl>(
-    () => ({ members, pendingRef, error, onReassign }),
-    [members, pendingRef, error, onReassign]
+    () => ({ members, membersLoading, pendingRef, error, onReassign }),
+    [members, membersLoading, pendingRef, error, onReassign]
   );
-  return <WaitingList groups={data.waiting.groups} projectId={data.projectId} reassign={control} />;
+  return (
+    <div ref={listRef} tabIndex={-1} className="min-w-0 outline-none">
+      <p
+        role="status"
+        aria-live="polite"
+        className="sr-only"
+        data-testid="insights-reassign-status"
+      >
+        {announcement}
+      </p>
+      <WaitingList groups={data.waiting.groups} projectId={data.projectId} reassign={control} />
+    </div>
+  );
 }

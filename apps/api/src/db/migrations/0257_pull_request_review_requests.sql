@@ -18,8 +18,15 @@
 -- `reviewer_kind` is 'user' (a GitHub login) or 'team' (a team slug); `reviewer_key` is lowercase.
 -- The key exists only to match a review to its request. Insights reports per project, never per
 -- reviewer.
+-- `pull_request.closed` closes the pull request's open cycles as removed: a request the PR closed
+-- on was never picked up, and must not wait forever.
 -- Existing rows: none. Requests made before this deploy were never recorded, and Insights says so
 -- ("not recorded") rather than estimating them.
+-- Growth: one small row per review request, deleted with the project, like pull_request_heads.
+--
+-- Also one index on asks, for "answered by the first person asked": the read seeks a project's
+-- answered and done asks by when they were resolved, so asks closed before the range are never
+-- read (idx_asks_project_status orders by created_at and cannot bound resolved_at).
 CREATE TABLE IF NOT EXISTS pull_request_review_requests (
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   repository TEXT NOT NULL,
@@ -35,3 +42,6 @@ CREATE TABLE IF NOT EXISTS pull_request_review_requests (
 -- Insights reads a project's cycles requested in a range, newest first.
 CREATE INDEX IF NOT EXISTS idx_pull_request_review_requests_project_requested
   ON pull_request_review_requests (project_id, requested_at);
+
+CREATE INDEX IF NOT EXISTS idx_asks_project_status_resolved
+  ON asks (project_id, status, resolved_at);

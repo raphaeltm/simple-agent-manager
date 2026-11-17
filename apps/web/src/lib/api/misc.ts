@@ -13,18 +13,18 @@ export interface CachedCommandResponse {
 
 export async function getCachedCommands(
   projectId: string,
-  agentType?: string
+  agentType?: string,
 ): Promise<{ commands: CachedCommandResponse[] }> {
   const qs = agentType ? `?agentType=${encodeURIComponent(agentType)}` : '';
   return request<{ commands: CachedCommandResponse[] }>(
-    `/api/projects/${projectId}/cached-commands${qs}`
+    `/api/projects/${projectId}/cached-commands${qs}`,
   );
 }
 
 export async function saveCachedCommands(
   projectId: string,
   agentType: string,
-  commands: Array<{ name: string; description: string }>
+  commands: Array<{ name: string; description: string }>,
 ): Promise<{ cached: number }> {
   return request<{ cached: number }>(`/api/projects/${projectId}/cached-commands`, {
     method: 'POST',

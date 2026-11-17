@@ -12,7 +12,10 @@ import {
   findProjectsForGitHubRepository,
   type GitHubProjectCandidate,
 } from './github-project-repositories';
-import { ingestPullRequestReviewWebhook } from './github-pull-request-reviews';
+import {
+  ingestPullRequestReviewWebhook,
+  isReviewCycleDelivery,
+} from './github-pull-request-reviews';
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -29,7 +32,9 @@ export async function ingestPullRequestWebhook(
   event: string,
   payload: Record<string, unknown>
 ): Promise<void> {
-  if (!['pull_request', 'pull_request_review', 'check_run', 'check_suite'].includes(event)) return;
+  const reviewCycles = isReviewCycleDelivery(event, payload.action);
+  // Review events matter only for review cycles: anything else returns before the project lookup.
+  if (!['pull_request', 'check_run', 'check_suite'].includes(event) && !reviewCycles) return;
   const repo = record(payload.repository);
   const repositoryFullName = string(repo?.full_name)?.toLowerCase() ?? null;
   const repositoryId = typeof repo?.id === 'number' ? repo.id : null;
@@ -43,19 +48,13 @@ export async function ingestPullRequestWebhook(
   );
   if (projects.length === 0 || !repositoryFullName) return;
 
-  if (
-    event === 'pull_request_review' ||
-    (event === 'pull_request' && isReviewRequestAction(payload.action))
-  )
+  // Review cycles for Insights · People; never throws, so it cannot hold up the work below.
+  if (reviewCycles)
     await ingestPullRequestReviewWebhook(env, event, repositoryFullName, projects, payload);
-  else if (event === 'pull_request')
+  if (event === 'pull_request')
     await ingestLifecycleWebhook(env, repositoryFullName, projects, payload);
-  else await ingestChecksWebhook(env, event, repositoryFullName, projects, payload);
-}
-
-/** `pull_request` actions that change who is asked to review (Insights · People). */
-function isReviewRequestAction(action: unknown): boolean {
-  return action === 'review_requested' || action === 'review_request_removed';
+  else if (event === 'check_run' || event === 'check_suite')
+    await ingestChecksWebhook(env, event, repositoryFullName, projects, payload);
 }
 
 async function ingestLifecycleWebhook(

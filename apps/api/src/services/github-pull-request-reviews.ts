@@ -7,6 +7,12 @@
  * - `pull_request_review.submitted`: stamp the first review on the reviewer's open cycle, and on
  *   the pull request's open team cycles (GitHub does not say which team a reviewer answered for,
  *   so the first review by anyone but the author picks up a team request).
+ * - `pull_request.closed`: close the pull request's open cycles as removed (never picked up).
+ *
+ * Known limits, accepted because they are rare and only skew a statistic: GitHub does not order
+ * deliveries, so a `review_requested` delivered after its review (or after its removal) opens a
+ * cycle that only a later review or the pull request closing ends; and of two requests to one
+ * reviewer racing in, the first to commit keeps its time.
  *
  * Times are GitHub's (`pull_request.updated_at`, `review.submitted_at`), never the delivery time,
  * so a redelivery writes the same values: every statement is idempotent. Bots are skipped: the tab
@@ -57,7 +63,19 @@ function requestedReviewer(payload: Record<string, unknown>): Reviewer | null {
 
 const OPEN_CYCLE_SQL = `first_review_at IS NULL AND removed_at IS NULL`;
 
-/** Called only after the webhook signature was verified by the route. */
+/** The deliveries this module records; `ingestPullRequestWebhook` routes only these here. */
+export function isReviewCycleDelivery(event: string, action: unknown): boolean {
+  if (event === 'pull_request')
+    return (
+      action === 'review_requested' || action === 'review_request_removed' || action === 'closed'
+    );
+  return event === 'pull_request_review' && action === 'submitted';
+}
+
+/**
+ * Called only after the webhook signature was verified by the route. Never throws: a failure is
+ * logged and the delivery's other work (pull request state, trigger intake) goes on.
+ */
 export async function ingestPullRequestReviewWebhook(
   env: Env,
   event: string,
@@ -66,22 +84,57 @@ export async function ingestPullRequestReviewWebhook(
   payload: Record<string, unknown>
 ): Promise<void> {
   const action = string(payload.action);
+  try {
+    const statements = reviewCycleStatements(
+      env,
+      event,
+      action,
+      repositoryFullName,
+      payload,
+      projects
+    );
+    if (statements.length > 0) await env.DATABASE.batch(statements);
+  } catch (error) {
+    log.error('github_review_requests.ingest_failed', {
+      repository: repositoryFullName,
+      event,
+      githubAction: action,
+      projectIds: projects.map((project) => project.id),
+      error: error instanceof Error ? error.message : String(error),
+      action: 'dropped',
+    });
+  }
+}
+
+function reviewCycleStatements(
+  env: Env,
+  event: string,
+  action: string | null,
+  repositoryFullName: string,
+  payload: Record<string, unknown>,
+  projects: GitHubProjectCandidate[]
+): D1PreparedStatement[] {
   const pr = record(payload.pull_request);
   const url = string(pr?.html_url);
   const number = typeof pr?.number === 'number' ? pr.number : null;
-  if (!url || !number) return;
+  if (!url || !number) return [];
   const parsed = parseProjectPullRequestUrl(url, repositoryFullName);
-  if (parsed?.number !== number) return;
+  if (parsed?.number !== number) return [];
   const target = { repository: parsed.repository, number };
 
   let write: ((projectId: string) => D1PreparedStatement) | null = null;
-  if (
+  if (event === 'pull_request' && action === 'closed') {
+    // A request still open when the pull request closed (merged or not) was never picked up.
+    const at = isoOf(pr?.closed_at) ?? isoOf(pr?.updated_at);
+    if (!at) return [];
+    write = (projectId) => closePullRequestCycles(env, projectId, target, at);
+  } else if (
     event === 'pull_request' &&
     (action === 'review_requested' || action === 'review_request_removed')
   ) {
     const reviewer = requestedReviewer(payload);
     const at = isoOf(pr?.updated_at);
-    if (!reviewer || !at) return;
+    if (!reviewer || !at) return [];
     write =
       action === 'review_requested'
         ? (projectId) => openCycle(env, projectId, target, reviewer, at)
@@ -91,26 +144,13 @@ export async function ingestPullRequestReviewWebhook(
     const reviewerUser = record(review?.user);
     const login = string(reviewerUser?.login)?.toLowerCase() ?? null;
     const at = isoOf(review?.submitted_at);
-    if (!login || !at || reviewerUser?.type === 'Bot') return;
+    if (!login || !at || reviewerUser?.type === 'Bot') return [];
     const author = string(record(pr?.user)?.login)?.toLowerCase() ?? null;
     write = (projectId) => recordReview(env, projectId, target, login, login === author, at);
   }
-  if (!write) return;
-
-  const statements = projects.map((project) => write(project.id));
-  try {
-    await env.DATABASE.batch(statements);
-  } catch (error) {
-    log.error('github_review_requests.ingest_failed', {
-      repository: target.repository,
-      prNumber: target.number,
-      event,
-      githubAction: action,
-      projectIds: projects.map((project) => project.id),
-      error: error instanceof Error ? error.message : String(error),
-      action: 'dropped',
-    });
-  }
+  if (!write) return [];
+  const statement = write;
+  return projects.map((project) => statement(project.id));
 }
 
 interface Target {
@@ -171,6 +211,19 @@ function removeCycle(
     reviewer.key,
     removedAt
   );
+}
+
+function closePullRequestCycles(
+  env: Env,
+  projectId: string,
+  target: Target,
+  closedAt: string
+): D1PreparedStatement {
+  return env.DATABASE.prepare(
+    `UPDATE pull_request_review_requests SET removed_at = ?
+      WHERE project_id = ? AND repository = ? AND pr_number = ? AND ${OPEN_CYCLE_SQL}
+        AND requested_at <= ?`
+  ).bind(closedAt, projectId, target.repository, target.number, closedAt);
 }
 
 function recordReview(

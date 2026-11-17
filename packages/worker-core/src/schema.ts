@@ -850,6 +850,12 @@ export const asks = sqliteTable(
       table.status,
       table.createdAt
     ),
+    // Insights · People "answered by the first person asked" (migration 0257).
+    projectStatusResolvedIdx: index('idx_asks_project_status_resolved').on(
+      table.projectId,
+      table.status,
+      table.resolvedAt
+    ),
     sessionStatusIdx: index('idx_asks_session_status').on(table.sourceSessionId, table.status),
     openExpiryIdx: index('idx_asks_open_expiry')
       .on(table.expiresAt)

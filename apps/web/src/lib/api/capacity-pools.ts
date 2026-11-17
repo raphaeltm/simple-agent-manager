@@ -9,10 +9,7 @@ interface DefaultCapacityPoolsFetchOptions {
   ensure?: boolean;
 }
 
-function defaultCapacityPoolsPath(
-  path: string,
-  options?: DefaultCapacityPoolsFetchOptions
-): string {
+function defaultCapacityPoolsPath(path: string, options?: DefaultCapacityPoolsFetchOptions): string {
   if (!options?.ensure) return path;
   const separator = path.includes('?') ? '&' : '?';
   return `${path}${separator}ensure=true`;

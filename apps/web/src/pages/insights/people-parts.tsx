@@ -1,7 +1,7 @@
 /**
  * The People tab's sections. Flow, not people: each block says what is waiting on someone and
  * for how long, never how much anyone did. An item the viewer could not open in the Inbox shows
- * its kind and age only (the API never sends its title).
+ * its age only (the API sends nothing else about it).
  */
 import type {
   InsightsPeopleAskKind,
@@ -10,13 +10,13 @@ import type {
   InsightsWaitingItem,
 } from '@simple-agent-manager/shared';
 import { Button, PersonAvatar, personSlotFor, Select } from '@simple-agent-manager/ui';
-import { CircleHelp, GitPullRequest, ListChecks, Users } from 'lucide-react';
-import { useId, useState } from 'react';
+import { CircleHelp, GitPullRequest, ListChecks, Lock, Users } from 'lucide-react';
+import { useId, useRef, useState } from 'react';
 import { Link } from 'react-router';
 
 import type { ProjectMemberSummary } from '../../hooks/useProjectMembers';
 import { Empty } from './flow-parts';
-import { formatDuration, formatDurationShort } from './format';
+import { formatDuration } from './format';
 
 const KIND_LABEL: Record<InsightsPeopleAskKind, string> = {
   question: 'Question',
@@ -30,21 +30,22 @@ const KIND_ICON: Record<InsightsPeopleAskKind, typeof CircleHelp> = {
   task: ListChecks,
 };
 
-function privateTitle(item: InsightsWaitingItem): string {
-  return `${KIND_LABEL[item.kind]} for someone else`;
-}
+/** Small buttons stay 44px tall on a phone (SAM Glass touch targets). */
+const TOUCH = 'max-sm:min-h-11';
 
 function groupTitle(group: InsightsWaitingGroup): string {
   if (group.kind === 'unassigned') return 'Not taken yet';
   if (group.you) return 'You';
-  return group.name ?? 'A former member';
+  return group.member ? (group.name ?? 'A member') : 'A former member';
 }
 
 export type ReassignTarget = { assigneeUserId: string } | { team: true };
 
 export interface ReassignControl {
   members: ProjectMemberSummary[];
-  /** The ref currently being handed on, so only that row shows progress. */
+  /** True while the member list has not arrived: the form waits rather than offer only the team. */
+  membersLoading: boolean;
+  /** The ref being handed on, if any. While one is in flight every other submit waits. */
   pendingRef: string | null;
   error: { ref: string; message: string } | null;
   onReassign: (ref: string, target: ReassignTarget) => void;
@@ -62,70 +63,91 @@ export function WaitingGroup({
 }) {
   const title = groupTitle(group);
   const hidden = group.open - group.items.length;
+  const headingId = useId();
   const summary = `${group.open} open · oldest ${formatDuration(group.oldestAgeMs)}${
-    group.blocking > 0 ? ` · ${group.blocking} blocking` : ''
+    group.blocking > 0 ? ` · ${group.blocking} blocking an agent` : ''
   }`;
   return (
-    <section
+    <div
       className="flex min-w-0 flex-col gap-1.5 border-0 border-t border-solid border-[var(--sam-hairline)] pt-3 first:border-t-0 first:pt-0"
-      aria-label={`${title}: ${summary}`}
       data-testid={`insights-waiting-group-${group.key}`}
     >
       <div className="flex min-w-0 items-center gap-2.5">
         {group.kind === 'unassigned' ? (
-          <span className="inline-grid h-[26px] w-[26px] shrink-0 place-items-center rounded-full sam-raised">
+          <span className="sam-raised inline-grid h-[26px] w-[26px] shrink-0 place-items-center rounded-full">
             <Users size={14} aria-hidden="true" className="text-fg-muted" />
           </span>
         ) : (
           <PersonAvatar
-            name={group.you ? 'You' : group.name}
+            name={group.you ? 'You' : group.member ? group.name : null}
             person={personSlotFor(group.userId, group.you ? group.userId : null)}
             decorative
           />
         )}
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="break-words text-[14px] font-semibold text-fg-primary [overflow-wrap:anywhere]">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <h3
+            id={headingId}
+            tabIndex={-1}
+            className="m-0 break-words text-[14px] font-semibold text-fg-primary [overflow-wrap:anywhere]"
+          >
             {title}
-          </span>
+          </h3>
           <span className="text-[12.5px] text-fg-muted">{summary}</span>
-        </span>
+        </div>
       </div>
-      <ul className="m-0 flex list-none flex-col p-0 sm:pl-[36px]">
+      <ul className="m-0 flex list-none flex-col p-0 sm:pl-[36px]" aria-labelledby={headingId}>
         {group.items.map((item, index) => (
           <WaitingRow
             key={item.ref ?? `${group.key}-${item.createdAt}-${index}`}
             item={item}
+            group={group}
             reassign={reassign}
           />
         ))}
       </ul>
       {(hidden > 0 || group.you) && (
-        <p className="m-0 text-[12.5px] text-fg-muted sm:pl-[36px]">
-          {hidden > 0 ? `${hidden} more, oldest shown first. ` : ''}
+        <p className="m-0 flex flex-wrap items-center gap-x-2 text-[12.5px] text-fg-muted sm:pl-[36px]">
+          {hidden > 0 && <span>{hidden} more, the oldest are shown.</span>}
           {group.you && (
-            <Link to={`/projects/${projectId}/inbox`} className="text-fg-primary">
+            <Link
+              to={`/projects/${projectId}/inbox`}
+              className="inline-flex min-h-11 items-center text-accent underline underline-offset-2 sm:min-h-0"
+            >
               Open your inbox
             </Link>
           )}
         </p>
       )}
-    </section>
+    </div>
   );
 }
 
-function WaitingRow({ item, reassign }: { item: InsightsWaitingItem; reassign: ReassignControl }) {
+function WaitingRow({
+  item,
+  group,
+  reassign,
+}: {
+  item: InsightsWaitingItem;
+  group: InsightsWaitingGroup;
+  reassign: ReassignControl;
+}) {
   const [open, setOpen] = useState(false);
-  const Icon = KIND_ICON[item.kind];
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const Icon = item.kind ? KIND_ICON[item.kind] : Lock;
   const ref = item.ref;
   const pending = ref !== null && reassign.pendingRef === ref;
+  const busy = reassign.pendingRef !== null;
   const error = ref !== null && reassign.error?.ref === ref ? reassign.error.message : null;
-  const meta = [
-    KIND_LABEL[item.kind],
-    item.blocking ? 'agent is blocked' : null,
-    item.claimed ? 'taken from the team' : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  const title = item.title ?? (item.kind ? KIND_LABEL[item.kind] : 'An item you cannot open');
+  const meta = item.private
+    ? 'Only its age is shown to you'
+    : [
+        item.kind ? KIND_LABEL[item.kind] : null,
+        item.blocking ? 'an agent is waiting on it' : null,
+        item.claimed ? 'taken from the team' : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
   return (
     <li className="flex min-w-0 flex-col gap-2 py-2">
       <div className="flex min-w-0 items-start gap-2.5">
@@ -133,16 +155,20 @@ function WaitingRow({ item, reassign }: { item: InsightsWaitingItem; reassign: R
         <span className="flex min-w-0 flex-1 flex-col">
           <span
             className={`line-clamp-2 break-words text-[13.5px] [overflow-wrap:anywhere] ${
-              item.title === null ? 'italic text-fg-muted' : 'font-semibold text-fg-primary'
+              item.private ? 'italic text-fg-muted' : 'font-semibold text-fg-primary'
             }`}
           >
-            {item.title ?? privateTitle(item)}
+            {title}
           </span>
-          <span className="text-[12.5px] text-fg-muted">{meta}</span>
+          <span
+            className={`text-[12.5px] ${item.blocking ? 'font-semibold text-fg-primary' : 'text-fg-muted'}`}
+          >
+            {meta}
+          </span>
         </span>
-        <span className="shrink-0 font-mono text-[12.5px] text-fg-muted">
+        <span className="shrink-0 text-[12.5px] text-fg-muted">
           <span className="sr-only">Waiting for </span>
-          {formatDurationShort(item.ageMs)}
+          {formatDuration(item.ageMs)}
         </span>
       </div>
       {item.canReassign && ref && (
@@ -150,19 +176,26 @@ function WaitingRow({ item, reassign }: { item: InsightsWaitingItem; reassign: R
           {open ? (
             <ReassignForm
               itemRef={ref}
-              title={item.title ?? privateTitle(item)}
-              members={reassign.members}
+              title={title}
+              holder={group.kind === 'unassigned' ? 'team' : group.userId}
+              control={reassign}
               pending={pending}
-              onCancel={() => setOpen(false)}
+              busy={busy}
+              onCancel={() => {
+                setOpen(false);
+                // Focus returns to the control that opened the form.
+                requestAnimationFrame(() => triggerRef.current?.querySelector('button')?.focus());
+              }}
               onSubmit={(target) => reassign.onReassign(ref, target)}
             />
           ) : (
-            <div>
+            <div ref={triggerRef}>
               <Button
-                variant="raised"
+                variant="ghost"
                 size="sm"
+                className={TOUCH}
                 onClick={() => setOpen(true)}
-                aria-label={`Reassign ${item.title ?? 'this task'}`}
+                aria-label={`Reassign ${title}`}
               >
                 Reassign
               </Button>
@@ -184,27 +217,34 @@ const TEAM = '__team__';
 function ReassignForm({
   itemRef,
   title,
-  members,
+  holder,
+  control,
   pending,
+  busy,
   onCancel,
   onSubmit,
 }: {
   itemRef: string;
   title: string;
-  members: ProjectMemberSummary[];
+  /** Who has it now (a user id, or `team`): not offered as a target. */
+  holder: string | null;
+  control: ReassignControl;
   pending: boolean;
+  busy: boolean;
   onCancel: () => void;
   onSubmit: (target: ReassignTarget) => void;
 }) {
   const id = useId();
   const [value, setValue] = useState('');
+  const options = control.members.filter((member) => member.userId !== holder);
   return (
     <form
+      aria-label={`Reassign ${title}`}
       className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center"
       data-testid={`insights-reassign-form-${itemRef}`}
       onSubmit={(event) => {
         event.preventDefault();
-        if (!value) return;
+        if (!value || busy) return;
         onSubmit(value === TEAM ? { team: true } : { assigneeUserId: value });
       }}
     >
@@ -214,22 +254,39 @@ function ReassignForm({
       <Select
         id={id}
         value={value}
+        // eslint-disable-next-line jsx-a11y/no-autofocus -- the person just asked for this form
+        autoFocus
+        disabled={pending || control.membersLoading}
         onChange={(event) => setValue(event.target.value)}
         className="min-h-11 min-w-0 sm:max-w-[260px]"
       >
-        <option value="">Choose who…</option>
-        {members.map((member) => (
+        <option value="">{control.membersLoading ? 'Loading people…' : 'Choose who…'}</option>
+        {options.map((member) => (
           <option key={member.userId} value={member.userId}>
             {member.name ?? member.email ?? 'Member'}
           </option>
         ))}
-        <option value={TEAM}>Back to the team</option>
+        {holder !== 'team' && <option value={TEAM}>Back to the team</option>}
       </Select>
       <div className="flex gap-2">
-        <Button type="submit" variant="accent" size="sm" disabled={!value} loading={pending}>
-          Reassign
+        <Button
+          type="submit"
+          variant="accent"
+          size="sm"
+          className={TOUCH}
+          disabled={!value || busy}
+          loading={pending}
+        >
+          Hand it on
         </Button>
-        <Button type="button" variant="raised" size="sm" onClick={onCancel} disabled={pending}>
+        <Button
+          type="button"
+          variant="raised"
+          size="sm"
+          className={TOUCH}
+          onClick={onCancel}
+          disabled={pending}
+        >
           Cancel
         </Button>
       </div>

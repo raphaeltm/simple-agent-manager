@@ -66,6 +66,8 @@ const MEMBERS = [
 interface Recorder {
   people: string[];
   reassigns: Array<{ path: string; body: unknown }>;
+  /** How the reassign route answers: move the task (default) or refuse it. */
+  reassign?: 'move' | 'refuse';
 }
 
 async function setupScene(page: Page, scene: PeopleScene | 'error', rec?: Recorder) {
@@ -109,8 +111,13 @@ async function setupScene(page: Page, scene: PeopleScene | 'error', rec?: Record
     }
     if (path.startsWith(`/api/projects/${PROJECT_ID}/inbox/items/`) && path.endsWith('/reassign')) {
       rec?.reassigns.push({ path, body: route.request().postDataJSON() });
-      // After the move the task is no longer the viewer's: serve the empty scene next.
-      current = 'empty';
+      if (rec?.reassign === 'refuse')
+        return respond(400, {
+          error: 'BAD_REQUEST',
+          message: 'The assignee is not an active project member',
+        });
+      // After the move the task waits on Sam: serve that state next.
+      current = 'moved';
       return respond(200, { ref: 'ask:t-2', status: 'open', agentNotified: true });
     }
     if (path.includes('/sessions')) return respond(200, { sessions: [], total: 0, hasMore: false });
@@ -161,8 +168,11 @@ test.describe('Insights · People', () => {
     const priya = page.getByTestId('insights-waiting-group-user-priya');
     await expect(priya).toContainText('Priya Natarajan');
     await expect(priya).toContainText('3 open · oldest 3.2 days · 1 blocking');
-    // Another member's private question shows its kind and age, never a title.
-    await expect(priya).toContainText('Question for someone else');
+    // Another member's private items show their age only.
+    await expect(priya.getByText('An item you cannot open')).toHaveCount(2);
+    await expect(priya).toContainText('Only its age is shown to you');
+    // Reassign is offered only on the three human tasks the viewer may hand on.
+    await expect(page.getByRole('button', { name: /^Reassign / })).toHaveCount(3);
     await expect(page.getByTestId('insights-waiting-group-user-insights')).toContainText('You');
     await expect(page.getByTestId('insights-waiting-group-unassigned')).toContainText(
       'Not taken yet'
@@ -175,7 +185,7 @@ test.describe('Insights · People', () => {
     await capture(page, 'insights-people-realistic');
   });
 
-  test('reassign hands a task on through the Inbox route and refreshes the list', async ({
+  test('reassign hands a task on through the Inbox route and the list shows where it went', async ({
     page,
   }) => {
     const rec: Recorder = { people: [], reassigns: [] };
@@ -187,13 +197,25 @@ test.describe('Insights · People', () => {
       .click();
     const form = page.getByTestId('insights-reassign-form-ask:t-2');
     await expect(form).toBeVisible();
+    const select = form.getByRole('combobox');
+    // The form takes focus, and does not offer the person who already has the task.
+    await expect(select).toBeFocused();
+    await expect(select.locator('option')).toHaveText([
+      'Choose who…',
+      'Priya Natarajan',
+      'Sam Okafor',
+      'Back to the team',
+    ]);
     await capture(page, 'insights-people-reassign-open');
-    await form.getByRole('combobox').selectOption({ label: 'Sam Okafor' });
-    await form.getByRole('button', { name: 'Reassign' }).click();
-    await expect(page.getByTestId('insights-waiting-list')).toHaveCount(0);
-    await expect(page.getByTestId('insights-section-waiting')).toContainText(
-      'Nothing is waiting on anyone'
+    await select.selectOption({ label: 'Sam Okafor' });
+    await form.getByRole('button', { name: 'Hand it on' }).click();
+    await expect(page.getByTestId('insights-reassign-status')).toHaveText(
+      'Handed on to Sam Okafor.'
     );
+    await expect(page.getByTestId('insights-waiting-group-user-sam')).toContainText(
+      'Confirm the new tax table with accounting'
+    );
+    await expect(own).not.toContainText('Confirm the new tax table with accounting');
     expect(rec.reassigns).toEqual([
       {
         path: `/api/projects/${PROJECT_ID}/inbox/items/ask%3At-2/reassign`,
@@ -201,6 +223,36 @@ test.describe('Insights · People', () => {
       },
     ]);
     expect(rec.people.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test('a refused reassign says why and keeps the form open; cancel returns focus', async ({
+    page,
+  }) => {
+    const rec: Recorder = { people: [], reassigns: [], reassign: 'refuse' };
+    await setupScene(page, 'realistic', rec);
+    await page.goto(`${BASE}/people`);
+    const trigger = page.getByRole('button', {
+      name: 'Reassign Check the EU VAT report renders for Belgium',
+    });
+    await trigger.click();
+    const form = page.getByTestId('insights-reassign-form-ask:t-3');
+    // A task nobody took is already the team's: "Back to the team" is not offered.
+    await expect(form.getByRole('combobox').locator('option')).toHaveText([
+      'Choose who…',
+      'Raph',
+      'Priya Natarajan',
+      'Sam Okafor',
+    ]);
+    await form.getByRole('combobox').selectOption({ label: 'Priya Natarajan' });
+    await form.getByRole('button', { name: 'Hand it on' }).click();
+    await expect(page.getByRole('alert')).toContainText(
+      'The assignee is not an active project member'
+    );
+    await expect(form).toBeVisible();
+    await capture(page, 'insights-people-reassign-refused');
+    await form.getByRole('button', { name: 'Cancel' }).click();
+    await expect(form).toHaveCount(0);
+    await expect(trigger).toBeFocused();
   });
 
   test('a stressed project wraps and stays in bounds', async ({ page }) => {
@@ -211,7 +263,7 @@ test.describe('Insights · People', () => {
       'Maximiliana Wolfeschlegelsteinhausenbergerdorff'
     );
     await expect(page.getByTestId('insights-waiting-group-user-0')).toContainText(
-      '24 more, oldest shown first.'
+      '24 more, the oldest are shown.'
     );
     await expect(page.getByTestId('insights-review-pickup')).toContainText(
       'only the most recent requests were examined'

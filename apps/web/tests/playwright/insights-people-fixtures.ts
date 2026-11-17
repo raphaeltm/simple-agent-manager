@@ -10,7 +10,7 @@ import type {
   ProjectPeopleResponse,
 } from '@simple-agent-manager/shared';
 
-export type PeopleScene = 'realistic' | 'stress' | 'empty';
+export type PeopleScene = 'realistic' | 'moved' | 'stress' | 'empty';
 
 const NOW = Date.parse('2026-11-16T12:00:00.000Z');
 const MIN = 60_000;
@@ -23,15 +23,31 @@ function item(
   ageMs: number,
   fields: Partial<InsightsWaitingItem> = {}
 ): InsightsWaitingItem {
+  const base = {
+    createdAt: new Date(NOW - ageMs).toISOString(),
+    ageMs,
+  };
+  // An item the viewer may not open: the API sends its age only.
+  if (ref === null)
+    return {
+      private: true,
+      ref: null,
+      title: null,
+      kind: null,
+      blocking: null,
+      claimed: null,
+      canReassign: false,
+      ...base,
+    };
   return {
+    private: false,
     ref,
     title,
     kind: 'question',
     blocking: false,
     claimed: false,
-    createdAt: new Date(NOW - ageMs).toISOString(),
-    ageMs,
     canReassign: false,
+    ...base,
     ...fields,
   };
 }
@@ -47,9 +63,10 @@ function group(
     kind: key === 'unassigned' ? 'unassigned' : 'person',
     userId: key === 'unassigned' ? null : key,
     name,
+    member: true,
     you: false,
     open: items.length,
-    blocking: items.filter((i) => i.blocking).length,
+    blocking: items.filter((i) => i.blocking === true).length,
     oldestAgeMs: Math.max(0, ...items.map((i) => i.ageMs)),
     items,
     ...fields,
@@ -58,14 +75,19 @@ function group(
 
 function realistic(): Pick<ProjectPeopleResponse, 'waiting' | 'reviewPickup' | 'firstPerson'> {
   const groups = [
-    group('user-priya', 'Priya Natarajan', [
-      item(null, null, 3 * DAY + 4 * HOUR, { blocking: true }),
-      item('ask:t-1', 'Rotate the Stripe webhook secret on staging', 26 * HOUR, {
-        kind: 'task',
-        canReassign: true,
-      }),
-      item(null, null, 5 * HOUR, { kind: 'review' }),
-    ]),
+    group(
+      'user-priya',
+      'Priya Natarajan',
+      [
+        item(null, null, 3 * DAY + 4 * HOUR),
+        item('ask:t-1', 'Rotate the Stripe webhook secret on staging', 26 * HOUR, {
+          kind: 'task',
+          canReassign: true,
+        }),
+        item(null, null, 5 * HOUR),
+      ],
+      { blocking: 1 }
+    ),
     group(
       'user-insights',
       'Raph',
@@ -100,6 +122,27 @@ function realistic(): Pick<ProjectPeopleResponse, 'waiting' | 'reviewPickup' | '
     },
     firstPerson: { closed: 23, firstPerson: 19, share: 19 / 23 },
   };
+}
+
+/** The realistic project after the viewer handed "Confirm the new tax table" to Sam. */
+function moved(): Pick<ProjectPeopleResponse, 'waiting' | 'reviewPickup' | 'firstPerson'> {
+  const base = realistic();
+  const groups = base.waiting.groups.map((g) =>
+    g.key === 'user-insights'
+      ? { ...g, open: 1, items: g.items.filter((i) => i.ref !== 'ask:t-2') }
+      : g
+  );
+  groups.splice(
+    2,
+    0,
+    group('user-sam', 'Sam Okafor', [
+      item('ask:t-2', 'Confirm the new tax table with accounting', 9 * HOUR, {
+        kind: 'task',
+        canReassign: true,
+      }),
+    ])
+  );
+  return { ...base, waiting: { ...base.waiting, groups } };
 }
 
 function stress(): Pick<ProjectPeopleResponse, 'waiting' | 'reviewPickup' | 'firstPerson'> {
@@ -163,13 +206,15 @@ export function makePeople(
   const body =
     scene === 'realistic'
       ? realistic()
-      : scene === 'stress'
-        ? stress()
-        : {
-            waiting: { groups: [], total: 0, listed: 10 },
-            reviewPickup: { state: 'not_recorded' as const, waiting: 0, recordedSince: null },
-            firstPerson: { closed: 0, firstPerson: 0, share: null },
-          };
+      : scene === 'moved'
+        ? moved()
+        : scene === 'stress'
+          ? stress()
+          : {
+              waiting: { groups: [], total: 0, listed: 10 },
+              reviewPickup: { state: 'not_recorded' as const, waiting: 0, recordedSince: null },
+              firstPerson: { closed: 0, firstPerson: 0, share: null },
+            };
   return {
     projectId,
     range,

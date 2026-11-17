@@ -18,7 +18,7 @@ import { request } from './client';
 
 export async function listKnowledgeEntities(
   projectId: string,
-  params: { entityType?: string; limit?: number; offset?: number } = {}
+  params: { entityType?: string; limit?: number; offset?: number } = {},
 ): Promise<ListKnowledgeEntitiesResponse> {
   const searchParams = new URLSearchParams();
   if (params.entityType) searchParams.set('entityType', params.entityType);
@@ -33,18 +33,14 @@ export async function listKnowledgeEntities(
 
 export async function getKnowledgeEntity(
   projectId: string,
-  entityId: string
-): Promise<{
-  entity: KnowledgeEntityDetail;
-  observations: KnowledgeObservation[];
-  relations: KnowledgeRelation[];
-}> {
+  entityId: string,
+): Promise<{ entity: KnowledgeEntityDetail; observations: KnowledgeObservation[]; relations: KnowledgeRelation[] }> {
   return request(`/api/projects/${projectId}/knowledge/${entityId}`);
 }
 
 export async function createKnowledgeEntity(
   projectId: string,
-  body: CreateKnowledgeEntityRequest
+  body: CreateKnowledgeEntityRequest,
 ): Promise<{ id: string; createdAt: number }> {
   return request(`/api/projects/${projectId}/knowledge`, {
     method: 'POST',
@@ -55,7 +51,7 @@ export async function createKnowledgeEntity(
 export async function updateKnowledgeEntity(
   projectId: string,
   entityId: string,
-  body: UpdateKnowledgeEntityRequest
+  body: UpdateKnowledgeEntityRequest,
 ): Promise<{ updated: boolean }> {
   return request(`/api/projects/${projectId}/knowledge/${entityId}`, {
     method: 'PATCH',
@@ -65,7 +61,7 @@ export async function updateKnowledgeEntity(
 
 export async function deleteKnowledgeEntity(
   projectId: string,
-  entityId: string
+  entityId: string,
 ): Promise<{ deleted: boolean }> {
   return request(`/api/projects/${projectId}/knowledge/${entityId}`, {
     method: 'DELETE',
@@ -75,7 +71,7 @@ export async function deleteKnowledgeEntity(
 export async function addObservation(
   projectId: string,
   entityId: string,
-  body: AddObservationRequest
+  body: AddObservationRequest,
 ): Promise<{ id: string; createdAt: number }> {
   return request(`/api/projects/${projectId}/knowledge/${entityId}/observations`, {
     method: 'POST',
@@ -86,7 +82,7 @@ export async function addObservation(
 export async function updateObservation(
   projectId: string,
   observationId: string,
-  body: UpdateObservationRequest
+  body: UpdateObservationRequest,
 ): Promise<{ id?: string; updated?: boolean }> {
   return request(`/api/projects/${projectId}/knowledge/observations/${observationId}`, {
     method: 'PATCH',
@@ -96,7 +92,7 @@ export async function updateObservation(
 
 export async function deleteObservation(
   projectId: string,
-  observationId: string
+  observationId: string,
 ): Promise<{ removed: boolean }> {
   return request(`/api/projects/${projectId}/knowledge/observations/${observationId}`, {
     method: 'DELETE',
@@ -106,12 +102,12 @@ export async function deleteObservation(
 export async function searchKnowledge(
   projectId: string,
   query: string,
-  params: { entityType?: KnowledgeEntityType; limit?: number } = {}
+  params: { entityType?: KnowledgeEntityType; limit?: number } = {},
 ): Promise<SearchKnowledgeResponse> {
   const searchParams = new URLSearchParams({ q: query });
   if (params.entityType) searchParams.set('entityType', params.entityType);
   if (params.limit) searchParams.set('limit', String(params.limit));
   return request<SearchKnowledgeResponse>(
-    `/api/projects/${projectId}/knowledge/search?${searchParams.toString()}`
+    `/api/projects/${projectId}/knowledge/search?${searchParams.toString()}`,
   );
 }

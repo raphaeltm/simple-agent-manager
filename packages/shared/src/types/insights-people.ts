@@ -5,7 +5,7 @@
  * `GET /api/projects/:projectId/insights/people?range=…`.
  *
  * - Waiting on: open asks and human tasks right now, grouped by who they wait on, oldest first.
- *   An item the viewer could not open in the Inbox shows its kind and age only, never its title.
+ *   An item the viewer could not open in the Inbox shows its age only: no title, kind or flags.
  * - Review pickup: time from a review being requested on a pull request to the first review, per
  *   project. Recorded from GitHub webhooks since slice P shipped; earlier requests are "not
  *   recorded", never estimated.
@@ -21,15 +21,21 @@ export type InsightsPeopleAskKind = (typeof INSIGHTS_PEOPLE_ASK_KINDS)[number];
 
 export type InsightsPeopleSection = 'waiting' | 'reviews' | 'first_person';
 
+/**
+ * One open item. Everything but its age is null when the viewer may not open it in the Inbox
+ * (`private: true`): the group's counts still include it.
+ */
 export interface InsightsWaitingItem {
-  /** Inbox reference (`ask:<id>`) when the viewer may open the item; null otherwise. */
+  private: boolean;
+  /** Inbox reference (`ask:<id>`); null when private. */
   ref: string | null;
-  /** The item's title when the viewer may open it; null otherwise. */
+  /** The item's title; null when private. */
   title: string | null;
-  kind: InsightsPeopleAskKind;
-  blocking: boolean;
-  /** A team task one member has taken: it waits on that member. */
-  claimed: boolean;
+  kind: InsightsPeopleAskKind | null;
+  /** An agent is paused waiting on it; null when private. */
+  blocking: boolean | null;
+  /** A team task one member has taken: it waits on that member. Null when private. */
+  claimed: boolean | null;
   createdAt: string;
   ageMs: number;
   /** True when the viewer may hand this task on through the Inbox (human tasks only). */
@@ -41,8 +47,13 @@ export interface InsightsWaitingGroup {
   key: string;
   kind: 'person' | 'unassigned';
   userId: string | null;
-  /** Display name; null when unknown or for the unassigned group. */
+  /**
+   * Display name of an active member; null for the unassigned group and for someone who is no
+   * longer an active member of the project.
+   */
   name: string | null;
+  /** False when the person is no longer an active member (their items still wait). */
+  member: boolean;
   you: boolean;
   /** Open items in this group. */
   open: number;

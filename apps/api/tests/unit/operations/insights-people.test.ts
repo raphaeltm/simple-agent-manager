@@ -96,7 +96,11 @@ describe('projectPeople', () => {
   beforeEach(() => {
     sqlite = new Database(':memory:');
     createAllSchemaTables(sqlite, schema);
-    createDeclaredIndexes(sqlite, [schema.pullRequestReviewRequests]);
+    createDeclaredIndexes(sqlite, [
+      schema.pullRequestReviewRequests,
+      schema.pullRequests,
+      schema.pullRequestHeads,
+    ]);
     sqlite.exec(`
       INSERT INTO users (id, name, email) VALUES ('owner','Owner','o@example.com'),
         ('mate','Mate Person','m@example.com'), ('outsider','Out','x@example.com');
@@ -185,35 +189,64 @@ describe('projectPeople', () => {
       );
     });
 
-    it('never sends the title of an item the viewer could not open in the Inbox', async () => {
+    it('sends only the age of an item the viewer could not open in the Inbox', async () => {
       const result = await people('owner');
       const mate = result.waiting.groups.find((g) => g.key === 'mate')!;
       const [privateQ, takenTeam, filed] = mate.items;
-      expect(privateQ).toMatchObject({
+      expect(privateQ).toEqual({
+        private: true,
         ref: null,
         title: null,
-        kind: 'question',
+        kind: null,
+        blocking: null,
+        claimed: null,
+        createdAt: new Date(NOW - 5 * DAY).toISOString(),
+        ageMs: 5 * DAY,
         canReassign: false,
       });
       // A team task is readable by every member; one the colleague took waits on them.
       expect(takenTeam).toMatchObject({
+        private: false,
         ref: 'ask:team-taken',
         title: 'Title team-taken',
+        kind: 'task',
         claimed: true,
       });
       // The owner's run filed it: the filer may read it (Inbox rule).
       expect(filed).toMatchObject({ ref: 'ask:filed-for-mate', title: 'Title filed-for-mate' });
       expect(JSON.stringify(result)).not.toContain('Mate private question');
 
-      // Control: the colleague sees their own question's title.
+      // Control: the colleague sees their own question in full.
       const asMate = await people('mate');
       const own = asMate.waiting.groups.find((g) => g.key === 'mate')!;
       expect(own.you).toBe(true);
-      expect(own.items[0]).toMatchObject({ ref: 'ask:mate-q', title: 'Mate private question' });
-      // …and not the owner's question.
+      expect(own.items[0]).toMatchObject({
+        private: false,
+        ref: 'ask:mate-q',
+        title: 'Mate private question',
+        kind: 'question',
+      });
+      // …and the owner's two items (a blocking question and a task nobody filed for the colleague)
+      // only as ages, while the group still counts them and their blocking flag.
       const ownerGroup = asMate.waiting.groups.find((g) => g.key === 'owner')!;
-      expect(ownerGroup.items.every((i) => i.title === null || i.kind === 'task')).toBe(true);
-      expect(ownerGroup.items.find((i) => i.kind === 'question')).toMatchObject({ title: null });
+      expect(ownerGroup).toMatchObject({ open: 2, blocking: 1 });
+      expect(ownerGroup.items.map((i) => [i.private, i.kind, i.blocking])).toEqual([
+        [true, null, null],
+        [true, null, null],
+      ]);
+    });
+
+    it('names only active members; a departed assignee reads as a former member', async () => {
+      sqlite.exec(
+        `UPDATE project_members SET status = 'removed' WHERE project_id = 'p' AND user_id = 'mate'`
+      );
+      const mate = (await people()).waiting.groups.find((g) => g.key === 'mate')!;
+      expect(mate).toMatchObject({ name: null, member: false, open: 3 });
+      // Control: an active member keeps their name.
+      expect((await people()).waiting.groups.find((g) => g.key === 'owner')).toMatchObject({
+        name: 'Owner',
+        member: true,
+      });
     });
 
     it('never selects an unreadable title out of D1 (the SQL layer alone)', () => {
@@ -222,7 +255,13 @@ describe('projectPeople', () => {
         id: string;
         title: string | null;
       }>;
-      expect(rows.find((row) => row.id === 'mate-q')?.title).toBeNull();
+      const hidden = rows.find((row) => row.id === 'mate-q') as Record<string, unknown>;
+      expect([hidden.title, hidden.kind, hidden.blocking, hidden.claimed]).toEqual([
+        null,
+        null,
+        null,
+        null,
+      ]);
       // Control: a readable title is selected.
       expect(rows.find((row) => row.id === 'own-q')?.title).toBe('Title own-q');
     });
@@ -409,6 +448,58 @@ describe('projectPeople', () => {
         samples: 1,
         medianMs: 3 * HOUR,
       });
+    });
+
+    it('a pull request closing ends its open requests, which then no longer wait', async () => {
+      await request(1, 'alice', 10 * HOUR);
+      await request(1, 'bob', 10 * HOUR);
+      await review(1, 'alice', 9 * HOUR);
+      expect((await people()).reviewPickup).toMatchObject({ waiting: 1, samples: 1 });
+      await ingest('pull_request', {
+        action: 'closed',
+        pull_request: {
+          ...pr(1),
+          state: 'closed',
+          merged: true,
+          head: { ref: 'topic', sha: 'a'.repeat(40) },
+          base: { ref: 'main' },
+          created_at: isoAgo(12 * HOUR),
+          updated_at: isoAgo(2 * HOUR),
+          closed_at: isoAgo(2 * HOUR),
+          merged_at: isoAgo(2 * HOUR),
+        },
+      });
+      expect((await people()).reviewPickup).toMatchObject({ waiting: 0, samples: 1 });
+      // The picked-up cycle kept its review; only the open one was closed.
+      const rows = sqlite
+        .prepare(
+          'SELECT reviewer_key, first_review_at IS NOT NULL AS reviewed, removed_at IS NOT NULL AS removed FROM pull_request_review_requests ORDER BY reviewer_key'
+        )
+        .all();
+      expect(rows).toEqual([
+        { reviewer_key: 'alice', reviewed: 1, removed: 0 },
+        { reviewer_key: 'bob', reviewed: 0, removed: 1 },
+      ]);
+    });
+
+    it('writes cycles for every project linked to the repository, and none for others', async () => {
+      sqlite.exec(`INSERT INTO projects (id, name, repository, user_id) VALUES ('p2', 'Twin', 'acme/app', 'owner');
+        INSERT INTO pull_request_review_requests (project_id, repository, pr_number, reviewer_kind, reviewer_key, requested_at)
+          VALUES ('foreign', 'acme/app', 3, 'user', 'alice', '2026-11-16T00:00:00.000Z')`);
+      await request(3, 'alice', 10 * HOUR);
+      await review(3, 'alice', 9 * HOUR);
+      const rows = sqlite
+        .prepare(
+          'SELECT project_id, first_review_at IS NOT NULL AS reviewed FROM pull_request_review_requests WHERE pr_number = 3 ORDER BY project_id, requested_at'
+        )
+        .all();
+      // Both linked projects got the cycle and its review; the unlinked project's open row with
+      // the same repository, PR and reviewer was not touched (attack), while ours were (control).
+      expect(rows).toEqual([
+        { project_id: 'foreign', reviewed: 0 },
+        { project_id: 'p', reviewed: 1 },
+        { project_id: 'p2', reviewed: 1 },
+      ]);
     });
 
     it('skips a malformed cycle row', async () => {

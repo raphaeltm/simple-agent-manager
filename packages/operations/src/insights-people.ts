@@ -19,9 +19,13 @@
  * Work bounds (rule 81): waiting-on returns one row per waiter for counts and at most `listed`
  * items per waiter, so its size is members x listed whatever the backlog. Review pickup scans at
  * most `peopleReviewScanCap` cycles (default 2,000, newest first) through the
- * `(project_id, requested_at)` index and says when the cap cut the range. First person scans the
- * project's closed asks once through `idx_asks_project_status`; a 10k-closed-ask project is one
- * indexed pass with two indexed `ask_activity` probes per row in the range.
+ * `(project_id, requested_at)` index and says when the cap cut the range. First person seeks the
+ * project's answered and done asks resolved in the range through
+ * `idx_asks_project_status_resolved` (migration 0257), so asks closed before the range are never
+ * read; each row in the range costs at most two indexed `ask_activity` probes, and only for asks
+ * the first assignee answered. Waiting items rank every open ask by a thin window (id, waiter,
+ * created_at) and evaluate readability and reassign rights only for the `listed` rows per waiter:
+ * 5k open asks cost one indexed pass plus at most members x listed full evaluations.
  */
 import {
   DEFAULT_INSIGHTS_RANGE,
@@ -84,14 +88,16 @@ const GroupRowSchema = v.object({
   blocking: v.nullish(count),
   oldest: epochMs,
   name: v.nullish(v.string()),
+  member: v.number(),
 });
 const ItemRowSchema = v.object({
   id: v.pipe(v.string(), v.minLength(1)),
-  kind: v.picklist(INSIGHTS_PEOPLE_ASK_KINDS),
+  // Null for an item the viewer may not read (masked in SQL).
+  kind: v.nullable(v.picklist(INSIGHTS_PEOPLE_ASK_KINDS)),
   blocking: v.nullish(v.number()),
   title: v.nullable(v.string()),
   created_at: epochMs,
-  claimed: v.number(),
+  claimed: v.nullish(v.number()),
   waiter: v.nullable(v.string()),
   readable: v.number(),
   can_reassign: v.number(),
@@ -189,7 +195,8 @@ function buildWaiting(
       key,
       kind: row.waiter ? 'person' : 'unassigned',
       userId: row.waiter,
-      name: row.waiter ? row.name?.trim() || null : null,
+      name: row.waiter && row.member === 1 ? row.name?.trim() || null : null,
+      member: row.waiter ? row.member === 1 : false,
       you: row.waiter === viewerId,
       open: row.open,
       blocking: row.blocking ?? 0,
@@ -208,16 +215,42 @@ function buildWaiting(
     const group = groups.get(row.waiter ?? UNASSIGNED);
     if (!group || group.items.length >= listed) continue;
     const readable = row.readable === 1;
-    group.items.push({
-      ref: readable ? `ask:${row.id}` : null,
-      title: readable ? row.title : null,
-      kind: row.kind,
-      blocking: (row.blocking ?? 0) > 0,
-      claimed: row.claimed === 1,
-      createdAt: new Date(row.created_at).toISOString(),
-      ageMs: Math.max(0, nowMs - row.created_at),
-      canReassign: readable && row.can_reassign === 1,
-    });
+    // A readable row must carry its kind; one that does not is malformed (rule 50).
+    if (readable && !row.kind) {
+      log.error(`${EVENT}.row_skipped`, {
+        projectId,
+        context: 'waiting_item',
+        rowId: row.id,
+        issue: 'readable item without a kind',
+        action: 'skipped',
+      });
+      continue;
+    }
+    group.items.push(
+      readable
+        ? {
+            private: false,
+            ref: `ask:${row.id}`,
+            title: row.title,
+            kind: row.kind,
+            blocking: (row.blocking ?? 0) > 0,
+            claimed: row.claimed === 1,
+            createdAt: new Date(row.created_at).toISOString(),
+            ageMs: Math.max(0, nowMs - row.created_at),
+            canReassign: row.can_reassign === 1,
+          }
+        : {
+            private: true,
+            ref: null,
+            title: null,
+            kind: null,
+            blocking: null,
+            claimed: null,
+            createdAt: new Date(row.created_at).toISOString(),
+            ageMs: Math.max(0, nowMs - row.created_at),
+            canReassign: false,
+          }
+    );
   }
   // A failed item read leaves the counts; the page says the list could not be loaded.
   if (!itemRows) unavailable.add('waiting');

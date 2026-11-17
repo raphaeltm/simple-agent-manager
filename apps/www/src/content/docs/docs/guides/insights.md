@@ -122,46 +122,50 @@ much anyone did: there is no per-person tally of answers, reviews or merges anyw
 
 ### The four figures
 
-- **Waiting on people now**: open questions, review requests and human tasks agents filed in the
-  Inbox. System error items are left out.
+- **Waiting on people now**: open questions, review asks and human tasks agents filed in the
+  Inbox (not GitHub pull request reviews; those are under Review pickup). System error items are
+  left out.
 - **Longest wait**: how long the oldest of them has been open.
 - **Review pickup, median**: on the project's GitHub pull requests, the time from a review being
   requested to the first review. Per project, never per reviewer.
-- **Answered by the first person asked**: of the questions and tasks first given to one person and
-  closed in the range, the share that person answered without handing it on.
+- **Answered by the first person asked**: of the questions, review asks and tasks first given to
+  one person and closed in the range, the share that person answered without handing it on.
 
 ### Waiting on
 
 Open items grouped by who they wait on, the longest wait first: each person, then **Not taken
-yet** for team tasks nobody has taken. A team task one member took waits on that member. Each
-group says how many are open, how old the oldest is and how many have an agent blocked on them, and
-lists the oldest ten.
+yet** for team tasks nobody has taken. A team task one member took waits on that member. Someone
+who has left the project shows as **A former member**. Each group says how many are open, how old
+the oldest is and how many have an agent waiting on them, and lists the oldest ten (an
+administrator can change how many).
 
-You see the title of an item only if you could open it in your own Inbox: your own items, team
-tasks, and tasks your runs filed. Other people's items show only their kind and age (for example
-**Question for someone else**).
+You see an item only if you could open it in your own Inbox: your own items, team tasks, and tasks
+your runs filed. Any other item shows only how long it has waited, as **An item you cannot open**;
+its title, kind and flags are not sent to your browser. The group's counts still include it.
 
 **Reassign** appears on a human task you are allowed to hand on: one assigned to you, one your run
-filed, or a team task nobody has taken, if your project role can change tasks. Choose a member or
-**Back to the team**. It is the same action as handing a task on from the Inbox, with the same
-checks: the new person must be an active member of the project. Questions cannot be reassigned.
+filed, or a team task nobody has taken or that you took, if your project role can change tasks.
+Choose a member or **Back to the team** (whoever has the task now is not offered), then **Hand it
+on**. It is the same action as handing a task on from the Inbox, with the same checks: the new
+person must be an active member of the project. Questions cannot be reassigned.
 
 ### Review pickup
 
 The median time from a review request to the first review, the time 9 in 10 requests were picked
 up within, and how many requests made in the range are still waiting. SAM records review requests
 from the GitHub App's webhooks, so pickup starts from when this was first recorded for the project
-(the panel says since when); earlier requests read **Not recorded**, never estimated.
+(the panel says since when); earlier requests read **Not recorded**, never estimated. Until a
+request in the range has been picked up, the panel says so instead of showing a time.
 
 - A request to a person ends at that person's first review (a comment review counts).
 - A request to a team ends at the first review by anyone except the pull request's author.
-- A request that is withdrawn is not a pickup and is left out. Requests to and reviews by bots are
-  ignored.
+- A request that is withdrawn, or still open when the pull request is merged or closed, is not a
+  pickup and is left out. Requests to and reviews by bots are ignored.
 - Asking the same person again after they reviewed starts a new request.
 
 ### Answered by the first person asked
 
-Counts questions and human tasks that were answered or marked done in the range. An item first
+Counts questions, review asks and human tasks that were answered or marked done in the range. An item first
 given to the team is left out, since no single person was asked. An item counts as answered by the
 first person when it was never handed on and the person it was given to answered it. Handing a task
 on, including the automatic hand-back to the team when its assignee leaves the project, means it
