@@ -178,6 +178,29 @@ export function openaiProxyOptions(jsonContext: string): PrepareProxyOptions {
   };
 }
 
+/** Admission depends on the resolved owner; locally funded calls must be priceable. */
+async function enforcePassthroughFunding(
+  c: ProxyContext,
+  userId: string,
+  modelId: string,
+  upstream: ResolvedProxyUpstream,
+  options: PrepareProxyOptions
+): Promise<Response | null> {
+  const platformBilled = upstream.credentialSource === 'platform';
+  if (platformBilled && hasLocalAiCostMetering(c.env) && !findPricedModel(modelId)) {
+    const message = 'Model has no catalog price and cannot use an installation-funded credential.';
+    return options.dialect === 'anthropic'
+      ? anthropicError(message, 'invalid_request_error', 400)
+      : openaiError(message, 'invalid_request_error', 400);
+  }
+  const usageGate = await checkAiUsageGate(c.env.KV, userId, c.env, { platformBilled });
+  if (usageGate.allowed) return null;
+  return options.usageGateResponse(
+    usageGate.reason,
+    usageGate.reason === 'monthly-cost-cap' ? usageGate.monthlyCap : undefined
+  );
+}
+
 export async function prepareProxyRequest(
   c: ProxyContext,
   options: PrepareProxyOptions
@@ -248,27 +271,8 @@ export async function prepareProxyRequest(
     return { ok: false, response: options.missingUpstreamResponse() };
   }
 
-  const platformBilled = upstream.credentialSource === 'platform';
-  if (platformBilled && hasLocalAiCostMetering(c.env) && !findPricedModel(modelId)) {
-    const message = 'Model has no catalog price and cannot use an installation-funded credential.';
-    return {
-      ok: false,
-      response:
-        options.dialect === 'anthropic'
-          ? anthropicError(message, 'invalid_request_error', 400)
-          : openaiError(message, 'invalid_request_error', 400),
-    };
-  }
-  const usageGate = await checkAiUsageGate(c.env.KV, auth.userId, c.env, { platformBilled });
-  if (!usageGate.allowed) {
-    return {
-      ok: false,
-      response: options.usageGateResponse(
-        usageGate.reason,
-        usageGate.reason === 'monthly-cost-cap' ? usageGate.monthlyCap : undefined
-      ),
-    };
-  }
+  const fundingError = await enforcePassthroughFunding(c, auth.userId, modelId, upstream, options);
+  if (fundingError) return { ok: false, response: fundingError };
 
   // Insights run usage: the measured tokens go to this workspace's run, keyed by the credential
   // the proxy forwards with.

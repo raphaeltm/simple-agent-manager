@@ -1,5 +1,7 @@
-import { monthlyCostCapMessage } from '@simple-agent-manager/ai-proxy';
-import { estimateInputTokensFromMessages } from '@simple-agent-manager/ai-proxy';
+import {
+  estimateInputTokensFromMessages,
+  monthlyCostCapMessage,
+} from '@simple-agent-manager/ai-proxy';
 /**
  * Agent loop — unified OpenAI-format code path routed through AI Gateway.
  *
