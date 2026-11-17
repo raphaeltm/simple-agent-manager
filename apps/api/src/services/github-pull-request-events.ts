@@ -8,6 +8,7 @@ import {
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { resolveAdminSetting } from './admin-settings';
+import { ingestPullRequestReviewWebhook } from './github-pull-request-reviews';
 import {
   findProjectsForGitHubRepository,
   type GitHubProjectCandidate,
@@ -28,7 +29,7 @@ export async function ingestPullRequestWebhook(
   event: string,
   payload: Record<string, unknown>
 ): Promise<void> {
-  if (!['pull_request', 'check_run', 'check_suite'].includes(event)) return;
+  if (!['pull_request', 'pull_request_review', 'check_run', 'check_suite'].includes(event)) return;
   const repo = record(payload.repository);
   const repositoryFullName = string(repo?.full_name)?.toLowerCase() ?? null;
   const repositoryId = typeof repo?.id === 'number' ? repo.id : null;
@@ -42,9 +43,19 @@ export async function ingestPullRequestWebhook(
   );
   if (projects.length === 0 || !repositoryFullName) return;
 
-  if (event === 'pull_request')
+  if (
+    event === 'pull_request_review' ||
+    (event === 'pull_request' && isReviewRequestAction(payload.action))
+  )
+    await ingestPullRequestReviewWebhook(env, event, repositoryFullName, projects, payload);
+  else if (event === 'pull_request')
     await ingestLifecycleWebhook(env, repositoryFullName, projects, payload);
   else await ingestChecksWebhook(env, event, repositoryFullName, projects, payload);
+}
+
+/** `pull_request` actions that change who is asked to review (Insights · People). */
+function isReviewRequestAction(action: unknown): boolean {
+  return action === 'review_requested' || action === 'review_request_removed';
 }
 
 async function ingestLifecycleWebhook(

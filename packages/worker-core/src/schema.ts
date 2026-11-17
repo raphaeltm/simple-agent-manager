@@ -1517,6 +1517,44 @@ export const pullRequestHeads = sqliteTable(
   })
 );
 
+/**
+ * One review request cycle per reviewer of a pull request (migration 0257), written by the GitHub
+ * webhook ingest (`services/github-pull-request-reviews.ts`). Insights · People reads it for review
+ * pickup time, per project only: `reviewerKey` exists to match a review to its request.
+ */
+export const pullRequestReviewRequests = sqliteTable(
+  'pull_request_review_requests',
+  {
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    prNumber: integer('pr_number').notNull(),
+    /** 'user' | 'team' */
+    reviewerKind: text('reviewer_kind').notNull(),
+    reviewerKey: text('reviewer_key').notNull(),
+    requestedAt: text('requested_at').notNull(),
+    firstReviewAt: text('first_review_at'),
+    removedAt: text('removed_at'),
+  },
+  (table) => ({
+    pk: primaryKey({
+      columns: [
+        table.projectId,
+        table.repository,
+        table.prNumber,
+        table.reviewerKind,
+        table.reviewerKey,
+        table.requestedAt,
+      ],
+    }),
+    projectRequested: index('idx_pull_request_review_requests_project_requested').on(
+      table.projectId,
+      table.requestedAt
+    ),
+  })
+);
+
 /** Per-installation hourly refresh budget and shared rate-limit backoff. */
 export const pullRequestRefreshBudget = sqliteTable('pull_request_refresh_budget', {
   installationId: text('installation_id').primaryKey(),

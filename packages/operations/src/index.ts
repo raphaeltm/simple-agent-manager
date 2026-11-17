@@ -155,6 +155,7 @@ export {
   notifyClosedAsk,
 } from './inbox-write-core';
 export { projectAccounts, type ProjectAccountsInput } from './insights-accounts';
+export { projectPeople, type ProjectPeopleInput } from './insights-people';
 export { projectFlow, type ProjectFlowInput } from './insights-flow';
 export {
   installationHealth,
