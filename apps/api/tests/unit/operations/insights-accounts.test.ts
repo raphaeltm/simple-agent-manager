@@ -15,7 +15,7 @@ import { flowWindow } from '@simple-agent-manager/operations/internal/insights-f
 import { newProviderLimitWait, PROVIDER_LIMIT_POLICY } from '@simple-agent-manager/scheduler-core';
 import { credentialLimitReferenceKey } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
@@ -204,7 +204,10 @@ describe('projectAccounts', () => {
     credential('cc-out', 'outsider', 'Outsider Name', 'oauth-token');
     env = { DATABASE: createSqliteD1(sqlite), BASE_DOMAIN: 'example.test' } as unknown as Env;
   });
-  afterEach(() => sqlite.close());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    sqlite.close();
+  });
 
   it('attributes runs to accounts: yours by name, teammates grouped by kind, never another project', async () => {
     run('a1', 'cc-max');
@@ -597,6 +600,8 @@ describe('projectAccounts', () => {
   });
 
   it('attaches the last-reported limit windows to your own accounts only', async () => {
+    // The account usage port also reads wall time when expiring limit windows.
+    vi.spyOn(Date, 'now').mockReturnValue(NOW);
     run('a1', 'cc-max');
     run('m1', 'cc-mate', {}, { user_id: 'mate' });
     insert('credential_limit_windows', {

@@ -50,3 +50,5 @@ Redundant binding removed, documented as omitted code default, both deploy sync 
 Final doc review: corrected the remaining current-default statement in the public recent-product-changes self-hoster notes, linking the canonical assistant configuration (Codex finding 4598972296). Historical feature rollout dates preserved.
 
 CI follow-up: Validate Deploy Scripts caught the missing optional SAM_MODEL mapping in the mirrored installer-engine-ci-env.json manifest. Added the same mapping as the workflow; the existing exact-manifest parity test now passes. Full installer-engine deployment suite: 11 files, 199 tests passed locally. Fresh CI required after pushing this correction; no staging or production actions.
+
+CI API shard 2 exposed an unrelated expired wall-clock fixture in insights-accounts.test.ts: its NOW + DAY reset passed at Nov 17 noon. Reproduced locally (1 failed, 21 passed), then pinned Date.now to the test's existing operation clock for that one meter-reading scenario with cleanup after each case. All 22 tests and ESLint pass; local reviewer PASS. Production logic and assertions unchanged; fresh CI required.
