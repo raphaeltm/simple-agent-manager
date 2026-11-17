@@ -379,7 +379,13 @@ export async function archiveAttention(
     throw markRejectedBeforeEffects(errors.conflict('An answer is already being delivered'));
   // `ready` (this request claimed it) and `in_flight` (an archive claim already staged) both end
   // in the same resolution; no prompt is sent, so there is nothing outcome-unknown to protect.
-  await projectDataService.completeAttentionArchive(env, projectId, sessionId, markerId);
+  try {
+    await projectDataService.completeAttentionArchive(env, projectId, sessionId, markerId);
+  } catch (cause) {
+    // Nothing was sent, so releasing is always safe; a staged claim would block every answer.
+    await projectDataService.releaseAttentionArchive(env, projectId, sessionId, markerId);
+    throw cause;
+  }
   await recordSharedSessionAnswer(env, writer, { markerId, archived: true });
   return { agentNotified: false };
 }
