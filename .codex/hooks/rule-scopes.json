@@ -1,0 +1,1237 @@
+{
+  "generatedBy": "pnpm quality:agent-context-budget --write",
+  "note": "Read by .codex/hooks/rule-context.mjs. Do not edit by hand.",
+  "rules": [
+    {
+      "path": ".claude/rules/04-ui-standards.md",
+      "title": "UI Standards",
+      "patterns": [
+        {
+          "pattern": "apps/web/**",
+          "regex": "^apps\\/web\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/ui/**",
+          "regex": "^packages\\/ui\\/.*$",
+          "literal": 12
+        },
+        {
+          "pattern": "packages/acp-client/**",
+          "regex": "^packages\\/acp-client\\/.*$",
+          "literal": 20
+        },
+        {
+          "pattern": "packages/terminal/**",
+          "regex": "^packages\\/terminal\\/.*$",
+          "literal": 18
+        },
+        {
+          "pattern": "apps/www/src/content/docs/docs/**",
+          "regex": "^apps\\/www\\/src\\/content\\/docs\\/docs\\/.*$",
+          "literal": 31
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/06-api-patterns.md",
+      "title": "API Technical Patterns",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/06-vm-agent-patterns.md",
+      "title": "VM Agent Technical Patterns",
+      "patterns": [
+        {
+          "pattern": "packages/cloud-init/**",
+          "regex": "^packages\\/cloud-init\\/.*$",
+          "literal": 20
+        },
+        {
+          "pattern": "packages/vm-agent/**",
+          "regex": "^packages\\/vm-agent\\/.*$",
+          "literal": 18
+        },
+        {
+          "pattern": "scripts/vm/**",
+          "regex": "^scripts\\/vm\\/.*$",
+          "literal": 11
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/15-nav-parity.md",
+      "title": "Desktop–Mobile Navigation Parity",
+      "patterns": [
+        {
+          "pattern": "apps/web/src/components/NavSidebar.tsx",
+          "regex": "^apps\\/web\\/src\\/components\\/NavSidebar\\.tsx(?:\\/.*)?$",
+          "literal": 38
+        },
+        {
+          "pattern": "apps/web/src/components/MobileNavDrawer.tsx",
+          "regex": "^apps\\/web\\/src\\/components\\/MobileNavDrawer\\.tsx(?:\\/.*)?$",
+          "literal": 43
+        },
+        {
+          "pattern": "apps/web/src/components/AppShell.tsx",
+          "regex": "^apps\\/web\\/src\\/components\\/AppShell\\.tsx(?:\\/.*)?$",
+          "literal": 36
+        },
+        {
+          "pattern": "apps/web/src/components/chat/SessionLinkedWorkDrawer.tsx",
+          "regex": "^apps\\/web\\/src\\/components\\/chat\\/SessionLinkedWorkDrawer\\.tsx(?:\\/.*)?$",
+          "literal": 56
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/16-no-page-reload-on-mutation.md",
+      "title": "No Page Reload on Mutation",
+      "patterns": [
+        {
+          "pattern": "apps/web/**",
+          "regex": "^apps\\/web\\/.*$",
+          "literal": 9
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/17-ui-visual-testing.md",
+      "title": "Mandatory Playwright Visual Testing for UI Changes",
+      "patterns": [
+        {
+          "pattern": "apps/web/**",
+          "regex": "^apps\\/web\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/acp-client/**",
+          "regex": "^packages\\/acp-client\\/.*$",
+          "literal": 20
+        },
+        {
+          "pattern": "packages/terminal/**",
+          "regex": "^packages\\/terminal\\/.*$",
+          "literal": 18
+        },
+        {
+          "pattern": "packages/ui/**",
+          "regex": "^packages\\/ui\\/.*$",
+          "literal": 12
+        },
+        {
+          "pattern": "scripts/quality/check-preflight-evidence.ts",
+          "regex": "^scripts\\/quality\\/check-preflight-evidence\\.ts(?:\\/.*)?$",
+          "literal": 43
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/24-no-duplicate-ui-controls.md",
+      "title": "No Duplicate Implementations",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "apps/web/**",
+          "regex": "^apps\\/web\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/operations/**",
+          "regex": "^packages\\/operations\\/.*$",
+          "literal": 20
+        },
+        {
+          "pattern": "packages/shared/**",
+          "regex": "^packages\\/shared\\/.*$",
+          "literal": 16
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/26-project-chat-first.md",
+      "title": "Project Chat First",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "apps/web/**",
+          "regex": "^apps\\/web\\/.*$",
+          "literal": 9
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/27-vm-agent-staging-refresh.md",
+      "title": "VM Agent Binary Refresh for Staging Tests",
+      "patterns": [
+        {
+          "pattern": "packages/vm-agent/**",
+          "regex": "^packages\\/vm-agent\\/.*$",
+          "literal": 18
+        },
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/31-migration-safety.md",
+      "title": "Migration Safety (ABSOLUTE RULE — DATA LOSS PREVENTION)",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/worker-core/**",
+          "regex": "^packages\\/worker-core\\/.*$",
+          "literal": 21
+        },
+        {
+          "pattern": "packages/project-data/**",
+          "regex": "^packages\\/project-data\\/.*$",
+          "literal": 22
+        },
+        {
+          "pattern": "packages/ai-proxy/src/ai-token-budget-counter.ts",
+          "regex": "^packages\\/ai-proxy\\/src\\/ai-token-budget-counter\\.ts(?:\\/.*)?$",
+          "literal": 48
+        },
+        {
+          "pattern": "packages/repo-hosting/src/github-installation-leak-sweep.ts",
+          "regex": "^packages\\/repo-hosting\\/src\\/github-installation-leak-sweep\\.ts(?:\\/.*)?$",
+          "literal": 59
+        },
+        {
+          "pattern": "infra/resources/database.ts",
+          "regex": "^infra\\/resources\\/database\\.ts(?:\\/.*)?$",
+          "literal": 27
+        },
+        {
+          "pattern": "scripts/deploy/configure-d1-read-replication.sh",
+          "regex": "^scripts\\/deploy\\/configure-d1-read-replication\\.sh(?:\\/.*)?$",
+          "literal": 47
+        },
+        {
+          "pattern": "scripts/quality/check-do-migration-safety.ts",
+          "regex": "^scripts\\/quality\\/check-do-migration-safety\\.ts(?:\\/.*)?$",
+          "literal": 44
+        },
+        {
+          "pattern": "scripts/quality/check-migration-safety.test.ts",
+          "regex": "^scripts\\/quality\\/check-migration-safety\\.test\\.ts(?:\\/.*)?$",
+          "literal": 46
+        },
+        {
+          "pattern": "scripts/quality/check-migration-safety.ts",
+          "regex": "^scripts\\/quality\\/check-migration-safety\\.ts(?:\\/.*)?$",
+          "literal": 41
+        },
+        {
+          "pattern": "scripts/quality/d1-read-replication-script.test.ts",
+          "regex": "^scripts\\/quality\\/d1-read-replication-script\\.test\\.ts(?:\\/.*)?$",
+          "literal": 50
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/32-cf-api-debugging.md",
+      "title": "Cloudflare API Debugging (Use This Before Guessing)",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/34-vm-agent-callback-auth-agent-side.md",
+      "title": "VM Agent Callback Routes Must Use Callback JWT Auth (ABSOLUTE RULE)",
+      "patterns": [
+        {
+          "pattern": "packages/vm-agent/**",
+          "regex": "^packages\\/vm-agent\\/.*$",
+          "literal": 18
+        },
+        {
+          "pattern": "apps/api/src/routes/deploy-release-callback.ts",
+          "regex": "^apps\\/api\\/src\\/routes\\/deploy-release-callback\\.ts(?:\\/.*)?$",
+          "literal": 46
+        },
+        {
+          "pattern": "apps/api/src/routes/projects/agent-activity-callback.ts",
+          "regex": "^apps\\/api\\/src\\/routes\\/projects\\/agent-activity-callback\\.ts(?:\\/.*)?$",
+          "literal": 55
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/34-vm-agent-callback-auth.md",
+      "title": "VM Agent Callback Routes Must Use Callback JWT Auth (ABSOLUTE RULE)",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/ai-proxy/**",
+          "regex": "^packages\\/ai-proxy\\/.*$",
+          "literal": 18
+        },
+        {
+          "pattern": "packages/vm-agent/**",
+          "regex": "^packages\\/vm-agent\\/.*$",
+          "literal": 18
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/36-cli-quality.md",
+      "title": "CLI Quality Bar",
+      "patterns": [
+        {
+          "pattern": "packages/cli/**",
+          "regex": "^packages\\/cli\\/.*$",
+          "literal": 13
+        },
+        {
+          "pattern": ".github/workflows/ci.yml",
+          "regex": "^\\.github\\/workflows\\/ci\\.yml(?:\\/.*)?$",
+          "literal": 24
+        },
+        {
+          "pattern": "sonar-project.properties",
+          "regex": "^(?:[^/]+\\/)*sonar-project\\.properties(?:\\/.*)?$",
+          "literal": 24
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/37-prototype-development.md",
+      "title": "Prototype Development",
+      "patterns": [
+        {
+          "pattern": "apps/web/**",
+          "regex": "^apps\\/web\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/ui/src/tokens/theme.css",
+          "regex": "^packages\\/ui\\/src\\/tokens\\/theme\\.css(?:\\/.*)?$",
+          "literal": 32
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/40-sentinel-rows-excluded-from-counts.md",
+      "title": "Internal/Sentinel Rows Must Be Excluded From Business-Logic Counts",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/43-long-running-mcp-tools.md",
+      "title": "Long-Running MCP Tools Must Be Async",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/operations/**",
+          "regex": "^packages\\/operations\\/.*$",
+          "literal": 20
+        },
+        {
+          "pattern": "packages/vm-agent/internal/server/mcp_build.go",
+          "regex": "^packages\\/vm-agent\\/internal\\/server\\/mcp_build\\.go(?:\\/.*)?$",
+          "literal": 46
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/44-dual-write-migration-enumerate-writers.md",
+      "title": "Storage Migrations Must Enumerate Every Writer of the Migrated Data",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/project-data/**",
+          "regex": "^packages\\/project-data\\/.*$",
+          "literal": 22
+        },
+        {
+          "pattern": "packages/worker-core/**",
+          "regex": "^packages\\/worker-core\\/.*$",
+          "literal": 21
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/45-durable-object-concurrency-mutex.md",
+      "title": "Durable Objects Do Not Serialize Across `await` — Use a Real Mutex for Critical Sections",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/project-data/**",
+          "regex": "^packages\\/project-data\\/.*$",
+          "literal": 22
+        },
+        {
+          "pattern": "packages/ai-proxy/src/ai-token-budget-counter.ts",
+          "regex": "^packages\\/ai-proxy\\/src\\/ai-token-budget-counter\\.ts(?:\\/.*)?$",
+          "literal": 48
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/46-vm-agent-diagnostic-getter-sync.md",
+      "title": "VM Agent Diagnostic Getters Must Synchronize Loop-Mutated Fields",
+      "patterns": [
+        {
+          "pattern": "packages/vm-agent/**",
+          "regex": "^packages\\/vm-agent\\/.*$",
+          "literal": 18
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/47-control-loop-io-budget.md",
+      "title": "Control Loops Need Explicit I/O Budgets",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/project-data/**",
+          "regex": "^packages\\/project-data\\/.*$",
+          "literal": 22
+        },
+        {
+          "pattern": "packages/ai-proxy/src/ai-monthly-cost-cron.ts",
+          "regex": "^packages\\/ai-proxy\\/src\\/ai-monthly-cost-cron\\.ts(?:\\/.*)?$",
+          "literal": 45
+        },
+        {
+          "pattern": "packages/app-deployment/src/scheduled/**",
+          "regex": "^packages\\/app-deployment\\/src\\/scheduled\\/.*$",
+          "literal": 38
+        },
+        {
+          "pattern": "packages/repo-hosting/src/github-installation-leak-sweep.ts",
+          "regex": "^packages\\/repo-hosting\\/src\\/github-installation-leak-sweep\\.ts(?:\\/.*)?$",
+          "literal": 59
+        },
+        {
+          "pattern": "packages/agent-email/src/recovery.ts",
+          "regex": "^packages\\/agent-email\\/src\\/recovery\\.ts(?:\\/.*)?$",
+          "literal": 36
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/48-stale-while-revalidate-ui.md",
+      "title": "Stale-While-Revalidate UI (No Hiding, No Refetch Loops)",
+      "patterns": [
+        {
+          "pattern": "apps/web/**",
+          "regex": "^apps\\/web\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/acp-client/**",
+          "regex": "^packages\\/acp-client\\/.*$",
+          "literal": 20
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/49-capture-prerequisites-before-async-completion.md",
+      "title": "Capture Handler Prerequisites Before a Long Async Operation",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/project-data/**",
+          "regex": "^packages\\/project-data\\/.*$",
+          "literal": 22
+        },
+        {
+          "pattern": "packages/vm-agent/internal/acp/session_host_prompt.go",
+          "regex": "^packages\\/vm-agent\\/internal\\/acp\\/session_host_prompt\\.go(?:\\/.*)?$",
+          "literal": 53
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/50-list-read-row-fault-isolation.md",
+      "title": "List/Snapshot Reads Must Tolerate a Single Malformed Row",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/project-data/**",
+          "regex": "^packages\\/project-data\\/.*$",
+          "literal": 22
+        },
+        {
+          "pattern": "packages/operations/**",
+          "regex": "^packages\\/operations\\/.*$",
+          "literal": 20
+        },
+        {
+          "pattern": "packages/worker-core/src/row-parsing.ts",
+          "regex": "^packages\\/worker-core\\/src\\/row-parsing\\.ts(?:\\/.*)?$",
+          "literal": 39
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/51-runtime-boundary-validation.md",
+      "title": "Runtime boundary validation",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/worker-core/**",
+          "regex": "^packages\\/worker-core\\/.*$",
+          "literal": 21
+        },
+        {
+          "pattern": "packages/scheduler-core/**",
+          "regex": "^packages\\/scheduler-core\\/.*$",
+          "literal": 24
+        },
+        {
+          "pattern": "packages/project-data/**",
+          "regex": "^packages\\/project-data\\/.*$",
+          "literal": 22
+        },
+        {
+          "pattern": "packages/operations/**",
+          "regex": "^packages\\/operations\\/.*$",
+          "literal": 20
+        },
+        {
+          "pattern": "packages/app-deployment/**",
+          "regex": "^packages\\/app-deployment\\/.*$",
+          "literal": 24
+        },
+        {
+          "pattern": "packages/ai-proxy/**",
+          "regex": "^packages\\/ai-proxy\\/.*$",
+          "literal": 18
+        },
+        {
+          "pattern": "packages/agent-email/**",
+          "regex": "^packages\\/agent-email\\/.*$",
+          "literal": 21
+        },
+        {
+          "pattern": "packages/repo-hosting/**",
+          "regex": "^packages\\/repo-hosting\\/.*$",
+          "literal": 22
+        },
+        {
+          "pattern": "scripts/quality/type-boundary-baseline.json",
+          "regex": "^scripts\\/quality\\/type-boundary-baseline\\.json(?:\\/.*)?$",
+          "literal": 43
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/51-server-side-node-class-gates.md",
+      "title": "Server-Side Node-Class / Identity Gates — Never Trust a Client-Supplied Identifier or Agent Abstention",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/scheduler-core/**",
+          "regex": "^packages\\/scheduler-core\\/.*$",
+          "literal": 24
+        },
+        {
+          "pattern": "packages/operations/**",
+          "regex": "^packages\\/operations\\/.*$",
+          "literal": 20
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/51-vm-agent-no-host-mime-dependency.md",
+      "title": "VM Agent Behavior Must Not Depend on Host-Provided MIME/OS Databases",
+      "patterns": [
+        {
+          "pattern": "packages/vm-agent/**",
+          "regex": "^packages\\/vm-agent\\/.*$",
+          "literal": 18
+        },
+        {
+          "pattern": "packages/shared/src/mime.ts",
+          "regex": "^packages\\/shared\\/src\\/mime\\.ts(?:\\/.*)?$",
+          "literal": 27
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/52-model-catalog-lifecycle.md",
+      "title": "Model Catalog Lifecycle (Adding and Retiring Provider Models)",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/shared/**",
+          "regex": "^packages\\/shared\\/.*$",
+          "literal": 16
+        },
+        {
+          "pattern": "packages/ai-proxy/**",
+          "regex": "^packages\\/ai-proxy\\/.*$",
+          "literal": 18
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md",
+      "title": "Scheduled Handlers: Isolate Every Step, and Never Use a Liveness Timestamp as an Idleness Signal",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/project-data/**",
+          "regex": "^packages\\/project-data\\/.*$",
+          "literal": 22
+        },
+        {
+          "pattern": "packages/vm-agent/internal/deploy/artifact_client.go",
+          "regex": "^packages\\/vm-agent\\/internal\\/deploy\\/artifact_client\\.go(?:\\/.*)?$",
+          "literal": 52
+        },
+        {
+          "pattern": "packages/vm-agent/internal/deploy/compose.go",
+          "regex": "^packages\\/vm-agent\\/internal\\/deploy\\/compose\\.go(?:\\/.*)?$",
+          "literal": 44
+        },
+        {
+          "pattern": "packages/vm-agent/internal/server/health.go",
+          "regex": "^packages\\/vm-agent\\/internal\\/server\\/health\\.go(?:\\/.*)?$",
+          "literal": 43
+        },
+        {
+          "pattern": "packages/ai-proxy/src/ai-monthly-cost-cron.ts",
+          "regex": "^packages\\/ai-proxy\\/src\\/ai-monthly-cost-cron\\.ts(?:\\/.*)?$",
+          "literal": 45
+        },
+        {
+          "pattern": "packages/app-deployment/src/scheduled/**",
+          "regex": "^packages\\/app-deployment\\/src\\/scheduled\\/.*$",
+          "literal": 38
+        },
+        {
+          "pattern": "packages/repo-hosting/src/github-installation-leak-sweep.ts",
+          "regex": "^packages\\/repo-hosting\\/src\\/github-installation-leak-sweep\\.ts(?:\\/.*)?$",
+          "literal": 59
+        },
+        {
+          "pattern": "packages/agent-email/src/recovery.ts",
+          "regex": "^packages\\/agent-email\\/src\\/recovery\\.ts(?:\\/.*)?$",
+          "literal": 36
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/54-vm-agent-rollout-compatibility.md",
+      "title": "VM Agent Rollout Compatibility",
+      "patterns": [
+        {
+          "pattern": "packages/vm-agent/**",
+          "regex": "^packages\\/vm-agent\\/.*$",
+          "literal": 18
+        },
+        {
+          "pattern": "scripts/deploy/resolve-vm-agent-release.sh",
+          "regex": "^scripts\\/deploy\\/resolve-vm-agent-release\\.sh(?:\\/.*)?$",
+          "literal": 42
+        },
+        {
+          "pattern": "scripts/quality/deploy-reusable-workflow.test.ts",
+          "regex": "^scripts\\/quality\\/deploy-reusable-workflow\\.test\\.ts(?:\\/.*)?$",
+          "literal": 48
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/55-runaway-cost-emergency-ops.md",
+      "title": "Runaway-Cost Emergency Operations",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/56-clipped-overflow-is-invisible-to-document-checks.md",
+      "title": "Horizontal Overflow Inside `overflow-x-hidden` Is Invisible to Document-Level Checks",
+      "patterns": [
+        {
+          "pattern": "apps/web/**",
+          "regex": "^apps\\/web\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/acp-client/**",
+          "regex": "^packages\\/acp-client\\/.*$",
+          "literal": 20
+        },
+        {
+          "pattern": "packages/terminal/**",
+          "regex": "^packages\\/terminal\\/.*$",
+          "literal": 18
+        },
+        {
+          "pattern": "packages/ui/**",
+          "regex": "^packages\\/ui\\/.*$",
+          "literal": 12
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/56-destructive-provider-ownership-proof.md",
+      "title": "Destructive Provider Ownership Proof",
+      "patterns": [
+        {
+          "pattern": "packages/providers/**",
+          "regex": "^packages\\/providers\\/.*$",
+          "literal": 19
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/57-write-only-cross-boundary-state.md",
+      "title": "Cross-Boundary State With Multiple Consumers Must Be Reconciled, Not Just Reported",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/project-data/**",
+          "regex": "^packages\\/project-data\\/.*$",
+          "literal": 22
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/58-terminal-verdicts-must-match-the-resumer.md",
+      "title": "A \"Work Is Unrecoverable\" Verdict Must Read The Same Record The Resumer Reads",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/project-data/src/do/reconciliation-dead-target.ts",
+          "regex": "^packages\\/project-data\\/src\\/do\\/reconciliation-dead-target\\.ts(?:\\/.*)?$",
+          "literal": 58
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/61-guards-must-cover-every-runtime.md",
+      "title": "A Guard Added for One Runtime Must Be Enforced for Every Runtime",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/vm-agent/**",
+          "regex": "^packages\\/vm-agent\\/.*$",
+          "literal": 18
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/61-per-cycle-budget-counters.md",
+      "title": "Per-Cycle Budget Counters Must Reset on Success",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/project-data/**",
+          "regex": "^packages\\/project-data\\/.*$",
+          "literal": 22
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/63-widening-a-table-can-delete-an-auth-check.md",
+      "title": "Making a Scoping Column Nullable Silently Deletes Every Check That Used It",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/worker-core/**",
+          "regex": "^packages\\/worker-core\\/.*$",
+          "literal": 21
+        },
+        {
+          "pattern": "packages/project-data/**",
+          "regex": "^packages\\/project-data\\/.*$",
+          "literal": 22
+        },
+        {
+          "pattern": "packages/operations/**",
+          "regex": "^packages\\/operations\\/.*$",
+          "literal": 20
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/64-unstable-prop-identity-remounts-subtrees.md",
+      "title": "An Object Literal in a Render Body Can Remount an Entire Subtree",
+      "patterns": [
+        {
+          "pattern": "apps/web/**",
+          "regex": "^apps\\/web\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/acp-client/**",
+          "regex": "^packages\\/acp-client\\/.*$",
+          "literal": 20
+        },
+        {
+          "pattern": "packages/terminal/**",
+          "regex": "^packages\\/terminal\\/.*$",
+          "literal": 18
+        },
+        {
+          "pattern": "packages/ui/**",
+          "regex": "^packages\\/ui\\/.*$",
+          "literal": 12
+        },
+        {
+          "pattern": "packages/eslint-plugin-sam/src/rules/no-inline-markdown-components.js",
+          "regex": "^packages\\/eslint-plugin-sam\\/src\\/rules\\/no-inline-markdown-components\\.js(?:\\/.*)?$",
+          "literal": 69
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/65-capped-selection-must-rank-and-disclose.md",
+      "title": "A Capped Selection Must Rank By Its Purpose, And Must Disclose What It Dropped",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/project-data/**",
+          "regex": "^packages\\/project-data\\/.*$",
+          "literal": 22
+        },
+        {
+          "pattern": "packages/operations/**",
+          "regex": "^packages\\/operations\\/.*$",
+          "literal": 20
+        },
+        {
+          "pattern": "packages/shared/src/types/comments.ts",
+          "regex": "^packages\\/shared\\/src\\/types\\/comments\\.ts(?:\\/.*)?$",
+          "literal": 37
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/66-ownership-handoff-must-record-the-supersession.md",
+      "title": "An Ownership Handoff Must Record That It Happened",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/67-shared-predicates-that-trigger-actions.md",
+      "title": "Never Widen a Shared Predicate That Drives an Action",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/vm-agent/internal/server/session_snapshot_coordinator.go",
+          "regex": "^packages\\/vm-agent\\/internal\\/server\\/session_snapshot_coordinator\\.go(?:\\/.*)?$",
+          "literal": 65
+        },
+        {
+          "pattern": "packages/operations/src/idea-identity.ts",
+          "regex": "^packages\\/operations\\/src\\/idea-identity\\.ts(?:\\/.*)?$",
+          "literal": 40
+        },
+        {
+          "pattern": "packages/vm-agent/internal/server/session_snapshot_coordinator_test.go",
+          "regex": "^packages\\/vm-agent\\/internal\\/server\\/session_snapshot_coordinator_test\\.go(?:\\/.*)?$",
+          "literal": 70
+        },
+        {
+          "pattern": "packages/vm-agent/internal/server/session_snapshot_errors.go",
+          "regex": "^packages\\/vm-agent\\/internal\\/server\\/session_snapshot_errors\\.go(?:\\/.*)?$",
+          "literal": 60
+        },
+        {
+          "pattern": "packages/vm-agent/internal/server/workspace_provisioning.go",
+          "regex": "^packages\\/vm-agent\\/internal\\/server\\/workspace_provisioning\\.go(?:\\/.*)?$",
+          "literal": 59
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/68-event-scoped-filter-predicates.md",
+      "title": "Event-Scoped Filters Must Encode Their Scope",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/project-data/**",
+          "regex": "^packages\\/project-data\\/.*$",
+          "literal": 22
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/69-aggregate-capacity-at-final-reservation.md",
+      "title": "Enforce Aggregate Capacity at the Final Atomic Reservation",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/providers/**",
+          "regex": "^packages\\/providers\\/.*$",
+          "literal": 19
+        },
+        {
+          "pattern": "packages/scheduler-core/**",
+          "regex": "^packages\\/scheduler-core\\/.*$",
+          "literal": 24
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/69-emergency-config-paths-need-their-own-coverage.md",
+      "title": "A Code Path That Only Activates Under an Emergency Configuration Needs Tests In That Configuration",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/project-data/**",
+          "regex": "^packages\\/project-data\\/.*$",
+          "literal": 22
+        },
+        {
+          "pattern": "packages/worker-core/src/d1-limits.ts",
+          "regex": "^packages\\/worker-core\\/src\\/d1-limits\\.ts(?:\\/.*)?$",
+          "literal": 37
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/70-flag-flips-must-verify-the-deployed-value.md",
+      "title": "A Config Flip Ships Only When the Deployed Value Says So",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": ".github/workflows/deploy-reusable.yml",
+          "regex": "^\\.github\\/workflows\\/deploy-reusable\\.yml(?:\\/.*)?$",
+          "literal": 37
+        },
+        {
+          "pattern": "scripts/deploy/environment-var-overrides.ts",
+          "regex": "^scripts\\/deploy\\/environment-var-overrides\\.ts(?:\\/.*)?$",
+          "literal": 43
+        },
+        {
+          "pattern": "scripts/deploy/sync-wrangler-config.ts",
+          "regex": "^scripts\\/deploy\\/sync-wrangler-config\\.ts(?:\\/.*)?$",
+          "literal": 38
+        },
+        {
+          "pattern": "scripts/deploy/worker-var-defaults.ts",
+          "regex": "^scripts\\/deploy\\/worker-var-defaults\\.ts(?:\\/.*)?$",
+          "literal": 37
+        },
+        {
+          "pattern": "packages/project-data/src/do/tool-payload-cleanup-config-refusal.ts",
+          "regex": "^packages\\/project-data\\/src\\/do\\/tool-payload-cleanup-config-refusal\\.ts(?:\\/.*)?$",
+          "literal": 67
+        },
+        {
+          "pattern": "scripts/deploy/configure-d1-read-replication.sh",
+          "regex": "^scripts\\/deploy\\/configure-d1-read-replication\\.sh(?:\\/.*)?$",
+          "literal": 47
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/71-request-context-must-not-outlive-its-request.md",
+      "title": "A Goroutine That Outlives Its Request Must Not Capture That Request's Context",
+      "patterns": [
+        {
+          "pattern": "packages/providers/**",
+          "regex": "^packages\\/providers\\/.*$",
+          "literal": 19
+        },
+        {
+          "pattern": "packages/vm-agent/**",
+          "regex": "^packages\\/vm-agent\\/.*$",
+          "literal": 18
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/71-tightening-a-column-can-delete-a-capability.md",
+      "title": "A New Required Column Can Silently Delete a Capability for Every Existing Row",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/worker-core/**",
+          "regex": "^packages\\/worker-core\\/.*$",
+          "literal": 21
+        },
+        {
+          "pattern": "packages/project-data/**",
+          "regex": "^packages\\/project-data\\/.*$",
+          "literal": 22
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/72-error-categories-must-match-the-recovery-action.md",
+      "title": "An Error Category Must Name the Recovery Action, Not the Provider's Vocabulary",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/providers/**",
+          "regex": "^packages\\/providers\\/.*$",
+          "literal": 19
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md",
+      "title": "A Zero-Valued Optional Field Must Not Overwrite Existing State",
+      "patterns": [
+        {
+          "pattern": "**/*.go",
+          "regex": "^(?:[^/]+\\/)*[^/]*\\.go$",
+          "literal": 4
+        },
+        {
+          "pattern": "**/*.ts",
+          "regex": "^(?:[^/]+\\/)*[^/]*\\.ts$",
+          "literal": 4
+        },
+        {
+          "pattern": "**/*.tsx",
+          "regex": "^(?:[^/]+\\/)*[^/]*\\.tsx$",
+          "literal": 5
+        },
+        {
+          "pattern": "**/*.sql",
+          "regex": "^(?:[^/]+\\/)*[^/]*\\.sql$",
+          "literal": 5
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/75-external-api-check-then-act.md",
+      "title": "A Conflict From a Remote Uniqueness Constraint Is a Signal, Not a Failure",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/repo-hosting/**",
+          "regex": "^packages\\/repo-hosting\\/.*$",
+          "literal": 22
+        },
+        {
+          "pattern": "packages/app-deployment/**",
+          "regex": "^packages\\/app-deployment\\/.*$",
+          "literal": 24
+        },
+        {
+          "pattern": "packages/vm-agent/internal/server/vm_jobs.go",
+          "regex": "^packages\\/vm-agent\\/internal\\/server\\/vm_jobs\\.go(?:\\/.*)?$",
+          "literal": 44
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/77-library-extension-points-typed-and-exercised.md",
+      "title": "Implement a Library Extension Point Against the Library's Types, and Test It Through the Library",
+      "patterns": [
+        {
+          "pattern": "apps/api/**",
+          "regex": "^apps\\/api\\/.*$",
+          "literal": 9
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/78-snapshot-capture-must-scale-with-the-session.md",
+      "title": "Snapshot Capture Cost Must Scale With the Session, Not the Repository",
+      "patterns": [
+        {
+          "pattern": "packages/vm-agent/**",
+          "regex": "^packages\\/vm-agent\\/.*$",
+          "literal": 18
+        },
+        {
+          "pattern": "apps/api/src/services/session-snapshot-capture-cleanup.ts",
+          "regex": "^apps\\/api\\/src\\/services\\/session-snapshot-capture-cleanup\\.ts(?:\\/.*)?$",
+          "literal": 57
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/79-new-enum-values-audit-every-denylist.md",
+      "title": "A New Value in a Shared Status Enum Must Audit Every Denylist Over That Enum",
+      "patterns": [
+        {
+          "pattern": "apps/web/**",
+          "regex": "^apps\\/web\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/shared/**",
+          "regex": "^packages\\/shared\\/.*$",
+          "literal": 16
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/80-sam-glass.md",
+      "title": "SAM Glass",
+      "patterns": [
+        {
+          "pattern": "apps/web/**",
+          "regex": "^apps\\/web\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/ui/**",
+          "regex": "^packages\\/ui\\/.*$",
+          "literal": 12
+        }
+      ]
+    },
+    {
+      "path": ".claude/rules/82-typed-cards-every-harness.md",
+      "title": "A Typed Chat Card Must Render for Every Agent Harness",
+      "patterns": [
+        {
+          "pattern": "apps/web/**",
+          "regex": "^apps\\/web\\/.*$",
+          "literal": 9
+        },
+        {
+          "pattern": "packages/shared/src/typed-chat-cards.ts",
+          "regex": "^packages\\/shared\\/src\\/typed-chat-cards\\.ts(?:\\/.*)?$",
+          "literal": 39
+        }
+      ]
+    }
+  ]
+}

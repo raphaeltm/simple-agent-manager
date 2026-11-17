@@ -2,7 +2,6 @@ package acp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -76,31 +75,6 @@ type agentStartup struct {
 	envVars      []string
 	secretEnvKey map[string]bool
 	settings     *agentSettingsPayload
-}
-
-const codexACPManagedAgentModeEnv = "INITIAL_AGENT_MODE=agent-full-access"
-const codexACPManagedCodexPathEnv = "CODEX_PATH=codex"
-
-type codexACPManagedConfig struct {
-	SandboxMode    string `json:"sandbox_mode"`
-	ApprovalPolicy string `json:"approval_policy"`
-	Model          string `json:"model,omitempty"`
-}
-
-func buildCodexACPManagedConfigEnv(settings *agentSettingsPayload) (string, error) {
-	config := codexACPManagedConfig{
-		SandboxMode:    "danger-full-access",
-		ApprovalPolicy: "never",
-	}
-	if settings != nil {
-		config.Model = settings.Model
-	}
-
-	encoded, err := json.Marshal(config)
-	if err != nil {
-		return "", fmt.Errorf("encode managed Codex config: %w", err)
-	}
-	return "CODEX_CONFIG=" + string(encoded), nil
 }
 
 func (h *SessionHost) prepareAgentStartup(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload) (*agentStartup, error) {
@@ -481,132 +455,6 @@ func (h *SessionHost) applyPermissionMode(settings *agentSettingsPayload) {
 	} else {
 		h.permissionMode = "default"
 	}
-}
-
-func (h *SessionHost) writeAgentStartupConfig(ctx context.Context, agentType string, cred *agentCredential, startup *agentStartup) error {
-	if agentType == "openai-codex" {
-		if err := h.writeCodexStartupConfig(ctx, cred, startup); err != nil {
-			return err
-		}
-	}
-	if startup.containerID == "" {
-		return nil
-	}
-	if agentType == "opencode" {
-		h.writeOpenCodeStartupConfig(ctx, cred, startup)
-	}
-	if agentType == "mistral-vibe" {
-		h.writeVibeStartupConfig(ctx, startup)
-	}
-	return nil
-}
-
-func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCredential, startup *agentStartup) error {
-	managedConfigEnv, err := buildCodexACPManagedConfigEnv(startup.settings)
-	if err != nil {
-		return fmt.Errorf("cannot start Codex: %w", err)
-	}
-	proxyConfig := codexProxyProviderConfigFromCredential(cred, h.callbackToken())
-	effort := ""
-	if startup.settings != nil {
-		effort = startup.settings.Effort
-	}
-	// URL and CR/LF checks apply to every server: a malformed value would corrupt config.toml.
-	//
-	// The missing-token check applies ONLY to SAM's own endpoint. A user-configured MCP server
-	// may legitimately have no bearer token — several providers issue pre-signed URLs that
-	// carry the credential in the URL itself — and generateCodexMcpConfig already omits
-	// bearer_token_env_var for those. Failing closed on all of them would mean one no-auth
-	// connection blocks every Codex session for that user.
-	mcpServers := h.mcpServers() // one snapshot: validated, written and logged together
-	names := ResolveMcpServerNames(mcpServers)
-	for i, server := range mcpServers {
-		switch {
-		case strings.TrimSpace(server.URL) == "":
-			return fmt.Errorf("cannot start Codex with SAM MCP enabled: mcp server %d has a blank URL", i)
-		case strings.ContainsAny(server.URL, "\r\n"):
-			return fmt.Errorf("cannot start Codex with SAM MCP enabled: mcp server %d URL contains CR/LF characters", i)
-		case names[i] == SamMcpServerName && strings.TrimSpace(server.Token) == "":
-			return fmt.Errorf("cannot start Codex with SAM MCP enabled: mcp server %d is missing its bearer token (SAM_MCP_TOKEN)", i)
-		case strings.ContainsAny(server.Token, "\r\n"):
-			return fmt.Errorf("cannot start Codex with SAM MCP enabled: mcp server %d bearer token contains CR/LF characters", i)
-		}
-	}
-
-	var codexMcpEnvVars []string
-	if startup.containerID != "" {
-		codexMcpEnvVars, err = writeCodexConfigToContainer(ctx, startup.containerID, h.config.ContainerUser, mcpServers, proxyConfig, effort)
-	} else {
-		codexMcpEnvVars, err = writeCodexConfigLocally(mcpServers, proxyConfig, effort)
-	}
-	if err != nil {
-		return fmt.Errorf("cannot start Codex: write SAM MCP config.toml: %w", err)
-	}
-	// codex-acp (verified through 2.1.1) ignores Codex CLI -c arguments. CODEX_CONFIG is merged into
-	// each app-server thread. Seed the requested model before session/new: newly
-	// released Codex models may be valid provider models before they appear in the
-	// adapter's default configOptions, while a configured current model is advertised
-	// and can be verified by the exact post-handshake selection RPC. Every turn then
-	// applies the ACP agent mode's
-	// approval and sandbox policy on top. Select the wrapper's supported full-access
-	// mode as well so main turns and spawned subagents cannot fall back to bwrap
-	// inside SAM-managed containers. CODEX_PATH makes the adapter execute the
-	// explicitly installed and version-validated companion instead of resolving a
-	// potentially different nested @openai/codex dependency.
-	startup.envVars = removeEnvVar(startup.envVars, "CODEX_CONFIG")
-	startup.envVars = removeEnvVar(startup.envVars, "INITIAL_AGENT_MODE")
-	startup.envVars = removeEnvVar(startup.envVars, "CODEX_PATH")
-	startup.envVars = append(startup.envVars, managedConfigEnv)
-	startup.envVars = append(startup.envVars, codexACPManagedAgentModeEnv)
-	startup.envVars = append(startup.envVars, codexACPManagedCodexPathEnv)
-	for _, envVar := range codexMcpEnvVars {
-		key, _, ok := strings.Cut(envVar, "=")
-		if ok {
-			startup.envVars = removeEnvVar(startup.envVars, key)
-		}
-	}
-	startup.envVars = append(startup.envVars, codexMcpEnvVars...)
-	slog.Info("Wrote Codex config.toml",
-		"mcpServers", len(mcpServers),
-		"hasProxyProvider", proxyConfig != nil,
-		"effort", normalizeCodexEffort(effort),
-		"standalone", startup.containerID == "")
-	return nil
-}
-
-func (h *SessionHost) writeOpenCodeStartupConfig(ctx context.Context, cred *agentCredential, startup *agentStartup) {
-	opencodeConfig := buildOpencodeConfig(startup.settings)
-	configJSON, err := json.Marshal(opencodeConfig)
-	if err != nil {
-		slog.Error("opencode: failed to marshal config", "error", err)
-		return
-	}
-
-	startup.envVars = append(startup.envVars, "OPENCODE_CONFIG_CONTENT="+string(configJSON))
-	// SAM pins its own OpenCode build (ACP live steering, opencode_install.go). Its
-	// updater must never replace that binary with an upstream release mid-session.
-	startup.envVars = removeEnvVar(startup.envVars, opencodeDisableAutoupdateEnvName)
-	startup.envVars = append(startup.envVars, opencodeDisableAutoupdateEnvName+"=1")
-	provider := DefaultOpencodeProvider
-	if startup.settings != nil && startup.settings.OpencodeProvider != "" {
-		provider = startup.settings.OpencodeProvider
-	}
-	slog.Info("OpenCode config injected",
-		"provider", provider, "model", opencodeConfig["model"],
-		"configLen", len(configJSON), "workspaceId", h.config.WorkspaceID)
-
-}
-
-func (h *SessionHost) writeVibeStartupConfig(ctx context.Context, startup *agentStartup) {
-	activeModel := resolveVibeActiveModel(startup.settings)
-	mcpServers := h.mcpServers()
-	err := writeVibeConfigToContainer(ctx, startup.containerID, h.config.ContainerUser, activeModel, mcpServers)
-	if err != nil {
-		slog.Warn("Failed to write Vibe config.toml",
-			"error", err, "activeModel", activeModel, "workspaceId", h.config.WorkspaceID)
-		return
-	}
-	slog.Info("Wrote Vibe config.toml", "activeModel", activeModel, "mcpServers", len(mcpServers))
 }
 
 func (h *SessionHost) startAgentProcess(startup *agentStartup) (agentProcess, error) {
