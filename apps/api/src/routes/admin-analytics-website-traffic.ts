@@ -3,122 +3,13 @@ import { type Hono } from 'hono';
 import type { Env } from '../env';
 import { getAnalyticsDataset } from '../lib/analytics-config';
 import {
-  DEFAULT_RETENTION_WEEKS,
   DEFAULT_WEBSITE_TRAFFIC_TOP_PAGES_LIMIT,
-  MAX_RETENTION_QUERY_ROWS,
   parsePeriod,
   parsePositiveInt,
   periodToInterval,
   queryAnalyticsEngine,
 } from './admin-analytics-query';
-export function registerAdminAudienceAnalyticsRoutes(
-  adminAnalyticsRoutes: Hono<{ Bindings: Env }>
-) {
-  adminAnalyticsRoutes.get('/retention', async (c) => {
-    const dataset = getAnalyticsDataset(c.env);
-    const weeks = parsePositiveInt(
-      c.req.query('weeks') || c.env.ANALYTICS_RETENTION_WEEKS,
-      DEFAULT_RETENTION_WEEKS
-    );
-
-    // Two-query approach:
-    // 1. Get cohort week (first activity) per user
-    // 2. Get all active weeks per user
-    // Then compute retention on the API layer for flexibility.
-    //
-    // NOTE: Analytics Engine SQL does not support toStartOfWeek — use
-    // toStartOfInterval(timestamp, INTERVAL '7' DAY) which buckets into
-    // epoch-aligned 7-day intervals.
-
-    const cohortSql = `
-    SELECT
-      index1 AS user_id,
-      min(toStartOfInterval(timestamp, INTERVAL '7' DAY)) AS cohort_week
-    FROM ${dataset}
-    WHERE timestamp >= NOW() - INTERVAL '${weeks * 7}' DAY
-      AND index1 != 'anonymous'
-      AND blob1 != ''
-    GROUP BY user_id
-    LIMIT ${MAX_RETENTION_QUERY_ROWS}
-  `;
-
-    const activitySql = `
-    SELECT
-      index1 AS user_id,
-      toStartOfInterval(timestamp, INTERVAL '7' DAY) AS active_week
-    FROM ${dataset}
-    WHERE timestamp >= NOW() - INTERVAL '${weeks * 7}' DAY
-      AND index1 != 'anonymous'
-      AND blob1 != ''
-    GROUP BY user_id, active_week
-    LIMIT ${MAX_RETENTION_QUERY_ROWS}
-  `;
-
-    const [cohortData, activityData] = await Promise.all([
-      queryAnalyticsEngine(c.env, cohortSql) as Promise<
-        Array<{ user_id: string; cohort_week: string }>
-      >,
-      queryAnalyticsEngine(c.env, activitySql) as Promise<
-        Array<{ user_id: string; active_week: string }>
-      >,
-    ]);
-
-    // Build cohort map: userId -> cohort_week
-    const userCohort = new Map<string, string>();
-    for (const row of cohortData) {
-      userCohort.set(row.user_id, row.cohort_week);
-    }
-
-    // Build retention matrix: cohort_week -> { week_offset -> Set<userId> }
-    const cohorts = new Map<string, Map<number, Set<string>>>();
-    for (const row of activityData) {
-      const cw = userCohort.get(row.user_id);
-      if (!cw) continue;
-
-      const cohortTime = new Date(cw).getTime();
-      const activeTime = new Date(row.active_week).getTime();
-      const weekOffset = Math.round((activeTime - cohortTime) / (7 * 24 * 60 * 60 * 1000));
-
-      if (weekOffset < 0 || weekOffset > weeks) continue;
-
-      let weekMap = cohorts.get(cw);
-      if (!weekMap) {
-        weekMap = new Map<number, Set<string>>();
-        cohorts.set(cw, weekMap);
-      }
-      let userSet = weekMap.get(weekOffset);
-      if (!userSet) {
-        userSet = new Set<string>();
-        weekMap.set(weekOffset, userSet);
-      }
-      userSet.add(row.user_id);
-    }
-
-    // Convert to serializable format, sorted by cohort week
-    const retention = Array.from(cohorts.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([cohortWeek, weekMap]) => {
-        const cohortSize = weekMap.get(0)?.size ?? 0;
-        const weekOffsets: Array<{ week: number; users: number; rate: number }> = [];
-
-        for (const [offset, users] of Array.from(weekMap.entries()).sort(([a], [b]) => a - b)) {
-          weekOffsets.push({
-            week: offset,
-            users: users.size,
-            rate: cohortSize > 0 ? Math.round((users.size / cohortSize) * 100) : 0,
-          });
-        }
-
-        return { cohortWeek, cohortSize, weeks: weekOffsets };
-      });
-
-    const truncated =
-      cohortData.length >= MAX_RETENTION_QUERY_ROWS ||
-      activityData.length >= MAX_RETENTION_QUERY_ROWS;
-
-    return c.json({ retention, weeks, truncated });
-  });
-
+export function registerAdminWebsiteTrafficRoutes(adminAnalyticsRoutes: Hono<{ Bindings: Env }>) {
   /**
    * GET /api/admin/analytics/website-traffic — Website traffic by section and top pages
    * Query param: ?period=24h|7d|30d|90d (default 7d)
@@ -294,8 +185,4 @@ export function registerAdminAudienceAnalyticsRoutes(
 
     return c.json({ hosts, trend, period });
   });
-
-  /**
-   * GET /api/admin/analytics/forward-status — Forwarding configuration and cursor state
-   */
 }
