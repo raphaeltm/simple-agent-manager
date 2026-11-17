@@ -15,7 +15,7 @@ import { flowWindow } from '@simple-agent-manager/operations/internal/insights-f
 import { newProviderLimitWait, PROVIDER_LIMIT_POLICY } from '@simple-agent-manager/scheduler-core';
 import { credentialLimitReferenceKey } from '@simple-agent-manager/shared';
 import type Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
@@ -145,7 +145,10 @@ describe('projectAccounts', () => {
     credential(LONG_ID, 'owner', 'Legacy Max', 'oauth-token');
     credential('cc-out', 'outsider', 'Outsider Name', 'oauth-token');
   });
-  afterEach(() => sqlite.close());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    sqlite.close();
+  });
 
   it('attributes runs to accounts: yours by name, teammates grouped by kind, never another project', async () => {
     run('a1', 'cc-max');
@@ -524,6 +527,8 @@ describe('projectAccounts', () => {
   });
 
   it('attaches the last-reported limit windows to your own accounts only', async () => {
+    // The account limit reader uses the current clock independently of the Insights range.
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(NOW);
     run('a1', 'cc-max');
     run('m1', 'cc-mate', {}, { user_id: 'mate' });
     insert('credential_limit_windows', {
@@ -554,6 +559,13 @@ describe('projectAccounts', () => {
     // An allowed window is a meter reading, not a stall.
     expect(own?.stalls).toEqual({ episodes: 0, totalMs: 0, ongoing: false });
     expect(result.stallEpisodes.total).toBe(0);
+
+    clock.mockReturnValue(NOW + 2 * DAY);
+    const expired = await projectAccounts(ctx(), { projectId: 'p', range: '30d', nowMs: NOW });
+    expect(expired.accounts.find((a) => a.key === 'cred:cc-max')?.usage?.windows[0]).toMatchObject({
+      windowType: 'claude.seven_day',
+      utilizationPercent: 0,
+    });
   });
 
   it('ignores waits and windows that began before the range', async () => {
