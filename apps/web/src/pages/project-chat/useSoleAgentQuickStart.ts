@@ -14,15 +14,14 @@ export function soleAgentQuickStart(
   if (!soleAgent || !onCreate) return undefined;
   const runtime =
     instantAvailable === null ? null : resolveWizardRuntime('conversation', null, instantAvailable);
+  let runtimeLabel: string | null = null;
+  if (runtime !== null) {
+    runtimeLabel = runtime === 'cf-container' ? 'in an Instant container' : 'on a Cloud VM';
+  }
   return {
     agentName: soleAgent.name,
     profileName: suggestProfileName(soleAgent.id, 'conversation'),
-    runtimeLabel:
-      runtime === null
-        ? null
-        : runtime === 'cf-container'
-          ? 'in an Instant container'
-          : 'on a Cloud VM',
+    runtimeLabel,
     onCreate,
   };
 }

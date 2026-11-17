@@ -40,6 +40,26 @@ interface ComputePoolEmptyStateProps {
   placementSettings?: SafeCapacityPoolPlacementSettingsSummary;
 }
 
+function emptyStateTitle(sharedReady: boolean, isProject: boolean): string {
+  if (sharedReady) {
+    return isProject ? 'This project uses shared machines' : "You're using shared machines";
+  }
+  return isProject ? 'No machines for this project yet' : 'No machines yet';
+}
+
+function emptyStateBody(sharedReady: boolean, isProject: boolean, machines: string | null): string {
+  if (!sharedReady) {
+    return isProject
+      ? 'Connect a cloud account to this project, or set up your personal compute pool.'
+      : 'Connect a cloud account so SAM can start machines for your agents.';
+  }
+  const action = isProject
+    ? 'Connect a cloud account to this project to give it machines of its own.'
+    : 'Connect your own cloud account to choose your own machine types and regions.';
+  const machineDetails = machines ? ` (${machines})` : '';
+  return `This installation provides the machines${machineDetails}. ${action}`;
+}
+
 /**
  * Shown when this scope has no pool. If the installation still provides machines, say
  * so: work runs on them, so a personal cloud account is optional, not required.
@@ -49,7 +69,7 @@ export function ComputePoolEmptyState({
   projectId,
   shared,
   placementSettings,
-}: ComputePoolEmptyStateProps) {
+}: Readonly<ComputePoolEmptyStateProps>) {
   const sharedReady =
     shared?.scope === 'installation' &&
     shared.state === 'configured-ready' &&
@@ -76,38 +96,21 @@ export function ComputePoolEmptyState({
     );
   }
 
-  const isProject = scope === 'project' && projectId;
+  const isProject = scope === 'project' && Boolean(projectId);
   const connectHref = isProject
     ? `/projects/${projectId}/settings/accounts?connect=cloud:any`
     : '/settings/infrastructure?connect=any';
-  const title = sharedReady
-    ? isProject
-      ? 'This project uses shared machines'
-      : "You're using shared machines"
-    : isProject
-      ? 'No machines for this project yet'
-      : 'No machines yet';
-  const body = sharedReady
-    ? `This installation provides the machines${machines ? ` (${machines})` : ''}. ${
-        isProject
-          ? 'Connect a cloud account to this project to give it machines of its own.'
-          : 'Connect your own cloud account to choose your own machine types and regions.'
-      }`
-    : isProject
-      ? 'Connect a cloud account to this project, or set up your personal compute pool.'
-      : 'Connect a cloud account so SAM can start machines for your agents.';
+  const title = emptyStateTitle(sharedReady, isProject);
+  const body = emptyStateBody(sharedReady, isProject, machines);
 
   return (
     <div className="grid gap-3 rounded-md border border-border-default bg-inset p-4">
       <p className="m-0 font-medium text-fg-primary">{title}</p>
       <p className="m-0 text-sm text-fg-muted [overflow-wrap:anywhere]">{body}</p>
       {fitWarning && (
-        <p
-          role="status"
-          className="m-0 rounded-md border border-warning/30 bg-warning-tint px-3 py-2 text-sm text-fg-primary"
-        >
+        <output className="m-0 block rounded-md border border-warning/30 bg-warning-tint px-3 py-2 text-sm text-fg-primary">
           {fitWarning}
-        </p>
+        </output>
       )}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <Link to={connectHref} className={PRIMARY_LINK}>

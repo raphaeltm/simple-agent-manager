@@ -375,6 +375,14 @@ export function NoProfilesGate({
     }
   };
 
+  let description = 'Choose an agent and default runtime settings for this project chat.';
+  if (quickStart) {
+    const runtimeDescription = quickStart.runtimeLabel
+      ? ` that runs ${quickStart.runtimeLabel}`
+      : '';
+    description = `One click creates a profile named "${quickStart.profileName}"${runtimeDescription}. You can change it later.`;
+  }
+
   return (
     // With a quick start the agent's name sits in the button, so the text gets its own row
     // instead of sharing one with buttons whose width depends on that name.
@@ -385,11 +393,7 @@ export function NoProfilesGate({
         <div className="text-sm font-medium text-fg-primary">
           {quickStart ? 'Ready to chat' : 'Create a profile to start'}
         </div>
-        <div className="mt-1 break-words text-xs text-fg-muted">
-          {quickStart
-            ? `One click creates a profile named "${quickStart.profileName}"${quickStart.runtimeLabel ? ` that runs ${quickStart.runtimeLabel}` : ''}. You can change it later.`
-            : 'Choose an agent and default runtime settings for this project chat.'}
-        </div>
+        <div className="mt-1 break-words text-xs text-fg-muted">{description}</div>
         {error && (
           <div role="alert" className="mt-1 break-words text-xs text-danger-fg">
             {error}
