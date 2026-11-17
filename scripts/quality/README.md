@@ -204,7 +204,10 @@ are created, so a lint would be mostly noise.
 `pnpm quality:no-secret-readback` (`scripts/quality/check-no-secret-readback.ts`) is blocking in
 the Secret Scan job. It scans every `.yml`, `.yaml`, `.sh`, JS/TS file and Dockerfile under
 `.github/`, `scripts/` and `infra/`, except tests (`*.test.*`, `*.spec.*`, `test-*.sh`, `__tests__/`,
-`fixtures/`) and itself. Comment lines are skipped, apart from a tracing shebang on line 1.
+`fixtures/`) and itself. Comment lines are skipped, apart from a tracing shebang on line 1. Rules apply to logical lines, so
+a split statement counts: shell `\` continuations in every file type, and JS/TS method chains
+(`crypto.subtle` followed by `.decrypt(` on the next line) are joined. A finding is reported at the
+statement's first line.
 
 It reports four kinds of finding:
 
@@ -248,7 +251,8 @@ canonical `main` push runs it, whatever the change touches.
     `--show-secrets` read and its `crypto.subtle.decrypt`.
 
   The patterns added after review (YAML `run:` forms, shebangs, `pulumi config get`, SHELLOPTS,
-  `trap DEBUG`, dynamic imports) found nothing new in the same sample. Because there were no false
+  `trap DEBUG`, dynamic imports, Dockerfiles and logical lines) found nothing new in the same
+  sample. Because there were no false
   positives, the check was blocking from the start (policy f9ae7f88).
 
 ### How the tests prove it
@@ -256,7 +260,8 @@ canonical `main` push runs it, whatever the change touches.
 - They reintroduce the staging2 bootstrap step, its decrypt helper and its multi-line import, and
   include negative controls for nearby shapes.
 - Each guard was deleted once and the tests went red: every pattern, the import pass, the comment
-  skip, the shebang check, the shell-only gate, the open-task check and the file pinning.
+  skip, the shebang check, the shell-only gate, the open-task check, the file pinning, Dockerfile
+  matching and logical-line joining.
 - A test also requires every pattern to be the only match for at least one reintroduced line.
 
 ## Runtime workflow state

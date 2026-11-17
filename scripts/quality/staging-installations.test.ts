@@ -500,14 +500,26 @@ describe('deploy-reusable.yml secondary installation wiring', () => {
     expect(configure).toContain(
       "SECRET_ENCRYPTION_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.ENCRYPTION_KEY || '' }}"
     );
-    // The primary's trust never reaches a secondary: each installation has its own secret, and
-    // an unset one leaves the Worker secret alone instead of deleting it.
+    // The primary's trust never reaches a secondary, and an unset secondary trust leaves the
+    // Worker secret alone instead of deleting it.
     expect(configure).toContain(
-      "AGENT_SIGN_IN_TRUST: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.AGENT_SIGN_IN_TRUST || steps.deploy_resources.outputs.installation == 'staging2' && secrets.AGENT_SIGN_IN_TRUST_STAGING2 || '' }}"
+      "AGENT_SIGN_IN_TRUST: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.AGENT_SIGN_IN_TRUST || '' }}"
     );
     expect(configure).toContain(
-      "AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET: ${{ steps.deploy_resources.outputs.secondary == 'true' && 'true' || 'false' }}"
+      "AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET: ${{ steps.deploy_resources.outputs.secondary == 'true' && 'true' || '' }}"
     );
+    expect(configure).not.toContain('AGENT_SIGN_IN_TRUST_STAGING2');
+    // The secondary's own trust goes from its GitHub secret to Wrangler on stdin, secondary only.
+    const trust = step('Configure Secondary Agent Sign-In Trust');
+    expect(trust).toContain("steps.deploy_resources.outputs.secondary == 'true'");
+    expect(trust).toContain(
+      "SECONDARY_AGENT_SIGN_IN_TRUST: ${{ steps.deploy_resources.outputs.installation == 'staging2' && secrets.AGENT_SIGN_IN_TRUST_STAGING2 || '' }}"
+    );
+    expect(trust).toContain('printf \'%s\' "$SECONDARY_AGENT_SIGN_IN_TRUST" |');
+    expect(trust).toContain(
+      'wrangler secret put AGENT_SIGN_IN_TRUST --env "$DEPLOY_ENV" >/dev/null 2>&1'
+    );
+    expect(trust).not.toMatch(/secrets\.AGENT_SIGN_IN_TRUST\b(?!_)/);
     expect(workflow).not.toMatch(/derive-trust|agent-sign-in-trust\.json/);
   });
 

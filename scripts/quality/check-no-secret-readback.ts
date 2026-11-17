@@ -195,6 +195,7 @@ export function scanText(
   const shell = SHELL_FILE.test(file) || DOCKERFILE.test(file);
   // Every file type: workflow YAML and shell heredocs carry inline JS.
   const importLines = new Set(decryptImportLines(text).map((line) => line - 1));
+  let continuedUntil = -1;
   lines.forEach((line, index) => {
     const marker = MARKER.exec(line);
     if (marker && !isAllowed(marker[1])) {
@@ -208,13 +209,44 @@ export function scanText(
       report(index, 'xtrace');
       return;
     }
-    if (isCommentLine(line)) return;
+    if (index <= continuedUntil || isCommentLine(line)) return;
+    const logical = logicalLine(lines, index, shell);
+    continuedUntil = logical.lastIndex;
     const rule = RULES.find(
-      (candidate) => (!candidate.shellOnly || shell) && candidate.pattern.test(line)
+      (candidate) => (!candidate.shellOnly || shell) && candidate.pattern.test(logical.text)
     );
     if (rule) report(index, rule.id);
   });
   return result;
+}
+
+/** Physical lines a logical line may span, so a pathological file cannot make the scan quadratic. */
+const MAX_CONTINUATION_LINES = 20;
+
+/**
+ * One statement split across lines, reported at its first line: shell `\` continuations (every
+ * file type, since YAML and Dockerfiles carry shell), and in JS/TS a method chain whose next line
+ * starts with `.`/`?.`/`[` or whose line ends with `.` (`crypto.subtle` / `.decrypt(...)`).
+ */
+function logicalLine(
+  lines: string[],
+  start: number,
+  shell: boolean
+): { text: string; lastIndex: number } {
+  let text = lines[start];
+  let index = start;
+  while (index + 1 < lines.length && index - start < MAX_CONTINUATION_LINES) {
+    const next = lines[index + 1];
+    if (/\\\s*$/.test(text)) {
+      text = `${text.replace(/\\\s*$/, '')} ${next.trim()}`;
+    } else if (!shell && (/^\s*(?:\??\.|\[)/.test(next) || /\.\s*$/.test(text))) {
+      text = `${text.trimEnd()}${next.trim()}`;
+    } else {
+      break;
+    }
+    index += 1;
+  }
+  return { text, lastIndex: index };
 }
 
 function markerTask(

@@ -168,6 +168,39 @@ describe('check-no-secret-readback rules', () => {
   });
 });
 
+describe('statements split across lines', () => {
+  it.each<[string, string, RuleId, number]>([
+    ['x.ts', 'const plain = await crypto.subtle\n  .decrypt(params, key, data);', 'decryption', 1],
+    ['x.ts', 'const plain = await crypto.subtle.\n  decrypt(params, key, data);', 'decryption', 1],
+    [
+      'x.ts',
+      "const plain = await crypto\n  .subtle['decrypt'](params, key, data);",
+      'decryption',
+      1,
+    ],
+    ['x.sh', 'echo start\nset \\\n  -x\necho done', 'xtrace', 2],
+    [
+      'x.sh',
+      'pulumi stack output \\\n  --stack staging \\\n  --show-secrets encryptionKey',
+      'show-secrets',
+      1,
+    ],
+    ['x.yml', '        run: |\n          bash \\\n            -x deploy.sh', 'xtrace', 2],
+  ])('reports %s %j', (file, text, rule, line) => {
+    expect(
+      scanText(file, text, isOpen).findings.map((finding) => [finding.rule, finding.line])
+    ).toEqual([[rule, line]]);
+  });
+
+  it.each([
+    ['x.ts', 'const ciphertext = await crypto.subtle\n  .encrypt(params, key, data);'],
+    ['x.sh', 'pulumi stack output \\\n  --stack staging \\\n  r2Name'],
+    ['x.sh', 'set -e\n-x is a flag name in this heredoc'],
+  ])('does not report %s %j', (file, text) => {
+    expect(scanText(file, text, isOpen).findings).toEqual([]);
+  });
+});
+
 describe('tracing shebangs', () => {
   it.each(['#!/bin/bash -x', '#!/usr/bin/env -S bash -eux', '#!/bin/sh -x'])(
     'reports %s on the first line',
