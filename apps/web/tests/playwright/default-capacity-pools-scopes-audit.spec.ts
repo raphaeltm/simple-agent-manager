@@ -791,6 +791,60 @@ test.describe('Default capacity pool scope surfaces', () => {
     );
   });
 
+  test('unavailable fitting machine does not suppress the default workspace warning', async ({
+    page,
+  }, testInfo) => {
+    await setupCommonMocks(page, user, 'installation');
+    // A live undersized candidate plus a fitting active candidate absent from the latest catalog.
+    const body = {
+      ...defaultsResponse('installation'),
+      placementSettings: {
+        version: 1,
+        sourceGeneration: 7,
+        legacyWorkloadAdapterVersion: 1,
+        selectionWeights: { priority: 1, price: 1, fit: 1, capacity: 1, candidateOrder: 1 },
+        rolloutCohortPercent: 100,
+        source: {
+          legacyWorkloadMapping: 'default',
+          platformDefaults: 'persisted',
+          selection: 'default',
+        },
+        resourceDefaults: {
+          legacyWorkloadMapping: {},
+          platformDefaults: { minVcpu: 2, minMemoryGb: 4, minDiskGb: 40, exclusiveNode: false },
+        },
+        hostMemoryReserveMb: 1024,
+      },
+    };
+    body.effective.candidates = body.effective.candidates.slice(0, 2).map((candidate, index) => ({
+      ...candidate,
+      status: 'active',
+      providerInstanceType: index === 0 ? 'cx23' : 'cx33',
+      providerInstanceVcpuCount: index === 0 ? 2 : 4,
+      providerInstanceMemoryMb: index === 0 ? 4096 : 8192,
+      providerInstanceDiskGb: 80,
+      catalogAvailability: index === 0 ? 'available' : 'last-known-unavailable',
+      providerInstanceCatalogSource: 'api',
+    }));
+    await page.route('**/api/capacity-pools/defaults*', (route) => jsonResponse(route, 200, body));
+    await page.goto('/settings/infrastructure');
+
+    const warning = page.getByText(/No allowed machine can run a default workspace/);
+    await expect(warning).toBeVisible();
+    await expect(warning).toContainText('It needs 2 vCPU, 4 GB of memory and 40 GB of disk');
+    await expect(warning).toContainText('at least 2 vCPU, 5 GB of memory and 40 GB of disk');
+    await expect(page.getByText(/Your work uses the shared compute pool/)).toBeVisible();
+    await assertNoOverflow(page);
+    await screenshotNearHeading(
+      page,
+      POOL_HEADINGS.user,
+      `default-capacity-pools-unavailable-fit-warning-${getProjectSuffix(testInfo.project.name)}`,
+      { outputDir: '../../.tmp/l15/unavailable-fit-screenshots' }
+    );
+    await warning.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath('unavailable-fit-warning.png') });
+  });
+
   test('ordinary user on the shared pool sees the fit warning from its safe summary', async ({
     page,
   }, testInfo) => {

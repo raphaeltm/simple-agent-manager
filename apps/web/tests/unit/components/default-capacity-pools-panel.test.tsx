@@ -215,6 +215,56 @@ describe('DefaultCapacityPoolsPanel', () => {
       ).toHaveTextContent('keeps 5 GB of memory for itself');
     });
 
+    it.each([
+      ['last-known-unavailable', true],
+      ['available', false],
+    ] as const)(
+      'uses only currently available fitting machines (%s)',
+      async (availability, warns) => {
+        const body = withInstallationSettings({ minVcpu: 2, minMemoryGb: 4 }, 1024);
+        body.effective!.candidates = body.effective!.candidates.map((candidate) => ({
+          ...candidate,
+          catalogAvailability:
+            candidate.providerInstanceType === 'cpx31' ? availability : 'available',
+          providerInstanceCatalogSource: 'api',
+        }));
+        mocks.fetchUserDefaultCapacityPools.mockResolvedValue(body);
+
+        renderPanel({ scope: 'user' });
+
+        expect(await screen.findByText(/Allowed machines/)).toBeInTheDocument();
+        const warning = screen.queryByText(/No allowed machine can run a default workspace/);
+        if (warns) expect(warning).toBeInTheDocument();
+        else expect(warning).not.toBeInTheDocument();
+      }
+    );
+
+    it('does not let an available disabled candidate rescue an unavailable active candidate in the same cell', async () => {
+      const body = withInstallationSettings({ minVcpu: 2, minMemoryGb: 4 }, 1024);
+      const fitting = body.effective!.candidates.find(
+        (candidate) => candidate.providerInstanceType === 'cpx31'
+      )!;
+      body.effective!.candidates = body.effective!.candidates.map((candidate) => ({
+        ...candidate,
+        catalogAvailability: candidate.id === fitting.id ? 'last-known-unavailable' : 'available',
+        providerInstanceCatalogSource: 'api',
+      }));
+      body.effective!.candidates.push({
+        ...fitting,
+        id: 'fitting-disabled',
+        status: 'disabled',
+        catalogAvailability: 'available',
+        providerInstanceCatalogSource: 'api',
+      });
+      mocks.fetchUserDefaultCapacityPools.mockResolvedValue(body);
+
+      renderPanel({ scope: 'user' });
+
+      expect(
+        await screen.findByText(/No allowed machine can run a default workspace/)
+      ).toBeInTheDocument();
+    });
+
     it('shows the pool state warning instead when the pool cannot be used at all', async () => {
       const body = withInstallationSettings({ minVcpu: 2, minMemoryGb: 8 }, 1024);
       body.effective = { ...body.effective!, effectiveState: 'catalog-unavailable' };
