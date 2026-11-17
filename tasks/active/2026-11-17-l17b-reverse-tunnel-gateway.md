@@ -36,20 +36,30 @@ Reverse-tunnel nodes add one indexed lease read per control-plane request.
   lease of the current incarnation, so revocation applies on the next request; frps drops the
   control session within one heartbeat timeout because a refused Ping does not refresh it.
 - F20 HMAC subkey: closed by L17a (HKDF purpose subkeys). Rotation: idea 01M7KPNV3B28WPEVJRNRAM2X1D.
-- F21 NULL tunnel_id backfill: closed by L17a. Broad 404 matcher: Caddy, L22.
-- F21 Login rate limit: see decision in PR.
-- F21 port_range_cooling_down: see decision in PR.
+- F21 NULL tunnel_id backfill: closed by L17a. Broad 404 matcher: box Caddy matcher, owned by L22.
+- F21 Login rate limit: deferred to the front door (Caddy `/~!frp`, L22). The plugin endpoint is
+  loopback-only; a probe costs one indexed read + SHA-256 against a 256-bit HMAC credential; an
+  API limiter keyed on claimed node_id is rotatable, a global one locks out real nodes. L22
+  acceptance criteria (loopback frps bindPort, per-source limiter, header_up overwrites, upstream
+  header stripping, log redaction, real-Caddy WebSocket forward_auth check) are recorded in idea
+  01M7MK0PCF032CT45Z45HRSDEQ.
+- F21 port_range_cooling_down: unchanged from L17a (fail-fast with reusable-at time); reachable only
+  when the whole range is cooling. Making it retryable capacity (or a minimum range size) is
+  tracked in idea 01M7MK0PCF032CT45Z45HRSDEQ.
+- Gating: gateway endpoints by REVERSE_TUNNEL_GATEWAY_SECRET (404 without), sweep and routing by
+  the installed driver (only the self-host entry installs it), shared seams by the stored
+  `nodes.transport`; new lease admission by VM_AGENT_TRANSPORT (L17a).
 
 ## Checklist
 
 - [x] Shared route seam + fetchNodeAgent / ws proxy / logs stream / liveness probe / relay
 - [x] Shared gateway decision module
 - [x] Self-host route resolver, gateway routes, entry wrapper with sweep
-- [ ] Tests: route seam (CF zero extra read, fail-closed, revocation), gateway serializer + auth,
+- [x] Tests: route seam (CF zero extra read, fail-closed, revocation), gateway serializer + auth,
       forward_auth through the real app, sweep mounted entry point, liveness probe routing,
       relay exclusion, import graph
-- [ ] Docs: self-hosting guide gateway/entry contract
-- [ ] Lint/typecheck/test/build; reviews: security-auditor, cloudflare-specialist, test-engineer,
+- [x] Docs: self-hosting guide gateway/entry contract
+- [x] Lint/typecheck/test/build (CI to confirm); reviews: security-auditor, cloudflare-specialist, test-engineer,
       task-completion-validator
 - [ ] Staging: default + cloudflare-tunnel nodes connect, heartbeat, system-info, websocket; sweep no-op; cleanup
 - [ ] BOX: reverse-tunnel run on the self-host box against this branch
