@@ -516,7 +516,11 @@ describe('inbox asks writes', () => {
 
   it('the sweep sends nothing for questions and reviews an earlier build archived without a notice', async () => {
     const resolvedAt = Date.now() - 10 * 60_000;
-    const closed = { source_session_id: 'chat-1', source_task_id: 'task-1', resolved_at: resolvedAt };
+    const closed = {
+      source_session_id: 'chat-1',
+      source_task_id: 'task-1',
+      resolved_at: resolvedAt,
+    };
     ask('old-question', { ...closed, kind: 'question', status: 'archived' });
     ask('old-review', { ...closed, kind: 'review', status: 'archived' });
     // Control: an answer whose notice was not queued is still retried in the same run.
