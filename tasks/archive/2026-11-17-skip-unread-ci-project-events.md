@@ -38,10 +38,10 @@ Read parent newest baseline update 01M7KY3Z5FAHAKRWT5FMKBMH55. Cost tool first f
 - [x] Tests for off mode, scope, expired and mismatched subscriptions, existing duplicate/conflict, late subscriptions
 - [x] Measure real-workerd before/after skip/store reads and writes, with row meter
 - [x] Update public docs and inspector UX; desktop/mobile screenshot audit if UI changes
-- [ ] Full lint/typecheck/test/build; local specialist and task-completion reviews
-- [ ] Staging lease, real webhook path if possible, subscribed CI runtime wake, cleanup
-- [ ] Ready PR, CI and CodeRabbit gate, merge, monitor deploy
-- [ ] Four complete production row_usage windows; post counts per covered hour to idea/channel/coordinator
+- [x] Full lint/typecheck/test/build; local specialist and task-completion reviews
+- [x] Staging lease, real webhook path if possible, subscribed CI runtime wake, cleanup
+- [x] Ready PR, CI and CodeRabbit gate, merge, monitor deploy
+- [x] Four complete production row_usage windows; post counts per covered hour to idea/channel/coordinator
 
 ## Acceptance criteria
 
@@ -69,3 +69,90 @@ The proposed one-write-per-stored-event index cut is deferred: 30-day retention 
 Primary staging is allowed by the migration guard (no namespace tags); coordinator confirmed. Reserved primary staging at07:21:42Z, released staging2 reservation. Extend existing bounded signed audit with staging-only check_run/check_suite/workflow_run fixtures;46signing tests pass, production fixture unchanged. Verify three cases live: skip unmatched, full-SHA agent subscription stores and wakes, OFF stores future unmatched; restore settings/clean up. New family fixtures retain the existing maximum2deliveries and2duplicate attempts (≤4signed requests per audit), each network call has a15s budget; no unbounded fanout.
 
 Full local validation before final scope reduction: lint22packages, typecheck36packages, build18tasks, root test39tasks; API16459passed/4skipped, web5368passed, project-data561passed. Final affected regression and signing/security review rerun pending. Screenshot finalboth themes: https://github.com/raphaeltm/simple-agent-manager/pull/2836#issuecomment-6940197711.
+
+
+### Completed release and production observation (2026-11-17)
+
+PR #2836 merged as `8c02e81493af5ba104bcdad89d4ee1519b279553` at 15:55:47 UTC.
+Final candidate `5e943cecc` passed CI 44106481715; primary staging deployment
+44106479056 passed. Signed audits 44112327721, 44112413348, 44113782089 and
+44113797829 proved skip ON, full-SHA subscriber storage/runtime wake, and OFF
+storage. Default restored at revision 100; inspector confirmed TRUE. Channel replay
+returned the same ID/sequence twice; credential reset persisted. Instant fixture
+workspace removed and node absent. The failed preallocation GCP VM fixture's node
+cleanup was tracked separately under idea 01M7N20Z6P4VWCGG2C6VMZ4QQA; no claim of
+strict absence. Lease release 44117420882 succeeded. Mobile/desktop disclosure
+screenshots reviewed with no layout issue. Storage/test/UI reviewers PASS or
+ADDRESSED; CodeRabbit returned Review skipped, with no findings. PR body retains
+full evidence and links.
+
+Production deployment 44174587033 succeeded at 21:28:55 UTC, serving Worker
+9432146a at 100%, annotation commit ecb58a6d510219b2429970308a3a2137a4078a9e,
+which contains this PR. API health and app returned HTTP 200 (persisted transcript
+and PR evidence); deployment success independently reconciled after recovery.
+Recovery did not verify an exact filesystem restore or repeat merge/deployment.
+
+Four complete root-project row_usage windows cover 1.00013278 hours:
+21:39:49.835–22:24:50.153 and 22:34:04.511–22:49:04.671 UTC. The gap is excluded.
+Policy TRUE throughout; admission overflow zero; all windows include admission counters.
+
+| Operation | Calls | Writes | Writes / covered hour | Historical writes / hour |
+| --- | ---: | ---: | ---: | ---: |
+| admitProjectEvent | 1,583 | 10,686 | 10,684.58 | 16,628.57 |
+| alarm:project_event_wake_materialization | 227 | 11,099 | 11,097.53 | 5,142.86 |
+| alarm:project_event_retention | Unknown | Unknown | Unknown | 1,942.86 |
+
+Historical baseline: 291,000 admission writes / 40,807 calls over 17.5 hours;
+wake 90,000 and retention 34,000 over the same coverage. Admission calls/hour
+1,582.79 vs 2,331.83 (-32.12%); writes/hour -35.75%; writes/call 6.7505 vs
+7.1311 (-5.34%). Recent comparison 18,434 writes/h gives -42.04%. Wake writes/hour
+increased 115.79%, so admission plus wake writes/hour are approximately flat.
+This short uncontrolled sample does not establish net event-system or billed savings.
+Retention is absent in all four top-32 label sets (27/26/61/37 labels dropped),
+which is unknown rather than zero.
+
+| Source/type family | Calls | Created (stored receipts) | Skipped |
+| --- | ---: | ---: | ---: |
+| github:check_run | 1,047 | 299 | 748 |
+| github:check_suite | 129 | 45 | 84 |
+| github:workflow_run | 257 | 26 | 231 |
+| github:push | 15 | 15 | 0 |
+| github:pull_request | 30 | 30 | 0 |
+| github:issue_comment | 67 | 67 | 0 |
+| github:pull_request_review | 4 | 4 | 0 |
+| github:pull_request_review_comment | 4 | 4 | 0 |
+| sam | 77 | 73 | 0 |
+
+All GitHub duplicates/conflicts zero; SAM conflicts four. CI total 1,433 calls,
+370 created and 1,063 skipped (74.18%). Credential warning one created, zero skipped.
+Counters include internal producers, so total 1,630 differs from 1,583 RPC calls.
+Detailed CI calls/created/skipped: check_run.created 514/0/514,
+check_run.completed 533/299/234; check_suite.completed 115/45/70,
+check_suite.requested 14/0/14; workflow_run.completed 82/26/56,
+workflow_run.requested 75/0/75, workflow_run.in_progress 100/0/100.
+
+Counts-only evidence posted to idea 01M7CX61WVX72T7CFQNRTX0DVM, update
+01M7NVG1ZC9KSAGGPJ5TYG78GJ, channel feature.do-write-cuts and coordinator.
+Managed job sx-3e05bdaf552357efb175300b175c41e0a6726e533a18b0f9f3180ed41fe8c390
+used only CF_PRODUCTION_DEBUGGING_TOKEN and CF_PRODUCTION_ACCOUNT_ID. No production
+settings or fixture mutations. Observability expands dotted type keys into nested
+objects; aggregate numeric leaf counters locally. Query upper bound 22:55 exceeded
+execution at 22:53:10, but only emitted complete windows through 22:49 counted.
+
+### Final task-completion validation
+
+Compared task research/checklist/criteria with implementation delta
+606fefec2..5e943cecc, tests and PR staging/release evidence. No application changes
+were reconstructed. Final record-only update checked with git diff --check.
+
+| Check | Verdict | Evidence |
+| --- | --- | --- |
+| A: Research → checklist | PASS | Reader inventory covered; risky index rebuild explicitly deferred with backlog file. |
+| B: Checklist → implementation | PASS | Typed setting, shared matcher, receipt-first skip, counters, inspector, docs and signed fixtures in delta; rollout complete above. |
+| C: Criteria → verification | PASS | Real-workerd zero-write/rollback/receipt/expiry/supersession tests plus live signed skip/store/wake audits; production sample and gaps reported. |
+| D: UI → backend | PASS | Read-only disclosure consumes inspector admission field; runtime rollback tested through typed settings. No new form input. |
+| E: Multiple variants | PASS | Three CI families and non-CI exclusions; SHA, expiry and cancellation controls covered. |
+| F: Vertical slice | PASS | Signed webhook through actual DO storage/matching to wake materialization, plus actual staging runtime acknowledgement. |
+
+Remaining limitations: source telemetry is volatile and incomplete across eviction;
+retention label unavailable; traffic mix changed; no causal or invoice saving claim.
