@@ -7,7 +7,7 @@
 import type { InsightsRange } from '@simple-agent-manager/shared';
 import { queryOptions } from '@tanstack/react-query';
 
-import { getProjectAccounts, getProjectFlow } from '../api';
+import { getProjectAccounts, getProjectFlow, getProjectPeople } from '../api';
 import { INSIGHTS_STALE_TIME_MS } from '../query-stale-times';
 
 export const insightsQueryKeys = {
@@ -16,6 +16,11 @@ export const insightsQueryKeys = {
     [...insightsQueryKeys.all(queryScope), 'flow', projectId, range] as const,
   accounts: (queryScope: string, projectId: string, range: InsightsRange) =>
     [...insightsQueryKeys.all(queryScope), 'accounts', projectId, range] as const,
+  /** Every range of a project's People read, for invalidation after a reassign. */
+  peopleAll: (queryScope: string, projectId: string) =>
+    [...insightsQueryKeys.all(queryScope), 'people', projectId] as const,
+  people: (queryScope: string, projectId: string, range: InsightsRange) =>
+    [...insightsQueryKeys.peopleAll(queryScope, projectId), range] as const,
 };
 
 export function projectFlowQueryOptions(
@@ -45,6 +50,23 @@ export function projectAccountsQueryOptions(
   return queryOptions({
     queryKey: insightsQueryKeys.accounts(queryScope, projectId, range),
     queryFn: () => getProjectAccounts(projectId, range),
+    staleTime: INSIGHTS_STALE_TIME_MS,
+    placeholderData: (previous) => (previous?.projectId === projectId ? previous : undefined),
+  });
+}
+
+/**
+ * Insights · People, per project and range. Not persisted: it carries the titles of the inbox items
+ * the viewer may open. Same stale-while-revalidate behaviour as Flow.
+ */
+export function projectPeopleQueryOptions(
+  queryScope: string,
+  projectId: string,
+  range: InsightsRange
+) {
+  return queryOptions({
+    queryKey: insightsQueryKeys.people(queryScope, projectId, range),
+    queryFn: () => getProjectPeople(projectId, range),
     staleTime: INSIGHTS_STALE_TIME_MS,
     placeholderData: (previous) => (previous?.projectId === projectId ? previous : undefined),
   });

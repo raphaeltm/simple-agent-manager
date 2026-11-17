@@ -10,9 +10,7 @@ export async function getReportIssueConfig(): Promise<ReportIssueConfig> {
   return request<ReportIssueConfig>('/api/report-issue/config');
 }
 
-export async function submitReportIssue(
-  data: ReportIssueRequest,
-): Promise<ReportIssueResponse> {
+export async function submitReportIssue(data: ReportIssueRequest): Promise<ReportIssueResponse> {
   return request<ReportIssueResponse>('/api/report-issue', {
     method: 'POST',
     body: JSON.stringify(data),

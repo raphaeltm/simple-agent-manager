@@ -1,7 +1,11 @@
 /**
  * Project Policies API client functions.
  */
-import type { ListPoliciesResponse, ProjectPolicy, UpdatePolicyRequest } from '@simple-agent-manager/shared';
+import type {
+  ListPoliciesResponse,
+  ProjectPolicy,
+  UpdatePolicyRequest,
+} from '@simple-agent-manager/shared';
 
 import { request } from './client';
 
@@ -9,7 +13,7 @@ export type { ListPoliciesResponse, ProjectPolicy };
 
 export async function listPolicies(
   projectId: string,
-  params: { category?: string; includeInactive?: boolean; limit?: number; offset?: number } = {},
+  params: { category?: string; includeInactive?: boolean; limit?: number; offset?: number } = {}
 ): Promise<ListPoliciesResponse> {
   const searchParams = new URLSearchParams();
   if (params.category) searchParams.set('category', params.category);
@@ -23,18 +27,14 @@ export async function listPolicies(
   return request<ListPoliciesResponse>(endpoint);
 }
 
-export async function getPolicy(
-  projectId: string,
-  policyId: string,
-): Promise<ProjectPolicy> {
+export async function getPolicy(projectId: string, policyId: string): Promise<ProjectPolicy> {
   return request<ProjectPolicy>(`/api/projects/${projectId}/policies/${policyId}`);
 }
-
 
 export async function updatePolicy(
   projectId: string,
   policyId: string,
-  body: UpdatePolicyRequest,
+  body: UpdatePolicyRequest
 ): Promise<{ updated: boolean; policyId: string }> {
   return request(`/api/projects/${projectId}/policies/${policyId}`, {
     method: 'PATCH',
@@ -44,7 +44,7 @@ export async function updatePolicy(
 
 export async function deletePolicy(
   projectId: string,
-  policyId: string,
+  policyId: string
 ): Promise<{ removed: boolean; policyId: string }> {
   return request(`/api/projects/${projectId}/policies/${policyId}`, {
     method: 'DELETE',

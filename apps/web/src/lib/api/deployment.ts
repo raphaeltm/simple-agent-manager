@@ -85,13 +85,7 @@ export interface DeploymentEnvironmentNodeSummary extends Pick<
 > {}
 
 export type DeploymentEnvironmentStatus =
-  | 'created'
-  | 'active'
-  | 'starting'
-  | 'stopping'
-  | 'stopped'
-  | 'error'
-  | 'failed';
+  'created' | 'active' | 'starting' | 'stopping' | 'stopped' | 'error' | 'failed';
 
 export interface DeploymentEnvironment {
   id: string;

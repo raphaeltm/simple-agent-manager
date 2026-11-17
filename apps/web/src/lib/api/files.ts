@@ -45,9 +45,15 @@ function parseGitFileStatus(value: unknown, context: string): GitFileStatus {
 
 function parseGitStatusData(record: Record<string, unknown>): GitStatusData {
   return {
-    staged: requireArray(record, 'staged', 'git.status').map((value, index) => parseGitFileStatus(value, `git.status.staged[${index}]`)),
-    unstaged: requireArray(record, 'unstaged', 'git.status').map((value, index) => parseGitFileStatus(value, `git.status.unstaged[${index}]`)),
-    untracked: requireArray(record, 'untracked', 'git.status').map((value, index) => parseGitFileStatus(value, `git.status.untracked[${index}]`)),
+    staged: requireArray(record, 'staged', 'git.status').map((value, index) =>
+      parseGitFileStatus(value, `git.status.staged[${index}]`)
+    ),
+    unstaged: requireArray(record, 'unstaged', 'git.status').map((value, index) =>
+      parseGitFileStatus(value, `git.status.unstaged[${index}]`)
+    ),
+    untracked: requireArray(record, 'untracked', 'git.status').map((value, index) =>
+      parseGitFileStatus(value, `git.status.untracked[${index}]`)
+    ),
   };
 }
 
@@ -212,7 +218,9 @@ function parseFileEntry(value: unknown, context: string): FileEntry {
 function parseFileListData(record: Record<string, unknown>): FileListData {
   return {
     path: requireString(record, 'path', 'files.list'),
-    entries: requireArray(record, 'entries', 'files.list').map((value, index) => parseFileEntry(value, `files.list.entries[${index}]`)),
+    entries: requireArray(record, 'entries', 'files.list').map((value, index) =>
+      parseFileEntry(value, `files.list.entries[${index}]`)
+    ),
   };
 }
 
@@ -256,7 +264,9 @@ export async function getFileIndex(
     throw new Error(`File find failed: ${text}`);
   }
   const data = await readResponseJson(res, 'files.find', (record) => ({
-    files: requireArray(record, 'files', 'files.find').filter((value): value is string => typeof value === 'string'),
+    files: requireArray(record, 'files', 'files.find').filter(
+      (value): value is string => typeof value === 'string'
+    ),
   }));
   return data.files;
 }
@@ -337,10 +347,7 @@ export async function removeWorktree(
 // ---------- Session File Proxy (proxied through CF Worker to VM agent) ----------
 
 /** Fetch recursive file index via session proxy. Returns flat list of all file paths. */
-export async function getSessionFileIndex(
-  projectId: string,
-  sessionId: string
-): Promise<string[]> {
+export async function getSessionFileIndex(projectId: string, sessionId: string): Promise<string[]> {
   const data = await request<{ files: string[] }>(
     `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/files/find`
   );
@@ -454,7 +461,9 @@ export async function uploadSessionFiles(
     }
   );
   if (!response.ok) {
-    const data = await response.json().catch(() => ({ error: 'UNKNOWN_ERROR', message: 'Upload failed' }));
+    const data = await response
+      .json()
+      .catch(() => ({ error: 'UNKNOWN_ERROR', message: 'Upload failed' }));
     throw new ApiClientError((data as ApiError).error, (data as ApiError).message, response.status);
   }
   return readResponseJson(response, 'files.upload', (record) => ({
@@ -481,7 +490,9 @@ export async function downloadSessionFile(
     { credentials: 'include' }
   );
   if (!response.ok) {
-    const data = await response.json().catch(() => ({ error: 'UNKNOWN_ERROR', message: 'Download failed' }));
+    const data = await response
+      .json()
+      .catch(() => ({ error: 'UNKNOWN_ERROR', message: 'Download failed' }));
     throw new ApiClientError((data as ApiError).error, (data as ApiError).message, response.status);
   }
   const blob = await response.blob();

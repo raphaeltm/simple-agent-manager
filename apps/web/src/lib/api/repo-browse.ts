@@ -60,7 +60,9 @@ export async function getRepoTree(projectId: string, ref: string): Promise<RepoT
   if (cached) return cached;
 
   const q = new URLSearchParams({ ref });
-  const data = await request<RepoTreeResponse>(`/api/projects/${projectId}/repo/tree?${q.toString()}`);
+  const data = await request<RepoTreeResponse>(
+    `/api/projects/${projectId}/repo/tree?${q.toString()}`
+  );
   setCache(treeCache, cacheKey, data);
   return data;
 }
@@ -87,7 +89,9 @@ export async function getRepoCompare(
 
   const q = new URLSearchParams({ head });
   if (base) q.set('base', base);
-  const data = await request<RepoCompareResponse>(`/api/projects/${projectId}/repo/compare?${q.toString()}`);
+  const data = await request<RepoCompareResponse>(
+    `/api/projects/${projectId}/repo/compare?${q.toString()}`
+  );
   setCache(compareCache, cacheKey, data);
   return data;
 }

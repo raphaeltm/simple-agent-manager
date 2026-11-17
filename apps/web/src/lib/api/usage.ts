@@ -19,7 +19,9 @@ export async function fetchUserQuotaStatus(): Promise<UserQuotaStatusResponse> {
 }
 
 /** Fetch current user's SAM-managed AI Gateway LLM usage. */
-export async function fetchUserAiUsage(period: string = 'current-month'): Promise<UserAiUsageResponse> {
+export async function fetchUserAiUsage(
+  period: string = 'current-month'
+): Promise<UserAiUsageResponse> {
   return request<UserAiUsageResponse>(`/api/usage/ai?period=${encodeURIComponent(period)}`);
 }
 
@@ -29,7 +31,9 @@ export async function fetchUserAiBudget(): Promise<UserAiBudgetResponse> {
 }
 
 /** Update current user's AI budget settings. */
-export async function updateUserAiBudget(body: UpdateAiBudgetRequest): Promise<{ success: boolean }> {
+export async function updateUserAiBudget(
+  body: UpdateAiBudgetRequest
+): Promise<{ success: boolean }> {
   return request<{ success: boolean }>('/api/usage/ai/budget', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

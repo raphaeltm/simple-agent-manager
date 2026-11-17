@@ -2,7 +2,7 @@
  * Visual and layout audit for the Insights page (Insights slice F) at 375×667 and 1280×800.
  * The Flow read is served exactly as the API answers it (`insights-fixtures.ts`). Scenes: a
  * realistic month, a stressed project (long names, every stop reason, 13 weeks, a capped idea
- * sample), an empty project, a failed read, the range switch, and the coming-soon tabs.
+ * sample), an empty project, a failed read, the range switch, and the coming-soon tab.
  * Accounts (slice A, `insights-accounts-fixtures.ts`): a realistic month, a stressed project
  * (long and hostile names, eight accounts, 13 weeks, a capped stall scan), an empty project, a
  * failed read, a failed stall section, and a range switch held mid-flight.
@@ -236,17 +236,14 @@ test.describe('Insights', () => {
     await capture(page, 'insights-flow-7d');
   });
 
-  test('the other tabs say they are coming', async ({ page }) => {
+  test('the Agent setups tab says it is coming', async ({ page }) => {
     await setupScene(page, 'realistic');
     await page.goto(`${BASE}/flow`);
-    for (const [tab, id] of [
-      ['Agent setups', 'agent-setups'],
-      ['People', 'people'],
-    ] as const) {
-      await page.getByRole('tab', { name: tab, exact: true }).click();
-      await expect(page).toHaveURL(new RegExp(`${BASE}/${id}`));
-      await expect(page.getByTestId(`insights-coming-soon-${id}`)).toContainText('coming soon');
-    }
+    await page.getByRole('tab', { name: 'Agent setups', exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`${BASE}/agent-setups`));
+    await expect(page.getByTestId('insights-coming-soon-agent-setups')).toContainText(
+      'coming soon'
+    );
     await capture(page, 'insights-coming-soon');
   });
 
