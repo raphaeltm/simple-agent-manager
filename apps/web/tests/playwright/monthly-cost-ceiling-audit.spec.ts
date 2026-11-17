@@ -145,10 +145,12 @@ async function checkLayout(page: Page) {
   await assertNoClippedOverflow(page);
 }
 
+/** The budget section itself: the app pane scrolls inside the shell, so a page shot cuts it off. */
 async function shot(page: Page, name: string) {
-  await page.screenshot({
+  const section = page.getByTestId('budget-settings-section');
+  await section.scrollIntoViewIfNeeded();
+  await section.screenshot({
     path: `../../.codex/tmp/playwright-screenshots/monthly-ceiling-${name}.png`,
-    fullPage: true,
   });
 }
 
@@ -156,8 +158,10 @@ function viewportName(page: Page): string {
   return (page.viewportSize()?.width ?? 0) < 640 ? 'mobile' : 'desktop';
 }
 
-{
-  test.describe('monthly cost ceiling', () => {
+// CI's visual job runs one phone project; the second pass pins the desktop viewport.
+for (const desktop of [false, true]) {
+  test.describe(desktop ? 'monthly cost ceiling (1280x800)' : 'monthly cost ceiling', () => {
+    if (desktop) test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
     test('ceiling binds when the user set no cap', async ({ page }) => {
       await setup(page, { userCap: null, ceilingUsd: 25, available: true, monthCostUsd: 18.4 });
       const bar = page.getByRole('meter', { name: 'Monthly Cost Cap (administrator limit)' });

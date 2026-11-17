@@ -143,7 +143,7 @@ export function BudgetSettingsSection() {
   }
 
   return (
-    <div className="space-y-4 min-w-0 overflow-hidden">
+    <div className="space-y-4 min-w-0 overflow-hidden" data-testid="budget-settings-section">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <SectionHeading>Budget Controls</SectionHeading>
@@ -200,10 +200,10 @@ export function BudgetSettingsSection() {
             />
           )}
           {cap && !cap.available && (
-            <Body className="text-fg-muted text-xs m-0" data-testid="monthly-cap-unavailable">
+            <p className="text-fg-muted text-xs m-0" data-testid="monthly-cap-unavailable">
               Monthly cost caps are turned off because AI spend can&apos;t be priced on this server.
               Daily token limits still apply.
-            </Body>
+            </p>
           )}
           {budget.exceeded && (
             <div
