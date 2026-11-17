@@ -1388,6 +1388,32 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
       );
     }
 
+    /** The real wake, with what it needs to reach its claim (as in the owner-resume test above). */
+    async function useRealWake() {
+      const absentTables = Object.values(schema).filter(
+        (value): value is SQLiteTable =>
+          is(value, SQLiteTable) &&
+          !d1
+            .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?")
+            .get(getTableName(value))
+      );
+      createSchemaTables(d1, absentTables);
+      d1.exec(`INSERT INTO credentials(id,user_id,provider,credential_type,credential_kind,is_active,encrypted_token,iv)
+        VALUES ('cloud-credential','user-1','hetzner','cloud-provider','api-key',1,'encrypted','iv');
+        UPDATE projects SET default_location='nbg1',default_branch='main',repository='owner/repo',installation_id='install-1' WHERE id='project-1';
+        UPDATE nodes SET cloud_provider='hetzner',vm_size='small',vm_location='nbg1' WHERE id='node-1'`);
+      await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
+        userId: 'user-1',
+        projectId: 'project-1',
+        includeInstallation: true,
+      });
+      recovery.start.mockResolvedValue(undefined);
+      const actual = await vi.importActual<typeof import('../../src/services/session-recovery')>(
+        '../../src/services/session-recovery'
+      );
+      recovery.ensure.mockImplementation(actual.ensureSessionRecovery);
+    }
+
     it('keeps the message past its TTL, parks it until the reset and files no wake error', async () => {
       const notified = seedInboxOwner();
       const wait = await parkAndSleep();
@@ -1561,30 +1587,7 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
       await sleepTheTask();
       // The reconciler presents the block, as in production (task asleep, no workspace).
       expect(await preserveProviderLimitWait(env, TASK, Date.now())).toBe(true);
-      // The real wake, with what it needs to reach its claim (as in the owner-resume test above):
-      // a blocked hold must not reach the claim that spends the wake budget.
-      const absentTables = Object.values(schema).filter(
-        (value): value is SQLiteTable =>
-          is(value, SQLiteTable) &&
-          !d1
-            .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?")
-            .get(getTableName(value))
-      );
-      createSchemaTables(d1, absentTables);
-      d1.exec(`INSERT INTO credentials(id,user_id,provider,credential_type,credential_kind,is_active,encrypted_token,iv)
-        VALUES ('cloud-credential','user-1','hetzner','cloud-provider','api-key',1,'encrypted','iv');
-        UPDATE projects SET default_location='nbg1',default_branch='main',repository='owner/repo',installation_id='install-1' WHERE id='project-1';
-        UPDATE nodes SET cloud_provider='hetzner',vm_size='small',vm_location='nbg1' WHERE id='node-1'`);
-      await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
-        userId: 'user-1',
-        projectId: 'project-1',
-        includeInstallation: true,
-      });
-      recovery.start.mockResolvedValue(undefined);
-      const actual = await vi.importActual<typeof import('../../src/services/session-recovery')>(
-        '../../src/services/session-recovery'
-      );
-      recovery.ensure.mockImplementation(actual.ensureSessionRecovery);
+      await useRealWake();
       const budget = () =>
         d1
           .prepare(
@@ -1640,6 +1643,52 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
       expect(waitRow().phase).toBe('blocked');
       expect(wakeAsks()).toEqual([{ status: 'open' }]);
       expect(wakeMessages()).toHaveLength(1);
+    });
+    it('an expired waiting hold is refused before the claim and recorded as blocked', async () => {
+      seedInboxOwner();
+      // A short known reset: the hold's deadline is 30 minutes after its retry time.
+      const response = await callback({
+        ...producedCallbacks[0].callback,
+        providerLimitResetsAt: Date.now() + 20 * MINUTE,
+      });
+      expect(response.status).toBe(200);
+      await sleepTheTask();
+      const wait = waitRow();
+      expect(wait.phase).toBe('waiting');
+      await useRealWake();
+      const budget = () =>
+        d1
+          .prepare(
+            'SELECT recovery_attempts AS attempts, recovery_failed_at AS failedAt FROM session_snapshots WHERE chat_session_id = ?'
+          )
+          .get(CHAT) as { attempts: number; failedAt: string | null };
+      const before = budget();
+
+      // The deadline passes with no alarm having blocked the wait (a sleeping task is not swept).
+      vi.setSystemTime(wait.deadlineAt + MINUTE);
+      const accepted = await followUp('Are you back?');
+      // The accept-time hold already parks it (the DO treats an expired wait as blocked); a wake
+      // attempt from elsewhere (a nudge, a delayed schedule) must still not spend the budget.
+      expect(delivery(accepted.message.id).nextAttemptAt).toBeGreaterThan(Date.now());
+      sql.exec(
+        'UPDATE session_inbox SET next_attempt_at = ? WHERE id = ?',
+        Date.now(),
+        accepted.message.id
+      );
+      await runDeliveryAlarm();
+
+      expect(recovery.ensure).toHaveBeenCalledOnce();
+      expect(recovery.start).not.toHaveBeenCalled();
+      expect(budget().attempts).toBe(before.attempts);
+      // Recorded and presented as blocked: the chat offers Resume.
+      expect(waitRow().phase).toBe('blocked');
+      expect(d1.prepare('SELECT admission_state AS state FROM tasks WHERE id=?').get(TASK)).toEqual(
+        { state: 'provider_limit_blocked' }
+      );
+      // The person's message is kept (parked, not retried) and no wake error is filed.
+      expect(delivery(accepted.message.id).state).toBe('retry_wait');
+      expect(wakeAsks()).toEqual([]);
+      expect(wakeMessages()).toEqual([]);
     });
   });
 });

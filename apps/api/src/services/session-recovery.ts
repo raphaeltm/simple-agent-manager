@@ -19,6 +19,11 @@ import {
   resolveTaskStartPlacementCredentialAttributionFromPlacement,
 } from './placement-resolver';
 import {
+  blockExpiredProviderLimitWait,
+  isExpiredProviderLimitWait,
+} from './provider-limit-reconciliation';
+import { presentBlockedProviderLimitWait } from './provider-limit-recovery';
+import {
   assertReplacementDeletionConfirmed,
   WorkspaceDeletionUnconfirmedError,
 } from './replacement-deletion-fence';
@@ -276,19 +281,39 @@ export async function ensureSessionRecovery(
   if (context.snapshot.runtime === 'cf-container') {
     return { status: 'unavailable', reason: 'container_runtime_wakes_in_place' };
   }
-  // The task this wake would run is held by a blocked provider-limit wait. TaskRunner admission
-  // would block the wake again (`holdTaskForProviderLimit`) after the claim spent a slot of the
-  // wake budget, so repeated deliveries burnt the budget in seconds (session a4c110be, 2026-11-16).
-  // Refuse before the claim. Owner Resume records the wait as `released` first, so it passes.
-  // Eviction recovery is exempt: it claims once per eviction (not a retry loop), and admission's
-  // block is what returns the evicted task to a resumable sleep (`presentBlockedProviderLimitWait`).
-  if (
-    !options.evictionFence &&
-    context.sourceTask &&
-    !TERMINAL_RECOVERY_TASK_STATUSES.has(context.sourceTask.status) &&
-    parseProviderLimitWait(context.sourceTask.providerLimitWaitJson)?.phase === 'blocked'
-  ) {
-    return refuse('provider_limit_blocked');
+  // The task this wake would run is held by a blocked provider-limit wait, or by a waiting one
+  // past its deadline (admission blocks that too). TaskRunner admission would block the wake again
+  // (`holdTaskForProviderLimit`) after the claim spent a slot of the wake budget, so repeated
+  // deliveries burnt the budget in seconds (session a4c110be, 2026-11-16). Refuse before the claim.
+  // An expired waiting hold is recorded as blocked and presented here, since a sleeping task is
+  // not swept by the stuck-task reconciler: the chat then offers Resume. Owner Resume records the
+  // wait as `released` first, so it passes. Eviction recovery is exempt: it claims once per
+  // eviction (not a retry loop), and admission's block is what returns the evicted task to a
+  // resumable sleep (`presentBlockedProviderLimitWait`).
+  const sourceTask = context.sourceTask;
+  const sourceWait =
+    !options.evictionFence && sourceTask && !TERMINAL_RECOVERY_TASK_STATUSES.has(sourceTask.status)
+      ? parseProviderLimitWait(sourceTask.providerLimitWaitJson)
+      : null;
+  if (sourceTask && sourceWait) {
+    const expired = isExpiredProviderLimitWait(sourceWait, Date.now());
+    if (sourceWait.phase === 'blocked' || expired) {
+      if (expired) {
+        try {
+          const blocked = await blockExpiredProviderLimitWait(env, sourceTask, sourceWait);
+          await presentBlockedProviderLimitWait(env, sourceTask, blocked);
+        } catch (error) {
+          // The refusal stands either way; the stuck-task sweep or admission blocks it later.
+          log.warn('session_recovery.provider_limit_block_failed', {
+            projectId,
+            chatSessionId,
+            taskId: sourceTask.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      return refuse('provider_limit_blocked');
+    }
   }
 
   const deletionSourceTaskId =
