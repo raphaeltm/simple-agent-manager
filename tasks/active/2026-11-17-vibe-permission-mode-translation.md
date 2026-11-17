@@ -25,7 +25,7 @@ Existing Antigravity tests provide real startup/fake process seams. Use a separa
 - [x] Assert other-agent controls (Antigravity, Claude, Gemini, Amp, OpenCode, Codex) retain behavior.
 - [x] Prove new regression tests fail against original code, then pass after minimal mapping fix.
 - [x] Document Vibe mode behavior and dontAsk limitation in public agents guide.
-- [ ] Run Go race tests, vet, coverage and build; run relevant docs/quality checks and manually dispatch full CI without readiness.
+- [x] Run Go race tests, vet, coverage and build; run relevant docs/quality checks and manually dispatch full CI without readiness.
 - [x] Complete local Go/security/test/task-completion reviews and resolve findings.
 - [x] Record live-provider/staging gaps honestly; no blanket approval or permission routing changes.
 - [x] Push output branch, create draft PR with Closes #2846, preserve draft-only constraint in state and PR, link idea without closing it.
@@ -51,3 +51,7 @@ Local validation: full VM-agent race/coverage suite passes (31 packages), go vet
 Review: local Go/security reviewer ADDRESSED (nil/reset-error findings fixed, re-review PASS); test/constitution PASS; completion/docs ADDRESSED, A-F revalidation PASS. Final tests fail against original production files in 16/18 mode matrix cases plus both rejected-reset startup cases. All other-agent controls pass.
 
 Full CI manually requested without marking ready: https://github.com/raphaeltm/simple-agent-manager/actions/runs/44054109832 on code commit 53c7df8bdcdf45c6d0a8bcbcd71d5dddeecce575. Completion tracked in PR body. Initial draft PR Evidence saw a PENDING reviewer before review finished; live body corrected and evidence rechecked. This task record remains active while PR is unmerged; no archive/merge claim.
+
+## Final CI result (2026-11-17 10:04 UTC)
+
+Full manually dispatched CI run44054109832 completed SUCCESS on runtime code commit53c7df8bdcdf45c6d0a8bcbcd71d5dddeecce575, including its final gate. Draft CI44055193640 and smoke44055194093 completed SUCCESS on865beb4a1739db795d1d7867af6375ddc3fe9c08; SonarCloud SUCCESS. This final task-evidence update changes no runtime code. Local and remote validation is complete for the tested draft deliverable; provider/staging gaps above remain explicit. PR remains OPEN/DRAFT and held; do not mark ready or merge. Idea remains open.
