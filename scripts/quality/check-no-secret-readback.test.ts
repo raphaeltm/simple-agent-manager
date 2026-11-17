@@ -68,6 +68,8 @@ const POSITIVE: Array<[string, RuleId]> = [
   ['printenv CF_API_TOKEN', 'env-dump'],
   ['        run: env', 'env-dump'],
   ['env -0', 'env-dump'],
+  ['env -u PATH', 'env-dump'],
+  ['env --unset=PATH | sort', 'env-dump'],
   ['        run: env --null | sort', 'env-dump'],
   ['      - run: printenv | sort', 'env-dump'],
   ['cd infra && env | grep KEY', 'env-dump'],
@@ -273,6 +275,13 @@ describe('legacy-read markers', () => {
     expect(result.invalidMarkers).toEqual([{ file: 's.sh', line: 1, task: archived }]);
   });
 
+  it('still reports another rule on the excused line', () => {
+    const text = `# sam:secret-readback-allowed ${OPEN_TASK}\nset -x; ${read}`;
+    const result = scanText('s.sh', text, isOpen);
+    expect(result.findings.map((finding) => finding.rule)).toEqual(['xtrace']);
+    expect(result.allowed.map((read) => read.rule)).toEqual(['show-secrets']);
+  });
+
   it('excuses only the line directly below the marker', () => {
     const below = [`# sam:secret-readback-allowed ${OPEN_TASK}`, read].join('\n');
     expect(scanText('s.sh', below, isOpen).findings).toHaveLength(0);
@@ -394,7 +403,7 @@ describe('scanRepository', () => {
   it('skips test files and itself', () => {
     expect(isScannedPath('scripts/quality/check-no-secret-readback.ts')).toBe(false);
     expect(isScannedPath('scripts/quality/foo.test.ts')).toBe(false);
-    expect(isScannedPath('scripts/deploy/test-publish-codex-runtime-artifact.sh')).toBe(false);
+    expect(isScannedPath('scripts/ci/test-devcontainer-volume-mount.sh')).toBe(true);
     expect(isScannedPath('scripts/deploy/configure-secrets.sh')).toBe(true);
     expect(isScannedPath('.github/workflows/deploy-reusable.yml')).toBe(true);
     expect(isScannedPath('infra/index.ts')).toBe(true);

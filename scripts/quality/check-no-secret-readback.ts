@@ -106,8 +106,9 @@ export const RULES: readonly Rule[] = [
   {
     id: 'env-dump',
     pattern: new RegExp(
-      // Options only, no command after them: `env -0`, `env --null` still print everything.
-      String.raw`${COMMAND_START}(?:env(?:\s+-[-\w]+)*|printenv|export\s+-p|declare\s+-p)\s*(?:$|[|>;&])`
+      // Options only, no command after them: `env -0`, `env -u NAME`, `env --unset=NAME` still
+      // print the rest of the environment.
+      String.raw`${COMMAND_START}(?:env(?:\s+(?:-u\s+\S+|--unset=\S+|-[-\w]+))*|printenv|export\s+-p|declare\s+-p)\s*(?:$|[|>;&])`
     ),
     shellOnly: true,
   },
@@ -170,7 +171,8 @@ const SELF = 'scripts/quality/check-no-secret-readback.ts';
 export function isScannedPath(path: string): boolean {
   if (!SCANNED_EXTENSIONS.test(path) && !DOCKERFILE.test(path)) return false;
   if (path === SELF) return false;
-  if (/\.(?:test|spec)\.[cm]?[jt]s$/.test(path) || /(?:^|\/)test-[^/]*\.sh$/.test(path)) {
+  // Shell `test-*.sh` scripts are scanned: workflows run some of them directly.
+  if (/\.(?:test|spec)\.[cm]?[jt]s$/.test(path)) {
     return false;
   }
   return true;
@@ -226,10 +228,14 @@ export function scanText(
     if (index <= continuedUntil || isCommentLine(line)) return;
     const logical = logicalLine(lines, index, shell);
     continuedUntil = logical.lastIndex;
-    const rule = RULES.find(
-      (candidate) => (!candidate.shellOnly || shell) && candidate.pattern.test(logical.text)
+    // Every rule that matches, so a marker that excuses a readback cannot hide a trace on the
+    // same line.
+    const matched = new Set(
+      RULES.filter(
+        (candidate) => (!candidate.shellOnly || shell) && candidate.pattern.test(logical.text)
+      ).map((candidate) => candidate.id)
     );
-    if (rule) report(index, rule.id);
+    for (const rule of matched) report(index, rule);
   });
   return result;
 }
