@@ -16,8 +16,31 @@ func writeOutput(w io.Writer, jsonMode bool, text string, value any) error {
 		_, err = fmt.Fprintln(w, string(content))
 		return err
 	}
-	_, err := fmt.Fprintln(w, text)
+	_, err := fmt.Fprintln(w, sanitizeTerminalText(text))
 	return err
+}
+
+// sanitizeTerminalText makes terminal controls visible while retaining the
+// layout characters intentionally added by text renderers.
+func sanitizeTerminalText(value string) string {
+	var sanitized strings.Builder
+	sanitized.Grow(len(value))
+	for _, character := range value {
+		if character == '\n' || character == '\t' {
+			sanitized.WriteRune(character)
+			continue
+		}
+		if character < 0x20 || character == 0x7f || character >= 0x80 && character <= 0x9f {
+			fmt.Fprintf(&sanitized, "\\u%04X", character)
+			continue
+		}
+		sanitized.WriteRune(character)
+	}
+	return sanitized.String()
+}
+
+func sanitizeTerminalLine(value string) string {
+	return strings.NewReplacer("\n", " ", "\t", " ").Replace(sanitizeTerminalText(value))
 }
 
 func formatSubmitResponse(response SubmitTaskResponse) string {

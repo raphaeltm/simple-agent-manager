@@ -34,7 +34,14 @@ func PickProject(ctx context.Context, client APIClient, stdin io.Reader, stdout 
 		if activity != "" {
 			detail += ", " + activity
 		}
-		fmt.Fprintf(stdout, "  %d. %s — %s (%s)\n", i+1, p.Name, or(p.Repository, "no repo"), detail)
+		fmt.Fprintf(
+			stdout,
+			"  %d. %s — %s (%s)\n",
+			i+1,
+			sanitizeTerminalLine(p.Name),
+			sanitizeTerminalLine(or(p.Repository, "no repo")),
+			sanitizeTerminalLine(detail),
+		)
 	}
 	fmt.Fprintln(stdout)
 	fmt.Fprint(stdout, "Enter number: ")

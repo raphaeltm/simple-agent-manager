@@ -35,7 +35,7 @@ func PrintTable(w io.Writer, headers []string, rows [][]string) {
 }
 
 func SanitizeTableCell(value string) string {
-	fields := strings.Fields(value)
+	fields := strings.Fields(sanitizeTerminalLine(value))
 	if len(fields) == 0 {
 		return ""
 	}

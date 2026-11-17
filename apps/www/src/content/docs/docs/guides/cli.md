@@ -86,6 +86,8 @@ app would start an Instant chat; to start on Instant, name an
 [Instant](/docs/guides/instant-sessions/) profile. Without `--mode task`, `sam tasks submit` follows
 the profile's **Task Mode**. `sam tasks wait` stops waiting at the timeout but doesn't cancel the
 task. Add `--json` to any command for output a script can read.
+Human-readable output shows unsafe terminal controls from SAM data as visible `\uXXXX` text;
+JSON output preserves the original values for scripts.
 
 ## More commands
 

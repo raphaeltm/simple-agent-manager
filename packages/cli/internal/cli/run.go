@@ -365,7 +365,7 @@ func fail(stderr io.Writer, err error) int {
 		w.writeError(err)
 		return 1
 	}
-	fmt.Fprintln(stderr, err.Error())
+	fmt.Fprintln(stderr, sanitizeTerminalText(err.Error()))
 	return 1
 }
 
