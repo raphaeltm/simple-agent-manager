@@ -424,6 +424,12 @@ export async function archiveInboxItem(
       // ask-notice sweep never sends one later.
       if (!(await closeAsk(ctx, item.projectId, ref.id, 'archived', null, { silent: true })))
         throw new OperationError('conflict', 'This inbox item was already answered or closed');
+      if (item.kind === 'question' && item.sessionId)
+        await ctx.ports.inbox.questionArchived({
+          projectId: item.projectId,
+          sessionId: item.sessionId,
+          askId: ref.id,
+        });
       return { ref: item.ref, outcome: 'archived', agentNotified: false };
     }
     case 'attention': {

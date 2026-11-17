@@ -367,6 +367,36 @@ describe('inbox capability through the real entry points', () => {
     expect(after.body.items.map((entry) => entry.ref)).not.toContain(ref);
   });
 
+  it('an archived question keeps SAM’s check-in hold; a withdrawn one releases it (control)', async () => {
+    const s = await seed();
+    const key = `taskReconciliationGate:${s.chatSessionId}`;
+    const until = Date.now() + 3_600_000;
+    const hold = JSON.stringify({ attempts: 0, nextAttemptAt: until, questionHold: true });
+    const readGate = () =>
+      runInDurableObject(s.project, async (_instance, state) => {
+        const row = state.storage.sql
+          .exec('SELECT value FROM do_meta WHERE key = ?', key)
+          .toArray()[0];
+        return row ? (JSON.parse(String(row.value)) as { nextAttemptAt: number }) : null;
+      });
+    const seedHold = () =>
+      runInDurableObject(s.project, async (_instance, state) => {
+        state.storage.sql.exec(
+          'INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+          key,
+          hold
+        );
+      });
+
+    await seedHold();
+    await s.project.recordQuestionArchived({ sessionId: s.chatSessionId, askId: 'ask-1' });
+    expect((await readGate())?.nextAttemptAt).toBe(until);
+
+    await seedHold();
+    await s.project.recordQuestionWithdrawn({ sessionId: s.chatSessionId, askId: 'ask-1' });
+    expect((await readGate())?.nextAttemptAt).toBeLessThan(until);
+  });
+
   it('a secret request archived through the inbox is declined and the agent notified', async () => {
     const s = await seed();
     const created = await callTool(s.token, 'request_secret', {

@@ -604,8 +604,10 @@ store: the question answer (the same one the chat card uses, so two answers meet
 compare-and-set and the loser gets `409`), the permission answer, secret fulfil/decline, and the
 approval decision.
 Secret values and Operations approval decisions are accepted only from the SAM app, never through
-an app connected to the Connector (`403`). Answering or archiving an item filed from a chat needs
-the same right to wake that chat's agent as answering in the chat.
+an app connected to the Connector (`403`). Answering an item filed from a chat needs the same
+right to wake that chat's agent as answering in the chat. Archiving wakes nothing: an inbox ask
+needs only that it is yours to act on, and a question asked before questions moved to inbox asks
+needs the right to write in its chat.
 
 Archive closes an item for every kind. A question, review or result becomes `archived` (a
 question asked before questions moved to inbox asks is resolved with reason `archived`) and the

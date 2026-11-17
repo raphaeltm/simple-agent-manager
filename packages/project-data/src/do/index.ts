@@ -3015,6 +3015,19 @@ export class ProjectData extends DurableObject<Env> {
    * slice D): the chat stops showing it as paused, as when a question is answered. Nothing is
    * stored here; the row is already closed.
    */
+  /**
+   * The person archived a question held in D1 `asks`: open chat views stop showing it. Unlike a
+   * withdrawal, SAM's check-in hold is kept until the question's original deadline, so archiving
+   * does not nudge the agent (archive tells the agent nothing; Raphaël, 2026-11-17).
+   */
+  recordQuestionArchived(input: { sessionId: string; askId: string }): void {
+    this.broadcastEvent(
+      'attention.resolved',
+      { sessionId: input.sessionId, markerId: input.askId, reason: 'archived' },
+      input.sessionId
+    );
+  }
+
   async recordQuestionWithdrawn(input: { sessionId: string; askId: string }): Promise<void> {
     if (releaseQuestionHold(this.sql, input.sessionId)) await this.recalculateAlarm();
     this.broadcastEvent(

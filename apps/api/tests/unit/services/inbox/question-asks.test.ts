@@ -14,6 +14,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const edges = vi.hoisted(() => ({
   acceptPromptDelivery: vi.fn(),
   recordQuestionAsked: vi.fn(),
+  recordQuestionArchived: vi.fn(),
   expireQuestionAsk: vi.fn(),
   getSessionAccess: vi.fn(),
   prepareAttentionAnswer: vi.fn(),
@@ -28,6 +29,7 @@ vi.mock('../../../../src/services/project-data', async () => ({
   )),
   acceptPromptDelivery: edges.acceptPromptDelivery,
   recordQuestionAsked: edges.recordQuestionAsked,
+  recordQuestionArchived: edges.recordQuestionArchived,
   expireQuestionAsk: edges.expireQuestionAsk,
   getSessionAccess: edges.getSessionAccess,
   prepareAttentionAnswer: edges.prepareAttentionAnswer,
@@ -107,6 +109,7 @@ beforeEach(() => {
   for (const edge of Object.values(edges)) edge.mockReset();
   edges.acceptPromptDelivery.mockResolvedValue({ message: { id: 'd' } });
   edges.recordQuestionAsked.mockResolvedValue(undefined);
+  edges.recordQuestionArchived.mockResolvedValue(undefined);
   edges.expireQuestionAsk.mockResolvedValue({ outcome: 'expired' });
   edges.getSessionAccess.mockResolvedValue({
     session: { topic: 'Deploy chat' },
@@ -415,6 +418,26 @@ describe('answering a question', () => {
     ).rejects.toMatchObject({ code: 'conflict' });
   });
 
+  it('a failed live update does not fail the archive', async () => {
+    const { id } = await question();
+    edges.recordQuestionArchived.mockRejectedValue(new Error('DO down'));
+    const ctx = {
+      env,
+      ports: createOperationPorts(env),
+      actor: {
+        userId: 'owner',
+        via: 'web' as const,
+        scopes: new Set(['sam.read', 'sam.write'] as const),
+      },
+      requestId: 't',
+    };
+    await expect(archiveInboxItem(ctx, { projectId: P1, ref: `ask:${id}` })).resolves.toMatchObject(
+      { outcome: 'archived', agentNotified: false }
+    );
+    expect(askRow(id).status).toBe('archived');
+    expect(edges.recordQuestionArchived).toHaveBeenCalledTimes(1);
+  });
+
   it('archiving from the inbox closes it and tells the agent nothing', async () => {
     const { id } = await question();
     const ctx = {
@@ -433,6 +456,11 @@ describe('answering a question', () => {
     expect(askRow(id).status).toBe('archived');
     expect(askRow(id).notified_at).not.toBeNull();
     expect(edges.acceptPromptDelivery).not.toHaveBeenCalled();
+    // Open chat views are told it closed (a live update, not a message to the agent).
+    expect(edges.recordQuestionArchived).toHaveBeenCalledWith(env, P1, {
+      sessionId: 'chat-1',
+      askId: id,
+    });
     // A late answer from the chat card meets the archived row.
     await expect(answer(id, 'eu')).rejects.toMatchObject({ statusCode: 409 });
   });

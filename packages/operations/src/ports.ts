@@ -527,6 +527,11 @@ export interface OperationInboxPort {
   /** The agent cancelled a blocking question: its chat stops showing it as paused. Never throws. */
   withdrawQuestion(input: { projectId: string; sessionId: string; askId: string }): Promise<void>;
   /**
+   * The person archived a question: open chat views stop showing it. Tells the agent nothing and
+   * keeps SAM's check-in hold. Never throws.
+   */
+  questionArchived(input: { projectId: string; sessionId: string; askId: string }): Promise<void>;
+  /**
    * Whether each link names a thing of this project, in input order: null when it does, else
    * a short reason the agent can act on. Read with the platform's access; nothing is copied.
    */

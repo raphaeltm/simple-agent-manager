@@ -110,6 +110,26 @@ export async function withdrawAgentQuestion(
   }
 }
 
+/** The person archived a question: open chat views stop showing it. Never throws. */
+export async function announceQuestionArchived(
+  env: Env,
+  input: { projectId: string; sessionId: string; askId: string }
+): Promise<void> {
+  try {
+    await projectDataService.recordQuestionArchived(env, input.projectId, {
+      sessionId: input.sessionId,
+      askId: input.askId,
+    });
+  } catch (error) {
+    // The row is closed; any fresh read of the chat shows it closed. Only an open view lags.
+    log.warn('inbox.question_archived_live_update_failed', {
+      askId: input.askId,
+      projectId: input.projectId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 const NOT_IN_PROJECT = 'not found in this project';
 
 function escapeRegExp(value: string): string {
