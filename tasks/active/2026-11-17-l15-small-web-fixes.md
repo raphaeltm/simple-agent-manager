@@ -37,15 +37,15 @@ SAM task 01M7M9EWWHSFH09VE6ZN1S27WJ. Self-host landing slice L15 (idea 01M72M9AE
 
 ## Checklist
 
-- [ ] `useProfileChoice`: `instantEnabled` input, `createDefaultChatProfile()` creates exactly one profile
-- [ ] `useNewChatComposer`: read Instant availability via TanStack Query
-- [ ] `NoProfilesGate` quick start (one agent only) + Customize; wired in project chat and overview
-- [ ] Wizard: Instant card disabled when unavailable; no-runtime fallback to VM
-- [ ] API: `hostMemoryReserveMb` on `SafeCapacityPoolPlacementSettingsSummary`
-- [ ] Web: `defaultWorkspaceFitWarning(groups, placementSettings)` in Overview
-- [ ] Copy: email trigger (two places), onboarding hosted repo
-- [ ] Unit tests (gate click creates one profile; no auto-create; fit warning with overrides)
-- [ ] Playwright audit 375/1280
+- [x] `useProfileChoice`: `instantEnabled` input, `createDefaultChatProfile()` creates exactly one profile
+- [x] `useNewChatComposer`: read Instant availability via TanStack Query
+- [x] `NoProfilesGate` quick start (one agent only) + Customize; wired in project chat and overview
+- [x] Wizard: Instant card disabled when unavailable; no-runtime fallback to VM
+- [x] API: `hostMemoryReserveMb` on `SafeCapacityPoolPlacementSettingsSummary`
+- [x] Web: `defaultWorkspaceFitWarning(groups, placementSettings)` in Overview
+- [x] Copy: email trigger (two places), onboarding hosted repo
+- [x] Unit tests (gate click creates one profile; no auto-create; fit warning with overrides)
+- [x] Playwright audit 375/1280
 - [ ] Staging verification
 
 ## Acceptance criteria
@@ -55,3 +55,9 @@ SAM task 01M7M9EWWHSFH09VE6ZN1S27WJ. Self-host landing slice L15 (idea 01M72M9AE
 - Fit warning appears when no allowed machine fits the installation's resolved defaults plus host
   reserve, and disappears when an override makes a machine fit.
 - Email copy names only the From-allowlist check.
+
+## Notes
+
+- PR #2857. Fit warning lives in the read-only overview only (as on the integration branch).
+- Desktop gate squeeze with long agent names found in screenshots and fixed (text on its own row).
+- Personal pool page fallback notice said "This project uses..." with no project; now "Your work uses...".
