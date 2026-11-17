@@ -1610,6 +1610,18 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
       expect(d1.prepare('SELECT admission_state AS state FROM tasks WHERE id=?').get(TASK)).toEqual(
         { state: 'provider_limit_blocked' }
       );
+
+      // Nobody resumed before the saved workspace expired: the person's message is really lost
+      // now, so it is reported even though the hold is still there.
+      vi.setSystemTime(keepUntil + 1);
+      await runDeliveryAlarm();
+      expect(delivery(accepted.message.id)).toMatchObject({
+        state: 'expired',
+        terminal: 'ttl_expired',
+      });
+      expect(waitRow().phase).toBe('blocked');
+      expect(wakeAsks()).toEqual([{ status: 'open' }]);
+      expect(wakeMessages()).toHaveLength(1);
     });
   });
 });

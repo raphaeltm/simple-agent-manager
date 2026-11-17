@@ -397,18 +397,21 @@ export function processPromptDeliveryAlarm(
           const seen = new Set<string>();
           for (const wakeFailure of expired.expiredWakeFailures) {
             if (seen.has(wakeFailure.targetSessionId)) continue;
-            seen.add(wakeFailure.targetSessionId);
             try {
-              // A chat held by a provider usage limit cannot wake until the hold ends: the expiry
-              // is the hold, which the chat already shows, not a failed wake. A person's message
-              // was kept for the hold (`provider-limit-delivery-hold.ts`); what expires here
-              // carried its own deadline. A failed lookup still files the failure.
+              // A chat held by a provider usage limit cannot wake until the hold ends. A delivery
+              // that is not a person's message expires there on its own deadline (an event batch,
+              // a schedule, a parent wake): that is the hold, which the chat already shows, not a
+              // failed wake. A person's message is kept for the hold
+              // (`provider-limit-delivery-hold.ts`), so one that expires anyway is really lost
+              // (its hold lookup failed, or the hold outlived the saved snapshot) and is always
+              // reported. A failed lookup reports too.
               if (
-                await isProviderLimitHoldExpiry(
+                wakeFailure.senderType !== 'human' &&
+                (await isProviderLimitHoldExpiry(
                   env.DATABASE,
                   hooks.getProjectId(),
                   wakeFailure.targetSessionId
-                )
+                ))
               ) {
                 log.info('alarm.wake_failure_suppressed_provider_limit_hold', {
                   sessionId: wakeFailure.targetSessionId,
@@ -417,6 +420,7 @@ export function processPromptDeliveryAlarm(
                 });
                 continue;
               }
+              seen.add(wakeFailure.targetSessionId);
               await raiseSessionWakeFailure(
                 sql,
                 env,

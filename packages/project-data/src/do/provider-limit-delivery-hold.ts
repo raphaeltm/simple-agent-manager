@@ -20,8 +20,9 @@
  *   the saved snapshot expires (Resume cannot restore past it), and nothing is retried meanwhile.
  *
  * A committed wake nudges every queued delivery (`applySessionWakeReady`), so a parked delivery
- * goes out as soon as the chat wakes. Expiry of a held chat's delivery files no wake failure
- * (`isProviderLimitHoldExpiry`): the chat shows the hold instead.
+ * goes out as soon as the chat wakes. A non-human delivery that expires in a held chat files no
+ * wake failure (`isProviderLimitHoldExpiry`): the chat shows the hold instead. A person's message
+ * that expires anyway is really lost and is still reported (`processPromptDeliveryAlarm`).
  */
 import {
   parseProviderLimitWait,
@@ -221,9 +222,9 @@ export async function applyProviderLimitDeliveryHold(
 }
 
 /**
- * Whether a delivery that just expired on its TTL belongs to a chat held by a provider limit, so
- * the expiry is the hold, not a failed wake. A failed read answers false: the failure stays
- * visible rather than silently swallowed.
+ * Whether a non-human delivery that just expired on its own deadline belongs to a chat held by a
+ * provider limit, so the expiry is the hold, not a failed wake. A failed read answers false: the
+ * failure stays visible rather than silently swallowed.
  */
 export async function isProviderLimitHoldExpiry(
   database: D1Database,
