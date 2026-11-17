@@ -3,6 +3,7 @@ import { Alert, Button, Input } from '@simple-agent-manager/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
 
+import { useAgentModelCallsAvailable } from '../../hooks/usePlatformCapabilities';
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { useToast } from '../../hooks/useToast';
 import { updateProjectAgentModelSettings } from '../../lib/api';
@@ -53,7 +54,9 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
   const queryScope = useQueryScope();
   const toast = useToast();
   const queryClient = useQueryClient();
-  const enabled = Boolean(queryScope && projectId);
+  // Without Workers AI (a self-hosted install) the section has nothing to manage.
+  const { available, known } = useAgentModelCallsAvailable();
+  const enabled = Boolean(queryScope && projectId) && available && known;
 
   const settingsQuery = useQuery({
     ...projectAgentModelSettingsQueryOptions(queryScope, projectId),
@@ -88,6 +91,8 @@ export function ProjectAgentModelsSection({ projectId }: { projectId: string }) 
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to save'),
   });
+
+  if (!available) return null;
 
   if (!settings) {
     if (settingsQuery.isError) {

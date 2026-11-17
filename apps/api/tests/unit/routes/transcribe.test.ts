@@ -130,6 +130,14 @@ describe('Transcribe Routes', () => {
       );
     });
 
+    it('answers 404 FEATURE_UNAVAILABLE without the Workers AI binding', async () => {
+      const res = await postAudio(createEnv({ AI: undefined as unknown as Ai }));
+
+      expect(res.status).toBe(404);
+      expect(await res.json()).toMatchObject({ error: 'FEATURE_UNAVAILABLE' });
+      expect(mockAI.run).not.toHaveBeenCalled();
+    });
+
     it('should return 400 when audio field is missing', async () => {
       const formData = new FormData();
       formData.append('notaudio', 'some-text');

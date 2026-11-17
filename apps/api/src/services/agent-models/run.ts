@@ -25,7 +25,7 @@ import {
   settleAgentModelBudget,
   usageMonth,
 } from './budget';
-import { getAgentModelCatalog } from './catalog';
+import { getAgentModelCatalog, WorkersAiUnavailableError } from './catalog';
 import {
   costMicroUsd,
   estimateReservationQuantities,
@@ -185,6 +185,9 @@ export async function runAgentModelForAgent(
   }
   const [catalog, context] = await Promise.all([
     getAgentModelCatalog(env, settings.catalogCacheSeconds).catch((err: unknown) => {
+      if (err instanceof WorkersAiUnavailableError) {
+        throw new AgentModelCallError('not_available', err.message);
+      }
       log.error('catalog_unavailable', { error: err instanceof Error ? err.message : String(err) });
       throw new AgentModelCallError(
         'catalog_unavailable',

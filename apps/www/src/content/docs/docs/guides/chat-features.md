@@ -631,6 +631,12 @@ Agent responses can be played back as audio. SAM uses Deepgram Aura 2 (via Worke
 | `TTS_MAX_TEXT_LENGTH` | `100000`                 | Max characters per synthesis |
 | `TTS_TIMEOUT_MS`      | `60000`                  | Synthesis timeout            |
 
+Voice input and server read-aloud need the Workers AI binding. An installation without it, or
+with `TTS_ENABLED` set to `false`, reports that through
+[`GET /api/config/platform-capabilities`](/docs/reference/api/), and the app hides the microphone
+(and, for TTS, plays read-aloud through the browser's own speech synthesis) instead of showing a
+control that fails.
+
 ## Conversation Forking
 
 Fork and Retry both start a new chat linked to the one you're in, and both open instantly.

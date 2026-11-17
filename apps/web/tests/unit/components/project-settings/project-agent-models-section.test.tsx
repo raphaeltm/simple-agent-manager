@@ -17,6 +17,19 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../../src/hooks/useQueryScope', () => ({ useQueryScope: () => 'user-1' }));
+// Agent model calls exist on this installation unless a test says otherwise.
+const capabilityState = vi.hoisted(() => ({ agentModelCalls: true }));
+vi.mock('../../../../src/lib/api/platform-capabilities', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../../../src/lib/api/platform-capabilities')>();
+  return {
+    ...actual,
+    getPlatformCapabilities: async () => ({
+      ...actual.ASSUMED_PLATFORM_CAPABILITIES,
+      agentModelCalls: capabilityState.agentModelCalls,
+    }),
+  };
+});
 vi.mock('../../../../src/hooks/useToast', () => ({ useToast: () => mocks.toast }));
 vi.mock('../../../../src/lib/api/agent-models', () => ({
   getAgentModelCatalog: mocks.getAgentModelCatalog,

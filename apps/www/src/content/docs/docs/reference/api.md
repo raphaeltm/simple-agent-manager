@@ -313,6 +313,23 @@ Limited per IP address. Other `/api/auth/email-otp/*` routes return `404`.
 Public. `{ "github": bool, "google": bool, "gitlab": bool, "email": bool }`: which sign-in options
 the login page offers.
 
+### `GET /api/config/platform-capabilities`
+
+Public. `{ "speechToText": bool, "textToSpeech": bool, "agentModelCalls": bool }`: which platform
+services this installation has, so the app hides controls that cannot work here. Computed from the
+Worker's bindings and settings with no D1 or KV read (`publicPlatformCapabilities()` in
+`apps/api/src/services/platform-capabilities.ts`). On Cloudflare, with the Workers AI binding
+present, every field is true; `textToSpeech` is also false when `TTS_ENABLED` is `"false"`. The
+web app treats a missing field, a failed request or a pending answer as "available", so controls
+never flicker away while it loads.
+
+Routes that need a missing service answer `404` with
+`{ "error": "FEATURE_UNAVAILABLE", "message": "…", "details": { "feature": "<capability>" } }`
+(`errors.featureUnavailable()` in `apps/api/src/middleware/error.ts`): `POST /api/transcribe`,
+`POST /api/tts/synthesize` and `GET /api/agent-models/catalog` without the Workers AI binding.
+Agent-facing model calls (`list_ai_models`, `run_ai_model`) answer with the non-retryable
+`not_available` code in that case.
+
 ### `GET /api/config/instant-runtime`
 
 Public. `{ "enabled": bool }`: whether agents can run on Instant (Cloudflare Containers) here

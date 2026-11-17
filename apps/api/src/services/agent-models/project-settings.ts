@@ -17,7 +17,7 @@ import { createModuleLogger } from '../../lib/logger';
 import { errors } from '../../middleware/error';
 import { projectRoleHasCapability } from '../../middleware/project-auth';
 import { microUsdToUsd, readAgentModelUsage, usageMonth } from './budget';
-import { getAgentModelCatalog } from './catalog';
+import { getAgentModelCatalog, WorkersAiUnavailableError } from './catalog';
 import { agentModelsResponse, serializeAgentModelSelection } from './selection';
 import {
   type AgentModelSettings,
@@ -37,6 +37,7 @@ async function defaultModelIds(env: Env, settings: AgentModelSettings): Promise<
   } catch (err) {
     // The settings page still shows the saved selection and budget; the picker reports the
     // catalog error itself from GET /api/agent-models/catalog.
+    if (err instanceof WorkersAiUnavailableError) return null;
     log.warn('catalog_unavailable', { error: err instanceof Error ? err.message : String(err) });
     return null;
   }
