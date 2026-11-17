@@ -8,19 +8,10 @@
  */
 import type { OperationContext } from '@simple-agent-manager/operations';
 import { projectPeople } from '@simple-agent-manager/operations';
-import Database from 'better-sqlite3';
-import { is } from 'drizzle-orm';
-import { SQLiteTable } from 'drizzle-orm/sqlite-core';
+import type Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import * as schema from '../../../src/db/schema';
-import type { Env } from '../../../src/env';
-import { createOperationPorts } from '../../../src/operation-ports';
-import {
-  createAllSchemaTables,
-  createDeclaredIndexes,
-  createSqliteD1,
-} from '../../helpers/sqlite-d1';
+import { createPlanHarness } from '../../helpers/insights-d1';
 
 const NOW = Date.parse('2026-11-16T12:00:00.000Z');
 const DAY = 86_400_000;
@@ -34,22 +25,12 @@ afterEach(() => {
   sqlite = null;
 });
 
-function plan(query: string): string[] {
-  const placeholders = (query.match(/\?/g) ?? []).length;
-  return (
-    sqlite!
-      .prepare(`EXPLAIN QUERY PLAN ${query}`)
-      .all(...Array.from({ length: placeholders }, () => null)) as { detail: string }[]
-  ).map((row) => row.detail);
-}
+let plan: (query: string) => string[] = () => [];
 
 function setup() {
-  sqlite = new Database(':memory:');
-  createAllSchemaTables(sqlite, schema);
-  createDeclaredIndexes(
-    sqlite,
-    Object.values(schema).filter((value): value is SQLiteTable => is(value, SQLiteTable))
-  );
+  const harness = createPlanHarness();
+  sqlite = harness.sqlite;
+  plan = harness.plan;
   sqlite.exec(`
     INSERT INTO projects (id, name, repository) VALUES ('p', 'Project', 'acme/app');
     INSERT INTO users (id, name, email) VALUES ('owner', 'Owner', 'o@example.com'),
@@ -101,28 +82,8 @@ function setup() {
       insertCycle.run(i, requested, i % 4 ? reviewed : null);
     }
   })();
-  const statements: string[] = [];
-  const base = createSqliteD1(sqlite);
-  const d1 = new Proxy(base, {
-    get(target, prop, receiver) {
-      if (prop === 'prepare') {
-        return (query: string) => {
-          statements.push(query);
-          return target.prepare(query);
-        };
-      }
-      const value = Reflect.get(target, prop, receiver);
-      return typeof value === 'function' ? value.bind(target) : value;
-    },
-  });
-  const env = { DATABASE: d1, BASE_DOMAIN: 'example.test' } as unknown as Env;
-  const ctx: OperationContext = {
-    env,
-    ports: createOperationPorts(env),
-    requestId: 'plan',
-    actor: { userId: 'owner', via: 'web', scopes: new Set(['sam.read']) },
-  };
-  return { ctx, statements };
+  const ctx: OperationContext = harness.ctx('owner');
+  return { ctx, statements: harness.statements };
 }
 
 describe('insights people query plans', { timeout: 60_000 }, () => {

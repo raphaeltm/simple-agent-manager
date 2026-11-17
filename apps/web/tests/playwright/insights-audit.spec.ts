@@ -7,50 +7,18 @@
  * (long and hostile names, eight accounts, 13 weeks, a capped stall scan), an empty project, a
  * failed read, a failed stall section, and a range switch held mid-flight.
  */
-import { expect, type Page, type Route, test, type TestInfo } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 import { isInsightsRange } from '@simple-agent-manager/shared';
 
-import {
-  assertNoClippedOverflow,
-  assertNoOverflow,
-  makeMockUser,
-  screenshot,
-} from './audit-helpers';
 import { type AccountsScene, makeAccounts } from './insights-accounts-fixtures';
+import {
+  auditOnPhoneAndDesktop,
+  BASE,
+  capture,
+  PROJECT_ID,
+  routeInsightsApi,
+} from './insights-audit-support';
 import { type FlowScene, makeFlow } from './insights-fixtures';
-
-const PROJECT_ID = 'proj-insights';
-const USER_ID = 'user-insights';
-const BASE = `/projects/${PROJECT_ID}/insights`;
-
-const MOCK_USER = makeMockUser({
-  email: 'raph@example.com',
-  name: 'Raph',
-  sessionId: 'session-insights',
-  userId: USER_ID,
-});
-
-const MOCK_PROJECT = {
-  id: PROJECT_ID,
-  name: 'Acme Billing',
-  repository: 'acme/billing',
-  repoProvider: 'github',
-  defaultBranch: 'main',
-  userId: USER_ID,
-  installationId: 'inst-1',
-  defaultWorkspaceProfile: 'full',
-  defaultDevcontainerConfigName: '',
-  createdAt: '2026-10-01T00:00:00Z',
-  updatedAt: '2026-11-15T00:00:00Z',
-  multiplayerActive: false,
-  summary: {
-    activeWorkspaceCount: 0,
-    activeSessionCount: 0,
-    lastActivityAt: null,
-    taskCountsByStatus: {},
-    linkedWorkspaces: 0,
-  },
-};
 
 async function setupScene(
   page: Page,
@@ -58,53 +26,15 @@ async function setupScene(
   requests: string[] = [],
   accountsScene: AccountsScene | 'error' = 'realistic'
 ) {
-  await page.addInitScript((id) => {
-    localStorage.setItem(`sam-onboarding-wizard-dismissed-${id}`, 'true');
-  }, USER_ID);
-  await page.route(/^https?:\/\/[^/]+\/api\//, async (route: Route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname;
-    const respond = (status: number, body: unknown) =>
-      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
-    if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
-    if (path === '/api/cc/credentials') return respond(200, { credentials: [] });
-    if (path === '/api/cc/configurations') return respond(200, { configurations: [] });
-    if (path === '/api/cc/attachments') return respond(200, { attachments: [] });
-    if (path === '/api/cc/profile-attachments') return respond(200, { attachments: [] });
-    if (path === '/api/credentials/resolution-status') return respond(200, { consumers: [] });
-    if (path === '/api/credentials/limits')
-      return respond(200, { credentials: [], generatedAt: Date.now() });
-    if (path === '/api/credentials') return respond(200, []);
-    if (path === '/api/agents') return respond(200, { agents: [] });
-    if (path === `/api/projects/${PROJECT_ID}/overview`)
-      return respond(200, {
-        projectId: PROJECT_ID,
-        running: { items: [], total: 0, waitingOnViewerTotal: 0 },
-        recent: { ideas: [], mergedPullRequests: [] },
-        unavailable: [],
-        generatedAt: new Date().toISOString(),
-      });
-    if (path === `/api/projects/${PROJECT_ID}/agent-profiles`) return respond(200, { items: [] });
-    if (path === `/api/projects/${PROJECT_ID}/skills`) return respond(200, { items: [] });
-    if (path === `/api/projects/${PROJECT_ID}/triggers`) return respond(200, { triggers: [] });
-    if (path === `/api/projects/${PROJECT_ID}/members`)
-      return respond(200, { members: [], inviteLinks: [], accessRequests: [] });
-    if (path === '/api/trial-status')
-      return respond(200, { available: false, hasInfraCredential: true });
-    if (path.startsWith('/api/notifications'))
-      return respond(200, { notifications: [], unreadCount: 0 });
-    if (path === '/api/projects')
-      return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
-    if (path === `/api/projects/${PROJECT_ID}`) return respond(200, MOCK_PROJECT);
-    if (path === `/api/projects/${PROJECT_ID}/insights/flow`) {
-      const range = url.searchParams.get('range');
+  await routeInsightsApi(page, (url, _route, respond) => {
+    const range = url.searchParams.get('range');
+    if (url.pathname === `/api/projects/${PROJECT_ID}/insights/flow`) {
       requests.push(range ?? '');
       if (scene === 'error')
         return respond(500, { error: 'INTERNAL_ERROR', message: 'Insights are unavailable' });
       return respond(200, makeFlow(PROJECT_ID, isInsightsRange(range) ? range : '30d', scene));
     }
-    if (path === `/api/projects/${PROJECT_ID}/insights/accounts`) {
-      const range = url.searchParams.get('range');
+    if (url.pathname === `/api/projects/${PROJECT_ID}/insights/accounts`) {
       requests.push(`accounts:${range ?? ''}`);
       if (accountsScene === 'error')
         return respond(500, { error: 'INTERNAL_ERROR', message: 'Insights are unavailable' });
@@ -113,40 +43,11 @@ async function setupScene(
         makeAccounts(PROJECT_ID, isInsightsRange(range) ? range : '30d', accountsScene)
       );
     }
-    if (path.includes('/sessions')) return respond(200, { sessions: [], total: 0, hasMore: false });
-    return respond(200, {});
+    return undefined;
   });
 }
 
-function onlyOn(names: string[]) {
-  return ({ page: _page }: { page: Page }, testInfo: TestInfo) => {
-    test.skip(!names.includes(testInfo.project.name), 'audited on a phone and desktop');
-  };
-}
-test.beforeEach(onlyOn(['iPhone SE (375x667)', 'Desktop (1280x800)']));
-
-async function capture(page: Page, name: string) {
-  await expect(page.getByText('Something went wrong')).toHaveCount(0);
-  await assertNoOverflow(page);
-  await assertNoClippedOverflow(page);
-  // The page root fits the viewport (rule 56): it is never sized by its own content.
-  const rootWidth = await page
-    .getByTestId('project-insights')
-    .evaluate((el) => el.getBoundingClientRect().width);
-  expect(rootWidth).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
-  // The app shell scrolls inside <main>: grow every scroller to its content so the
-  // screenshot shows the whole page, not the first screen.
-  await page.evaluate(() => {
-    let node = document.querySelector<HTMLElement>('[data-testid="project-insights"]');
-    while (node) {
-      node.style.overflow = 'visible';
-      node.style.height = 'auto';
-      node.style.maxHeight = 'none';
-      node = node.parentElement;
-    }
-  });
-  await screenshot(page, name);
-}
+auditOnPhoneAndDesktop();
 
 test.describe('Insights', () => {
   test('flow with a realistic month', async ({ page }) => {

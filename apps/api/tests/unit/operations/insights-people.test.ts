@@ -17,6 +17,7 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { createOperationPorts } from '../../../src/operation-ports';
 import { ingestPullRequestWebhook } from '../../../src/services/github-pull-request-events';
+import { countD1RoundTrips } from '../../helpers/insights-d1';
 import {
   createAllSchemaTables,
   createDeclaredIndexes,
@@ -611,56 +612,19 @@ describe('projectPeople', () => {
   });
 
   it('stays within its round-trip budget', async () => {
-    const real = env.DATABASE;
-    let trips = 0;
-    const wrap = <T extends Record<string, unknown>>(statement: T): T => ({
-      ...statement,
-      all: async (...a: unknown[]) => {
-        trips += 1;
-        return (statement.all as (...x: unknown[]) => unknown)(...a);
-      },
-      first: async (...a: unknown[]) => {
-        trips += 1;
-        return (statement.first as (...x: unknown[]) => unknown)(...a);
-      },
-      run: async (...a: unknown[]) => {
-        trips += 1;
-        return (statement.run as (...x: unknown[]) => unknown)(...a);
-      },
-      raw: async (...a: unknown[]) => {
-        trips += 1;
-        return (statement.raw as (...x: unknown[]) => unknown)(...a);
-      },
-    });
-    env = {
-      ...env,
-      DATABASE: {
-        ...real,
-        prepare: (sql: string) => {
-          const statement = real.prepare(sql) as unknown as Record<string, unknown>;
-          return {
-            ...wrap(statement),
-            bind: (...params: unknown[]) =>
-              wrap((statement.bind as (...p: unknown[]) => Record<string, unknown>)(...params)),
-          };
-        },
-        batch: async (statements: unknown[]) => {
-          trips += 1;
-          return (real.batch as (s: unknown[]) => unknown)(statements);
-        },
-      },
-    } as unknown as Env;
+    const counter = countD1RoundTrips(env);
+    env = counter.env;
     for (let i = 0; i < 40; i += 1)
       ask(`busy-${i}`, {
         assignee_user_id: i % 2 ? 'owner' : 'mate',
         kind: i % 3 ? 'question' : 'task',
       });
     await people(); // warm the settings cache
-    trips = 0;
+    counter.reset();
     const result = await people();
     expect(result.waiting.total).toBe(40);
     // Rule 60 budget for this read is 4 (Insights spec). Measured: membership and the batch.
-    expect(trips).toBeLessThanOrEqual(3);
-    expect(trips).toBe(2);
+    expect(counter.trips()).toBeLessThanOrEqual(3);
+    expect(counter.trips()).toBe(2);
   });
 });
