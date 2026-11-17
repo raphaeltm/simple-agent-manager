@@ -291,6 +291,11 @@ items agents file (`packages/operations/src/inbox-settings-definition.ts`).
 | `inbox.errorSweepBatchSize`        | 10      | 1–50       | Error items one five-minute sweep files at most (failed tasks, automations, lost answers) |
 | `inbox.errorLookbackMinutes`       | 30      | 5–1,440    | How far back that sweep looks for failures with no error item yet                         |
 | `inbox.sweepBatchSize`             | 10      | 1–50       | Items each step of the five-minute sweep handles (reminders, expiries, notice retries)    |
+| `inbox.openTasksPerChat`           | 20      | 1–200      | Open human tasks one chat may have assigned; assigning past it is refused                 |
+| `inbox.taskStepsMax`               | 20      | 1–50       | Steps one human task may list                                                             |
+| `inbox.watchersPerItemMax`         | 10      | 1–50       | Chats that may watch one task (the one that assigned it plus chats that attached)         |
+| `inbox.taskActivityMax`            | 100     | 10–500     | Lifecycle rows a task view returns, newest kept; the view says when older ones exist      |
+| `inbox.closedTaskWatchHours`       | 168     | 1–2,160    | Hours a finished, archived or cancelled task still wakes the chats watching it            |
 
 A question an agent asks with `request_human_input` is an inbox item, and these settings set its
 schedule (`apps/api/src/services/inbox/sweep.ts`, every five minutes):

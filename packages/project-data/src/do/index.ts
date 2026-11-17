@@ -65,6 +65,8 @@ import * as groupedFtsWallRecovery from './grouped-fts-wall-recovery';
 import * as ideaUpdates from './idea-updates';
 import * as ideaWork from './idea-work';
 import * as idleCleanup from './idle-cleanup';
+import { countInboxItemWatchers, renewInboxItemWatches } from './inbox-event-wake';
+import * as inboxItemComments from './inbox-item-comments';
 import * as knowledge from './knowledge';
 import * as libraryFileComments from './library-file-comments';
 import * as links from './links';
@@ -2609,6 +2611,41 @@ export class ProjectData extends DurableObject<Env> {
       libraryFileComments.updateFileCommentThreadStatus(this.sql, this.env, input)
     );
     return { thread: result.thread, idempotent: result.idempotent };
+  }
+
+  // --- Inbox item comments (inbox slice H1) -----------------------------------
+  // Discussion on a human task, scoped to its asks id (DO migration 081). Callers must have
+  // already verified the item belongs to this project and the reader may see it; the DO has no D1.
+
+  listInboxItemCommentThreads(
+    input: inboxItemComments.ListInboxItemCommentThreadsInput
+  ): ReturnType<typeof inboxItemComments.listInboxItemCommentThreads> {
+    return inboxItemComments.listInboxItemCommentThreads(this.sql, this.env, input);
+  }
+
+  countInboxItemWatchers(projectId: string, itemId: string): number {
+    return countInboxItemWatchers(this.sql, projectId, itemId);
+  }
+
+  renewInboxItemWatches(input: {
+    projectId: string;
+    itemId: string;
+    open: boolean;
+    closedGraceMs: number;
+  }): number {
+    return renewInboxItemWatches(this.sql, {
+      ...input,
+      now: Date.now(),
+      lifetimeMs: resolveProjectEventLimits(this.env).wakeSubscriptionLifetimeMs,
+    });
+  }
+
+  createInboxItemComment(
+    input: inboxItemComments.CreateInboxItemCommentInput
+  ): inboxItemComments.InboxItemCommentMutationResult {
+    return this.meteredStorage.transactionSync(() =>
+      inboxItemComments.createInboxItemComment(this.sql, this.env, input)
+    );
   }
 
   materializeSession(sessionId: string): void {

@@ -13,6 +13,8 @@ import type { Env } from '../../../src/env';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
 import { requireApproved, requireAuth } from '../../../src/middleware/auth';
 import { inboxRoutes, projectInboxRoutes } from '../../../src/routes/inbox';
+import { projectInboxTaskRoutes } from '../../../src/routes/inbox-tasks';
+import { projectCommentRoutes } from '../../../src/routes/project-comments';
 import { storeMcpToken } from '../../../src/services/mcp-token';
 import {
   seedAgentSession,
@@ -35,6 +37,8 @@ export function browserApp() {
   app.use('/api/*', requireAuth(), requireApproved());
   app.route('/api/inbox', inboxRoutes);
   app.route('/api/projects/:projectId/inbox', projectInboxRoutes);
+  app.route('/api/projects/:projectId/inbox', projectInboxTaskRoutes);
+  app.route('/api/projects/:projectId/comments', projectCommentRoutes);
   return app;
 }
 

@@ -19,6 +19,7 @@ import { OperationError } from './errors';
 import { answerErrorItem, archiveErrorItem } from './inbox-error-core';
 import { INBOX_NOT_FOUND, resolveInboxItem } from './inbox-item-core';
 import { getInboxLimits } from './inbox-settings';
+import { archiveTask, completeTask } from './inbox-task-core';
 import type { InboxAskNoticeOutcome, InboxAskNoticeRow } from './ports';
 import type { OperationContext } from './types';
 
@@ -43,6 +44,9 @@ async function requireActable(
 ): Promise<{ item: InboxItem; ref: ParsedInboxRef }> {
   await authorizeProjectOperation(ctx, input.projectId, 'task:write');
   const resolved = await resolveInboxItem(ctx, input, true);
+  // A human task has its own rule for who may close it (`canWriteTask`); the task operation
+  // checks it, so the inbox's assignee-only gate must not refuse the filer first.
+  if (resolved.item.kind === 'task' && resolved.ref.store === 'ask') return resolved;
   if (resolved.item.status !== 'open')
     throw new OperationError('conflict', `This inbox item is already ${resolved.item.status}`);
   if (!resolved.item.canAct) throw new OperationError('forbidden', 'You cannot act on this item');
@@ -142,6 +146,15 @@ async function answerAsk(
 ): Promise<InboxActionResponse> {
   // Length was checked against `inbox.answerMaxChars` by `answerInboxItem`.
   const answer = input.answer?.trim();
+  if (item.kind === 'task') {
+    // A human task closes through its own path: the `sam.inbox` event is the agent's notice.
+    const result = await completeTask(ctx, {
+      projectId: item.projectId,
+      askId,
+      note: answer || undefined,
+    });
+    return { ref: item.ref, outcome: result.status, agentNotified: result.agentNotified };
+  }
   if (item.kind === 'question' && item.sessionId) {
     // A question is answered through the one path a chat card, a notification and the Connector
     // also use (`answerAttention`, `apps/api/src/routes/chat-attention.ts`), so concurrent answers
@@ -168,7 +181,7 @@ async function answerAsk(
   // An answer reaches the agent as a prompt, so the agent-wake policy decides first.
   if (item.sessionId)
     await ctx.ports.inbox.authorizeAnswerWake(item.projectId, item.sessionId, ctx.actor.userId);
-  const status = item.kind === 'task' ? 'done' : 'answered';
+  const status = 'answered';
   const answerJson = answer ? JSON.stringify({ text: answer }) : null;
   if (!(await closeAsk(ctx, item.projectId, askId, status, answerJson)))
     throw new OperationError('conflict', 'This inbox item was already answered or closed');
@@ -331,6 +344,10 @@ export async function archiveInboxItem(
   const me = ctx.actor.userId;
   switch (ref.store) {
     case 'ask': {
+      if (item.kind === 'task') {
+        const result = await archiveTask(ctx, { projectId: item.projectId, askId: ref.id });
+        return { ref: item.ref, outcome: result.status, agentNotified: result.agentNotified };
+      }
       if (item.kind === 'error') return archiveErrorItem(ctx, item, ref.id);
       // The notice wakes the filing agent, so the agent-wake policy decides, as for an answer.
       if (item.sessionId)

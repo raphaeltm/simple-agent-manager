@@ -535,12 +535,31 @@ approvals. Nothing is copied.
 | POST   | `/api/projects/:projectId/inbox/items/:ref/answer`  | Answer it through the path its store uses      |
 | POST   | `/api/projects/:projectId/inbox/items/:ref/archive` | Close it; the agent is told you will not act   |
 
+A human task (`ask:<id>` of kind `task`) adds its own routes beside these
+(`apps/api/src/routes/inbox-tasks.ts`, operations in `packages/operations/src/inbox-task-core.ts`).
+`GET …/items/:ref` returns it with `task`: steps, assignee, who took it, activity and discussion.
+Each write wakes the chats watching the task, with these exceptions
+([Tasks for people](/docs/guides/inbox/#tasks-for-people)): step ticks wake only a chat that asked
+for them (`wakeOnSteps`); a comment wakes only the chat that assigned the task, and only when its
+author is the assignee, the member who took it, or a writer of that chat; a chat that attached to the
+task is woken by lifecycle changes, not comments.
+
+| Method | Endpoint                                                 | Purpose                                            |
+| ------ | -------------------------------------------------------- | -------------------------------------------------- |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/steps/:index` | `{ done }`: tick or untick a step                  |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/comments`     | `{ body, threadId?, mentions? }`: comment or reply |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/claim`        | Take a team task                                   |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/reassign`     | `{ assigneeUserId }` or `{ team: true }`           |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/done`         | `{ note? }`: mark it done                          |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/reopen`       | Reopen a done or archived task                     |
+
 The list takes `filter` (`needs_you` by default: open items you can act on; `blocking`, `tasks`,
 `reviews`, or `archived`), `limit` (default `inbox.listPageSize`, at most `inbox.listPageMax`) and
 `cursor`, and returns `{ items, nextCursor, skipped }`. Items with a live deadline (permission
 requests, asks with a due time) come first, then the ones an agent is stopped on, then the rest,
 oldest first; one chat's items stay together (`stackKey`). `skipped` counts stored rows on the page
-that could not be read. You see an ask assigned to you (or an unclaimed team ask), questions in
+that could not be read. You see an ask assigned to you (or a team ask; one another member took
+is listed but is not counted as needing you), questions in
 chats you created, secret requests your agents made (and, when the member whose agent asked
 cannot supply secrets, the requests of members who cannot, if you can), and, as an active
 superadmin, Operations approvals in projects you belong to. Opening, answering or archiving an
