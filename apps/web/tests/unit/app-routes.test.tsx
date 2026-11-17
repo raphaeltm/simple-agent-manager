@@ -460,7 +460,10 @@ describe('App routes', () => {
     vi.stubEnv('PROD', true);
     vi.stubEnv('MODE', 'production');
 
-    expect(DEV_ONLY_ROUTE_PATHS).toEqual(['/__test/error-boundary', '/ui-standards']);
+    expect(DEV_ONLY_ROUTE_PATHS).toEqual([
+      '/__test/error-boundary',
+      '/ui-standards',
+    ]);
     expect(devOnlyRoutesEnabled()).toBe(false);
 
     for (const routePath of DEV_ONLY_ROUTE_PATHS) {
