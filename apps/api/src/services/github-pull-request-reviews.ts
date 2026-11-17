@@ -1,5 +1,5 @@
 /**
- * Review request cycles for Insights · People "review pickup time" (slice P, migration 0257). The
+ * Review request cycles for Insights · People "review pickup time" (slice P, migration 0258). The
  * GitHub webhook ingest calls this for three deliveries the App already subscribes to:
  *
  * - `pull_request.review_requested`: open a cycle for that reviewer, unless one is open already.

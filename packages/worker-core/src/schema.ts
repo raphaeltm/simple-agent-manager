@@ -850,7 +850,7 @@ export const asks = sqliteTable(
       table.status,
       table.createdAt
     ),
-    // Insights · People "answered by the first person asked" (migration 0257).
+    // Insights · People "answered by the first person asked" (migration 0258).
     projectStatusResolvedIdx: index('idx_asks_project_status_resolved').on(
       table.projectId,
       table.status,
@@ -1524,7 +1524,7 @@ export const pullRequestHeads = sqliteTable(
 );
 
 /**
- * One review request cycle per reviewer of a pull request (migration 0257), written by the GitHub
+ * One review request cycle per reviewer of a pull request (migration 0258), written by the GitHub
  * webhook ingest (`services/github-pull-request-reviews.ts`). Insights · People reads it for review
  * pickup time, per project only: `reviewerKey` exists to match a review to its request.
  */

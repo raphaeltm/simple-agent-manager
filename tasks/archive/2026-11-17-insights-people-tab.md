@@ -55,7 +55,7 @@ people, no per-person output counts**):
 
 ## Design
 
-- Table `pull_request_review_requests` (migration 0257 or next free): one row per request cycle
+- Table `pull_request_review_requests` (migration 0258 or next free): one row per request cycle
   (project, repository, pr, reviewer kind user|team, reviewer key, requested_at), `first_review_at`,
   `removed_at`. FK projects ON DELETE CASCADE (child only, not a parent). Index
   `(project_id, requested_at)`.
@@ -103,7 +103,7 @@ people, no per-person output counts**):
 
 ## Implementation notes
 
-- Migration 0257: `pull_request_review_requests` plus `idx_asks_project_status_resolved` (review: D1
+- Migration 0258: `pull_request_review_requests` plus `idx_asks_project_status_resolved` (review: D1
   plan for the first-person read).
 - Private waiting items carry only their age (security review); departed assignees read as
   "A former member"; review cycles close on `pull_request.closed`.

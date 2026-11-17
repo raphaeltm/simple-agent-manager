@@ -21,7 +21,7 @@
  * most `peopleReviewScanCap` cycles (default 2,000, newest first) through the
  * `(project_id, requested_at)` index and says when the cap cut the range. First person seeks the
  * project's answered and done asks resolved in the range through
- * `idx_asks_project_status_resolved` (migration 0257), so asks closed before the range are never
+ * `idx_asks_project_status_resolved` (migration 0258), so asks closed before the range are never
  * read; each row in the range costs at most two indexed `ask_activity` probes, and only for asks
  * the first assignee answered. Waiting items rank every open ask by a thin window (id, waiter,
  * created_at) and evaluate readability and reassign rights only for the `listed` rows per waiter:
