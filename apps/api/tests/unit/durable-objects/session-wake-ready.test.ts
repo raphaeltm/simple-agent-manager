@@ -12,9 +12,11 @@ import {
   applySessionWakeReady,
   captureSessionWakeActivation,
   isSessionWakeReadyCurrent,
+  recordSessionWakeActivation,
   type SessionWakeReadyInput,
 } from '@simple-agent-manager/project-data/internal/do/session-wake-ready';
 import { sleepSession, wakeSession } from '@simple-agent-manager/project-data/internal/do/sessions';
+import { log } from '@simple-agent-manager/worker-core';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -345,4 +347,20 @@ describe('readiness against actual SQL authority', () => {
       }
     }
   );
+});
+
+describe('wake lifecycle admission completion', () => {
+  it('contains an asynchronous admission rejection and waits for its diagnostic', async () => {
+    const warning = vi.spyOn(log, 'warn').mockImplementation(() => undefined);
+    const admit = vi.fn(async () => {
+      throw new Error('admission unavailable');
+    });
+    await expect(recordSessionWakeActivation(input, now, admit)).resolves.toBeUndefined();
+    expect(admit).toHaveBeenCalledOnce();
+    expect(warning).toHaveBeenCalledWith(
+      'project_data.session_lifecycle_event_failed',
+      expect.objectContaining({ lifecycle: 'woke', error: 'admission unavailable' })
+    );
+    warning.mockRestore();
+  });
 });

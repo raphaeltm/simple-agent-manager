@@ -147,6 +147,7 @@ async function loadTranscript(
   const cached = client.getQueryData<ChatSessionDetailResponse>(queryKey);
   const refreshed = cached && (await refreshCachedTranscript(projectId, sessionId, cached, signal));
   if (!refreshed) return fetchNewestPage(projectId, sessionId, signal);
+  if (refreshed.toolChanges?.resetRequired) return refreshed;
 
   // Rows the socket or an optimistic send appended while the refresh was in
   // flight are in the latest cache entry, not in the snapshot it started from.

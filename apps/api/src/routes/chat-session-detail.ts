@@ -38,6 +38,7 @@ import {
 } from './chat-message-query';
 import { getChatSessionRouteContext } from './chat-route-context';
 import { enrichSessionWithAccess } from './chat-session-ownership';
+import { readChatToolChanges } from './chat-tool-changes';
 
 export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env }>): void {
   /**
@@ -71,6 +72,7 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
       throw errors.notFound('Chat session');
     }
 
+    const toolChanges = await readChatToolChanges(c, projectId, sessionId);
     const limit = getSessionMessageLimit(c.env, c.req.query('limit'));
     const before = getMessageCursor('before', c.req.query('before'));
     const after = getMessageCursor('after', c.req.query('after'));
@@ -245,6 +247,7 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
         { access: loaded.access, grants: loaded.grants, undelivered: loaded.undelivered }
       ),
       messages: messagesResult.messages,
+      ...(toolChanges ? { toolChanges } : {}),
       hasMore: messagesResult.hasMore,
       state: stateWithRecovery,
     });
