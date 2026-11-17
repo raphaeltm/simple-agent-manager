@@ -62,8 +62,8 @@ export async function runSetupSessionCleanup(
 ): Promise<void> {
   const { env, sql } = context;
   const interactiveTimeoutMs = getSandboxConfig(env).execTimeoutMs;
-  // Recovery has at most three attempts and four bounded remote steps (20s per
-  // attempt by default), plus the settings read. Inline keeps its existing budget.
+  // Recovery has its snapshotted attempt cap and four bounded remote steps (20s
+  // per attempt by default), plus the settings read. Inline keeps its existing budget.
   const execTimeoutMs = resumed
     ? Math.min(interactiveTimeoutMs, await getSetupSessionCleanupRecoveryStepTimeoutMs(env))
     : interactiveTimeoutMs;
@@ -78,7 +78,8 @@ export async function runSetupSessionCleanup(
     await scrubSetupDirectory(context, row, execTimeoutMs);
   }
   if (await context.deferPending(row)) return;
-  const destroyed = await destroySetupSandbox(context, row, resumed, execTimeoutMs);
+  const destroyed = await destroySetupSandbox(context, row, execTimeoutMs);
+  if (await context.deferPending(row)) return;
   const released = await releaseSetupPool(env, row, resumed, execTimeoutMs);
   // Failed/unfinished steps preserve both the obligation and a future recovery alarm.
   if (!destroyed || !released || !d1Repaired) {
@@ -188,32 +189,49 @@ async function scrubSetupDirectory(
 async function destroySetupSandbox(
   context: SetupSessionCleanupContext,
   row: SetupSessionRow,
-  resumed: boolean,
   execTimeoutMs: number
 ): Promise<boolean> {
   if (row.cleanup_sandbox_destroyed === 1) return true;
   const { env, sql } = context;
+  let awaitingDestruction = true;
   try {
-    const destruction = destroySandboxInstance(env, row.id, { sandboxId: row.id });
-    if (resumed) {
-      await withTimeout(
-        destruction,
-        execTimeoutMs,
-        `Setup sandbox destroy timed out after ${execTimeoutMs}ms`
+    const settled = beginSandboxFlight(sql, row.id, () => context.rearmAlarm());
+    const destruction = Promise.resolve()
+      .then(() => destroySandboxInstance(env, row.id, { sandboxId: row.id }, { timeoutMs: null }))
+      .then(
+        async () => {
+          // Commit before settlement/rearm so recovery never recreates this sandbox.
+          // If proof cannot persist, retain uncertainty instead of permitting exec.
+          try {
+            sql.exec(`UPDATE setup_session SET cleanup_sandbox_destroyed = 1 WHERE id = ?`, row.id);
+          } catch {
+            log.error('credential_setup.destroy_proof_failed', { sessionId: row.id });
+            throw new Error('Setup destruction proof could not be persisted');
+          }
+          await settled(!awaitingDestruction);
+        },
+        async (error: unknown) => {
+          await settled(!awaitingDestruction);
+          throw error;
+        }
       );
-    } else {
-      await destruction;
-    }
-    // Commit proof before the next await: a death during pool/D1 cleanup must
-    // never make recovery exec against (and recreate) the destroyed sandbox.
-    sql.exec(`UPDATE setup_session SET cleanup_sandbox_destroyed = 1 WHERE id = ?`, row.id);
+    context.waitUntil(
+      destruction.then(
+        () => undefined,
+        () => undefined
+      )
+    );
+    await withTimeout(
+      destruction,
+      execTimeoutMs,
+      `Setup sandbox destroy timed out after ${execTimeoutMs}ms`
+    );
     return true;
-  } catch (err) {
-    log.warn('credential_setup.sandbox_destroy_failed', {
-      sessionId: row.id,
-      error: err instanceof Error ? err.message : String(err),
-    });
+  } catch {
+    log.warn('credential_setup.sandbox_destroy_failed', { sessionId: row.id });
     return false;
+  } finally {
+    awaitingDestruction = false;
   }
 }
 

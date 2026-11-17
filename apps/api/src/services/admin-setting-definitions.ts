@@ -39,6 +39,7 @@ export type AdminSettingName =
   | AiProxySettingName
   | DeploymentPublishJobSettingName
   | 'credentialSetup.cleanupRecoveryStepTimeoutMs'
+  | 'credentialSetup.cleanupRecoveryMaxAttempts'
   | 'deployments.publishCallbackMaxBodyBytes'
   | 'events.skipUnsubscribedGitHubCi'
   | 'chat.messageMergingEnabled'

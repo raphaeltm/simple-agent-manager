@@ -139,6 +139,7 @@ interface FakeRow {
   cleanup_pending: number | null;
   cleanup_from_status: string | null;
   cleanup_attempts: number | null;
+  cleanup_recovery_max_attempts: number | null;
   cleanup_sandbox_destroyed: number | null;
   cleanup_scrub_state: number | null;
   cleanup_sandbox_io_pending: number | null;
@@ -191,6 +192,7 @@ function createFakeSql() {
         cleanup_pending: null,
         cleanup_from_status: null,
         cleanup_attempts: null,
+        cleanup_recovery_max_attempts: null,
         cleanup_sandbox_destroyed: null,
         cleanup_scrub_state: null,
         cleanup_sandbox_io_pending: 0,
@@ -255,11 +257,22 @@ function createFakeSql() {
       return {
         toArray: () =>
           row
-            ? [{ cleanup_pending: row.cleanup_pending, cleanup_attempts: row.cleanup_attempts }]
+            ? [
+                {
+                  cleanup_pending: row.cleanup_pending,
+                  cleanup_attempts: row.cleanup_attempts,
+                  cleanup_recovery_max_attempts: row.cleanup_recovery_max_attempts,
+                },
+              ]
             : [],
       };
     if (q.includes('update setup_session set cleanup_sandbox_destroyed = 1')) {
       if (row) row = { ...row, cleanup_sandbox_destroyed: 1 };
+      return { toArray: () => [] };
+    }
+    if (q.includes('update setup_session set cleanup_recovery_max_attempts = ?')) {
+      if (row && row.cleanup_recovery_max_attempts == null)
+        row = { ...row, cleanup_recovery_max_attempts: args[0] };
       return { toArray: () => [] };
     }
     if (q.includes('update setup_session set cleanup_attempts = ?')) {
@@ -304,11 +317,17 @@ function createFakeDatabase() {
 
 function createFakeCtx() {
   const sql = createFakeSql();
-  const setAlarm = vi.fn(async () => undefined);
-  const deleteAlarm = vi.fn(async () => undefined);
+  let alarm: number | null = null;
+  const setAlarm = vi.fn(async (time: number | Date) => {
+    alarm = Number(time);
+  });
+  const deleteAlarm = vi.fn(async () => {
+    alarm = null;
+  });
+  const getAlarm = vi.fn(async () => alarm);
   const blockConcurrencyWhile = vi.fn(async <T>(fn: () => Promise<T>): Promise<T> => fn());
   return {
-    storage: { sql, setAlarm, deleteAlarm },
+    storage: { sql, setAlarm, deleteAlarm, getAlarm },
     blockConcurrencyWhile,
     waitUntil: vi.fn(),
     _sql: sql,
@@ -642,9 +661,14 @@ describe('CredentialSetupSession — alarm() provisioning step', () => {
     expect(state?.errorCode).toBe('sandbox_provision_failed');
 
     // Teardown ran: scrub (best-effort), destroy, release, D1 marked terminal, alarm disarmed.
-    expect(destroySandboxInstance).toHaveBeenCalledWith(expect.anything(), 'setup-1', {
-      sandboxId: 'setup-1',
-    });
+    expect(destroySandboxInstance).toHaveBeenCalledWith(
+      expect.anything(),
+      'setup-1',
+      {
+        sandboxId: 'setup-1',
+      },
+      { timeoutMs: null }
+    );
     expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), 'lease-abc');
     expect(ctx.storage.deleteAlarm).toHaveBeenCalledTimes(1);
     expect(database._calls.some((c) => c.args.includes('failed'))).toBe(true);
@@ -839,9 +863,14 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
       expect.stringContaining('rm -rf'),
       expect.objectContaining({ timeout: expect.any(Number) })
     );
-    expect(destroySandboxInstance).toHaveBeenCalledWith(expect.anything(), 'setup-1', {
-      sandboxId: 'setup-1',
-    });
+    expect(destroySandboxInstance).toHaveBeenCalledWith(
+      expect.anything(),
+      'setup-1',
+      {
+        sandboxId: 'setup-1',
+      },
+      { timeoutMs: null }
+    );
     expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), 'lease-abc');
     expect(ctx.storage.deleteAlarm).toHaveBeenCalledTimes(1);
     expect(database._calls.some((c) => c.args.includes('completed'))).toBe(true);
@@ -1046,9 +1075,14 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
       )
     ).toBe(true);
     expect(JSON.stringify(database._calls)).not.toContain('private terminal output');
-    expect(destroySandboxInstance).toHaveBeenCalledWith(expect.anything(), 'setup-startup-exit', {
-      sandboxId: 'setup-startup-exit',
-    });
+    expect(destroySandboxInstance).toHaveBeenCalledWith(
+      expect.anything(),
+      'setup-startup-exit',
+      {
+        sandboxId: 'setup-startup-exit',
+      },
+      { timeoutMs: null }
+    );
     expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), 'lease-abc');
     expect(ctx.storage.deleteAlarm).toHaveBeenCalled();
     expect(saveAgentCredentialForUser).not.toHaveBeenCalled();

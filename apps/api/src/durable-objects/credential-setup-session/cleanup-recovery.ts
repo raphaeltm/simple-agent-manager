@@ -6,6 +6,11 @@ import { persistError } from '../../services/observability-errors';
 import { getSandboxConfig } from '../../services/sandbox';
 import type { SetupSessionRow } from './schema';
 
+/** Snapshot prevents later setting changes from reviving a quarantined episode. */
+export function cleanupAttemptLimit(row: SetupSessionRow): number {
+  return row.cleanup_recovery_max_attempts ?? DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS;
+}
+
 export function readCleanupRow(sql: SqlStorage, sessionId: string): SetupSessionRow | undefined {
   return sql
     .exec<SetupSessionRow>('SELECT * FROM setup_session WHERE id = ?', sessionId)
@@ -38,11 +43,11 @@ export async function quarantineCleanup(
   row: SetupSessionRow,
   reason = 'attempts_exhausted'
 ): Promise<void> {
-  if ((row.cleanup_attempts ?? 0) > DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS) {
+  if ((row.cleanup_attempts ?? 0) > cleanupAttemptLimit(row)) {
     await deleteRecoveryAlarm(ctx);
     return;
   }
-  const attempts = DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS + 1;
+  const attempts = cleanupAttemptLimit(row) + 1;
   sql.exec(`UPDATE setup_session SET cleanup_attempts = ? WHERE id = ?`, attempts, row.id);
   const context = {
     status: row.status,
@@ -78,7 +83,7 @@ export async function deferPendingCleanup(
 ): Promise<boolean> {
   row = readCleanupRow(sql, row.id) ?? row;
   if (row.cleanup_pending !== 1) return true;
-  if ((row.cleanup_attempts ?? 0) > DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS) {
+  if ((row.cleanup_attempts ?? 0) > cleanupAttemptLimit(row)) {
     await deleteRecoveryAlarm(ctx);
     return true;
   }
@@ -110,7 +115,7 @@ export async function claimCleanupAttempt(
 ): Promise<boolean> {
   row = readCleanupRow(sql, row.id) ?? row;
   const attempts = (row.cleanup_attempts ?? 0) + 1;
-  if (attempts > DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS) {
+  if (attempts > cleanupAttemptLimit(row)) {
     await quarantineCleanup(ctx, env, sql, row);
     return false;
   }
@@ -122,4 +127,28 @@ export async function claimCleanupAttempt(
     attempt: attempts,
   });
   return true;
+}
+
+/** An alarm must not acknowledge unresolved cleanup without a durable next wake.
+ * Cloudflare retries uncaught alarm failures (including isolate termination).
+ * https://developers.cloudflare.com/durable-objects/api/alarms/
+ */
+export async function ensureCleanupWake(
+  ctx: DurableObjectState,
+  sql: SqlStorage,
+  row: SetupSessionRow
+): Promise<void> {
+  const needsWake = (current: SetupSessionRow | undefined) =>
+    current?.cleanup_pending === 1 &&
+    (current.cleanup_attempts ?? 0) <= cleanupAttemptLimit(current);
+  if (!needsWake(readCleanupRow(sql, row.id))) return;
+  let alarm: number | null = null;
+  try {
+    alarm = await ctx.storage.getAlarm();
+  } catch {
+    // An unknown wake cannot acknowledge the alarm delivery as complete.
+  }
+  if (alarm !== null && Number.isFinite(alarm)) return;
+  if (needsWake(readCleanupRow(sql, row.id)))
+    throw new Error('Credential setup cleanup has no durable recovery alarm');
 }

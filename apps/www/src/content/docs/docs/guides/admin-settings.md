@@ -1155,10 +1155,14 @@ for all keys, budgets, proxy availability and accounting limits.
 `credentialSetup.cleanupRecoveryStepTimeoutMs` (Operations) limits each remote step when a
 guided credential-login cleanup is retried by its recovery alarm: D1 repair, sandbox scrub,
 sandbox destruction and pool release. The default is 5,000 ms per step (range 1–10,000 ms),
-capped by `SANDBOX_EXEC_TIMEOUT_MS`. At most three recovery attempts run; waiting for an
+capped by `SANDBOX_EXEC_TIMEOUT_MS`. `credentialSetup.cleanupRecoveryMaxAttempts` sets the
+number of recovery work attempts (default 3, range 1–10). Its value is fixed for each cleanup
+when recovery first begins; changing it affects future cleanups. Legacy cleanup already in
+progress keeps its original cap of three. Waiting for an
 already-issued SDK operation does not consume an attempt. Remote waits total
 at most 20 seconds per attempt by default (40 seconds at the maximum), plus the existing
-bounded settings read. Only recovery reads this setting; inline cancellation keeps the
+bounded settings read. The maximum configured cap allows 400 seconds of remote waits across
+all attempts; the default allows 60 seconds. Only recovery reads these settings; inline cancellation keeps the
 interactive sandbox timeout.
 
 A deadline stops waiting; it does not cancel an SDK operation. Cleanup cannot record
@@ -1168,5 +1172,8 @@ work's settlement is observed, recovery preserves the uncertainty. After the rec
 the session is quarantined and reported as an operator-visible platform error; a late
 settlement does not reset the cap. Pending SDK work has a separate watchdog at the later
 of the original session expiry and one interactive timeout plus a capture poll after teardown.
-Observed settlement wakes cleanup earlier. A timed-out destruction never records destruction
-proof, and a rejected or nonzero scrub remains retryable until scrub or destruction succeeds.
+Observed settlement wakes cleanup earlier. A timed-out destruction remains tracked: only its
+original successful completion records destruction proof, and recovery waits before another
+sandbox operation or pool release. A rejected or nonzero scrub remains retryable until scrub
+or destruction succeeds. If an alarm cannot establish a durable next wake while cleanup is
+still owed, it fails so Cloudflare can apply its bounded alarm retry policy.

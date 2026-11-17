@@ -5,12 +5,39 @@
  */
 import type { Env } from '../env';
 import { resolveAdminSetting } from './admin-settings';
-import { DEFAULT_SETUP_SESSION_CLEANUP_RECOVERY_STEP_TIMEOUT_MS } from './admin-settings-credential-setup-definitions';
+import {
+  DEFAULT_SETUP_SESSION_CLEANUP_RECOVERY_STEP_TIMEOUT_MS,
+  DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS,
+} from './admin-settings-credential-setup-definitions';
+
+export { DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS } from './admin-settings-credential-setup-definitions';
 
 /** Only recovery pays this cached settings read; inline teardown retains the interactive timeout. */
 export async function getSetupSessionCleanupRecoveryStepTimeoutMs(env: Env): Promise<number> {
   const value = await resolveAdminSetting(env, 'credentialSetup.cleanupRecoveryStepTimeoutMs');
   return typeof value === 'number' ? value : DEFAULT_SETUP_SESSION_CLEANUP_RECOVERY_STEP_TIMEOUT_MS;
+}
+
+export interface SetupSessionCleanupRecoveryConfig {
+  stepTimeoutMs: number;
+  maxAttempts: number;
+}
+
+/** Recovery-only: both settings share the existing override cache/in-flight read. */
+export async function getSetupSessionCleanupRecoveryConfig(
+  env: Env
+): Promise<SetupSessionCleanupRecoveryConfig> {
+  const [stepTimeoutMs, maxAttempts] = await Promise.all([
+    getSetupSessionCleanupRecoveryStepTimeoutMs(env),
+    resolveAdminSetting(env, 'credentialSetup.cleanupRecoveryMaxAttempts'),
+  ]);
+  return {
+    stepTimeoutMs,
+    maxAttempts:
+      typeof maxAttempts === 'number'
+        ? maxAttempts
+        : DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS,
+  };
 }
 
 /** Concurrency sub-cap for simultaneous setup sessions (below the Sandbox container max_instances). */
@@ -33,14 +60,6 @@ export const DEFAULT_CLAUDE_SETUP_OUTPUT_BUFFER_BYTES = 32_768;
 export const DEFAULT_CLAUDE_VERIFICATION_CODE_MAX_LENGTH = 1_024;
 export const DEFAULT_CLAUDE_SETUP_ERROR_DETAIL_MAX_LENGTH = 160;
 export const DEFAULT_CLAUDE_OAUTH_TOKEN_MAX_LENGTH = 8_192;
-/**
- * Alarm-driven re-runs of interrupted or failed teardown cleanup before quarantine.
- * The unresolved marker remains after this cap and an operator-visible error is
- * persisted; no further alarms are armed. A crash-loop circuit breaker, not an
- * operator setting: retry spacing is the session's capture poll interval
- * (`SETUP_SESSION_CAPTURE_POLL_MS`).
- */
-export const DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS = 3;
 /**
  * The message `@cloudflare/sandbox` puts on its own permanent container start failure
  * (HTTP 500 from `containerFetch`: no such image, no matching container application,

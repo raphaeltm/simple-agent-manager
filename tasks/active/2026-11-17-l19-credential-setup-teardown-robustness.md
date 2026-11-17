@@ -133,3 +133,13 @@ Sonar's green aggregate still exposed four open findings through its PR issue AP
 - [x] Two pre-fix red proofs reproduced budget spending and false scrub success. Final teardown47/47 and existing30/native12 pass; admin3 unchanged from prior validation. Secret-readback guard reports zero findings. Independent Cloudflare/security/constitution delta review PASS.
 - [x] Four new minor scanner RegExp.exec suggestions addressed without changing regex behavior; scanner15, five real files and48-fixture output parity pass.
 - [ ] New pushed candidate still requires its own CI/Sonar analysis and live staging gates.
+
+## Alarm wake, original destruction and configurable retry policy
+
+- [x] Alarm completion verifies a durable future wake while nonquarantined cleanup remains owed; missing or unknown alarm state throws for Cloudflare native bounded retries (up to six). Inline terminal/resource cleanup remains best-effort. Abrupt alarm termination is retried by the platform; no sweep selection is widened.
+- [x] Original destruction is tracked across acquisition and raw SDK completion, including beyond the helper's former hidden30s timeout. Only original success plus durable proof permits settlement. Failed proof writes preserve uncertainty; late success cannot restart a destroyed sandbox.
+- [x] Operations cleanupRecoveryMaxAttempts default3/range1–10; first recovery snapshots its cap. Existing legacy attempts retain3; alreadyquarantined legacy rows cannot revive. Both settings share one cached override read; inline starts add no remote settings reads. Maximum remote wait budget400s/default60s across the episode, plus bounded settings reads and final local alarm lookup.
+- [x] Independent CF/security/constitution/doc review PASS; config10/10 and existing/native42/42 pass. Destroy race RED reproduced premature pool release after5s. Latest abeebb142 actual Sonar issues0/hotspots0 and E2EsmokeSUCCESS.
+- [ ] Final new regressions/quality checks, fresh push/CI, live staging and production merge-hold release still required.
+
+Final latest delta evidence: teardown56/56 +existing30/native12 +recoveryconfig10 =108/108 pass. Real helper observes original SDK destruction beyond35s. Root surgical removal of the alarm-finally wake assertion reproduces the failed rejection expectation (.tmp/l19-alarm-wake-red.log); assertion restored and targeted green required. Independent source/security/CF/doc reviews PASS.

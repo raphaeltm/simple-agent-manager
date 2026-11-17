@@ -51,6 +51,7 @@ import {
   DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS,
   getClaudeOauthTokenMaxLength,
   getClaudeVerificationCodeMaxLength,
+  getSetupSessionCleanupRecoveryConfig,
   isTerminalSetupStatus,
   SANDBOX_PERMANENT_STARTUP_MESSAGE,
   type SetupSessionStatus,
@@ -59,7 +60,12 @@ import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import { getSandboxInstance, shellQuote } from '../../services/sandbox';
 import { CredentialValidator } from '../../services/validation';
 import { runSetupSessionCleanup } from './cleanup';
-import { claimCleanupAttempt, deferPendingCleanup } from './cleanup-recovery';
+import {
+  claimCleanupAttempt,
+  cleanupAttemptLimit,
+  deferPendingCleanup,
+  ensureCleanupWake,
+} from './cleanup-recovery';
 import { type SetupSessionD1Extra, updateSetupSessionD1Status } from './d1-status';
 import { type DeviceAuthState, driverFailure } from './driver-state';
 import {
@@ -282,6 +288,15 @@ export class CredentialSetupSession extends DurableObject<Env> {
    * or reaches a terminal teardown, so a session cannot get stuck armed.
    */
   async alarm(): Promise<void> {
+    try {
+      await this.alarmTick();
+    } finally {
+      const row = this.readRow();
+      if (row) await ensureCleanupWake(this.ctx, this.sql, row);
+    }
+  }
+
+  private async alarmTick(): Promise<void> {
     if (await deferAlarmWhenDisabled(this.env, this.ctx.storage, 'CredentialSetupSession')) return;
 
     const row = this.readRow();
@@ -663,7 +678,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
     }
     // cap + 1 is a durable quarantine marker. Keep cleanup_pending=1 as evidence
     // that teardown is unresolved, but never restart work or repeat the alert.
-    if ((row.cleanup_attempts ?? 0) > DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS) {
+    if ((row.cleanup_attempts ?? 0) > cleanupAttemptLimit(row)) {
       await this.deleteAlarmBestEffort();
       return;
     }
@@ -676,7 +691,18 @@ export class CredentialSetupSession extends DurableObject<Env> {
     await this.runCleanup(row, true);
   }
 
-  private runCleanup(row: SetupSessionRow, resumed: boolean): Promise<void> {
+  private async runCleanup(row: SetupSessionRow, resumed: boolean): Promise<void> {
+    if (resumed && row.cleanup_recovery_max_attempts == null) {
+      const policy = await getSetupSessionCleanupRecoveryConfig(this.env);
+      this.sql.exec(
+        `UPDATE setup_session SET cleanup_recovery_max_attempts = ? WHERE id = ? AND cleanup_recovery_max_attempts IS NULL`,
+        (row.cleanup_attempts ?? 0) > 0
+          ? DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS
+          : policy.maxAttempts,
+        row.id
+      );
+      row = this.readRow() ?? row;
+    }
     return runSetupSessionCleanup(
       {
         env: this.env,

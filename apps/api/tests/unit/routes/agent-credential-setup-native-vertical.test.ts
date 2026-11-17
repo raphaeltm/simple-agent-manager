@@ -111,6 +111,7 @@ function createDoContext() {
           agent_name: agentName,
           status: 'provisioning',
           cleanup_sandbox_io_pending: 0,
+          cleanup_recovery_max_attempts: null,
           pool_lease_id: poolLeaseId,
           codex_home: codexHome,
           expires_at: expiresAt,
@@ -144,6 +145,9 @@ function createDoContext() {
         };
       } else if (normalized.includes('set cleanup_sandbox_destroyed = 1') && row) {
         row = { ...row, cleanup_sandbox_destroyed: 1 };
+      } else if (normalized.includes('set cleanup_recovery_max_attempts = ?') && row) {
+        if (row.cleanup_recovery_max_attempts == null)
+          row = { ...row, cleanup_recovery_max_attempts: args[0] };
       } else if (normalized.includes('set cleanup_attempts = ?') && row) {
         row = { ...row, cleanup_attempts: args[0] };
       } else if (normalized.includes('update setup_session') && row) {
@@ -170,6 +174,7 @@ function createDoContext() {
                   {
                     cleanup_pending: row.cleanup_pending ?? null,
                     cleanup_attempts: row.cleanup_attempts ?? null,
+                    cleanup_recovery_max_attempts: row.cleanup_recovery_max_attempts ?? null,
                   },
                 ]
               : [],
@@ -180,11 +185,17 @@ function createDoContext() {
       return { toArray: () => [] };
     }),
   };
+  let alarm: number | null = null;
   return {
     storage: {
       sql,
-      setAlarm: vi.fn().mockResolvedValue(undefined),
-      deleteAlarm: vi.fn().mockResolvedValue(undefined),
+      setAlarm: vi.fn(async (time: number | Date) => {
+        alarm = Number(time);
+      }),
+      deleteAlarm: vi.fn(async () => {
+        alarm = null;
+      }),
+      getAlarm: vi.fn(async () => alarm),
     },
     waitUntil: vi.fn(),
     blockConcurrencyWhile: vi.fn(async (callback: () => Promise<unknown>) => callback()),

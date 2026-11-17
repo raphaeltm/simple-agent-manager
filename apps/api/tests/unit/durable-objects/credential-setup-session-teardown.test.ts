@@ -153,10 +153,16 @@ function doRow(doDb: Database.Database): DoRow {
 
 /** One DO "isolate" over persistent storage. A new instance over the same doDb = restart. */
 function createInstance(doDb: Database.Database, env: Env) {
+  let scheduledAlarm: number | null = null;
   const storage = {
     sql: createSqlStorage(doDb),
-    setAlarm: vi.fn(async (_at: number) => undefined),
-    deleteAlarm: vi.fn(async () => undefined),
+    setAlarm: vi.fn(async (at: number) => {
+      scheduledAlarm = at;
+    }),
+    getAlarm: vi.fn(async () => scheduledAlarm),
+    deleteAlarm: vi.fn(async () => {
+      scheduledAlarm = null;
+    }),
   };
   const ctx = {
     storage,
@@ -164,6 +170,11 @@ function createInstance(doDb: Database.Database, env: Env) {
     blockConcurrencyWhile: async <T>(fn: () => Promise<T>): Promise<T> => fn(),
   };
   const instance = new CredentialSetupSession(ctx as never, env);
+  const runAlarm = instance.alarm.bind(instance);
+  instance.alarm = async () => {
+    scheduledAlarm = null;
+    return runAlarm();
+  };
   return { instance, storage };
 }
 
@@ -239,8 +250,8 @@ async function startSession(
 }
 
 /**
- * Start a cancel whose sandbox destroy never settles, the way an isolate that dies
- * mid-teardown never gets past it. Records the D1 status seen by each sandbox call.
+ * Leave a settled failed destroy for recovery. Unsettled SDK promises have their own
+ * flight/watchdog fixtures below and must never masquerade as retryable failures.
  */
 async function interruptTeardown(fixture: Fixture) {
   const handle = await startSession(fixture, true);
@@ -251,12 +262,12 @@ async function interruptTeardown(fixture: Fixture) {
   });
   vi.mocked(destroySandboxInstance).mockImplementation(() => {
     seen.push(`destroy:${d1Status(fixture.d1)}`);
-    return new Promise<void>(() => undefined);
+    return Promise.reject(new Error('destroy unavailable'));
   });
   // Clear the provisioning-time alarms so assertions see only the claim-time one.
   handle.storage.setAlarm.mockClear();
   const cancelledAt = Date.now();
-  void handle.instance.cancel();
+  await handle.instance.cancel();
   await vi.waitFor(() => expect(destroySandboxInstance).toHaveBeenCalledTimes(1));
   return { ...handle, seen, cancelledAt };
 }
@@ -301,14 +312,14 @@ describe('CredentialSetupSession teardown — interrupted after the DO claim', (
       cleanup_from_status: 'waiting_for_user',
       cleanup_attempts: 0,
     });
-    expect(storage.setAlarm).toHaveBeenCalledTimes(1);
+    expect(storage.setAlarm).toHaveBeenCalledTimes(2); // claim plus settled-failure recovery
     expect(storage.setAlarm.mock.calls[0]?.[0]).toBeGreaterThanOrEqual(cancelledAt + POLL_MS);
     // The sign-in URL and user code are gone with the claim, not after the cleanup.
     expect(fixture.doDb.prepare('SELECT COUNT(*) AS n FROM device_auth_details').get()).toEqual({
       n: 0,
     });
     expect(storage.deleteAlarm).not.toHaveBeenCalled();
-    expect(releaseSetupSlot).not.toHaveBeenCalled(); // the "process" never got that far
+    expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), LEASE_ID); // settled failure still runs independent cleanup
 
     // The real create route no longer finds the dead session as active.
     vi.mocked(leaseSetupSlot).mockResolvedValue({ granted: true, leaseId: 'lease-new' });
@@ -337,6 +348,118 @@ describe('CredentialSetupSession teardown — interrupted after the DO claim', (
 });
 
 describe('CredentialSetupSession teardown — recovery alarm', () => {
+  it('preserves the legacy retry budget when a newer setting lowers the cap', async () => {
+    const config = await import('../../../src/services/credential-setup-config');
+    const setting = vi
+      .spyOn(config, 'getSetupSessionCleanupRecoveryConfig')
+      .mockResolvedValue({ stepTimeoutMs: 5_000, maxAttempts: 1 });
+    try {
+      const fixture = createFixture();
+      fixture.env.OBSERVABILITY_DATABASE = {} as D1Database;
+      await interruptTeardown(fixture);
+      fixture.doDb
+        .prepare(
+          'UPDATE setup_session SET cleanup_attempts = 2, cleanup_recovery_max_attempts = NULL'
+        )
+        .run();
+      vi.mocked(destroySandboxInstance).mockClear();
+      await createInstance(fixture.doDb, fixture.env).instance.alarm();
+      expect(
+        fixture.doDb.prepare('SELECT cleanup_recovery_max_attempts FROM setup_session').get()
+      ).toEqual({
+        cleanup_recovery_max_attempts: DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS,
+      });
+      expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1, cleanup_attempts: 3 });
+      expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+      expect(persistError).not.toHaveBeenCalled();
+      await createInstance(fixture.doDb, fixture.env).instance.alarm();
+      expect(doRow(fixture.doDb).cleanup_attempts).toBe(4);
+      expect(persistError).toHaveBeenCalledTimes(1);
+    } finally {
+      setting.mockRestore();
+    }
+  });
+
+  it('snapshots the configured retry cap without allowing later settings to revive quarantine', async () => {
+    const config = await import('../../../src/services/credential-setup-config');
+    const setting = vi
+      .spyOn(config, 'getSetupSessionCleanupRecoveryConfig')
+      .mockResolvedValue({ stepTimeoutMs: 5_000, maxAttempts: 5 });
+    try {
+      const fixture = createFixture();
+      fixture.env.OBSERVABILITY_DATABASE = {} as D1Database;
+      const first = await startSession(fixture, true);
+      vi.mocked(destroySandboxInstance).mockRejectedValue(new Error('destroy unavailable'));
+      await first.instance.cancel();
+      expect(setting).not.toHaveBeenCalled();
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        await createInstance(fixture.doDb, fixture.env).instance.alarm();
+        expect(doRow(fixture.doDb)).toMatchObject({
+          cleanup_pending: 1,
+          cleanup_attempts: attempt,
+        });
+        expect(
+          fixture.doDb.prepare('SELECT cleanup_recovery_max_attempts FROM setup_session').get()
+        ).toEqual({ cleanup_recovery_max_attempts: 5 });
+      }
+      setting.mockResolvedValue({ stepTimeoutMs: 5_000, maxAttempts: 1 });
+      await createInstance(fixture.doDb, fixture.env).instance.alarm();
+      expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1, cleanup_attempts: 6 });
+      expect(persistError).toHaveBeenCalledTimes(1);
+      vi.mocked(destroySandboxInstance).mockClear();
+      setting.mockResolvedValue({ stepTimeoutMs: 5_000, maxAttempts: 10 });
+      await createInstance(fixture.doDb, fixture.env).instance.alarm();
+      expect(destroySandboxInstance).not.toHaveBeenCalled();
+      expect(persistError).toHaveBeenCalledTimes(1);
+    } finally {
+      setting.mockRestore();
+    }
+  });
+
+  it('keeps a legacy NULL-cap quarantine closed when the configured retry cap increases', async () => {
+    const config = await import('../../../src/services/credential-setup-config');
+    const setting = vi
+      .spyOn(config, 'getSetupSessionCleanupRecoveryConfig')
+      .mockResolvedValue({ stepTimeoutMs: 5_000, maxAttempts: 5 });
+    try {
+      const fixture = createFixture();
+      await interruptTeardown(fixture);
+      fixture.doDb
+        .prepare(
+          'UPDATE setup_session SET cleanup_attempts = 4, cleanup_recovery_max_attempts = NULL'
+        )
+        .run();
+      vi.mocked(destroySandboxInstance).mockClear();
+      await createInstance(fixture.doDb, fixture.env).instance.alarm();
+      expect(destroySandboxInstance).not.toHaveBeenCalled();
+      expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1, cleanup_attempts: 4 });
+      expect(
+        fixture.doDb.prepare('SELECT cleanup_recovery_max_attempts FROM setup_session').get()
+      ).toEqual({ cleanup_recovery_max_attempts: null });
+      expect(setting).not.toHaveBeenCalled();
+    } finally {
+      setting.mockRestore();
+    }
+  });
+
+  it('rejects an alarm with unresolved cleanup and no durable wake, then retries successfully', async () => {
+    const fixture = createFixture();
+    const first = await startSession(fixture, true);
+    vi.mocked(destroySandboxInstance).mockRejectedValueOnce(
+      new Error('initial destroy unavailable')
+    );
+    await first.instance.cancel();
+    const restarted = createInstance(fixture.doDb, fixture.env);
+    restarted.storage.setAlarm.mockRejectedValue(new Error('alarm storage unavailable'));
+    vi.mocked(destroySandboxInstance).mockRejectedValueOnce(new Error('destroy unavailable'));
+    await expect(restarted.instance.alarm()).rejects.toThrow();
+    expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1 });
+    expect(d1Status(fixture.d1)).toBe('cancelled');
+    // Cloudflare retries an uncaught alarm exception; model that new invocation.
+    await createInstance(fixture.doDb, fixture.env).instance.alarm();
+    expect(doRow(fixture.doDb).cleanup_pending).toBe(0);
+  });
+
   it('finishes cancellation even when arming its recovery alarm fails', async () => {
     const fixture = createFixture();
     const handle = await startSession(fixture, true);
@@ -385,9 +508,10 @@ describe('CredentialSetupSession teardown — recovery alarm', () => {
   it('conservatively scrubs legacy NULL-flight cleanup interrupted during provisioning', async () => {
     const fixture = createFixture();
     const first = await startSession(fixture, false);
+    vi.mocked(destroySandboxInstance).mockRejectedValueOnce(new Error('destroy unavailable'));
+    await first.instance.cancel();
+    // Legacy objects have no flight metadata; this is not an unobserved live SDK call.
     fixture.doDb.prepare('UPDATE setup_session SET cleanup_sandbox_io_pending = NULL').run();
-    vi.mocked(destroySandboxInstance).mockImplementation(() => new Promise(() => {}));
-    void first.instance.cancel();
     await vi.waitFor(() => expect(destroySandboxInstance).toHaveBeenCalledTimes(1));
     expect(scrubCalls(fixture.sandbox)).toHaveLength(0);
     expect(doRow(fixture.doDb)).toMatchObject({
@@ -449,9 +573,14 @@ describe('CredentialSetupSession teardown — recovery alarm', () => {
       cleanup_scrub_state: 2,
     });
     expect(scrubCalls(fixture.sandbox)).toHaveLength(0);
-    expect(destroySandboxInstance).toHaveBeenCalledWith(expect.anything(), SESSION_ID, {
-      sandboxId: SESSION_ID,
-    });
+    expect(destroySandboxInstance).toHaveBeenCalledWith(
+      expect.anything(),
+      SESSION_ID,
+      {
+        sandboxId: SESSION_ID,
+      },
+      { timeoutMs: null }
+    );
     expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), LEASE_ID);
     expect(doRow(fixture.doDb)).toEqual({
       status: 'cancelled',
@@ -599,10 +728,10 @@ describe('CredentialSetupSession teardown — recovery alarm', () => {
     ) {
       vi.mocked(destroySandboxInstance).mockClear();
       const dying = createInstance(fixture.doDb, fixture.env);
-      void dying.instance.alarm();
+      await dying.instance.alarm();
       await vi.waitFor(() => expect(destroySandboxInstance).toHaveBeenCalledTimes(1));
       expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1, cleanup_attempts: attempt });
-      expect(dying.storage.setAlarm).toHaveBeenCalledTimes(1); // re-armed before its I/O
+      expect(dying.storage.setAlarm).toHaveBeenCalledTimes(2); // pre-I/O and failed-attempt retry
     }
 
     vi.mocked(destroySandboxInstance).mockClear();
@@ -797,9 +926,14 @@ describe('CredentialSetupSession teardown — never-started container', () => {
 
     expect(result.status).toBe('cancelled');
     expect(fixture.sandbox.exec).not.toHaveBeenCalled();
-    expect(destroySandboxInstance).toHaveBeenCalledWith(expect.anything(), SESSION_ID, {
-      sandboxId: SESSION_ID,
-    });
+    expect(destroySandboxInstance).toHaveBeenCalledWith(
+      expect.anything(),
+      SESSION_ID,
+      {
+        sandboxId: SESSION_ID,
+      },
+      { timeoutMs: null }
+    );
     expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), LEASE_ID);
     expect(d1Status(fixture.d1)).toBe('cancelled');
     expect(doRow(fixture.doDb)).toMatchObject({
@@ -854,6 +988,119 @@ describe('CredentialSetupSession teardown — never-started container', () => {
 });
 
 describe('CredentialSetupSession teardown — unresolved asynchronous operations', () => {
+  it('preserves destruction uncertainty when the successful SDK result cannot persist its proof', async () => {
+    const fixture = createFixture();
+    const first = await startSession(fixture, true);
+    const exec = first.storage.sql.exec.bind(first.storage.sql);
+    vi.spyOn(first.storage.sql, 'exec').mockImplementation(
+      (query: string, ...args: SqlStorageValue[]) => {
+        if (query.includes('SET cleanup_sandbox_destroyed = 1'))
+          throw new Error('proof storage unavailable');
+        return exec(query, ...args);
+      }
+    );
+    await first.instance.cancel();
+    expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+    expect(releaseSetupSlot).not.toHaveBeenCalled();
+    expect(
+      fixture.doDb
+        .prepare('SELECT cleanup_sandbox_io_pending, cleanup_sandbox_destroyed FROM setup_session')
+        .get()
+    ).toEqual({ cleanup_sandbox_io_pending: 1, cleanup_sandbox_destroyed: null });
+    const scrubCount = scrubCalls(fixture.sandbox).length;
+    await createInstance(fixture.doDb, fixture.env).instance.alarm();
+    expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+    expect(scrubCalls(fixture.sandbox)).toHaveLength(scrubCount);
+    expect(releaseSetupSlot).not.toHaveBeenCalled();
+    expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1, cleanup_attempts: 0 });
+  });
+
+  it.each(['success', 'rejection', 'eviction'])(
+    'retains a timed-out destroy flight until original %s is observed',
+    async (outcome) => {
+      const fixture = createFixture({ SANDBOX_EXEC_TIMEOUT_MS: '30000' });
+      fixture.env.OBSERVABILITY_DATABASE = {} as D1Database;
+      const first = await startSession(fixture, true);
+      vi.mocked(destroySandboxInstance).mockRejectedValueOnce(
+        new Error('initial destroy unavailable')
+      );
+      await first.instance.cancel();
+      expect(doRow(fixture.doDb).cleanup_pending).toBe(1);
+      vi.mocked(destroySandboxInstance).mockClear();
+      vi.mocked(releaseSetupSlot).mockClear();
+      vi.mocked(getSandboxInstance).mockClear();
+      fixture.sandbox.exec.mockClear();
+      let resolveDestroy: (() => void) | undefined;
+      let rejectDestroy: ((error: Error) => void) | undefined;
+      const destruction = new Promise<void>((resolve, reject) => {
+        resolveDestroy = resolve;
+        rejectDestroy = reject;
+      });
+      vi.mocked(destroySandboxInstance).mockImplementationOnce(() => destruction);
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+      const resumed = createInstance(fixture.doDb, fixture.env);
+      const recovery = resumed.instance.alarm();
+      await vi.waitFor(() => expect(destroySandboxInstance).toHaveBeenCalledTimes(1));
+      await vi.advanceTimersByTimeAsync(5_000);
+      await recovery;
+      expect(releaseSetupSlot).not.toHaveBeenCalled();
+      expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1, cleanup_attempts: 1 });
+      expect(
+        fixture.doDb
+          .prepare(
+            'SELECT cleanup_sandbox_io_pending, cleanup_sandbox_destroyed FROM setup_session'
+          )
+          .get()
+      ).toEqual({ cleanup_sandbox_io_pending: 1, cleanup_sandbox_destroyed: null });
+      for (let tick = 0; tick < 5; tick++) {
+        await createInstance(fixture.doDb, fixture.env).instance.alarm();
+        expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1, cleanup_attempts: 1 });
+      }
+      expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+      expect(fixture.sandbox.exec).not.toHaveBeenCalled();
+      expect(releaseSetupSlot).not.toHaveBeenCalled();
+      if (outcome === 'eviction') {
+        const clocks = fixture.doDb
+          .prepare('SELECT expires_at, completed_at FROM setup_session')
+          .get() as { expires_at: number; completed_at: number };
+        vi.setSystemTime(Math.max(clocks.expires_at, clocks.completed_at + 30_000 + POLL_MS));
+        const quarantined = createInstance(fixture.doDb, fixture.env);
+        await quarantined.instance.alarm();
+        expect(doRow(fixture.doDb)).toMatchObject({
+          cleanup_pending: 1,
+          cleanup_attempts: DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS + 1,
+        });
+        expect(persistError).toHaveBeenCalledTimes(1);
+        quarantined.storage.setAlarm.mockClear();
+        await quarantined.instance.alarm();
+        expect(quarantined.storage.setAlarm).not.toHaveBeenCalled();
+        expect(persistError).toHaveBeenCalledTimes(1);
+        expect(releaseSetupSlot).not.toHaveBeenCalled();
+        return;
+      }
+      if (outcome === 'success') resolveDestroy?.();
+      else rejectDestroy?.(new Error('original destruction failed'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(
+        fixture.doDb
+          .prepare(
+            'SELECT cleanup_sandbox_io_pending, cleanup_sandbox_destroyed FROM setup_session'
+          )
+          .get()
+      ).toEqual({
+        cleanup_sandbox_io_pending: 0,
+        cleanup_sandbox_destroyed: outcome === 'success' ? 1 : null,
+      });
+      expect(resumed.storage.setAlarm).toHaveBeenLastCalledWith(Date.now() + POLL_MS);
+      await createInstance(fixture.doDb, fixture.env).instance.alarm();
+      expect(destroySandboxInstance).toHaveBeenCalledTimes(outcome === 'success' ? 1 : 2);
+      expect(getSandboxInstance).not.toHaveBeenCalled();
+      expect(fixture.sandbox.exec).not.toHaveBeenCalled();
+      expect(releaseSetupSlot).toHaveBeenCalledTimes(1);
+      expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0 });
+    }
+  );
+
   it.each(['expires_at', 'completed_at'])(
     'quarantines pending SDK work with invalid %s once',
     async (clock) => {
@@ -1414,6 +1661,7 @@ describe('CredentialSetupSession teardown — recovery I/O budget', () => {
     async (step) => {
       const fixture = createFixture({ SANDBOX_EXEC_TIMEOUT_MS: '30000' });
       await interruptTeardown(fixture);
+      vi.mocked(releaseSetupSlot).mockClear();
       vi.mocked(destroySandboxInstance)
         .mockReset()
         .mockImplementation(() => new Promise(() => {}));
@@ -1545,6 +1793,41 @@ describe('CredentialSetupSession — cleanup columns on an existing object', () 
 });
 
 describe('CredentialSetupSession — Sandbox SDK permanent-start contract', () => {
+  it('the real destruction helper with caller-owned deadline observes the raw SDK promise beyond 30 seconds', async () => {
+    const actual = await vi.importActual<typeof import('../../../src/services/sandbox')>(
+      '../../../src/services/sandbox'
+    );
+    let finishDestroy: (() => void) | undefined;
+    const raw = new Promise<void>((resolve) => {
+      finishDestroy = resolve;
+    });
+    const destroy = vi.fn(() => raw);
+    vi.doMock('@cloudflare/sandbox', () => ({ getSandbox: () => ({ destroy }) }));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let settled = false;
+    const operation = actual
+      .destroySandboxInstance(
+        { SANDBOX: {}, SANDBOX_EXEC_TIMEOUT_MS: '30000' } as Env,
+        SESSION_ID,
+        { sandboxId: SESSION_ID },
+        { timeoutMs: null }
+      )
+      .then(() => {
+        settled = true;
+      });
+    try {
+      await vi.waitFor(() => expect(destroy).toHaveBeenCalledTimes(1));
+      await vi.advanceTimersByTimeAsync(35_000);
+      expect(settled).toBe(false);
+      finishDestroy?.();
+      await operation;
+      expect(settled).toBe(true);
+    } finally {
+      finishDestroy?.();
+      vi.doUnmock('@cloudflare/sandbox');
+    }
+  });
+
   it('the installed @cloudflare/sandbox still answers permanent start failures with the matched message', () => {
     // The session maps this exact text to sandbox_runtime_unavailable. If an SDK upgrade
     // rewords it, the mapping silently falls back to sandbox_provision_failed; fail here instead.

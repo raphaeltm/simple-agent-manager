@@ -3,8 +3,8 @@ import * as v from 'valibot';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS } from '../../services/credential-setup-config';
 import { getSandboxConfig, getSandboxInstance, shellQuote } from '../../services/sandbox';
+import { cleanupAttemptLimit } from './cleanup-recovery';
 import { type DeviceAuthState, DeviceAuthStateSchema } from './driver-state';
 import type { SetupSessionRow } from './schema';
 
@@ -14,14 +14,11 @@ export async function rearmPendingCleanup(
   rearm: () => Promise<void>
 ): Promise<void> {
   const current = sql
-    .exec<Pick<SetupSessionRow, 'cleanup_pending' | 'cleanup_attempts'>>(
-      'SELECT cleanup_pending, cleanup_attempts FROM setup_session WHERE id = ?',
-      sessionId
-    )
+    .exec<SetupSessionRow>('SELECT * FROM setup_session WHERE id = ?', sessionId)
     .toArray()[0];
   if (
     current?.cleanup_pending === 1 &&
-    (current.cleanup_attempts ?? 0) <= DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS
+    (current.cleanup_attempts ?? 0) <= cleanupAttemptLimit(current)
   )
     await rearm();
 }
