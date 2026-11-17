@@ -11,22 +11,25 @@ import {
   parseAccountUsageRows,
 } from '@simple-agent-manager/operations/internal/insights-run-usage';
 import { PLATFORM_AI_MODELS } from '@simple-agent-manager/shared';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import { createOperationPorts } from '../../../src/operation-ports';
 import {
   recordHarnessRunUsage,
   recordProxyRunUsage,
   type RunUsageModelCounts,
 } from '../../../src/services/agent-run-usage';
+import { createDeclaredIndexes } from '../../helpers/sqlite-d1';
 import {
-  createAllSchemaTables,
-  createDeclaredIndexes,
-  createSqliteD1,
-} from '../../helpers/sqlite-d1';
+  createAccountsTestDb,
+  insertCredential,
+  insertRow,
+  insertRun,
+  operationContext,
+  withFailingStatement,
+} from './insights-accounts-test-db';
 
 const NOW = Date.parse('2026-11-16T12:00:00.000Z');
 const DAY = 86_400_000;
@@ -57,34 +60,11 @@ describe('projectAccounts tokens and spend', () => {
   let sqlite: Database.Database;
   let env: Env;
 
-  function ctx(userId = 'owner'): OperationContext {
-    return {
-      env,
-      ports: createOperationPorts(env),
-      requestId: 'test',
-      actor: { userId, via: 'web', scopes: new Set(['sam.read']) },
-    };
-  }
-
-  function insert(table: string, row: Record<string, string | number | null>): void {
-    const columns = Object.keys(row);
-    sqlite
-      .prepare(
-        `INSERT INTO ${table} (${columns.join(',')}) VALUES (${columns.map(() => '?').join(',')})`
-      )
-      .run(...Object.values(row));
-  }
-
-  function credential(id: string, ownerId: string, name: string, kind: string): void {
-    insert('cc_credentials', {
-      id,
-      owner_id: ownerId,
-      name,
-      kind,
-      encrypted_token: 'ciphertext-never-read',
-      iv: 'iv-never-read',
-    });
-  }
+  const ctx = (userId = 'owner'): OperationContext => operationContext(env, userId);
+  const insert = (table: string, row: Record<string, string | number | null>) =>
+    insertRow(sqlite, table, row);
+  const credential = (id: string, ownerId: string, name: string, kind: string) =>
+    insertCredential(sqlite, id, ownerId, name, kind);
 
   /** A finished run of project p on `credentialId`, merged when `merged` is set. */
   function run(
@@ -92,56 +72,27 @@ describe('projectAccounts tokens and spend', () => {
     credentialId: string,
     options: { userId?: string; source?: string; merged?: boolean } = {}
   ): void {
-    const userId = options.userId ?? 'owner';
-    insert('workspaces', {
-      id: `w-${id}`,
-      project_id: 'p',
-      user_id: userId,
-      name: `ws ${id}`,
-      repository: 'acme/app',
-      branch: 'main',
-      status: 'deleted',
-      vm_size: 'small',
-      vm_location: 'fsn1',
-    });
-    insert('agent_sessions', {
-      id: `s-${id}`,
-      workspace_id: `w-${id}`,
-      user_id: userId,
-      status: 'stopped',
-      agent_type: 'claude-code',
-      agent_credential_source: options.source ?? 'user',
-      agent_credential_reference: ref(credentialId),
-    });
     const prUrl = options.merged ? `https://github.com/acme/app/pull/${id}` : null;
-    insert('tasks', {
-      id,
+    insertRun(sqlite, id, {
+      userId: options.userId,
+      credentialReference: ref(credentialId),
+      session: { agent_credential_source: options.source ?? 'user' },
+      task: { output_pr_url: prUrl },
+      taskTimes: { created: daysAgo(3), ended: daysAgo(2) },
+    });
+    if (!prUrl) return;
+    insert('pull_requests', {
+      id: `pr-${id}`,
       project_id: 'p',
-      user_id: userId,
-      title: `Run ${id}`,
-      status: 'completed',
-      task_mode: 'task',
-      is_idea: 0,
-      workspace_id: `w-${id}`,
+      repository: 'acme/app',
+      number: 100 + Number(sqlite.prepare('SELECT count(*) FROM pull_requests').pluck().get()),
+      url: prUrl,
+      state: 'merged',
+      merged_at: daysAgo(2),
       created_at: daysAgo(3),
       updated_at: daysAgo(2),
-      completed_at: daysAgo(2),
-      output_pr_url: prUrl,
+      last_synced_at: daysAgo(2),
     });
-    if (prUrl) {
-      insert('pull_requests', {
-        id: `pr-${id}`,
-        project_id: 'p',
-        repository: 'acme/app',
-        number: 100 + sqlite.prepare('SELECT count(*) AS n FROM pull_requests').pluck().get(),
-        url: prUrl,
-        state: 'merged',
-        merged_at: daysAgo(2),
-        created_at: daysAgo(3),
-        updated_at: daysAgo(2),
-        last_synced_at: daysAgo(2),
-      });
-    }
   }
 
   /** The VM agent's cumulative report for run `id`, written by the production writer. */
@@ -200,31 +151,32 @@ describe('projectAccounts tokens and spend', () => {
     );
   }
 
+  /** The usage statement's raw rows for the owner over the last week, straight from SQL. */
+  function usageRows(maxRows = 50): Record<string, unknown>[] {
+    const statement = accountUsageStatement({
+      projectId: 'p',
+      viewerId: 'owner',
+      sinceMs: NOW - 7 * DAY,
+      maxRows,
+    });
+    return sqlite.prepare(statement.sql).all(...statement.binds) as Record<string, unknown>[];
+  }
+
   async function accounts(viewer = 'owner') {
     const result = await projectAccounts(ctx(viewer), { projectId: 'p', range: '7d', nowMs: NOW });
     return { result, byKey: Object.fromEntries(result.accounts.map((a) => [a.key, a])) };
   }
 
   beforeEach(() => {
-    sqlite = new Database(':memory:');
-    createAllSchemaTables(sqlite, schema);
+    ({ sqlite, env } = createAccountsTestDb());
     // The writers upsert on the unique key, and the read seeks the project/updated index.
     createDeclaredIndexes(sqlite, [schema.agentRunUsage]);
-    sqlite.exec(`
-      INSERT INTO users (id, name, email) VALUES ('owner','Owner','o@example.com'),
-        ('mate','Mate','m@example.com'), ('outsider','Out','x@example.com');
-      INSERT INTO projects (id, name, repository, user_id) VALUES ('p', 'Project', 'acme/app', 'owner'),
-        ('foreign', 'Other', 'acme/app', 'outsider');
-      INSERT INTO project_members (project_id, user_id, role, status) VALUES
-        ('p','owner','owner','active'), ('p','mate','member','active'), ('foreign','outsider','owner','active');
-    `);
     credential('cc-key', 'owner', 'Work API key', 'api-key');
     credential('cc-key2', 'owner', 'Spare API key', 'api-key');
     credential('cc-max', 'owner', 'Personal Max', 'oauth-token');
     credential('cc-compat', 'owner', 'Local gateway', 'openai-compatible');
     credential('cc-mate-key', 'mate', 'Mate Secret Key', 'api-key');
     credential('cc-shared-key', 'mate', 'Team key', 'api-key');
-    env = { DATABASE: createSqliteD1(sqlite), BASE_DOMAIN: 'example.test' } as unknown as Env;
   });
   afterEach(() => sqlite.close());
 
@@ -333,13 +285,7 @@ describe('projectAccounts tokens and spend', () => {
     run('k1', 'cc-key');
     await harness('t1', 'cc-mate-key', [counts(SONNET, 20_000, 2_000)]);
     await harness('k1', 'cc-key', [counts(SONNET, 1_000, 100)]);
-    const statement = accountUsageStatement({
-      projectId: 'p',
-      viewerId: 'owner',
-      sinceMs: NOW - 7 * DAY,
-      maxRows: 50,
-    });
-    const rows = sqlite.prepare(statement.sql).all(...statement.binds) as Array<{
+    const rows = usageRows() as Array<{
       ref: string | null;
       redacted: number;
     }>;
@@ -400,19 +346,13 @@ describe('projectAccounts tokens and spend', () => {
     ).map((row) => row.detail);
     expect(plan.join('\n')).toMatch(/SEARCH r USING INDEX idx_agent_run_usage_project_updated/);
     expect(plan.join('\n')).toMatch(/SEARCH p USING (COVERING )?INDEX idx_agent_run_usage_key/);
-    expect(plan.filter((detail) => /^SCAN (r|p|s|w|c)\b/.test(detail))).toEqual([]);
+    expect(plan.filter((detail) => /^SCAN (r|p|s|w|rw|c|sc)\b/.test(detail))).toEqual([]);
   });
 
   it('keeps the largest rows under the cap and says it cut the rest', async () => {
     run('k1', 'cc-key');
     await harness('k1', 'cc-key', [counts(SONNET, 50_000, 0), counts(HAIKU, 10, 0)]);
-    const statement = accountUsageStatement({
-      projectId: 'p',
-      viewerId: 'owner',
-      sinceMs: NOW - 7 * DAY,
-      maxRows: 1,
-    });
-    const raw = sqlite.prepare(statement.sql).all(...statement.binds) as Record<string, unknown>[];
+    const raw = usageRows(1);
     const read = parseAccountUsageRows(raw, { projectId: 'p', maxRows: 1 });
     expect(read.limited).toBe(true);
     expect(read.rows.map((row) => row.model)).toEqual([SONNET]);
@@ -551,44 +491,11 @@ describe('projectAccounts tokens and spend', () => {
       agent_type: 'claude-code',
     });
     run('own', 'cc-key');
-    await recordHarnessRunUsage(
-      env,
-      {
-        projectId: 'p',
-        chatSessionId: 'chat-attack',
-        workspaceId: 'w-fx',
-        agentSessionId: 's-fx',
-        agentType: 'claude-code',
-        credentialReference: ref('gone-attack'),
-        credentialSource: 'user',
-      },
-      'epoch-1',
-      [counts(SONNET, 1_000, 0)],
-      NOW - DAY
-    );
+    // The run's own workspace and session are the foreign ones (w-fx, s-fx).
+    await harness('fx', 'gone-attack', [counts(SONNET, 1_000, 0)]);
     // Owner control: the same deleted-credential shape on the viewer's own session in p.
-    await recordHarnessRunUsage(
-      env,
-      {
-        projectId: 'p',
-        chatSessionId: 'chat-own',
-        workspaceId: 'w-own',
-        agentSessionId: 's-own',
-        agentType: 'claude-code',
-        credentialReference: ref('gone-own'),
-        credentialSource: 'user',
-      },
-      'epoch-1',
-      [counts(SONNET, 2_000, 0)],
-      NOW - DAY
-    );
-    const statement = accountUsageStatement({
-      projectId: 'p',
-      viewerId: 'owner',
-      sinceMs: NOW - 7 * DAY,
-      maxRows: 50,
-    });
-    const rows = sqlite.prepare(statement.sql).all(...statement.binds) as Array<{
+    await harness('own', 'gone-own', [counts(SONNET, 2_000, 0)]);
+    const rows = usageRows() as Array<{
       ref: string | null;
       redacted: number;
       input_tokens: number;
@@ -606,26 +513,10 @@ describe('projectAccounts tokens and spend', () => {
   it('a failed usage read marks only tokens, and leaves runs alone', async () => {
     run('k1', 'cc-key');
     await harness('k1', 'cc-key', [counts(SONNET, 1_000, 100)]);
-    const real = env.DATABASE;
     env = {
       ...env,
-      DATABASE: {
-        ...real,
-        prepare: (sql: string) => {
-          const statement = real.prepare(sql);
-          if (!sql.includes('FROM agent_run_usage r')) return statement;
-          const failing = {
-            all: async () => {
-              throw new Error('D1_ERROR: simulated');
-            },
-          };
-          return { ...statement, bind: () => failing, ...failing };
-        },
-        batch: async () => {
-          throw new Error('D1_ERROR: batch failed');
-        },
-      },
-    } as unknown as Env;
+      DATABASE: withFailingStatement(env.DATABASE, (sql) => sql.includes('FROM agent_run_usage r')),
+    };
     const { result, byKey } = await accounts();
     expect(result.unavailable).toEqual(['tokens']);
     // Liveness: the runs still load; tokens and spend are absent rather than "not reported".
