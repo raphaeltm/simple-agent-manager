@@ -133,7 +133,7 @@ export const RULES: readonly Rule[] = [
   {
     id: 'env-dump',
     pattern: new RegExp(
-      String.raw`${COMMAND_START}(?:declare|typeset)\s+-[A-Za-z]*p[A-Za-z]*(?:\s+[A-Za-z_]\w*)+\s*(?:$|[|>;&])`
+      String.raw`${COMMAND_START}(?:declare|typeset)\s+-[A-Za-z]*p[A-Za-z]*(?:\s+--)?(?:\s+[A-Za-z_]\w*)+\s*(?:$|[|>;&])`
     ),
     shellOnly: true,
   },

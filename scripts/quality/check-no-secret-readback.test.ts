@@ -80,6 +80,7 @@ const POSITIVE: Array<[string, RuleId]> = [
   ['export', 'env-dump'],
   ['command env', 'env-dump'],
   ['declare -p SECRET_NAME', 'env-dump'],
+  ['typeset -p -- SECRET_NAME', 'env-dump'],
   ['        run: typeset -p CF_API_TOKEN | cat', 'env-dump'],
   ['sudo -E env', 'env-dump'],
   ['        run: sudo -u runner printenv', 'env-dump'],
