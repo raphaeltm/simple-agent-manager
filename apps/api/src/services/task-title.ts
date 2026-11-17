@@ -279,6 +279,30 @@ async function fetchTaskTitle(
   });
 }
 
+function generatedTitleOrFallback(
+  rawTitle: string | null,
+  message: string,
+  maxLength: number,
+  modelId: string,
+  attempt: number
+): string {
+  if (!rawTitle) {
+    log.warn('task_title.empty_response', { modelId, messageLength: message.length, attempt });
+    return truncateTitle(message, maxLength);
+  }
+  const title = stripMarkdown(rawTitle);
+  if (!title) {
+    log.warn('task_title.empty_after_strip', {
+      modelId,
+      rawTitle,
+      messageLength: message.length,
+      attempt,
+    });
+    return truncateTitle(message, maxLength);
+  }
+  return truncateTitle(title, maxLength);
+}
+
 /**
  * Generate a concise task title from a message using Workers AI via AI Gateway.
  *
@@ -327,23 +351,7 @@ export async function generateTaskTitle(
         timeoutMs,
         errorDiagnosticMaxLength
       );
-      if (!rawTitle) {
-        log.warn('task_title.empty_response', { modelId, messageLength: message.length, attempt });
-        return truncateTitle(message, maxLength);
-      }
-
-      const title = stripMarkdown(rawTitle);
-      if (!title) {
-        log.warn('task_title.empty_after_strip', {
-          modelId,
-          rawTitle,
-          messageLength: message.length,
-          attempt,
-        });
-        return truncateTitle(message, maxLength);
-      }
-
-      return truncateTitle(title, maxLength);
+      return generatedTitleOrFallback(rawTitle, message, maxLength, modelId, attempt);
     } catch (err) {
       if (err instanceof LlmUnavailableError) return truncateTitle(message, maxLength);
       const classified = classifyError(err);

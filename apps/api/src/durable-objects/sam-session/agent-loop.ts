@@ -158,8 +158,7 @@ export async function runAgentLoop(
         userId,
         conversationId,
         systemPrompt,
-        tools,
-        endpoint
+        { tools, endpoint }
       );
       response = await attachTokenUsageAccounting(response, {
         env,

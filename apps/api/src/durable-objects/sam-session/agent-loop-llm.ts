@@ -51,8 +51,7 @@ export async function callLLM(
   userId: string,
   conversationId: string,
   baseSystemPrompt: string,
-  tools: AnthropicToolDef[],
-  endpoint: ChatCompletionsTarget | null
+  { tools, endpoint }: { tools: AnthropicToolDef[]; endpoint: ChatCompletionsTarget | null }
 ): Promise<Response> {
   const model = config.model;
   const systemPrompt = config.systemPromptAppend
@@ -184,7 +183,7 @@ async function callAnthropicLLM(
 }
 
 /** Call an OpenAI-format chat completions target (Workers AI or an OpenAI-compatible endpoint). */
-async function callOpenAIChatLLM(
+function callOpenAIChatLLM(
   target: ChatCompletionsTarget,
   systemPrompt: string,
   messages: OpenAIMessage[],

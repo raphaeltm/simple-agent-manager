@@ -24,6 +24,7 @@ import {
   assertWorkspaceAcceptsCallback,
   assertWorkspaceCallbackIdentityCurrent,
   verifyWorkspaceCallbackAuth,
+  workspaceCallbackIdentityFields,
 } from './_helpers';
 import { callbackJsonWithJit } from './runtime-callback-response';
 const runtimeRoutes = new Hono<{ Bindings: Env }>();
@@ -122,7 +123,7 @@ async function resolveAdditionalRepositoryIds(input: {
     return [];
   }
 
-  let accessibleById = new Map<string, number>();
+  let accessibleById: Map<string, number>;
   try {
     const repositories = await getUserInstallationRepositories(
       accessToken,
@@ -174,15 +175,8 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
   // Look up workspace → project to determine repo provider
   const workspaceRows = await db
     .select({
-      workspaceId: schema.workspaces.id,
+      ...workspaceCallbackIdentityFields,
       installationId: schema.workspaces.installationId,
-      projectId: schema.workspaces.projectId,
-      chatSessionId: schema.workspaces.chatSessionId,
-      userId: schema.workspaces.userId,
-      status: schema.workspaces.status,
-      nodeId: schema.workspaces.nodeId,
-      nodeStatus: schema.nodes.status,
-      callbackGeneration: schema.workspaces.callbackGeneration,
     })
     .from(schema.workspaces)
     .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
@@ -438,7 +432,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       : [];
 
   const scopedTokenOptions = {
-    ...(tokenOptions ?? {}),
+    ...tokenOptions,
     ...(githubRepoId
       ? { repositoryIds: [githubRepoId, ...additionalRepoIds.filter((id) => id !== githubRepoId)] }
       : { repositories: [repoShortName as string] }),

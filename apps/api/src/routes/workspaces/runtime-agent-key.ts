@@ -68,12 +68,9 @@ function buildPlatformInferenceConfig(input: {
 }) {
   const capability = getProxyCapability(input.agentType);
   if (!capability) return null;
-  const provider =
-    capability.proxyProviderTag === 'anthropic-passthrough'
-      ? 'anthropic-proxy'
-      : capability.usesOpencodeConfig
-        ? 'openai-compatible'
-        : 'openai-proxy';
+  let provider = 'openai-proxy';
+  if (capability.proxyProviderTag === 'anthropic-passthrough') provider = 'anthropic-proxy';
+  else if (capability.usesOpencodeConfig) provider = 'openai-compatible';
   const routeSegment = capability.proxyRouteSegment === 'anthropic' ? 'anthropic' : 'v1';
   return {
     provider,
@@ -113,6 +110,54 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     profile
   );
   let credentialProviderMode = 'direct';
+
+  const persistAttribution = (
+    attribution: Parameters<typeof persistAgentCredentialAttribution>[2]['attribution']
+  ) =>
+    persistAgentCredentialAttribution(c.env, workspace, {
+      workspaceId,
+      agentSessionId: body.agentSessionId,
+      agentType: body.agentType,
+      attribution,
+    });
+  const returnCredential = async (
+    data: NonNullable<typeof credentialData>,
+    providerMode: string,
+    inferenceConfig?: NonNullable<ReturnType<typeof buildPassthroughInferenceConfig>>
+  ) => {
+    const persistedAttribution = await persistAttribution(
+      credentialAttributionFromData(data, body.agentType, providerMode)
+    );
+    return callbackJsonWithJit(c, workspace, 'agent_key', {
+      apiKey: inferenceConfig ? '__sam_proxy__' : data.credential,
+      credentialKind: data.credentialKind,
+      credentialSource: data.credentialSource,
+      credentialReference: data.credentialReference,
+      credentialProvider:
+        data.credentialProvider ??
+        (inferenceConfig ? data.providerDialect : undefined) ??
+        agentCredentialProviderFallback(body.agentType),
+      providerMode,
+      credentialGeneration: persistedAttribution?.credentialGeneration,
+      ...(inferenceConfig ? { inferenceConfig } : {}),
+    });
+  };
+  const trackTaskCredentialSource = async (
+    source: NonNullable<typeof credentialData>['credentialSource']
+  ) => {
+    const [task] = await db
+      .select({ id: schema.tasks.id })
+      .from(schema.tasks)
+      .where(eq(schema.tasks.workspaceId, workspaceId))
+      .limit(1);
+    if (task) {
+      await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'agent_key');
+      await db
+        .update(schema.tasks)
+        .set({ agentCredentialSource: source })
+        .where(eq(schema.tasks.id, task.id));
+    }
+  };
 
   // An account chosen for this run that can no longer be used (paused, removed) must stop
   // the run here. Without this, "no credential" would continue to the platform proxy or a
@@ -172,26 +217,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
   }
 
   if (credentialData && !credentialData.baseUrl && opencodeRequiresDedicatedCredential) {
-    const persistedAttribution = await persistAgentCredentialAttribution(c.env, workspace, {
-      workspaceId,
-      agentSessionId: body.agentSessionId,
-      agentType: body.agentType,
-      attribution: credentialAttributionFromData(
-        credentialData,
-        body.agentType,
-        credentialProviderMode
-      ),
-    });
-    return callbackJsonWithJit(c, workspace, 'agent_key', {
-      apiKey: credentialData.credential,
-      credentialKind: credentialData.credentialKind,
-      credentialSource: credentialData.credentialSource,
-      credentialReference: credentialData.credentialReference,
-      credentialProvider:
-        credentialData.credentialProvider ?? agentCredentialProviderFallback(body.agentType),
-      providerMode: credentialProviderMode,
-      credentialGeneration: persistedAttribution?.credentialGeneration,
-    });
+    return returnCredential(credentialData, credentialProviderMode);
   }
 
   if (!credentialData && opencodeRequiresDedicatedCredential) {
@@ -282,45 +308,9 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
         agentType: body.agentType,
       });
 
-      // Track credential source on associated task
-      const taskRows = await db
-        .select({ id: schema.tasks.id })
-        .from(schema.tasks)
-        .where(eq(schema.tasks.workspaceId, workspaceId))
-        .limit(1);
-      const task = taskRows[0];
-      if (task) {
-        await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'agent_key');
-        await db
-          .update(schema.tasks)
-          .set({ agentCredentialSource: credentialData.credentialSource })
-          .where(eq(schema.tasks.id, task.id));
-      }
+      await trackTaskCredentialSource(credentialData.credentialSource);
 
-      const persistedAttribution = await persistAgentCredentialAttribution(c.env, workspace, {
-        workspaceId,
-        agentSessionId: body.agentSessionId,
-        agentType: body.agentType,
-        attribution: credentialAttributionFromData(
-          credentialData,
-          body.agentType,
-          'proxy-passthrough'
-        ),
-      });
-
-      return callbackJsonWithJit(c, workspace, 'agent_key', {
-        apiKey: '__sam_proxy__',
-        credentialKind: credentialData.credentialKind,
-        credentialSource: credentialData.credentialSource,
-        credentialReference: credentialData.credentialReference,
-        credentialProvider:
-          credentialData.credentialProvider ??
-          credentialData.providerDialect ??
-          agentCredentialProviderFallback(body.agentType),
-        providerMode: 'proxy-passthrough',
-        credentialGeneration: persistedAttribution?.credentialGeneration,
-        inferenceConfig,
-      });
+      return returnCredential(credentialData, 'proxy-passthrough', inferenceConfig);
     }
 
     if (credentialData?.baseUrl) {
@@ -334,26 +324,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     }
 
     if (credentialData) {
-      const persistedAttribution = await persistAgentCredentialAttribution(c.env, workspace, {
-        workspaceId,
-        agentSessionId: body.agentSessionId,
-        agentType: body.agentType,
-        attribution: credentialAttributionFromData(
-          credentialData,
-          body.agentType,
-          credentialProviderMode
-        ),
-      });
-      return callbackJsonWithJit(c, workspace, 'agent_key', {
-        apiKey: credentialData.credential,
-        credentialKind: credentialData.credentialKind,
-        credentialSource: credentialData.credentialSource,
-        credentialReference: credentialData.credentialReference,
-        credentialProvider:
-          credentialData.credentialProvider ?? agentCredentialProviderFallback(body.agentType),
-        providerMode: credentialProviderMode,
-        credentialGeneration: persistedAttribution?.credentialGeneration,
-      });
+      return returnCredential(credentialData, credentialProviderMode);
     }
 
     // Claude Code and Codex require an explicit SAM provider selection before
@@ -391,28 +362,10 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       agentType: body.agentType,
     });
 
-    // Track credential source on associated task
-    const taskRows = await db
-      .select({ id: schema.tasks.id })
-      .from(schema.tasks)
-      .where(eq(schema.tasks.workspaceId, workspaceId))
-      .limit(1);
-    const task = taskRows[0];
-    if (task) {
-      await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'agent_key');
-      await db
-        .update(schema.tasks)
-        .set({ agentCredentialSource: 'platform' })
-        .where(eq(schema.tasks.id, task.id));
-    }
+    await trackTaskCredentialSource('platform');
 
     const platformAttribution = platformProxyAttribution(body.agentType);
-    const persistedAttribution = await persistAgentCredentialAttribution(c.env, workspace, {
-      workspaceId,
-      agentSessionId: body.agentSessionId,
-      agentType: body.agentType,
-      attribution: platformAttribution,
-    });
+    const persistedAttribution = await persistAttribution(platformAttribution);
 
     return callbackJsonWithJit(c, workspace, 'agent_key', {
       apiKey: '__platform_proxy__',
@@ -432,42 +385,10 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
 
   // Track credential source on associated task if applicable
   if (credentialData.credentialSource === 'platform') {
-    const taskRows = await db
-      .select({ id: schema.tasks.id })
-      .from(schema.tasks)
-      .where(eq(schema.tasks.workspaceId, workspaceId))
-      .limit(1);
-    const task = taskRows[0];
-    if (task) {
-      await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'agent_key');
-      await db
-        .update(schema.tasks)
-        .set({ agentCredentialSource: 'platform' })
-        .where(eq(schema.tasks.id, task.id));
-    }
+    await trackTaskCredentialSource('platform');
   }
 
-  const persistedAttribution = await persistAgentCredentialAttribution(c.env, workspace, {
-    workspaceId,
-    agentSessionId: body.agentSessionId,
-    agentType: body.agentType,
-    attribution: credentialAttributionFromData(
-      credentialData,
-      body.agentType,
-      credentialProviderMode
-    ),
-  });
-
-  return callbackJsonWithJit(c, workspace, 'agent_key', {
-    apiKey: credentialData.credential,
-    credentialKind: credentialData.credentialKind,
-    credentialSource: credentialData.credentialSource,
-    credentialReference: credentialData.credentialReference,
-    credentialProvider:
-      credentialData.credentialProvider ?? agentCredentialProviderFallback(body.agentType),
-    providerMode: credentialProviderMode,
-    credentialGeneration: persistedAttribution?.credentialGeneration,
-  });
+  return returnCredential(credentialData, credentialProviderMode);
 });
 
 /**

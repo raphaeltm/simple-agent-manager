@@ -164,17 +164,15 @@ export async function recordOperatorStepUsage(
   const cached = Math.min(input, Math.max(0, step.usage.cachedInputTokens ?? 0));
   const cachedRate = catalogModel.costPer1kCachedInputTokens ?? catalogModel.costPer1kInputTokens;
   const anthropic = config.model.startsWith('claude-');
+  const providerId = anthropic ? 'anthropic' : 'workers-ai';
+  const providerName = anthropic ? 'Anthropic' : 'Cloudflare Workers AI';
   await incrementTokenUsage(env.KV, userId, input, output, env);
   await incrementProviderUsage(
     env.KV,
     userId,
     {
-      providerId: customEndpoint ? 'openai-compatible' : anthropic ? 'anthropic' : 'workers-ai',
-      providerName: customEndpoint
-        ? 'OpenAI-compatible endpoint'
-        : anthropic
-          ? 'Anthropic'
-          : 'Cloudflare Workers AI',
+      providerId: customEndpoint ? 'openai-compatible' : providerId,
+      providerName: customEndpoint ? 'OpenAI-compatible endpoint' : providerName,
       dialect: !customEndpoint && anthropic ? 'anthropic' : 'openai',
     },
     input,

@@ -1,9 +1,6 @@
-import { eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
 import { type Context } from 'hono';
 import * as v from 'valibot';
 
-import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
@@ -11,7 +8,11 @@ import { errors } from '../../middleware/error';
 import { formatIssues, MessageBatchSchema } from '../../schemas';
 import { nodeStatusTerminatesCallbacks } from '../../services/node-callback-auth';
 import { persistError } from '../../services/observability';
-import { safeParseJson, type WorkspaceCallbackIdentitySnapshot } from './_helpers';
+import {
+  loadWorkspaceCallbackIdentity,
+  safeParseJson,
+  type WorkspaceCallbackIdentitySnapshot,
+} from './_helpers';
 
 type RuntimeContext = Context<{ Bindings: Env }>;
 type MessageBatchBody = v.InferOutput<typeof MessageBatchSchema>;
@@ -188,27 +189,11 @@ export function validateMessageBatch(env: Env, body: MessageBatchBody): string {
   return sessionId;
 }
 
-export async function loadMessageWorkspace(
+export function loadMessageWorkspace(
   env: Env,
   workspaceId: string
 ): Promise<MessageWorkspace | null> {
-  const db = drizzle(env.DATABASE, { schema });
-  const workspaceRows = await db
-    .select({
-      workspaceId: schema.workspaces.id,
-      userId: schema.workspaces.userId,
-      projectId: schema.workspaces.projectId,
-      chatSessionId: schema.workspaces.chatSessionId,
-      status: schema.workspaces.status,
-      nodeId: schema.workspaces.nodeId,
-      nodeStatus: schema.nodes.status,
-      callbackGeneration: schema.workspaces.callbackGeneration,
-    })
-    .from(schema.workspaces)
-    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
-    .where(eq(schema.workspaces.id, workspaceId))
-    .limit(1);
-  return workspaceRows[0] ?? null;
+  return loadWorkspaceCallbackIdentity(env, workspaceId);
 }
 
 export function terminalMessagePersistenceResponse(

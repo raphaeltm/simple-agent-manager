@@ -152,7 +152,8 @@ vi.mock('../../src/schemas', async (importOriginal) => {
   };
 });
 
-vi.mock('../../src/routes/workspaces/_helpers', () => ({
+vi.mock('../../src/routes/workspaces/_helpers', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/routes/workspaces/_helpers')>()),
   assertWorkspaceAcceptsCallback: vi.fn(async (_env: unknown, workspace: unknown) => workspace),
   assertWorkspaceCallbackResourceById: vi.fn(async () => ({
     workspaceId: 'test-workspace',

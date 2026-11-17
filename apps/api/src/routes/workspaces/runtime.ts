@@ -21,6 +21,7 @@ import {
   assertWorkspaceCallbackIdentityCurrent,
   assertWorkspaceCallbackResourceById,
   verifyWorkspaceCallbackAuth,
+  workspaceCallbackIdentityFields,
 } from './_helpers';
 import { agentKeyRoutes } from './runtime-agent-key';
 import { callbackJsonWithJit } from './runtime-callback-response';
@@ -86,16 +87,9 @@ runtimeRoutes.get('/:id/runtime', async (c) => {
 
   const workspaceRows = await db
     .select({
-      workspaceId: schema.workspaces.id,
-      userId: schema.workspaces.userId,
+      ...workspaceCallbackIdentityFields,
       repository: schema.workspaces.repository,
       branch: schema.workspaces.branch,
-      projectId: schema.workspaces.projectId,
-      chatSessionId: schema.workspaces.chatSessionId,
-      status: schema.workspaces.status,
-      nodeId: schema.workspaces.nodeId,
-      nodeStatus: schema.nodes.status,
-      callbackGeneration: schema.workspaces.callbackGeneration,
     })
     .from(schema.workspaces)
     .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))

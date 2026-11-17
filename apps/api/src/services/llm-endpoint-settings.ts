@@ -69,7 +69,10 @@ export function validLlmBaseUrl(value: unknown): boolean {
 
 /** Normalized base URL without a trailing slash. Caller must have validated it. */
 export function normalizeLlmBaseUrl(value: string): string {
-  return value.trim().replace(/\/+$/, '');
+  const trimmed = value.trim();
+  let end = trimmed.length;
+  while (end > 0 && trimmed[end - 1] === '/') end--;
+  return trimmed.slice(0, end);
 }
 
 function validModelId(value: unknown): boolean {

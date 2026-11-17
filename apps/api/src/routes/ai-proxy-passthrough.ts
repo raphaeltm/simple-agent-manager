@@ -36,7 +36,6 @@ import {
 import { schedulePassthroughLimitHeaders } from './ai-proxy-passthrough-telemetry';
 import {
   type ResolvedProxyUpstream,
-  resolveProxyUpstream,
   trimTrailingSlashes,
 } from './ai-proxy-passthrough-upstream';
 
@@ -404,5 +403,6 @@ export {
   aiProxyPassthroughRoutes,
   buildUpstreamAuthHeaders,
   joinUpstreamUrl,
-  resolveProxyUpstream,
 };
+
+export { resolveProxyUpstream } from './ai-proxy-passthrough-upstream';

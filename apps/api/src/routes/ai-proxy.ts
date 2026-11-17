@@ -48,8 +48,8 @@ import {
   resolveOpenAIProxyCredential,
   schedulePlatformProxyLimitHeaders,
 } from './ai-proxy-platform-billing';
-import { customEndpointResponses } from './ai-proxy-upstream';
 import {
+  customEndpointResponses,
   forwardToAnthropic,
   forwardToOpenAI,
   forwardToOpenAIResponses,

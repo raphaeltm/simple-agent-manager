@@ -99,9 +99,9 @@ async function checkPassthroughRateLimit(
   userId: string
 ): Promise<{ allowed: boolean; remaining: number; resetAt: number; limit: number }> {
   const rpmLimit =
-    parseInt(env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
+    Number.parseInt(env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
   const windowSeconds =
-    parseInt(env.AI_PROXY_RATE_LIMIT_WINDOW_SECONDS || '', 10) ||
+    Number.parseInt(env.AI_PROXY_RATE_LIMIT_WINDOW_SECONDS || '', 10) ||
     DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS;
   const windowStart = getCurrentWindowStart(windowSeconds);
   const rateLimitKey = createRateLimitKey('ai-proxy', userId, windowStart);

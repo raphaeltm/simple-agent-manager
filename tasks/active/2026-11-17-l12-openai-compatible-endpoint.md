@@ -46,3 +46,5 @@ Idea 01M72M9AEB933ZY8269D376DKC; task 01M7KNA1CNRHWG13CMNB2SVMP5; coordinator 01
 
 - Full validation: all other package suites passed; API collected 16,476 tests in 1,079 files. All 62 failures came from 15 files loaded before corrections; a fresh combined rerun passed all 260 tests in those files (JSON success=true). Final merged-main analytics checks passed 62 tests. Root lint/typecheck/build passed 62 tasks; final cached checks after merging main are running.
 - Added direct dependency audit evidence for the already-resolved SDK version. The latest main analytics change merged cleanly before candidate readiness.
+
+- Final quality cleanup: consolidated existing callback identity projections and credential responses to address Sonar duplication without changing auth order or adding I/O. Security re-review passed with 108 callback/account tests; performance re-review passed with 123 tests. Title/endpoint cleanup passed 41 tests and raw SAM/proxy checks passed 134. Final root lint/typecheck/build passed all 62 tasks after these changes. Net non-test source growth is 1,064 lines, including mechanical split overhead.
