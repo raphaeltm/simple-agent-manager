@@ -14,5 +14,5 @@ Found 2026-11-17 during the weekly docs update; `guides/insights.md` was correct
 
 ## Acceptance Criteria
 
-- [ ] Accounts tab footer points to the run receipt for per-run tokens and spend
+- [x] Accounts tab footer no longer says tokens are not recorded: the tab now shows tokens and API-key spend itself (#2828)
 - [ ] NavSidebar comment describes the Overview as the landing page

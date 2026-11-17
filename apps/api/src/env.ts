@@ -1393,7 +1393,7 @@ export interface Env
   /** Max changed files returned by an Artifacts compare before truncating (default: 300). */
   REPO_BROWSE_MAX_COMPARE_FILES?: string;
   // SAM Agent (Top-Level Agent) configuration
-  SAM_MODEL?: string; // LLM model (default: claude-sonnet-5)
+  SAM_MODEL?: string; // LLM model (default: @cf/deepseek-ai/deepseek-v4.1-flash-1017)
   SAM_MAX_TOKENS?: string; // Max output tokens per turn (default: 4096)
   SAM_MAX_TURNS?: string; // Max tool-use loop iterations (default: 20)
   SAM_SYSTEM_PROMPT_APPEND?: string; // Additional system prompt text

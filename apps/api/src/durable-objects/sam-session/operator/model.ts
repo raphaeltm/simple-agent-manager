@@ -1,5 +1,9 @@
 import type { MastraModelConfig } from '@mastra/core/llm';
-import type { PlatformAIModel, SamConfig } from '@simple-agent-manager/shared';
+import {
+  filterModelsForAgentLoop,
+  type PlatformAIModel,
+  type SamConfig,
+} from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 
 import type { Env } from '../../../env';
@@ -108,11 +112,29 @@ function chatHeadersWithoutAuth(
   );
 }
 
+/**
+ * Hierarchy scopes guide harness selection; the account assistant uses the explicit installation
+ * SAM_MODEL with the shared agent-loop reliability floor and Chat Completions tools. A custom
+ * endpoint supplies its own model/capabilities independently of this catalog billing entry.
+ */
+export function assertOperatorModelSupportsTools(
+  model: PlatformAIModel,
+  customEndpoint: boolean
+): void {
+  if (
+    !customEndpoint &&
+    (filterModelsForAgentLoop([model]).length === 0 ||
+      model.supportsChatCompletionsToolCalls === false)
+  )
+    throw new Error('SAM model must support reliable Chat Completions tool calls');
+}
+
 /** Model quirks live in one explicit boundary (compare `getTaskTitleModelControls`). */
 export function operatorProviderOptions(modelId: string) {
   switch (modelId) {
+    case '@cf/deepseek-ai/deepseek-v4.1-flash-1017':
     case '@cf/zai-org/glm-5.3-flash':
-      // Reasoning cannot be disabled on this model; low effort keeps tool turns responsive.
+      // Low effort keeps tool turns responsive (DeepSeek otherwise defaults to high).
       return { [WORKERS_AI_PROVIDER_ID]: { reasoningEffort: 'low' } };
     default:
       return undefined;

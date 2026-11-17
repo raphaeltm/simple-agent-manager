@@ -123,6 +123,7 @@ describe('useChatWebSocket (behavioral)', () => {
     expect(MockWebSocket.instances[0]!.url).toContain('/api/projects/proj-1/sessions/ws');
     // Session-scoped server-side filtering: sessionId must be in WS URL query params
     expect(MockWebSocket.instances[0]!.url).toContain('sessionId=');
+    expect(MockWebSocket.instances[0]!.url).toContain('toolReplace=tool-replace-v1');
   });
 
   it('advertises append support only when it can apply canonical deltas', () => {
@@ -960,6 +961,7 @@ describe('useChatWebSocket (behavioral)', () => {
     expect(onCatchUp).toHaveBeenLastCalledWith(
       expect.arrayContaining([expect.objectContaining({ id: 'msg-catchup-1' })]),
       expect.any(Object),
+      undefined,
       undefined
     );
   });
