@@ -10,6 +10,8 @@ import { workerEnv } from './worker-env';
 
 /** Operational brakes, the stalled-task loop classifier and operator alerts. */
 export const operationsPort: OperationsPort = {
+  skipUnsubscribedGitHubCi: async (env) =>
+    (await resolveAdminSetting(workerEnv(env), 'events.skipUnsubscribedGitHubCi')) === true,
   messageMergeConfig: async (env) => {
     const [enabled, maxRowBytes, recentIds] = await Promise.all([
       resolveAdminSetting(workerEnv(env), 'chat.messageMergingEnabled'),

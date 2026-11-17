@@ -1,3 +1,4 @@
+import { useFullProjectEventHistory } from './helpers/full-project-event-history';
 import type { AdmitProjectEventInput } from '@simple-agent-manager/project-data/internal/do/project-events';
 import {
   runProjectEventWakeMaterializationBatch,
@@ -171,6 +172,8 @@ async function disableProjectEventWakeOnStub(projectId: string): Promise<void> {
     ).env.DURABLE_PROMPT_DELIVERY_ENABLED = 'false';
   });
 }
+
+useFullProjectEventHistory();
 
 describe('ProjectData event subscription core', () => {
   it('admits normalized events idempotently and exposes same-key fingerprint conflicts', async () => {

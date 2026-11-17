@@ -2782,6 +2782,19 @@ export const MIGRATIONS: Migration[] = [
       );
     },
   },
+  {
+    name: '082-project-event-credential-index-scope',
+    run(sql) {
+      // The supersession reader always requires windowType equality. Rows with no
+      // windowType cannot satisfy it, but previously every CI receipt indexed NULL.
+      sql.exec('DROP INDEX IF EXISTS idx_project_events_credential_window');
+      sql.exec(`CREATE INDEX idx_project_events_credential_window
+        ON project_events(project_id, source, subject_type, subject_id,
+          json_extract(metadata_json, '$.windowType'),
+          json_extract(metadata_json, '$.observedAt') DESC, id DESC)
+        WHERE state = 'recorded' AND json_extract(metadata_json, '$.windowType') IS NOT NULL`);
+    },
+  },
   // Retired before release: `072-anchored-comment-threads` ran on staging only (renumbered to
   // 073 after another 072 merged first). That name may not be reused.
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects

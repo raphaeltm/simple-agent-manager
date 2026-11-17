@@ -3,9 +3,10 @@ import { MIGRATIONS } from '@simple-agent-manager/project-data/internal/do/migra
 import { admitProjectEvent } from '@simple-agent-manager/project-data/internal/do/project-events';
 import { runProjectEventRetention } from '@simple-agent-manager/project-data/internal/do/project-events-status-retention';
 import { env, evictDurableObject, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach,describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
+import { useFullProjectEventHistory } from './helpers/full-project-event-history';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 
 const testEnv = env as unknown as Env;
@@ -50,6 +51,11 @@ function observe(sql: SqlStorage) {
 
 function restoreLegacyIndexes(sql: SqlStorage) {
   sql.exec('DROP INDEX idx_project_event_matches_event_id');
+  sql.exec('DROP INDEX idx_project_events_credential_window');
+  sql.exec(`CREATE INDEX idx_project_events_credential_window
+    ON project_events(project_id, source, subject_type, subject_id,
+      json_extract(metadata_json, '$.windowType'), json_extract(metadata_json, '$.observedAt') DESC, id DESC)
+    WHERE state = 'recorded'`);
   sql.exec(
     'CREATE INDEX idx_project_events_project_source_type ON project_events(project_id,source,event_type,received_at DESC,id)'
   );
@@ -106,6 +112,8 @@ function plan(sql: SqlStorage, query: string, ...bindings: unknown[]): string {
     .join('\n');
 }
 
+useFullProjectEventHistory();
+
 describe('project event physical storage cost', () => {
   it('cuts an event insert from nine to five rows and leaves an established retention checkpoint untouched', async () => {
     const projectId = 'cost-admission';
@@ -140,7 +148,7 @@ describe('project event physical storage cost', () => {
     });
   });
 
-  it('rearms the real RPC on cold admission, but writes five SQL rows and no alarm on the next unmatched admission', async () => {
+  it('rearms the real RPC on cold admission, but writes four SQL rows and no alarm on the next unmatched admission', async () => {
     const projectId = 'cost-rpc-alarm';
     const stub = stubFor(projectId);
     await stub.ensureProjectId(projectId);
@@ -148,23 +156,23 @@ describe('project event physical storage cost', () => {
       const alarms = vi.spyOn(state.storage, 'setAlarm');
       const observed = observe(state.storage.sql);
       try {
-        instance.admitProjectEvent(inputFor(projectId, 'cold'));
+        await instance.admitProjectEvent(inputFor(projectId, 'cold'));
         await vi.waitFor(() => expect(alarms).toHaveBeenCalledTimes(1));
         expect(await state.storage.getAlarm()).not.toBeNull();
         observed.statements.length = 0;
         alarms.mockClear();
-        const created = instance.admitProjectEvent(inputFor(projectId, 'warm'));
+        const created = await instance.admitProjectEvent(inputFor(projectId, 'warm'));
         // The recalculation starts synchronously; an awaited getAlarm also drains its storage I/O.
         await state.storage.getAlarm();
         expect(created.matches).toEqual([]);
-        expect(observed.usage().written).toBe(5);
+        expect(observed.usage().written).toBe(4);
         expect(alarms).not.toHaveBeenCalled();
-        const replay = instance.admitProjectEvent(inputFor(projectId, 'warm'));
+        const replay = await instance.admitProjectEvent(inputFor(projectId, 'warm'));
         expect(replay).toMatchObject({
           outcome: 'duplicate_replay',
           event: { id: created.event.id, duplicateCount: 1 },
         });
-        const conflict = instance.admitProjectEvent({
+        const conflict = await instance.admitProjectEvent({
           ...inputFor(projectId, 'warm'),
           payloadFingerprint: 'different',
         });
@@ -191,15 +199,15 @@ describe('project event physical storage cost', () => {
       const alarms = vi.spyOn(state.storage, 'setAlarm');
       alarms.mockRejectedValueOnce(new Error('simulated alarm write failure'));
       try {
-        instance.admitProjectEvent(inputFor(projectId, 'failed-alarm'));
+        await instance.admitProjectEvent(inputFor(projectId, 'failed-alarm'));
         await vi.waitFor(() => expect(alarms).toHaveBeenCalledTimes(1));
         await Promise.resolve();
         expect(await state.storage.getAlarm()).toBeNull();
-        instance.admitProjectEvent(inputFor(projectId, 'repair-alarm'));
+        await instance.admitProjectEvent(inputFor(projectId, 'repair-alarm'));
         await vi.waitFor(() => expect(alarms).toHaveBeenCalledTimes(2));
         expect(await state.storage.getAlarm()).not.toBeNull();
         alarms.mockClear();
-        instance.admitProjectEvent(inputFor(projectId, 'healthy-alarm'));
+        await instance.admitProjectEvent(inputFor(projectId, 'healthy-alarm'));
         await state.storage.getAlarm();
         expect(alarms).not.toHaveBeenCalled();
       } finally {
@@ -227,7 +235,7 @@ describe('project event physical storage cost', () => {
         if (mode !== 'healthy')
           alarms.mockRejectedValueOnce(new Error('simulated alarm write failure'));
         try {
-          instance.admitProjectEvent(inputFor(projectId, 'before-eviction'));
+          await instance.admitProjectEvent(inputFor(projectId, 'before-eviction'));
           await vi.waitFor(() => expect(alarms).toHaveBeenCalledTimes(1));
           await Promise.resolve();
           if (mode === 'healthy') expect(await state.storage.getAlarm()).not.toBeNull();
@@ -239,7 +247,7 @@ describe('project event physical storage cost', () => {
       await runInDurableObject(stub, async (instance, state) => {
         const alarms = vi.spyOn(state.storage, 'setAlarm');
         try {
-          instance.admitProjectEvent(inputFor(projectId, 'after-eviction'));
+          await instance.admitProjectEvent(inputFor(projectId, 'after-eviction'));
           if (mode !== 'healthy') await vi.waitFor(() => expect(alarms).toHaveBeenCalledTimes(1));
           const alarm = await state.storage.getAlarm();
           expect(alarm).not.toBeNull();

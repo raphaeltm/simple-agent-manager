@@ -10,6 +10,7 @@ import { NODE_TUNNEL_SETTINGS } from './admin-settings-node-tunnel-definitions';
 import { OPERATIONS_TELEMETRY_SETTINGS } from './admin-settings-operations-telemetry-definitions';
 import { OPERATOR_SETTINGS } from './admin-settings-operator-definitions';
 import { OUTBOUND_SETTINGS } from './admin-settings-outbound-definitions';
+import { PROJECT_EVENT_SETTINGS } from './admin-settings-project-event-definitions';
 export {
   type AdminSettingDefinition,
   type AdminSettingName,
@@ -27,6 +28,7 @@ export {
 } from './admin-setting-definitions';
 const definitions = [
   ...MESSAGE_MERGE_SETTINGS,
+  ...PROJECT_EVENT_SETTINGS,
   ...DEPLOYMENT_PUBLISH_SETTINGS,
   ...CORE_SETTINGS,
   ...NODE_TUNNEL_SETTINGS,

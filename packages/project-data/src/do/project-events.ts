@@ -7,10 +7,13 @@ import { assertProjectBinding, normalizeProjectEventInput } from './project-even
 import { ensureProjectEventRetentionScheduled } from './project-events-scheduler';
 import {
   createMatchesForEvent,
+  insertMatchIfAbsent,
   listMatchesForEvent,
+  matchingSubscriptionsForEvent,
   readEventByDeliveryKey,
   readEventById,
 } from './project-events-storage-helpers';
+import { recordProjectEventAdmission } from './row-usage';
 import type { Env } from './types';
 import { generateId } from './types';
 
@@ -113,16 +116,47 @@ export {
   type ValidateProjectEventWakeRecoveryAuthorityInput,
 } from './project-events-wake-delivery';
 
+/** Protocol scope, shared by the runtime-settings gate and SQLite admission. */
+export function isGitHubCiProjectEvent(
+  input: Pick<AdmitProjectEventInput, 'source' | 'eventType'>
+): boolean {
+  return (
+    input.source.trim() === 'github' &&
+    /^(check_run|check_suite|workflow_run)(\.|$)/.test(input.eventType.trim())
+  );
+}
+
+// Direct internal producers retain history unless the RPC supplies the runtime policy.
 export function admitProjectEvent(
   sql: SqlStorage,
   env: Env,
   storedProjectId: string | null,
   input: AdmitProjectEventInput,
-  requireCompleteFanout = false
+  requireCompleteFanout?: boolean
+): Exclude<ProjectEventAdmissionResult, { outcome: 'skipped_no_subscriber' }>;
+export function admitProjectEvent(
+  sql: SqlStorage,
+  env: Env,
+  storedProjectId: string | null,
+  input: AdmitProjectEventInput,
+  requireCompleteFanout: boolean,
+  skipUnsubscribedGitHubCi: boolean
+): ProjectEventAdmissionResult;
+export function admitProjectEvent(
+  sql: SqlStorage,
+  env: Env,
+  storedProjectId: string | null,
+  input: AdmitProjectEventInput,
+  requireCompleteFanout = false,
+  skipUnsubscribedGitHubCi = false
 ): ProjectEventAdmissionResult {
   const limits = resolveProjectEventLimits(env);
   const eventInput = normalizeProjectEventInput(input, limits);
   assertProjectBinding(storedProjectId, eventInput.projectId);
+  const finish = (result: ProjectEventAdmissionResult): ProjectEventAdmissionResult => {
+    recordProjectEventAdmission(eventInput.source, eventInput.eventType, result.outcome);
+    return result;
+  };
 
   const existing = readEventByDeliveryKey(
     sql,
@@ -141,11 +175,11 @@ export function admitProjectEvent(
         eventInput.projectId,
         existing.id
       );
-      return {
+      return finish({
         outcome: 'duplicate_replay',
         event: readEventById(sql, eventInput.projectId, existing.id),
         matches: listMatchesForEvent(sql, eventInput.projectId, existing.id, limits.listLimitMax),
-      };
+      });
     }
 
     sql.exec(
@@ -163,7 +197,7 @@ export function admitProjectEvent(
       existing.id
     );
     const conflicted = readEventById(sql, eventInput.projectId, existing.id);
-    return {
+    return finish({
       outcome: 'conflict',
       event: conflicted,
       matches: listMatchesForEvent(sql, eventInput.projectId, existing.id, limits.listLimitMax),
@@ -172,13 +206,13 @@ export function admitProjectEvent(
         existingFingerprint: existing.payloadFingerprint,
         incomingFingerprint: eventInput.payloadFingerprint,
       },
-    };
+    });
   }
 
   const newerCredentialEvent = findNewerCredentialLimitEvent(sql, eventInput);
   if (newerCredentialEvent) {
     ensureProjectEventRetentionScheduled(sql, env, eventInput.projectId, Date.now());
-    return {
+    return finish({
       outcome: 'conflict',
       event: newerCredentialEvent,
       matches: listMatchesForEvent(
@@ -192,10 +226,28 @@ export function admitProjectEvent(
         existingFingerprint: newerCredentialEvent.payloadFingerprint,
         incomingFingerprint: eventInput.payloadFingerprint,
       },
-    };
+    });
   }
 
   const eventId = generateId();
+  const candidate = {
+    ...eventInput,
+    id: eventId,
+    state: 'recorded' as const,
+    duplicateCount: 0,
+    conflictCount: 0,
+    conflictFingerprint: null,
+    conflictDetectedAt: null,
+  };
+  // Channel history, credential supersession and other sources retain their full history.
+  // Existing stored receipts were checked above, even when the last subscriber has expired.
+  const subscriptions =
+    skipUnsubscribedGitHubCi && isGitHubCiProjectEvent(eventInput)
+      ? matchingSubscriptionsForEvent(sql, candidate, Date.now(), limits, requireCompleteFanout)
+      : null;
+  if (subscriptions?.length === 0) {
+    return finish({ outcome: 'skipped_no_subscriber', event: null, matches: [] });
+  }
   sql.exec(
     `INSERT INTO project_events
      (id, project_id, contract_version, source, event_type, subject_type, subject_id, severity,
@@ -229,7 +281,9 @@ export function admitProjectEvent(
   );
 
   const event = readEventById(sql, eventInput.projectId, eventId);
-  const matches = createMatchesForEvent(sql, event, Date.now(), limits, requireCompleteFanout);
+  const matches = subscriptions
+    ? subscriptions.map((subscription) => insertMatchIfAbsent(sql, event, subscription, Date.now()))
+    : createMatchesForEvent(sql, event, Date.now(), limits, requireCompleteFanout);
   ensureProjectEventRetentionScheduled(sql, env, eventInput.projectId, Date.now());
-  return { outcome: 'created', event, matches };
+  return finish({ outcome: 'created', event, matches });
 }

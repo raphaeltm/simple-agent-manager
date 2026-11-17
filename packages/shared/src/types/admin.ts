@@ -10,6 +10,7 @@ import type {
   ProjectEventSeverity,
   ProjectEventStorageAccountingRecord,
   ProjectEventSubject,
+  ProjectEventRecentStatus,
   ProjectEventSubscriptionOwner,
   ProjectEventSubscriptionState,
 } from './project-events';
@@ -198,6 +199,7 @@ export interface AdminProjectEventInspectorTotals {
 }
 
 export interface AdminProjectEventInspectorResponse {
+  admission?: ProjectEventRecentStatus['admission'];
   generatedAt: number;
   limit: number;
   project: AdminProjectEventInspectorProject;

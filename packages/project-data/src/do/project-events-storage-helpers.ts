@@ -98,6 +98,24 @@ export function createMatchesForEvent(
   limits: ProjectEventLimits,
   requireCompleteFanout = false
 ): ProjectEventMatchRecord[] {
+  const subscriptions = matchingSubscriptionsForEvent(
+    sql,
+    event,
+    now,
+    limits,
+    requireCompleteFanout
+  );
+  return subscriptions.map((subscription) => insertMatchIfAbsent(sql, event, subscription, now));
+}
+
+/** Read-only admission preflight; shared with stored-event fanout so predicates cannot drift. */
+export function matchingSubscriptionsForEvent(
+  sql: SqlStorage,
+  event: ProjectEventRecord,
+  now: number,
+  limits: ProjectEventLimits,
+  requireCompleteFanout = false
+): ProjectEventSubscriptionRecord[] {
   const eventKeys = projectEventKeys(event);
   const placeholders = eventKeys.map(() => '?').join(', ');
   const rows = sql
@@ -121,7 +139,7 @@ export function createMatchesForEvent(
   if (requireCompleteFanout && rows.length > limits.maxActiveSubscriptionsPerProject) {
     throw new ProjectEventLimitExceededError('Channel subscription candidate capacity exceeded');
   }
-  const matches: ProjectEventMatchRecord[] = [];
+  const matches: ProjectEventSubscriptionRecord[] = [];
   for (const row of rows) {
     let subscription: ProjectEventSubscriptionRecord;
     try {
@@ -137,8 +155,7 @@ export function createMatchesForEvent(
       // The enclosing channel transaction rolls back all earlier match writes.
       throw new ProjectEventLimitExceededError('Channel event fanout capacity exceeded');
     }
-    const match = insertMatchIfAbsent(sql, event, subscription, now);
-    matches.push(match);
+    matches.push(subscription);
     if (!requireCompleteFanout && matches.length >= limits.maxMatchesPerEvent) break;
   }
   return matches;

@@ -33,6 +33,7 @@ export type AdminSettingType = 'boolean' | 'integer' | 'string' | 'string-list' 
 export type AdminSettingName =
   | DeploymentPublishJobSettingName
   | 'deployments.publishCallbackMaxBodyBytes'
+  | 'events.skipUnsubscribedGitHubCi'
   | 'chat.messageMergingEnabled'
   | 'chat.messageMergeMaxRowBytes'
   | 'chat.messageMergeRecentIds'

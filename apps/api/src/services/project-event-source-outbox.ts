@@ -479,7 +479,7 @@ async function admitClaimedIntent(
            last_error = ?, updated_at = ?`,
       [
         state,
-        result.event.id,
+        result.event?.id ?? null,
         result.outcome,
         nowIso,
         result.outcome === 'conflict' ? 'ProjectData admission conflict' : null,
