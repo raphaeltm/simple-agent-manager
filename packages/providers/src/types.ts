@@ -434,6 +434,8 @@ export interface InfomaniakProviderConfig {
   requestTimeoutMs?: number;
   ipPollTimeoutMs?: number;
   ipPollIntervalMs?: number;
+  /** Boot volume GB for new VMs (admin setting `infomaniak.bootVolumeGb`); see infomaniak-boot-volume.ts. */
+  bootVolumeSizeGb?: number;
   logger?: ProviderLogger;
 }
 
