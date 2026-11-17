@@ -23,6 +23,16 @@ subscribes to that chat session and receives its transcript frames (`message.new
 (lifecycle, attention, comments, access, activity and other project events), but no transcript
 frames.
 
+The socket is read-only and is bound to the authenticated user, project, optional session scope,
+`project:read` capability and control-plane session expiry by `forwardWebSocket` in
+`packages/project-data/src/client/project-data.ts` and `admitBrowserSocket` in
+`packages/project-data/src/do/session-sockets.ts`. Browser-supplied authority headers are
+overwritten. Heartbeats re-check the user's current active project membership. Member offboarding
+closes that actor's project sockets before later access-change events are emitted, and account
+suspension closes the actor's sockets across every active project.
+Expired, revoked, malformed or temporarily unverifiable authority closes with code `4403`; clients
+must reconnect through the authenticated route.
+
 A client can add `messageAppend=message-append-v1` to advertise canonical message append support.
 A session socket without this capability keeps the individual-row stream and disables merging for
 its session only; project sockets never affect merging. The server never sends `message.append`

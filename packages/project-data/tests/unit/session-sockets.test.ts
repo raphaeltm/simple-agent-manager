@@ -16,15 +16,20 @@ import {
 } from '../../src/do/session-sockets';
 
 const SESSION = '11111111-2222-3333-4444-555555555555';
+const PROJECT = 'project-1';
 
 interface FakeSocket {
   readyState: number;
   tags: string[] | 'throws';
   send: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
+  deserializeAttachment: ReturnType<typeof vi.fn>;
 }
 
-function socket(tags: string[] | 'throws', opts: { sendThrows?: boolean } = {}): FakeSocket {
+function socket(
+  tags: string[] | 'throws',
+  opts: { expiresAt?: number; sendThrows?: boolean } = {}
+): FakeSocket {
   const ws: FakeSocket = {
     readyState: WebSocket.OPEN,
     tags,
@@ -34,6 +39,16 @@ function socket(tags: string[] | 'throws', opts: { sendThrows?: boolean } = {}):
     close: vi.fn(() => {
       ws.readyState = WebSocket.CLOSING;
     }),
+    deserializeAttachment: vi.fn(() => ({
+      version: 1,
+      actorId: 'user-1',
+      projectId: PROJECT,
+      sessionId: Array.isArray(tags)
+        ? (tags.find((tag) => tag.startsWith('session:'))?.slice('session:'.length) ?? null)
+        : null,
+      capability: 'project:read',
+      expiresAt: opts.expiresAt ?? 2_000_000_000_000,
+    })),
   };
   return ws;
 }
@@ -56,7 +71,7 @@ describe('broadcastToBrowserSockets failure isolation', () => {
   it('a socket whose send throws does not stop delivery to the others', () => {
     const broken = socket(capable, { sendThrows: true });
     const healthy = socket(capable);
-    broadcastToBrowserSockets(context([broken, healthy]), 'message.append', {}, SESSION);
+    broadcastToBrowserSockets(context([broken, healthy]), PROJECT, 'message.append', {}, SESSION);
     expect(broken.send).toHaveBeenCalledOnce();
     expect(healthy.send).toHaveBeenCalledOnce();
   });
@@ -65,9 +80,20 @@ describe('broadcastToBrowserSockets failure isolation', () => {
     const gone = socket('throws');
     const project = socket([]);
     expect(() =>
-      broadcastToBrowserSockets(context([gone, project]), 'session.updated', {}, SESSION)
+      broadcastToBrowserSockets(context([gone, project]), PROJECT, 'session.updated', {}, SESSION)
     ).not.toThrow();
     expect(project.send).toHaveBeenCalledOnce();
+  });
+
+  it('closes expired authority before broadcasting while preserving active delivery', () => {
+    const expired = socket([], { expiresAt: 1 });
+    const active = socket([]);
+
+    broadcastToBrowserSockets(context([expired, active]), PROJECT, 'session.updated', {});
+
+    expect(expired.close).toHaveBeenCalledWith(4403, 'authorization expired');
+    expect(expired.send).not.toHaveBeenCalled();
+    expect(active.send).toHaveBeenCalledOnce();
   });
 
   it('closes every legacy chat socket once, even across repeated appends', () => {
@@ -75,8 +101,8 @@ describe('broadcastToBrowserSockets failure isolation', () => {
     const second = socket(session);
     const current = socket(capable);
     const ctx = context([first, second, current]);
-    broadcastToBrowserSockets(ctx, 'message.append', {}, SESSION);
-    broadcastToBrowserSockets(ctx, 'message.append', {}, SESSION);
+    broadcastToBrowserSockets(ctx, PROJECT, 'message.append', {}, SESSION);
+    broadcastToBrowserSockets(ctx, PROJECT, 'message.append', {}, SESSION);
     for (const legacy of [first, second]) {
       expect(legacy.send).not.toHaveBeenCalled();
       expect(legacy.close).toHaveBeenCalledOnce();
@@ -92,7 +118,7 @@ describe('broadcastToBrowserSockets failure isolation', () => {
     });
     const next = socket(session);
     expect(() =>
-      broadcastToBrowserSockets(context([throwing, next]), 'message.append', {}, SESSION)
+      broadcastToBrowserSockets(context([throwing, next]), PROJECT, 'message.append', {}, SESSION)
     ).not.toThrow();
     expect(next.close).toHaveBeenCalledOnce();
     expect(() => closeQuietly(throwing as unknown as WebSocket)).not.toThrow();

@@ -14,7 +14,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { requireRouteParam } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
-import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
+import { getAuth, getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import { CreateChatSessionSchema, parseOptionalBody } from '../schemas';
@@ -112,7 +112,8 @@ chatRoutes.post('/', async (c) => {
  * captured as a sessionId parameter.
  */
 chatRoutes.get('/ws', async (c) => {
-  const userId = getUserId(c);
+  const auth = getAuth(c);
+  const userId = auth.user.id;
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
 
@@ -123,7 +124,14 @@ chatRoutes.get('/ws', async (c) => {
     throw errors.badRequest('Expected WebSocket upgrade');
   }
 
-  return projectDataService.forwardWebSocket(c.env, projectId, c.req.raw);
+  const expiresAt = Math.min(
+    auth.session.expiresAt.getTime(),
+    auth.session.hardExpiresAt?.getTime() ?? Number.POSITIVE_INFINITY
+  );
+  return projectDataService.forwardWebSocket(c.env, projectId, c.req.raw, {
+    actorId: userId,
+    expiresAt,
+  });
 });
 
 /**

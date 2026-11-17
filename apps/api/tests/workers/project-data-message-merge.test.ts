@@ -14,6 +14,11 @@ const source = {
   callbackGeneration: 'generation-a',
   outboxIncarnation: '7aba0c09-bbf4-4d84-8a0a-4fcab3bdce50',
 };
+const browserSocketHeaders = {
+  Upgrade: 'websocket',
+  'x-sam-browser-socket-actor-id': 'merge-user',
+  'x-sam-browser-socket-expires-at': '2000000000000',
+};
 const fixtureEnd = Date.parse(reporterMessages.at(-1)!.timestamp);
 const fixtureNow = Date.now();
 const batch = reporterMessages.map((row) => ({
@@ -451,7 +456,7 @@ describe('canonical streamed chunks through real ProjectData persistence', () =>
     await stub.persistMessageBatch(session, batch.slice(1, 5), source);
     const response = await stub.fetch(
       new Request(`https://test/ws?sessionId=${session}`, {
-        headers: { Upgrade: 'websocket' },
+        headers: browserSocketHeaders,
       })
     );
     expect(response.status).toBe(101);

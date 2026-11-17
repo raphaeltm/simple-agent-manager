@@ -143,6 +143,43 @@ async function signedIn(f: Startup): Promise<string> {
 }
 
 describe('browser sockets and chunk merging', () => {
+  it('binds the route-authenticated actor and keeps browser sockets read-only', async () => {
+    const f = await startup();
+    const chat = await openSocket(f, await signedIn(f), {
+      sessionId: f.session,
+      capable: true,
+    });
+    const before = await storedRows(f);
+
+    const authorization = await runInDurableObject(f.stub, (instance) => {
+      const [serverSocket] = instance.ctx.getWebSockets(`session:${f.session}`);
+      return serverSocket?.deserializeAttachment() as Record<string, unknown> | undefined;
+    });
+    expect(authorization).toMatchObject({
+      version: 1,
+      actorId: f.user,
+      projectId: f.project,
+      sessionId: f.session,
+      capability: 'project:read',
+    });
+    expect(Number(authorization?.expiresAt)).toBeGreaterThan(Date.now());
+
+    chat.ws.send(
+      JSON.stringify({
+        type: 'message.send',
+        sessionId: f.session,
+        role: 'user',
+        content: 'must not be persisted',
+      })
+    );
+    await settle(() => chat.frames.some((frame) => frame.type === 'error'), 'write rejection');
+    expect(await storedRows(f)).toEqual(before);
+
+    // The same authorized read-only socket remains useful for its legitimate heartbeat path.
+    chat.ws.send(JSON.stringify({ type: 'ping' }));
+    await settle(() => chat.frames.some((frame) => frame.type === 'pong'), 'authorized pong');
+  });
+
   it('a legacy project socket no longer switches merging off, and receives no transcript frames', async () => {
     const f = await startup();
     const cookie = await signedIn(f);

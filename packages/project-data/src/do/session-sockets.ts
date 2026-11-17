@@ -23,6 +23,12 @@ import {
 } from '@simple-agent-manager/shared';
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
 
+import {
+  BROWSER_SOCKET_ACTOR_ID_HEADER,
+  BROWSER_SOCKET_EXPIRES_AT_HEADER,
+  BROWSER_SOCKET_READ_CAPABILITY,
+  BROWSER_SOCKET_UNAUTHORIZED_CLOSE_CODE,
+} from '../browser-socket-auth';
 import { sealMessageStream } from './message-stream-ingest';
 
 const log = createModuleLogger('project_data.sockets');
@@ -41,8 +47,97 @@ function sessionTag(sessionId: string): string {
   return `${SESSION_TAG_PREFIX}${sessionId}`;
 }
 
+export interface BrowserSocketAuthorization {
+  version: 1;
+  actorId: string;
+  projectId: string;
+  sessionId: string | null;
+  capability: typeof BROWSER_SOCKET_READ_CAPABILITY;
+  expiresAt: number;
+}
+
+function readAuthorization(ws: WebSocket): BrowserSocketAuthorization | null {
+  try {
+    const value: unknown = ws.deserializeAttachment();
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const record = value as Record<string, unknown>;
+    const actorId = record.actorId;
+    const projectId = record.projectId;
+    const sessionId = record.sessionId;
+    const expiresAt = record.expiresAt;
+    if (
+      record.version !== 1 ||
+      typeof actorId !== 'string' ||
+      !actorId ||
+      typeof projectId !== 'string' ||
+      !projectId ||
+      (sessionId !== null && (typeof sessionId !== 'string' || !sessionId)) ||
+      record.capability !== BROWSER_SOCKET_READ_CAPABILITY ||
+      typeof expiresAt !== 'number' ||
+      !Number.isFinite(expiresAt)
+    ) {
+      return null;
+    }
+    return {
+      version: 1,
+      actorId,
+      projectId,
+      sessionId,
+      capability: BROWSER_SOCKET_READ_CAPABILITY,
+      expiresAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function authorizationMatchesSocket(
+  ctx: DurableObjectState,
+  ws: WebSocket,
+  projectId: string,
+  now = Date.now()
+): BrowserSocketAuthorization | null {
+  const authorization = readAuthorization(ws);
+  if (
+    !authorization ||
+    authorization.projectId !== projectId ||
+    authorization.expiresAt <= now
+  ) {
+    return null;
+  }
+  const tags = tagsOf(ctx, ws);
+  if (!tags) return null;
+  const taggedSession = tags.find((tag) => tag.startsWith(SESSION_TAG_PREFIX)) ?? null;
+  const expectedSession = authorization.sessionId
+    ? sessionTag(authorization.sessionId)
+    : null;
+  return taggedSession === expectedSession ? authorization : null;
+}
+
+function closeUnauthorized(ws: WebSocket): void {
+  closeQuietly(ws, BROWSER_SOCKET_UNAUTHORIZED_CLOSE_CODE, 'authorization expired');
+}
+
 /** Accept a browser socket upgrade forwarded by the API route. */
-export function admitBrowserSocket(ctx: DurableObjectState, sql: SqlStorage, url: URL): Response {
+export function admitBrowserSocket(
+  ctx: DurableObjectState,
+  sql: SqlStorage,
+  request: Request,
+  projectId: string
+): Response {
+  const actorId = request.headers.get(BROWSER_SOCKET_ACTOR_ID_HEADER)?.trim();
+  const expiresAt = Number(request.headers.get(BROWSER_SOCKET_EXPIRES_AT_HEADER));
+  if (!actorId || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+    log.warn('websocket.authorization_rejected', {
+      projectId,
+      hasActorId: Boolean(actorId),
+      hasValidExpiry: Number.isFinite(expiresAt) && expiresAt > Date.now(),
+      action: 'rejected',
+    });
+    return new Response('WebSocket authorization is missing or expired', { status: 403 });
+  }
+
+  const url = new URL(request.url);
   const requested = url.searchParams.get('sessionId');
   const tags: string[] = [];
   // Session IDs are stored lowercase; an uppercase spelling must still match the
@@ -61,7 +156,66 @@ export function admitBrowserSocket(ctx: DurableObjectState, sql: SqlStorage, url
   }
   const pair = new WebSocketPair();
   ctx.acceptWebSocket(pair[1], tags);
+  pair[1].serializeAttachment({
+    version: 1,
+    actorId,
+    projectId,
+    sessionId,
+    capability: BROWSER_SOCKET_READ_CAPABILITY,
+    expiresAt,
+  } satisfies BrowserSocketAuthorization);
   return new Response(null, { status: 101, webSocket: pair[0] });
+}
+
+/** Current D1 authority for a socket heartbeat. Failure is handled fail-closed by the caller. */
+export async function hasCurrentBrowserSocketAuthority(
+  database: D1Database,
+  authorization: BrowserSocketAuthorization
+): Promise<boolean> {
+  if (authorization.expiresAt <= Date.now()) return false;
+  const row = await database
+    .prepare(
+      `SELECT 1 AS authorized
+       FROM project_members pm
+       JOIN users u ON u.id = pm.user_id
+       WHERE pm.project_id = ? AND pm.user_id = ? AND pm.status = 'active'
+         AND (u.status IS NULL OR u.status != 'suspended')
+       LIMIT 1`
+    )
+    .bind(authorization.projectId, authorization.actorId)
+    .first<{ authorized: number }>();
+  return row?.authorized === 1;
+}
+
+/** Validate the socket's immutable attachment and its session tag before handling a frame. */
+export function getBrowserSocketAuthorization(
+  ctx: DurableObjectState,
+  ws: WebSocket,
+  projectId: string
+): BrowserSocketAuthorization | null {
+  return authorizationMatchesSocket(ctx, ws, projectId);
+}
+
+/** Close every socket for a member whose project authority was revoked. */
+export function revokeBrowserSocketsForActor(
+  ctx: DurableObjectState,
+  projectId: string,
+  actorId: string
+): number {
+  let closed = 0;
+  for (const ws of ctx.getWebSockets()) {
+    const authorization = readAuthorization(ws);
+    // Sockets admitted before actor binding shipped cannot be attributed safely.
+    if (
+      !authorization ||
+      authorization.projectId !== projectId ||
+      authorization.actorId === actorId
+    ) {
+      closeUnauthorized(ws);
+      closed++;
+    }
+  }
+  return closed;
 }
 
 /**
@@ -133,16 +287,24 @@ function closeForResync(ws: WebSocket, sessionId: string): void {
  */
 export function broadcastToBrowserSockets(
   ctx: DurableObjectState,
+  projectId: string,
   type: string,
   payload: Record<string, unknown>,
   sessionId?: string
 ): void {
   const message = JSON.stringify({ type, payload });
   if (!sessionId) {
-    for (const ws of ctx.getWebSockets()) send(ws, message);
+    for (const ws of ctx.getWebSockets()) {
+      if (!authorizationMatchesSocket(ctx, ws, projectId)) closeUnauthorized(ws);
+      else send(ws, message);
+    }
     return;
   }
   for (const ws of ctx.getWebSockets(sessionTag(sessionId))) {
+    if (!authorizationMatchesSocket(ctx, ws, projectId)) {
+      closeUnauthorized(ws);
+      continue;
+    }
     const tags = tagsOf(ctx, ws);
     if (!tags) continue;
     if (type === MESSAGE_APPEND_FRAME && !tags.includes(CHAT_MESSAGE_APPEND_CAPABILITY))
@@ -151,6 +313,10 @@ export function broadcastToBrowserSockets(
   }
   if (TRANSCRIPT_FRAME_TYPES.has(type)) return;
   for (const ws of ctx.getWebSockets()) {
+    if (!authorizationMatchesSocket(ctx, ws, projectId)) {
+      closeUnauthorized(ws);
+      continue;
+    }
     const tags = tagsOf(ctx, ws);
     if (!tags || tags.some((tag) => tag.startsWith(SESSION_TAG_PREFIX))) continue;
     send(ws, message);

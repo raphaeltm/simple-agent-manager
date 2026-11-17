@@ -50,17 +50,41 @@ const { ProjectData } = await import('../../src/do/index');
 interface MockWebSocket {
   send: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
+  serializeAttachment: ReturnType<typeof vi.fn>;
+  deserializeAttachment: ReturnType<typeof vi.fn>;
   tags: string[];
   _sent: string[];
+  _attachment: unknown;
 }
 
 function createMockWebSocket(tags: string[] = []): MockWebSocket {
   const sent: string[] = [];
+  let attachment: unknown = {
+    version: 1,
+    actorId: 'user-1',
+    projectId: 'test-project',
+    sessionId: tags.find((tag) => tag.startsWith('session:'))?.slice('session:'.length) ?? null,
+    capability: 'project:read',
+    expiresAt: 2_000_000_000_000,
+  };
   return {
     send: vi.fn((data: string) => sent.push(data)),
     close: vi.fn(),
     tags,
     _sent: sent,
+    _attachment: attachment,
+    serializeAttachment: vi.fn((value: unknown) => {
+      attachment = value;
+    }),
+    deserializeAttachment: vi.fn(() => attachment),
+  };
+}
+
+function socketHeaders(): Record<string, string> {
+  return {
+    Upgrade: 'websocket',
+    'x-sam-browser-socket-actor-id': 'user-1',
+    'x-sam-browser-socket-expires-at': '2000000000000',
   };
 }
 
@@ -120,12 +144,27 @@ describe('ProjectData DO — session-scoped broadcasting', () => {
 
     mockCtx = createMockCtx([sessionASocket, sessionBSocket, untaggedSocket]);
     projectData = new ProjectData(mockCtx as any, createMockEnv() as any);
+    projectData.ensureProjectId('test-project');
   });
 
   describe('WebSocket upgrade with session tag', () => {
+    it('rejects an upgrade without server-bound actor authorization', async () => {
+      const freshCtx = createMockCtx([]);
+      const pd = new ProjectData(freshCtx as any, createMockEnv() as any);
+      pd.ensureProjectId('test-project');
+
+      const response = await pd.fetch(
+        new Request('https://do.internal/ws', { headers: { Upgrade: 'websocket' } })
+      );
+
+      expect(response.status).toBe(403);
+      expect(freshCtx.acceptWebSocket).not.toHaveBeenCalled();
+    });
+
     it('accepts WebSocket with session tag from query param', async () => {
       const freshCtx = createMockCtx([]);
       const pd = new ProjectData(freshCtx as any, createMockEnv() as any);
+      pd.ensureProjectId('test-project');
 
       const clientWs = createMockWebSocket();
       const serverWs = createMockWebSocket();
@@ -140,7 +179,7 @@ describe('ProjectData DO — session-scoped broadcasting', () => {
       try {
         await pd.fetch(
           new Request('https://do.internal/ws?sessionId=a1b2c3d4-e5f6-7890-abcd-ef1234567890', {
-            headers: { Upgrade: 'websocket' },
+            headers: socketHeaders(),
           })
         );
       } catch {
@@ -155,6 +194,7 @@ describe('ProjectData DO — session-scoped broadcasting', () => {
     it('accepts WebSocket without tags when no sessionId param', async () => {
       const freshCtx = createMockCtx([]);
       const pd = new ProjectData(freshCtx as any, createMockEnv() as any);
+      pd.ensureProjectId('test-project');
 
       const clientWs = createMockWebSocket();
       const serverWs = createMockWebSocket();
@@ -169,7 +209,7 @@ describe('ProjectData DO — session-scoped broadcasting', () => {
       try {
         await pd.fetch(
           new Request('https://do.internal/ws', {
-            headers: { Upgrade: 'websocket' },
+            headers: socketHeaders(),
           })
         );
       } catch {
@@ -182,10 +222,11 @@ describe('ProjectData DO — session-scoped broadcasting', () => {
     it('rejects WebSocket upgrade with malformed sessionId', async () => {
       const freshCtx = createMockCtx([]);
       const pd = new ProjectData(freshCtx as any, createMockEnv() as any);
+      pd.ensureProjectId('test-project');
 
       const response = await pd.fetch(
         new Request('https://do.internal/ws?sessionId=../../../etc/passwd', {
-          headers: { Upgrade: 'websocket' },
+          headers: socketHeaders(),
         })
       );
 

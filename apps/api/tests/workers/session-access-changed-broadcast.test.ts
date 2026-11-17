@@ -27,7 +27,11 @@ type Broadcast = { type?: string; payload?: Record<string, unknown> } & Record<s
 
 async function subscribe(stub: DurableObjectStub<ProjectData>, chatSessionId: string) {
   const response = await stub.fetch(`https://do/ws?sessionId=${chatSessionId}`, {
-    headers: { Upgrade: 'websocket' },
+    headers: {
+      Upgrade: 'websocket',
+      'x-sam-browser-socket-actor-id': 'access-reader',
+      'x-sam-browser-socket-expires-at': '2000000000000',
+    },
   });
   expect(response.status).toBe(101);
   const ws = response.webSocket!;

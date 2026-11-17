@@ -32,6 +32,7 @@ import { DurableObject } from 'cloudflare:workers';
 
 import { measureArchiveSql } from '../archive/sql-metrics';
 import { estimateArchiveWrites } from '../archive/write-budget';
+import { BROWSER_SOCKET_UNAUTHORIZED_CLOSE_CODE } from '../browser-socket-auth';
 import {
   assertExactWriteAllowed,
   isProjectDataArchiveExactRoutingEnabled,
@@ -135,6 +136,9 @@ import {
   broadcastToBrowserSockets,
   closeQuietly,
   countLegacySockets,
+  getBrowserSocketAuthorization,
+  hasCurrentBrowserSocketAuthority,
+  revokeBrowserSocketsForActor as closeBrowserSocketsForActor,
 } from './session-sockets';
 import * as sessionState from './session-state';
 import * as sessionSummarySync from './session-summary-sync';
@@ -3781,39 +3785,91 @@ export class ProjectData extends DurableObject<Env> {
       const upgradeHeader = request.headers.get('Upgrade');
       if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket')
         return new Response('Expected WebSocket upgrade', { status: 426 });
-      return admitBrowserSocket(this.ctx, this.sql, url);
+      const projectId = this.getProjectId();
+      if (!projectId) return new Response('Project identity is unavailable', { status: 503 });
+      return admitBrowserSocket(this.ctx, this.sql, request, projectId);
     }
     return new Response('Not found', { status: 404 });
   }
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     if (typeof message !== 'string') return;
+    let msg: Record<string, unknown>;
     try {
       const parsed: unknown = JSON.parse(message);
-      const msg = expectJsonRecord(parsed, 'project-data.websocket.message');
-      if (msg.type === 'ping') {
-        ws.send(JSON.stringify({ type: 'pong' }));
+      msg = expectJsonRecord(parsed, 'project-data.websocket.message');
+    } catch {
+      return;
+    }
+    if (msg.type !== 'ping' && msg.type !== 'message.send') return;
+
+    const projectId = this.getProjectId();
+    const authorization = projectId
+      ? getBrowserSocketAuthorization(this.ctx, ws, projectId)
+      : null;
+    if (!authorization) {
+      log.warn('websocket.authorization_rejected', {
+        projectId,
+        action: 'closed',
+      });
+      closeQuietly(ws, BROWSER_SOCKET_UNAUTHORIZED_CLOSE_CODE, 'authorization expired');
+      return;
+    }
+    try {
+      if (!(await hasCurrentBrowserSocketAuthority(this.env.DATABASE, authorization))) {
+        log.warn('websocket.authority_revoked', {
+          projectId,
+          actorId: authorization.actorId,
+          action: 'closed',
+        });
+        closeQuietly(ws, BROWSER_SOCKET_UNAUTHORIZED_CLOSE_CODE, 'authorization revoked');
         return;
       }
-      if (msg.type === 'message.send') {
-        // Browser sockets are read-only. This path used to persist a `role=user` row into any
-        // active session for any connected project member, without knowing who they were
-        // (idea 01M59MYE4GY91BWTE8TZF1ZB5D, gap G1). Prompts and their transcript rows now
-        // come only from authorized REST delivery (`sendChat` → durable prompt delivery).
-        log.warn('websocket.message_send_rejected', {
-          sessionTag: this.ctx.getTags(ws).find((tag) => tag.startsWith('session:')) ?? null,
-          action: 'rejected',
-        });
-        ws.send(
-          JSON.stringify({
-            type: 'error',
-            message: 'Sending messages over this socket is not supported',
-          })
-        );
-      }
-    } catch {
-      /* Ignore non-JSON messages */
+    } catch (error) {
+      log.warn('websocket.authority_check_failed', {
+        projectId,
+        actorId: authorization.actorId,
+        error: error instanceof Error ? error.message : String(error),
+        action: 'closed',
+      });
+      closeQuietly(ws, BROWSER_SOCKET_UNAUTHORIZED_CLOSE_CODE, 'authorization unavailable');
+      return;
     }
+
+    if (msg.type === 'ping') {
+      ws.send(JSON.stringify({ type: 'pong' }));
+      return;
+    }
+
+    // Browser sockets are read-only. This path used to persist a `role=user` row into any
+    // active session for any connected project member, without knowing who they were
+    // (idea 01M59MYE4GY91BWTE8TZF1ZB5D, gap G1). Prompts and their transcript rows now
+    // come only from authorized REST delivery (`sendChat` -> durable prompt delivery).
+    log.warn('websocket.message_send_rejected', {
+      projectId,
+      actorId: authorization.actorId,
+      sessionId: authorization.sessionId,
+      action: 'rejected',
+    });
+    ws.send(
+      JSON.stringify({
+        type: 'error',
+        message: 'Sending messages over this socket is not supported',
+      })
+    );
+  }
+
+  revokeBrowserSocketsForActor(actorId: string): number {
+    const projectId = this.getProjectId();
+    if (!projectId || !actorId) {
+      log.warn('websocket.revocation_rejected', {
+        projectId,
+        hasActorId: Boolean(actorId),
+        action: 'rejected',
+      });
+      throw new Error('Project and actor identity are required to revoke browser sockets');
+    }
+    return closeBrowserSocketsForActor(this.ctx, projectId, actorId);
   }
 
   async webSocketClose(
@@ -4255,7 +4311,12 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   private broadcastEvent(type: string, payload: Record<string, unknown>, sessionId?: string): void {
-    broadcastToBrowserSockets(this.ctx, type, payload, sessionId);
+    const projectId = this.getProjectId();
+    if (!projectId) {
+      log.warn('websocket.broadcast_skipped_no_project_id', { type, action: 'dropped' });
+      return;
+    }
+    broadcastToBrowserSockets(this.ctx, projectId, type, payload, sessionId);
   }
 
   private broadcastCommentThread(

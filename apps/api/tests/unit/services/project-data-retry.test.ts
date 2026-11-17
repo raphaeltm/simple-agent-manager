@@ -173,10 +173,17 @@ describe('project-data Durable Object retry', () => {
       fetch: vi.fn().mockRejectedValueOnce(doResetError).mockResolvedValue(response),
     };
     const request = new Request('https://api.example.test/api/projects/proj-1/sessions/ws', {
-      headers: { Upgrade: 'websocket' },
+      headers: {
+        Upgrade: 'websocket',
+        'x-sam-browser-socket-actor-id': 'spoofed-browser-actor',
+        'x-sam-browser-socket-expires-at': '1',
+      },
     });
 
-    const result = await svc.forwardWebSocket(makeEnv(stub), 'proj-1', request);
+    const result = await svc.forwardWebSocket(makeEnv(stub), 'proj-1', request, {
+      actorId: 'authenticated-user',
+      expiresAt: 2_000_000_000_000,
+    });
 
     expect(result).toBe(response);
     expect(stub.ensureProjectId).toHaveBeenCalledTimes(2);
@@ -184,7 +191,30 @@ describe('project-data Durable Object retry', () => {
     for (const [forwardedRequest] of stub.fetch.mock.calls) {
       expect(forwardedRequest).toBeInstanceOf(Request);
       expect(new URL((forwardedRequest as Request).url).pathname).toBe('/ws');
+      expect((forwardedRequest as Request).headers.get('x-sam-browser-socket-actor-id')).toBe(
+        'authenticated-user'
+      );
+      expect((forwardedRequest as Request).headers.get('x-sam-browser-socket-expires-at')).toBe(
+        '2000000000000'
+      );
     }
+  });
+
+  it('retries actor socket revocation because closing an already-closed socket is idempotent', async () => {
+    const stub = {
+      ensureProjectId: vi.fn().mockResolvedValue(undefined),
+      revokeBrowserSocketsForActor: vi
+        .fn()
+        .mockRejectedValueOnce(doResetError)
+        .mockResolvedValue(1),
+    };
+
+    await expect(
+      svc.revokeBrowserSocketsForActor(makeEnv(stub), 'proj-1', 'removed-user')
+    ).resolves.toBe(1);
+
+    expect(stub.revokeBrowserSocketsForActor).toHaveBeenCalledTimes(2);
+    expect(stub.revokeBrowserSocketsForActor).toHaveBeenCalledWith('removed-user');
   });
 
   it('does not retry non-transient Durable Object errors', async () => {

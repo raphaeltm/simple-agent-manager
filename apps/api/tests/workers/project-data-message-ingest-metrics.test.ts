@@ -11,6 +11,11 @@ const source = {
   outboxIncarnation: 'cbce9fe8-c5e5-464c-9900-4bec2bd30cb1',
 };
 const config = { enabled: true, maxRowBytes: 65536, recentIds: 200 };
+const browserSocketHeaders = {
+  Upgrade: 'websocket',
+  'x-sam-browser-socket-actor-id': 'metrics-user',
+  'x-sam-browser-socket-expires-at': '2000000000000',
+};
 function chunk(sequence: number, role = 'assistant') {
   return {
     messageId: `chunk-${sequence}`,
@@ -113,7 +118,7 @@ describe('content-free message ingestion counters through real workerd', () => {
       const { stub, session } = await setup();
       const response = await stub.fetch(
         new Request(`https://test/ws${sessionScoped ? `?sessionId=${session}` : ''}`, {
-          headers: { Upgrade: 'websocket' },
+          headers: browserSocketHeaders,
         })
       );
       expect(response.status).toBe(101);
@@ -164,7 +169,7 @@ describe('content-free message ingestion counters through real workerd', () => {
       const capability = reader === 'capable reader' ? '&messageAppend=message-append-v1' : '';
       const response = await stub.fetch(
         new Request(`https://test/ws?sessionId=${watched}${capability}`, {
-          headers: { Upgrade: 'websocket' },
+          headers: browserSocketHeaders,
         })
       );
       expect(response.status).toBe(101);

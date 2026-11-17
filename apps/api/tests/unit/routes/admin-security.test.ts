@@ -66,6 +66,7 @@ const mockGet = vi.fn();
 const mockAll = vi.fn();
 const mockUpdate = vi.fn();
 const mockGetTaskReconciliationDiagnostics = vi.fn();
+const mockRevokeBrowserSocketsForActor = vi.fn();
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
@@ -112,6 +113,12 @@ vi.mock('../../../src/services/limits', () => ({
   }),
 }));
 
+vi.mock('../../../src/services/project-data', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/project-data')>()),
+  revokeBrowserSocketsForActor: (...args: unknown[]) =>
+    mockRevokeBrowserSocketsForActor(...args),
+}));
+
 vi.mock('../../../src/scheduled/stuck-tasks', () => ({
   getTaskReconciliationDiagnostics: (...args: unknown[]) =>
     mockGetTaskReconciliationDiagnostics(...args),
@@ -122,7 +129,11 @@ vi.mock('../../../src/schemas', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../src/schemas')>();
   return {
     ...actual,
-    jsonValidator: () => vi.fn((_c: any, next: any) => next()),
+    jsonValidator: () =>
+      vi.fn(async (c: any, next: any) => {
+        c.req.addValidatedData('json', await c.req.json());
+        await next();
+      }),
     parseOptionalBody: vi.fn(async () => ({})),
   };
 });
@@ -150,6 +161,7 @@ describe('Admin security hardening (route-level)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetUserId.mockReturnValue(SUPERADMIN_USER_ID);
+    mockRevokeBrowserSocketsForActor.mockResolvedValue(1);
 
     app = new Hono<{ Bindings: Env }>();
     app.onError((err, c) => {
@@ -211,6 +223,36 @@ describe('Admin security hardening (route-level)', () => {
       // It may be 500 (DB mock incomplete) or 404 (user not found) — that's fine,
       // the security property we're testing is that the self-mod guard passes.
       expect(res.status).not.toBe(400);
+    });
+
+    it('closes the suspended user sockets in every active project', async () => {
+      const env = createEnv();
+      mockGet.mockResolvedValue({ id: 'user-other', role: 'user' });
+      mockAll.mockResolvedValue([{ projectId: 'project-a' }, { projectId: 'project-b' }]);
+      mockUpdate.mockResolvedValue(undefined);
+
+      const res = await app.request(
+        '/api/admin/users/user-other',
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'suspend' }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockRevokeBrowserSocketsForActor).toHaveBeenCalledTimes(2);
+      expect(mockRevokeBrowserSocketsForActor).toHaveBeenCalledWith(
+        env,
+        'project-a',
+        'user-other'
+      );
+      expect(mockRevokeBrowserSocketsForActor).toHaveBeenCalledWith(
+        env,
+        'project-b',
+        'user-other'
+      );
     });
   });
 

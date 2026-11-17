@@ -169,6 +169,10 @@ import {
   type ProjectDataArchiveLocation,
   type ProjectDataArchiveOwnerRef,
 } from '../archive/contract';
+import {
+  BROWSER_SOCKET_ACTOR_ID_HEADER,
+  BROWSER_SOCKET_EXPIRES_AT_HEADER,
+} from '../browser-socket-auth';
 import { projectDataPorts } from '../do/ports';
 import type { ValidateProjectEventWakeRecoveryAuthorityInput } from '../do/project-events-wake-delivery';
 import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from '../do/prompt-delivery';
@@ -3427,7 +3431,8 @@ export async function getHandoffPacketsForTask(env: Env, projectId: string, task
 export async function forwardWebSocket(
   env: Env,
   projectId: string,
-  request: Request
+  request: Request,
+  authorization: { actorId: string; expiresAt: number }
 ): Promise<Response> {
   // A WebSocket upgrade creates no state a repeat could duplicate; a retried attempt simply
   // accepts a fresh socket if the first one never reached the object.
@@ -3438,8 +3443,31 @@ export async function forwardWebSocket(
     (stub) => {
       const url = new URL(request.url);
       url.pathname = '/ws';
-      return stub.fetch(new Request(url.toString(), request));
+      const forwardedRequest = new Request(url.toString(), request);
+      // Never trust similarly named browser headers: the authenticated route overwrites both
+      // values before this request crosses into the Durable Object.
+      forwardedRequest.headers.set(BROWSER_SOCKET_ACTOR_ID_HEADER, authorization.actorId);
+      forwardedRequest.headers.set(
+        BROWSER_SOCKET_EXPIRES_AT_HEADER,
+        String(authorization.expiresAt)
+      );
+      return stub.fetch(forwardedRequest);
     },
+    'idempotent_read'
+  );
+}
+
+/** Close all browser sockets bound to an actor after their project access is revoked. */
+export function revokeBrowserSocketsForActor(
+  env: Env,
+  projectId: string,
+  actorId: string
+): Promise<number> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'revokeBrowserSocketsForActor',
+    (stub) => stub.revokeBrowserSocketsForActor(actorId),
     'idempotent_read'
   );
 }
