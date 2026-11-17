@@ -72,3 +72,24 @@ point (`installAdminSettingDefinitions`).
 - Every outbound speech fetch uses `guardedFetch`; outbound-fetch baseline not raised.
 - Audio size (`MAX_AUDIO_SIZE_BYTES`), TTS text/chunk limits and the endpoint timeout stay configurable.
 - `src/index.ts` never reaches `src/selfhost/` (import-graph test).
+
+## Takeover validation (2026-11-17)
+
+Task 01M7NBJG2R8Z6W3R5AZJQ2FZ6B resumes existing PR #2840 and branch. Main merged with
+#2841 safe deploy workflow (0c672ddbf); `quality:no-secret-readback` passes.
+
+- [x] Resolve Codex synthesis voice P1: require configured voice before advertising TTS; route regression.
+- [x] Resolve non-audio response P1: reject declared non-audio media before caching; JSON/HTML route regressions.
+- [x] Resolve response bound P2: `speech.synthesis.maxAudioBytes` (8 MiB default, max32 MiB), streamed byte
+  counter and declared-length precheck; cancellation/no-cache regressions and exact-boundary controls.
+- [x] Resolve partial-cache P2: disable endpoint partial caching, preserving Workers AI caching. Endpoint,
+  model and voice changes across failed request/retry exercise real routes/settings and final R2 output.
+- [x] Resolve capability browser-cache P2: no-store without Workers AI; Cloudflare public config unchanged.
+- [x] Focused7files153tests pass. Mutation checks fail for removed voice/MIME/size/cache guards, then restored.
+- [x] Security/Cloudflare/completion delta reviews PASS (no blockers); prior unchanged-area evidence retained.
+- [ ] New-head full CI, live Cloudflare staging, cleanup/release, coordinator hold lift, normal merge.
+
+OpenAI speech reference verified Nov17: https://developers.openai.com/api/reference/resources/audio/subresources/speech/methods/create
+requires voice. Compatibility providers should configure their own valid voice. Missing audio MIME is accepted for
+compatible raw-byte endpoints; known non-audio is refused. Endpoint partial retries now spend regeneration calls
+instead of introducing a new cache-identity contract. The existing final-audio cache behavior is unchanged.

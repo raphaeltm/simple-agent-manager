@@ -125,10 +125,11 @@ function postSynthesize(env: Env, storageId = 'msg-1') {
 
 function workersAi() {
   return {
-    run: vi.fn(async (_model: string, _input: unknown, options?: { returnRawResponse?: boolean }) =>
-      options?.returnRawResponse
-        ? new Response(AUDIO_BYTES, { headers: { 'Content-Type': 'audio/mpeg' } })
-        : { text: 'from whisper on Workers AI' }
+    run: vi.fn(
+      async (_model: string, _input: unknown, options?: { returnRawResponse?: boolean }) =>
+        options?.returnRawResponse
+          ? new Response(AUDIO_BYTES, { headers: { 'Content-Type': 'audio/mpeg' } })
+          : { text: 'from whisper on Workers AI' }
     ),
   };
 }
@@ -282,14 +283,126 @@ describe('server read-aloud through an OpenAI-compatible endpoint', () => {
     expect((await resolvePublicPlatformCapabilities(env)).textToSpeech).toBe(true);
   });
 
+  it('keeps synthesis unavailable until a voice is configured', async () => {
+    const { env } = boxEnv();
+    await configure(env, {
+      'speech.synthesis.baseUrl': 'https://tts.example.com/v1',
+      'speech.synthesis.model': 'tts-1',
+    });
+    expect((await resolvePublicPlatformCapabilities(env)).textToSpeech).toBe(false);
+    expect((await postSynthesize(env)).status).toBe(404);
+    expect(fetchMock).not.toHaveBeenCalled();
+    await configure(env, { 'speech.synthesis.voice': 'alloy' });
+    fetchMock.mockResolvedValueOnce(new Response(AUDIO_BYTES));
+    expect((await postSynthesize(env)).status).toBe(200);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1].body)).voice).toBe('alloy');
+  });
+
+  it.each(['application/json', 'text/html'])(
+    'refuses successful %s without caching',
+    async (contentType) => {
+      const { r2, stored } = createR2();
+      const { env } = boxEnv({ R2: r2 });
+      await configure(env, {
+        'speech.synthesis.baseUrl': 'https://tts.example.com/v1',
+        'speech.synthesis.model': 'kokoro',
+        'speech.synthesis.voice': 'af_heart',
+      });
+      fetchMock.mockResolvedValueOnce(
+        new Response('not audio', { headers: { 'Content-Type': contentType } })
+      );
+      expect((await postSynthesize(env)).status).toBe(503);
+      expect(stored.size).toBe(0);
+    }
+  );
+
+  it.each([undefined, '1', '99'])(
+    'bounds response bytes with Content-Length=%s and cancels the body',
+    async (length) => {
+      const { r2, stored } = createR2();
+      const { env } = boxEnv({ R2: r2 });
+      await configure(env, {
+        'speech.synthesis.baseUrl': 'https://tts.example.com/v1',
+        'speech.synthesis.model': 'kokoro',
+        'speech.synthesis.voice': 'af_heart',
+        'speech.synthesis.maxAudioBytes': 4,
+      });
+      const cancel = vi.fn();
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(AUDIO_BYTES);
+        },
+        cancel,
+      });
+      fetchMock.mockResolvedValueOnce(
+        new Response(stream, {
+          headers: {
+            'Content-Type': 'audio/mpeg',
+            ...(length ? { 'Content-Length': length } : {}),
+          },
+        })
+      );
+      expect((await postSynthesize(env)).status).toBe(503);
+      expect(cancel).toHaveBeenCalledTimes(1);
+      expect(stored.size).toBe(0);
+      // The configured boundary admits exactly four bytes.
+      fetchMock.mockResolvedValueOnce(new Response(AUDIO_BYTES.slice(0, 4)));
+      expect((await postSynthesize(env)).status).toBe(200);
+    }
+  );
+
+  it('regenerates every partial chunk after the backend settings change', async () => {
+    const { r2, stored } = createR2();
+    const { env } = boxEnv({ R2: r2, TTS_CHUNK_SIZE: '40' });
+    await configure(env, {
+      'speech.synthesis.baseUrl': 'https://old.example.com/v1',
+      'speech.synthesis.model': 'kokoro',
+      'speech.synthesis.voice': 'af_heart',
+    });
+    const request = () =>
+      app().request(
+        '/api/tts/synthesize',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: 'A short sentence here. Another sentence to read. A final sentence now.',
+            storageId: 'partial',
+          }),
+        },
+        env
+      );
+    fetchMock.mockResolvedValueOnce(new Response(AUDIO_BYTES));
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 503 }));
+    expect((await request()).status).toBe(503);
+    expect(stored.size).toBe(0);
+    await configure(env, {
+      'speech.synthesis.baseUrl': 'https://new.example.com/v1',
+      'speech.synthesis.model': 'tts-1',
+      'speech.synthesis.voice': 'alloy',
+    });
+    fetchMock.mockClear();
+    fetchMock.mockImplementation(async () => new Response(AUDIO_BYTES));
+    expect((await request()).status).toBe(200);
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
+    for (const [url, init] of fetchMock.mock.calls) {
+      expect(url).toBe('https://new.example.com/v1/audio/speech');
+      expect(JSON.parse(String(init.body))).toMatchObject({ model: 'tts-1', voice: 'alloy' });
+    }
+    expect(stored.size).toBe(1); // only final audio, never partial backend chunks
+  });
+
   it('rate-limits per user and hides endpoint errors from the client', async () => {
     const { env } = boxEnv();
     await configure(env, {
       'speech.synthesis.baseUrl': 'https://tts.example.com/v1',
       'speech.synthesis.model': 'kokoro',
+      'speech.synthesis.voice': 'af_heart',
       'speech.synthesis.maxRequestsPerHour': 1,
     });
-    fetchMock.mockResolvedValue(new Response('upstream says: tts.example.com quota', { status: 400 }));
+    fetchMock.mockResolvedValue(
+      new Response('upstream says: tts.example.com quota', { status: 400 })
+    );
 
     const failed = await postSynthesize(env);
     expect(failed.status).toBe(503);
@@ -306,6 +419,7 @@ describe('server read-aloud through an OpenAI-compatible endpoint', () => {
     await configure(env, {
       'speech.synthesis.baseUrl': 'https://tts.example.com/v1',
       'speech.synthesis.model': 'kokoro',
+      'speech.synthesis.voice': 'af_heart',
     });
     fetchMock.mockResolvedValueOnce(new Response('busy', { status: 503 }));
     fetchMock.mockResolvedValue(new Response(AUDIO_BYTES));
@@ -321,6 +435,7 @@ describe('server read-aloud through an OpenAI-compatible endpoint', () => {
     await configure(env, {
       'speech.synthesis.baseUrl': 'https://tts.example.com/v1',
       'speech.synthesis.model': 'kokoro',
+      'speech.synthesis.voice': 'af_heart',
     });
     fetchMock.mockResolvedValueOnce(new Response(new Uint8Array()));
 
@@ -335,6 +450,7 @@ describe('server read-aloud through an OpenAI-compatible endpoint', () => {
     await configure(env, {
       'speech.synthesis.baseUrl': 'https://tts.example.com/v1',
       'speech.synthesis.model': 'kokoro',
+      'speech.synthesis.voice': 'af_heart',
     });
     fetchMock.mockImplementation(async () => new Response(AUDIO_BYTES));
 
@@ -343,13 +459,18 @@ describe('server read-aloud through an OpenAI-compatible endpoint', () => {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: 'One short sentence here. '.repeat(40), storageId: 'msg-long' }),
+        body: JSON.stringify({
+          text: 'One short sentence here. '.repeat(40),
+          storageId: 'msg-long',
+        }),
       },
       env
     );
     expect(res.status).toBe(200);
     const sent = fetchMock.mock.calls
-      .map(([, init]) => (JSON.parse(String((init as RequestInit).body)) as { input: string }).input)
+      .map(
+        ([, init]) => (JSON.parse(String((init as RequestInit).body)) as { input: string }).input
+      )
       .join(' ');
     // chunk size x (max chunks - 1) = 80 characters of the 1,000 sent.
     expect(sent.replace(/\s+/g, ' ').trim().length).toBeLessThanOrEqual(80);
@@ -375,6 +496,7 @@ describe('server read-aloud through an OpenAI-compatible endpoint', () => {
     await configure(env, {
       'speech.synthesis.baseUrl': 'https://tts.example.com/v1',
       'speech.synthesis.model': 'kokoro',
+      'speech.synthesis.voice': 'af_heart',
     });
     expect((await postSynthesize(env)).status).toBe(400);
     expect((await resolvePublicPlatformCapabilities(env)).textToSpeech).toBe(false);
@@ -391,6 +513,7 @@ describe('Cloudflare behaviour is unchanged', () => {
       'speech.transcription.model': 'whisper-large-v3',
       'speech.synthesis.baseUrl': 'https://tts.example.com/v1',
       'speech.synthesis.model': 'kokoro',
+      'speech.synthesis.voice': 'af_heart',
     });
     const transcription = vi.spyOn(speechEndpointBackend, 'transcription');
     const synthesis = vi.spyOn(speechEndpointBackend, 'synthesis');
@@ -449,6 +572,7 @@ describe('capabilities', () => {
     await configure(env, {
       'speech.synthesis.baseUrl': 'https://tts.example.com/v1',
       'speech.synthesis.model': 'kokoro',
+      'speech.synthesis.voice': 'af_heart',
     });
     vi.spyOn(speechEndpointBackend, 'transcription').mockRejectedValueOnce(new Error('boom'));
 
@@ -469,9 +593,8 @@ describe('settings registration', () => {
 
   it('installing twice is a no-op, and a clashing name is refused', async () => {
     expect(() => installSpeechEndpoints()).not.toThrow();
-    const { installAdminSettingDefinitions } = await import(
-      '../../../src/services/admin-settings-registry'
-    );
+    const { installAdminSettingDefinitions } =
+      await import('../../../src/services/admin-settings-registry');
     const clash = { ...findAdminSetting('speech.synthesis.model')! };
     expect(() => installAdminSettingDefinitions([clash])).toThrow(/already registered/);
   });

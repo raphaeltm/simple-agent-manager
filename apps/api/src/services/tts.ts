@@ -160,6 +160,9 @@ export async function generateSpeechAudio(
   const chunkSize = config.chunkSize ?? DEFAULT_TTS_CHUNK_SIZE;
   const maxChunks = config.maxChunks ?? DEFAULT_TTS_MAX_CHUNKS;
   const chunks = splitTextIntoChunks(text, chunkSize);
+  // Endpoint settings can change between retries. Regenerate endpoint chunks from one
+  // snapshot; only Workers AI uses the historical partial-chunk cache.
+  const chunkCache = isSynthesisBackend(ai) ? undefined : r2;
 
   if (chunks.length === 1) {
     const [chunk] = chunks;
@@ -192,9 +195,9 @@ export async function generateSpeechAudio(
   const audioBuffers: ArrayBuffer[] = [];
   for (const [i, chunkText] of chunks.entries()) {
     // Try per-chunk R2 cache first
-    if (r2 && storageId && userId) {
+    if (chunkCache && storageId && userId) {
       const chunkKey = buildChunkR2Key(storageId, userId, i, chunkText, config);
-      const cachedChunk = await r2.get(chunkKey);
+      const cachedChunk = await chunkCache.get(chunkKey);
       if (cachedChunk) {
         const cachedBuffer = await cachedChunk.arrayBuffer();
         audioBuffers.push(cachedBuffer);
@@ -212,10 +215,10 @@ export async function generateSpeechAudio(
     audioBuffers.push(buffer);
 
     // Store individual chunk in R2 for future partial recovery
-    if (r2 && storageId && userId) {
+    if (chunkCache && storageId && userId) {
       const chunkKey = buildChunkR2Key(storageId, userId, i, chunkText, config);
       const encoding = config.encoding ?? DEFAULT_TTS_ENCODING;
-      await r2
+      await chunkCache
         .put(chunkKey, buffer, {
           httpMetadata: { contentType: audioContentType(encoding) },
         })
@@ -242,11 +245,11 @@ export async function generateSpeechAudio(
   // Best-effort cleanup of per-chunk R2 objects now that final audio will be stored.
   // Chunks are only needed for retry recovery during generation; the final concatenated
   // audio is what getAudioFromR2 serves.
-  if (r2 && storageId && userId) {
+  if (chunkCache && storageId && userId) {
     const chunkKeys = chunks.map((chunkText, i) =>
       buildChunkR2Key(storageId, userId, i, chunkText, config)
     );
-    await Promise.allSettled(chunkKeys.map((key) => r2.delete(key))).catch(() => {
+    await Promise.allSettled(chunkKeys.map((key) => chunkCache.delete(key))).catch(() => {
       // Non-fatal: cleanup failure doesn't affect the result
     });
   }

@@ -5,7 +5,7 @@
  * or Kokoro-FastAPI.
  *
  * Only the self-host entry registers these (`installSpeechEndpoints`), so a Cloudflare admin
- * never sees them. Nothing changes until an admin sets a base URL and a model. Keys are stored
+ * never sees them. Setup needs a base URL and a model, plus a voice for synthesis. Keys are stored
  * encrypted in `platform_credentials` like the LLM endpoint key.
  */
 import { classifyHost } from '@simple-agent-manager/worker-core';
@@ -29,6 +29,9 @@ export const DEFAULT_SPEECH_ENDPOINT_TIMEOUT_MS = 60_000;
  * (`speech.synthesis.maxRequestsPerHour`). Each one spends the admin's endpoint.
  */
 export const DEFAULT_SPEECH_SYNTHESIS_REQUESTS_PER_HOUR = 120;
+
+/** Per-chunk audio ceiling; about two minutes of uncompressed mono speech. */
+export const DEFAULT_SPEECH_SYNTHESIS_MAX_AUDIO_BYTES = 8 * 1024 * 1024;
 
 const MAX_URL_LENGTH = 2048;
 const MAX_API_KEY_LENGTH = 4096;
@@ -123,7 +126,8 @@ function definition(kind: SpeechEndpointKind, key: CommonKey | 'voice'): AdminSe
     case 'voice':
       return {
         ...base,
-        description: 'Voice id on the text-to-speech endpoint (for example alloy). Optional.',
+        description:
+          'Voice id on the text-to-speech endpoint (for example alloy). Required to enable read-aloud.',
         validate: validId,
       };
     case 'allowPrivateNetwork':
@@ -142,6 +146,13 @@ export const SPEECH_ENDPOINT_SETTINGS: readonly AdminSettingDefinition[] = [
   ...COMMON_KEYS.map((key) => definition('transcription', key)),
   ...COMMON_KEYS.map((key) => definition('synthesis', key)),
   definition('synthesis', 'voice'),
+  integerDefinition(
+    speechSettingName('synthesis', 'maxAudioBytes'),
+    DEFAULT_SPEECH_SYNTHESIS_MAX_AUDIO_BYTES,
+    'AI models',
+    'Maximum audio response bytes per read-aloud chunk. Oversized responses are refused before caching.',
+    { min: 1, max: 32 * 1024 * 1024 }
+  ),
   integerDefinition(
     speechSettingName(null, 'endpointTimeoutMs'),
     DEFAULT_SPEECH_ENDPOINT_TIMEOUT_MS,

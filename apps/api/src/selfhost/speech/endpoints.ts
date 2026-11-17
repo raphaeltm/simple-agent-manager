@@ -15,6 +15,7 @@ import { resolveAdminSettingDetailsMany } from '../../services/admin-settings-re
 import { outboundMaxRedirectsValue } from '../../services/outbound-fetch-settings';
 import {
   DEFAULT_SPEECH_ENDPOINT_TIMEOUT_MS,
+  DEFAULT_SPEECH_SYNTHESIS_MAX_AUDIO_BYTES,
   type SpeechEndpointKind,
   speechSettingName,
   validSpeechBaseUrl,
@@ -32,6 +33,7 @@ export interface SpeechEndpoint {
   maxRedirects: number;
   /** Per-request budget (`speech.endpointTimeoutMs`). */
   timeoutMs: number;
+  maxAudioBytes: number;
 }
 
 export class SpeechEndpointError extends Error {
@@ -50,7 +52,7 @@ function stringValue(value: unknown): string | null {
 }
 
 /**
- * The configured endpoint, or null when it is not configured (no base URL or no model), when the
+ * The configured endpoint, or null without a base URL, model (or synthesis voice), when the
  * settings cannot be read, or when its host is private and the admin has not opted in. Null keeps
  * the feature off, as on an installation that never set it up.
  */
@@ -68,6 +70,7 @@ export async function resolveSpeechEndpoint(
       speechSettingName('synthesis', 'voice'),
       speechSettingName(null, 'endpointTimeoutMs'),
       'outbound.maxRedirects',
+      speechSettingName('synthesis', 'maxAudioBytes'),
     ]);
     values = details.map((detail) => detail.value);
   } catch (err) {
@@ -77,9 +80,11 @@ export async function resolveSpeechEndpoint(
     });
     return null;
   }
-  const [baseUrl, apiKey, model, allowPrivate, voice, timeout, maxRedirects] = values;
+  const [baseUrl, apiKey, model, allowPrivate, voice, timeout, maxRedirects, maxAudioBytes] =
+    values;
   const modelId = stringValue(model);
   if (!validSpeechBaseUrl(kind, baseUrl) || !modelId) return null;
+  if (kind === 'synthesis' && !stringValue(voice)) return null;
   const normalized = String(baseUrl).trim().replace(/\/+$/, '');
   const allowPrivateNetwork = allowPrivate === true;
   if (!allowPrivateNetwork && classifyHost(new URL(normalized).hostname) === 'private') {
@@ -94,6 +99,10 @@ export async function resolveSpeechEndpoint(
     voice: kind === 'synthesis' ? stringValue(voice) : null,
     allowPrivateNetwork,
     maxRedirects: outboundMaxRedirectsValue(maxRedirects),
+    maxAudioBytes:
+      typeof maxAudioBytes === 'number' && Number.isInteger(maxAudioBytes) && maxAudioBytes > 0
+        ? maxAudioBytes
+        : DEFAULT_SPEECH_SYNTHESIS_MAX_AUDIO_BYTES,
     timeoutMs:
       typeof timeout === 'number' && Number.isInteger(timeout) && timeout > 0
         ? timeout
@@ -159,5 +168,50 @@ export async function synthesizeWithEndpoint(
       ...(endpoint.voice ? { voice: endpoint.voice } : {}),
     }),
   });
-  return response.arrayBuffer();
+  const contentType = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
+  if (
+    contentType &&
+    !contentType.startsWith('audio/') &&
+    contentType !== 'application/octet-stream'
+  ) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new SpeechEndpointError(
+      'synthesis',
+      response.status,
+      'The synthesis endpoint returned non-audio content'
+    );
+  }
+  return readAudio(response, endpoint.maxAudioBytes);
+}
+
+/** Bound actual streamed bytes even when Content-Length is absent or untruthful. */
+async function readAudio(response: Response, maxBytes: number): Promise<ArrayBuffer> {
+  const reader = response.body?.getReader();
+  if (!reader) return new ArrayBuffer(0);
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    if (Number(response.headers.get('content-length')) > maxBytes) {
+      throw new Error('Speech audio exceeds configured byte limit');
+    }
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) throw new Error('Speech audio exceeds configured byte limit');
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return bytes.buffer;
+  } catch (err) {
+    await reader.cancel().catch(() => undefined);
+    throw err;
+  } finally {
+    reader.releaseLock();
+  }
 }

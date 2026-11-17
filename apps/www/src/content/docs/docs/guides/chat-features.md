@@ -641,7 +641,10 @@ Agent responses can be played back as audio. SAM uses Deepgram Aura 2 (via Worke
 Voice input and server read-aloud need the Workers AI binding. On a runtime without it, a
 self-host build whose entry installs the speech backend (`installSpeechEndpoints()` in
 `apps/api/src/selfhost/speech/`) can send them to OpenAI-compatible speech endpoints its admin
-configures; the Cloudflare Worker never installs it. An installation with neither, or
+configures; the Cloudflare Worker never installs it. Endpoint synthesis needs a base URL, model
+and voice. `speech.synthesis.maxAudioBytes` caps each response (8 MiB by default); known non-audio
+responses are refused before caching. Endpoint retries regenerate partial audio so changed model
+or voice settings cannot mix chunks. An installation with neither, or
 with `TTS_ENABLED` set to `false`, reports that through
 [`GET /api/config/platform-capabilities`](/docs/reference/api/), and the app hides the microphone
 (and, for TTS, plays read-aloud through the browser's own speech synthesis) instead of showing a
