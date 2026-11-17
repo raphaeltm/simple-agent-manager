@@ -780,8 +780,8 @@ test.describe('Default capacity pool scope surfaces', () => {
 
     const warning = page.getByText(/No allowed machine can run a default workspace/);
     await expect(warning).toBeVisible();
-    await expect(warning).toContainText('It needs 8 vCPU and 16 GB of memory');
-    await expect(warning).toContainText('at least 8 vCPU and 17 GB of memory');
+    await expect(warning).toContainText('It needs 8 vCPU, 16 GB of memory and 40 GB of disk');
+    await expect(warning).toContainText('at least 8 vCPU, 17 GB of memory and 40 GB of disk');
     await expect(page.getByText(/Your work uses the shared compute pool/)).toBeVisible();
     await assertNoOverflow(page);
     await screenshotNearHeading(

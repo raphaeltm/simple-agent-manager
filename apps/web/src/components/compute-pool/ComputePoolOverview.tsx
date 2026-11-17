@@ -5,6 +5,7 @@ import type {
 import {
   DEFAULT_CAPACITY_POOL_DEPLOYMENT_STRATEGY,
   DEFAULT_CAPACITY_POOL_MAX_NODES,
+  isCapacitySourceExcluded,
 } from '@simple-agent-manager/shared';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
@@ -186,7 +187,11 @@ export function ComputePoolOverview({
   const warning =
     (summary.effectiveState ? POOL_STATE_WARNINGS[summary.effectiveState] : undefined) ??
     (allowedCount === 0 ? POOL_STATE_WARNINGS['configured-empty'] : undefined) ??
-    defaultWorkspaceFitWarning(groups, placementSettings);
+    // A switched-off account keeps its picks but is never placed on, so its machines cannot fit.
+    defaultWorkspaceFitWarning(
+      groups.filter((group) => !isCapacitySourceExcluded(pool, group.key)),
+      placementSettings
+    );
   const sentence = allowedMachinesSentence(groups);
   const strategy = WORKSPACE_STRATEGY_COPY[pool.strategy];
   const exhaustion = EXHAUSTION_POLICY_COPY[pool.exhaustionPolicy];

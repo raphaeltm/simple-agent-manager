@@ -30,20 +30,27 @@ export function defaultWorkspaceFitWarning(
   if (allowed.length === 0) return null;
   const neededMemoryMb = defaults.minMemoryGb * 1024;
   // A machine of unknown size counts as a fit: say nothing rather than warn about a guess.
+  // Disk mirrors placement (`capacityCandidateSatisfiesReservation`): checked only when known,
+  // with no host reserve.
   const fits = allowed.some(
-    ({ vcpu, ramGb }) =>
+    ({ vcpu, ramGb, diskGb }) =>
       vcpu === null ||
       ramGb === null ||
-      (vcpu >= defaults.minVcpu && ramGb * 1024 - reserveMb >= neededMemoryMb)
+      (vcpu >= defaults.minVcpu &&
+        ramGb * 1024 - reserveMb >= neededMemoryMb &&
+        (diskGb === null || diskGb >= defaults.minDiskGb))
   );
   if (fits) return null;
   const totalGb = (neededMemoryMb + reserveMb) / 1024;
   return (
     `No allowed machine can run a default workspace. It needs ` +
-    `${formatOfferingNumber(defaults.minVcpu, '')} vCPU and ` +
-    `${formatOfferingNumber(defaults.minMemoryGb, 'GB')} of memory, and each machine keeps ` +
-    `${formatOfferingNumber(reserveMb / 1024, 'GB')} for itself. Allow a machine with at least ` +
-    `${formatOfferingNumber(defaults.minVcpu, '')} vCPU and ${formatOfferingNumber(totalGb, 'GB')} ` +
-    `of memory, or workspaces this pool starts at the default size will fail to start.`
+    `${formatOfferingNumber(defaults.minVcpu, '')} vCPU, ` +
+    `${formatOfferingNumber(defaults.minMemoryGb, 'GB')} of memory and ` +
+    `${formatOfferingNumber(defaults.minDiskGb, 'GB')} of disk, and each machine keeps ` +
+    `${formatOfferingNumber(reserveMb / 1024, 'GB')} of memory for itself. Allow a machine with ` +
+    `at least ${formatOfferingNumber(defaults.minVcpu, '')} vCPU, ` +
+    `${formatOfferingNumber(totalGb, 'GB')} of memory and ` +
+    `${formatOfferingNumber(defaults.minDiskGb, 'GB')} of disk, or workspaces this pool starts ` +
+    `at the default size will fail to start.`
   );
 }

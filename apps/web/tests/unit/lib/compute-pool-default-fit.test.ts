@@ -4,7 +4,12 @@ import { defaultWorkspaceFitWarning } from '../../../src/lib/compute-pool-defaul
 import type { MachineGroup, MachineTypeRow } from '../../../src/lib/compute-pool-machines';
 import { resolveWizardRuntime } from '../../../src/pages/project-chat/profileWizardHelpers';
 
-function row(vcpu: number | null, ramGb: number | null, allowed = true): MachineTypeRow {
+function row(
+  vcpu: number | null,
+  ramGb: number | null,
+  allowed = true,
+  diskGb: number | null = 40
+): MachineTypeRow {
   return {
     key: `m-${vcpu}-${ramGb}-${allowed}`,
     provider: 'hetzner',
@@ -12,7 +17,7 @@ function row(vcpu: number | null, ramGb: number | null, allowed = true): Machine
     sku: `m-${vcpu}-${ramGb}`,
     vcpu,
     ramGb,
-    diskGb: 40,
+    diskGb,
     cells: [],
     allowed,
   };
@@ -53,8 +58,21 @@ describe('defaultWorkspaceFitWarning', () => {
 
   it('warns when memory fits but vCPU does not', () => {
     expect(defaultWorkspaceFitWarning(groups(row(1, 32)), settings(2, 4, 1024))).toContain(
-      'at least 2 vCPU and 5 GB of memory'
+      'at least 2 vCPU, 5 GB of memory and 15 GB of disk'
     );
+  });
+
+  it('warns when vCPU and memory fit but the known disk is too small, as placement refuses it', () => {
+    expect(defaultWorkspaceFitWarning(groups(row(4, 8, true, 10)), settings(2, 4, 1024))).toContain(
+      '15 GB of disk'
+    );
+    // Unknown disk is not checked, as in placement.
+    expect(
+      defaultWorkspaceFitWarning(groups(row(4, 8, true, null)), settings(2, 4, 1024))
+    ).toBeNull();
+    expect(
+      defaultWorkspaceFitWarning(groups(row(4, 8, true, 15)), settings(2, 4, 1024))
+    ).toBeNull();
   });
 
   it('counts only allowed machines', () => {
@@ -84,7 +102,7 @@ describe('defaultWorkspaceFitWarning', () => {
   it('uses the installation reserve as given, including none and fractions of a GB', () => {
     expect(defaultWorkspaceFitWarning(groups(row(2, 4)), settings(2, 4, 0))).toBeNull();
     expect(defaultWorkspaceFitWarning(groups(row(2, 4)), settings(2, 4, 512))).toContain(
-      'keeps 0.5 GB for itself. Allow a machine with at least 2 vCPU and 4.5 GB of memory'
+      'keeps 0.5 GB of memory for itself. Allow a machine with at least 2 vCPU, 4.5 GB of memory'
     );
   });
 });

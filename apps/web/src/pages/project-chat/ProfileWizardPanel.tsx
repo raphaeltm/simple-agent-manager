@@ -349,10 +349,11 @@ export function NoAgentsNotice({ projectId }: Readonly<{ projectId: string }>) {
   );
 }
 
+// 56px: primary actions on mobile (apps/web/AGENTS.md, UI Agent Rules).
 const GATE_PRIMARY_BUTTON =
-  'min-h-[44px] rounded-md border-0 bg-accent px-4 py-2 text-sm font-semibold text-white flex items-center justify-center gap-1.5 disabled:opacity-60';
+  'min-h-[56px] rounded-md border-0 bg-accent px-4 py-2 text-sm font-semibold text-white flex items-center justify-center gap-1.5 disabled:opacity-60';
 const GATE_SECONDARY_BUTTON =
-  'min-h-[44px] rounded-md border border-border-default bg-transparent px-4 py-2 text-sm font-medium text-fg-primary flex items-center justify-center gap-1.5 disabled:opacity-60';
+  'min-h-[56px] rounded-md border border-border-default bg-transparent px-4 py-2 text-sm font-medium text-fg-primary flex items-center justify-center gap-1.5 disabled:opacity-60';
 
 export function NoProfilesGate({
   onStartWizard,

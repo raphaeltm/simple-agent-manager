@@ -197,9 +197,9 @@ describe('DefaultCapacityPoolsPanel', () => {
       renderPanel({ scope: 'user' });
 
       const warning = await screen.findByText(/No allowed machine can run a default workspace/);
-      expect(warning).toHaveTextContent('It needs 2 vCPU and 8 GB of memory');
-      expect(warning).toHaveTextContent('keeps 1 GB for itself');
-      expect(warning).toHaveTextContent('at least 2 vCPU and 9 GB of memory');
+      expect(warning).toHaveTextContent('It needs 2 vCPU, 8 GB of memory and 15 GB of disk');
+      expect(warning).toHaveTextContent('keeps 1 GB of memory for itself');
+      expect(warning).toHaveTextContent('at least 2 vCPU, 9 GB of memory and 15 GB of disk');
       expect(screen.getByText(/Your work uses the shared compute pool/)).toBeInTheDocument();
     });
 
@@ -212,7 +212,7 @@ describe('DefaultCapacityPoolsPanel', () => {
 
       expect(
         await screen.findByText(/No allowed machine can run a default workspace/)
-      ).toHaveTextContent('keeps 5 GB for itself');
+      ).toHaveTextContent('keeps 5 GB of memory for itself');
     });
 
     it('shows the pool state warning instead when the pool cannot be used at all', async () => {
@@ -225,6 +225,46 @@ describe('DefaultCapacityPoolsPanel', () => {
       expect(
         await screen.findByText("SAM couldn't read the provider's machine list. Try Refresh.")
       ).toBeInTheDocument();
+      expect(
+        screen.queryByText(/No allowed machine can run a default workspace/)
+      ).not.toBeInTheDocument();
+    });
+
+    /** The shared pool with its 8 GB machine moved to a second account, switched off or not. */
+    function withSecondAccount(switchedOff: boolean) {
+      const body = withInstallationSettings({ minVcpu: 2, minMemoryGb: 4 }, 1024);
+      const effective = body.effective!;
+      const second = { ...effective.sources[0]!, id: 'source-off', platformCredentialId: 'pc-2' };
+      body.effective = {
+        ...effective,
+        pool: { ...effective.pool, excludedSourceIds: switchedOff ? ['source-off'] : [] },
+        sources: [...effective.sources, second],
+        candidates: effective.candidates.map((candidate) =>
+          candidate.providerInstanceType === 'cpx31'
+            ? { ...candidate, capacitySourceId: 'source-off' }
+            : candidate
+        ),
+      };
+      return body;
+    }
+
+    it('ignores machines of a switched-off account, which placement never uses', async () => {
+      // Left on: the 4 GB machine keeps 1 GB, so only the switched-off 8 GB one could fit.
+      mocks.fetchUserDefaultCapacityPools.mockResolvedValue(withSecondAccount(true));
+
+      renderPanel({ scope: 'user' });
+
+      expect(
+        await screen.findByText(/No allowed machine can run a default workspace/)
+      ).toBeInTheDocument();
+    });
+
+    it('counts the same machine when its account is on (control)', async () => {
+      mocks.fetchUserDefaultCapacityPools.mockResolvedValue(withSecondAccount(false));
+
+      renderPanel({ scope: 'user' });
+
+      expect(await screen.findByText(/Allowed machines/)).toBeInTheDocument();
       expect(
         screen.queryByText(/No allowed machine can run a default workspace/)
       ).not.toBeInTheDocument();
