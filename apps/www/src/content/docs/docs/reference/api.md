@@ -1181,9 +1181,9 @@ Connector lists; sam-mcp tool `project_insights`, `apps/api/src/routes/mcp/proje
   `groupBy`): `projectSetups`. `accounts` (`range`): `projectAccounts`. `phases` (`skillId` or
   `agentProfileId`, optional `operation`, `phaseNames` and `windowDays`): median and p90 per
   lifecycle phase from `phaseDurationStats`, over at most the 500 newest successful rows of each
-  operation and phase. Each phase's rows are read newest first through its index and the read stops
-  there, so the cost does not grow with stored history; `truncated` says when older rows were left
-  out. An argument the method does not read, or a missing one it needs, is `invalid_input`.
+  operation and phase. Each (operation, phase) is read newest first from one range of an index
+  keyed on every filter (migration 0260), and the read stops at its sample, so the cost does not
+  grow with stored history; `truncated` says when older rows were left out. An argument the method does not read, or a missing one it needs, is `invalid_input`.
 - Numbers only: no task, pull request or idea titles, no idea notes, no agent questions, no account
   names or credential references, no names of a teammate's profiles. CI check names are kept
   (capped at 100 characters) because they identify a flaky check. Accounts are keyed `account-1`,

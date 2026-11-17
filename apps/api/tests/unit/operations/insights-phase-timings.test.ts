@@ -19,10 +19,13 @@ import {
   createSqliteD1WithBindLimit,
 } from '../../helpers/sqlite-d1';
 
-const MIGRATION = new URL(
-  '../../../src/db/migrations/0250_lifecycle_phase_timings.sql',
-  import.meta.url
-);
+const MIGRATIONS = [
+  new URL('../../../src/db/migrations/0250_lifecycle_phase_timings.sql', import.meta.url),
+  new URL(
+    '../../../src/db/migrations/0260_lifecycle_phase_timings_pair_indexes.sql',
+    import.meta.url
+  ),
+];
 const NOW = 1_794_000_000_000;
 const DAY = 86_400_000;
 
@@ -65,7 +68,7 @@ describe('insights phase timings reads', () => {
 
   beforeEach(() => {
     sqlite = new Database(':memory:');
-    applySqliteMigration(sqlite, MIGRATION);
+    for (const migration of MIGRATIONS) applySqliteMigration(sqlite, migration);
     db = createSqliteD1(sqlite);
   });
 
@@ -201,10 +204,10 @@ describe('insights phase timings reads', () => {
     });
   });
 
-  it('reads a phase shared by two operations into a sample for each', async () => {
-    // VM phases repeat across workspace, sleep and wake: newer workspace rows must not use up
-    // the wake rows' share of the per-phase read.
-    for (let i = 0; i < 5; i += 1) {
+  it('caps each operation of a shared phase separately, so newer rows of one cannot hide another', async () => {
+    // VM phases repeat across workspace, sleep and wake. Twelve newer workspace rows must not use
+    // up the older wake rows' share: a per-phase cap of any multiple of the sample would.
+    for (let i = 0; i < 12; i += 1) {
       insert({ project: 'p', phase: 'git_clone', durationMs: 10 + i, ageMs: DAY - i * 1000 });
     }
     insert({ project: 'p', phase: 'git_clone', durationMs: 90, operation: 'wake', ageMs: 2 * DAY });
@@ -217,15 +220,41 @@ describe('insights phase timings reads', () => {
       now: NOW,
     });
     expect(result.truncated).toBe(true);
-    expect(result.stats.map((stat) => [stat.operation, stat.count])).toEqual([
-      ['wake', 2],
-      ['workspace', 2],
+    expect(result.stats.map((stat) => [stat.operation, stat.count, stat.medianMs])).toEqual([
+      ['wake', 2, 90],
+      ['workspace', 2, 20],
     ]);
   });
 
-  it('reads each phase through its index, never every row of the skill (rule 81)', async () => {
-    // The work bound is per phase: each phase's newest rows come from an index range ordered by
-    // created_at, so history beyond the sample is never read. Checked on the SQL the read issues.
+  it('takes the newest successful rows of a phase past a run of newer failures', async () => {
+    for (let i = 0; i < 20; i += 1) {
+      insert({
+        project: 'p',
+        phase: 'git_clone',
+        durationMs: 1,
+        outcome: 'failure',
+        ageMs: DAY - i,
+      });
+    }
+    insert({ project: 'p', phase: 'git_clone', durationMs: 50, ageMs: 2 * DAY });
+    insert({ project: 'p', phase: 'git_clone', durationMs: 60, ageMs: 3 * DAY });
+    const result = await phaseDurationStats(db, {
+      projectId: 'p',
+      skillId: 'skill-1',
+      sampleLimit: 1,
+      now: NOW,
+    });
+    expect(result).toMatchObject({
+      truncated: true,
+      stats: [{ operation: 'workspace', phase: 'git_clone', count: 1, medianMs: 50 }],
+    });
+  });
+
+  it('reads each (operation, phase) through one index range, never a phase history (rule 81)', async () => {
+    // The work bound is per pair: pairs are listed with MIN seeks on the pair index, and each
+    // pair's sample is one index range keyed on every filter (operation, phase, outcome,
+    // created_at), so it stops at its LIMIT however many older, failed or other-operation rows
+    // exist. Checked on the SQL the read actually issues, for every branch of it.
     const issued: string[] = [];
     const recording = {
       ...db,
@@ -234,19 +263,42 @@ describe('insights phase timings reads', () => {
         return db.prepare(sql);
       },
     } as D1Database;
-    for (const phases of [undefined, ['git_clone', 'devcontainer_up']]) {
+    const variants: Array<{ phases?: string[]; operation?: string; profile?: boolean }> = [
+      {},
+      { phases: ['git_clone', 'devcontainer_up'] },
+      { operation: 'wake' },
+      { profile: true },
+    ];
+    for (const variant of variants) {
       issued.length = 0;
-      await phaseDurationStats(recording, { projectId: 'p', skillId: 'skill-1', phases, now: NOW });
+      await phaseDurationStats(recording, {
+        projectId: 'p',
+        ...(variant.profile ? { agentProfileId: 'profile-1' } : { skillId: 'skill-1' }),
+        phases: variant.phases,
+        operation: variant.operation,
+        now: NOW,
+      });
       expect(issued).toHaveLength(1);
       const binds = (issued[0]!.match(/\?/g) ?? []).map(() => 'x');
       const plan = sqlite
         .prepare(`EXPLAIN QUERY PLAN ${issued[0]}`)
         .all(...binds)
         .map((row) => (row as { detail: string }).detail);
+      const index = variant.profile ? 'profile_pair' : 'skill_pair';
+      const by = variant.profile ? 'agent_profile_id' : 'skill_id';
       expect(plan).toContain(
-        'SEARCH s USING INDEX idx_lifecycle_phase_timings_skill_phase (project_id=? AND skill_id=? AND phase=? AND created_at>?)'
+        `SEARCH s USING COVERING INDEX idx_lifecycle_phase_timings_${index} (project_id=? AND ${by}=? AND operation=? AND phase=? AND outcome=? AND created_at>?)`
       );
-      expect(plan.some((line) => /^SCAN lifecycle_phase_timings\b/.test(line))).toBe(false);
+      // Pair listing: seeks into the next operation or the next phase, never a range on the
+      // first column alone after an equality on it.
+      expect(plan).toContain(
+        `SEARCH lifecycle_phase_timings USING COVERING INDEX idx_lifecycle_phase_timings_${index} (project_id=? AND ${by}=? AND operation=? AND phase>?)`
+      );
+      const tableReads = plan.filter((line) =>
+        /lifecycle_phase_timings|^(SCAN|SEARCH) [st]\b/.test(line)
+      );
+      expect(tableReads.length).toBeGreaterThan(5);
+      expect(tableReads.filter((line) => !line.startsWith('SEARCH'))).toEqual([]);
     }
   });
 

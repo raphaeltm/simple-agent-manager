@@ -23,13 +23,6 @@ export const DEFAULT_PHASE_STATS_SAMPLE_LIMIT = 500;
 export const MAX_PHASE_STATS_SAMPLE_LIMIT = 20_000;
 /** Rows one stats read returns in total, whatever the number of phases (a memory bound). */
 export const MAX_PHASE_STATS_TOTAL_ROWS = 20_000;
-/**
- * Operations that can store one phase name: the VM vocabulary is shared by `workspace`, `sleep`
- * and `wake` (`provision` rows have no project); runner steps have their own operations. A phase
- * reads at most this many samples' worth of its newest rows, so every operation can fill its own
- * sample.
- */
-export const PHASE_STATS_OPERATIONS_PER_PHASE = 3;
 export const DEFAULT_PHASE_STATS_WINDOW_DAYS = 30;
 export const MAX_PHASE_STATS_WINDOW_DAYS = 365;
 /** Distinct phases one stats call may ask for (the VM vocabulary plus runner steps fit). */
@@ -139,7 +132,7 @@ export function nearestRankPercentile(sorted: readonly number[], fraction: numbe
  * Median and p90 duration per phase for one skill or one profile in one project over the last
  * `windowDays`, from successful phases only (a failed phase's time says nothing about the usual),
  * over at most `sampleLimit` newest rows per (operation, phase). One query on
- * `idx_lifecycle_phase_timings_skill_phase` / `_profile_phase`.
+ * `idx_lifecycle_phase_timings_skill_pair` / `_profile_pair` (migration 0260).
  */
 export async function phaseDurationStats(
   db: D1Database,
@@ -169,62 +162,90 @@ export async function phaseDurationStats(
     MAX_PHASE_STATS_SAMPLE_LIMIT
   );
   const since = (input.now ?? Date.now()) - windowDays * DAY_MS;
-  const phaseScanLimit = (sampleLimit + 1) * PHASE_STATS_OPERATIONS_PER_PHASE;
 
-  // The database work is bounded by phases, not by history: the phase list comes from index
-  // seeks (one per stored phase, or the caller's list), and each phase reads only its newest
-  // `phaseScanLimit` rows in index order. A year of rows costs what a day costs.
+  // The database work is bounded by the (operation, phase) pairs, not by history. The pairs come
+  // from index seeks, one per stored pair. Each pair's sample is one range of the pair index,
+  // whose key holds every filter (operation, phase, outcome, created_at), so it reads its newest
+  // successful rows and stops at its LIMIT: a year of rows costs what a day costs, and a rare
+  // operation or a run of failures cannot make it walk further.
   // The cap is per (operation, phase), never global: a newest-first LIMIT over every phase lets
-  // one frequent phase crowd the others out of the sample (rule 65). One extra row per group shows
-  // whether that group was cut, and a phase that filled its scan may have older rows unread. The
-  // total bound is ordered by row number, so it trims every group's oldest rows first.
-  const phaseList =
-    phases === null
-      ? `SELECT MIN(phase) FROM lifecycle_phase_timings
-          WHERE project_id = ? AND ${byColumn} = ?
-         UNION ALL
-         SELECT (SELECT MIN(phase) FROM lifecycle_phase_timings
-                  WHERE project_id = ? AND ${byColumn} = ? AND phase > phases.phase)
-           FROM phases WHERE phases.phase IS NOT NULL`
-      : `VALUES ${phases.map(() => '(?)').join(', ')}`;
-  const operationFilter = input.operation !== undefined ? 'AND s.operation = ?' : '';
+  // one frequent group crowd the others out of the sample (rule 65). One extra row per group shows
+  // whether that group was cut. The total bound is ordered by row number, so it trims every
+  // group's oldest rows first.
+  // Pairs are listed in index order with MIN seeks, never with a row-value comparison, which
+  // SQLite seeks on its first column only (and would re-walk the current operation's rows each
+  // step): the next phase of the same operation, else the first phase of the next operation.
+  const scope = `project_id = ? AND ${byColumn} = ?`;
+  const nextPhase = `(SELECT MIN(phase) FROM lifecycle_phase_timings
+     WHERE ${scope} AND operation = pairs.operation AND phase > pairs.phase)`;
+  const nextOperation = `(SELECT MIN(operation) FROM lifecycle_phase_timings
+     WHERE ${scope} AND operation > pairs.operation)`;
+  const phaseFilter = phases === null ? '' : `AND p.phase IN (${phases.map(() => '?').join(', ')})`;
+  const operationFilter = input.operation !== undefined ? 'AND p.operation = ?' : '';
+  const scopeBinds = [projectId, byId];
   const bindings: Array<string | number> = [
-    ...(phases ?? [projectId, byId, projectId, byId]),
-    projectId,
-    byId,
+    // Anchor: the first operation, then its first phase.
+    ...scopeBinds,
+    ...scopeBinds,
+    // Step: nextPhase twice, nextOperation twice, then the next operation's first phase.
+    ...scopeBinds,
+    ...scopeBinds,
+    ...scopeBinds,
+    ...scopeBinds,
+    ...scopeBinds,
+    // Each pair's sample.
+    ...scopeBinds,
     since,
+    sampleLimit + 1,
+    ...(phases ?? []),
   ];
   if (input.operation !== undefined) bindings.push(input.operation);
-  bindings.push(phaseScanLimit, sampleLimit + 1, MAX_PHASE_STATS_TOTAL_ROWS);
+  bindings.push(MAX_PHASE_STATS_TOTAL_ROWS);
 
   const result = await db
     .prepare(
-      `WITH RECURSIVE phases(phase) AS (${phaseList}),
+      `WITH RECURSIVE pairs(operation, phase) AS (
+         SELECT first.operation,
+                (SELECT MIN(phase) FROM lifecycle_phase_timings
+                  WHERE ${scope} AND operation = first.operation)
+           FROM (SELECT MIN(operation) AS operation FROM lifecycle_phase_timings
+                  WHERE ${scope}) AS first
+         UNION ALL
+         SELECT CASE WHEN ${nextPhase} IS NOT NULL THEN pairs.operation ELSE ${nextOperation} END,
+                COALESCE(
+                  ${nextPhase},
+                  (SELECT MIN(phase) FROM lifecycle_phase_timings
+                    WHERE ${scope} AND operation = ${nextOperation})
+                )
+           FROM pairs WHERE pairs.operation IS NOT NULL
+       ),
        sampled AS (
          SELECT t.id, t.operation, t.phase, t.duration_ms, t.created_at
-           FROM phases p
-           JOIN lifecycle_phase_timings t
+           FROM pairs p
+           -- CROSS JOIN fixes the loop order: pairs outside, rows by id inside. D1 keeps no
+           -- planner statistics, and a plain JOIN let SQLite scan the whole table instead.
+           CROSS JOIN lifecycle_phase_timings t
              ON t.id IN (
                SELECT s.id FROM lifecycle_phase_timings s
                 WHERE s.project_id = ?
                   AND s.${byColumn} = ?
+                  AND s.operation = p.operation
                   AND s.phase = p.phase
-                  AND s.created_at >= ?
                   AND s.outcome = 'success'
-                  ${operationFilter}
+                  AND s.created_at >= ?
                 ORDER BY s.created_at DESC
                 LIMIT ?)
-          WHERE p.phase IS NOT NULL
+          WHERE p.operation IS NOT NULL
+            ${phaseFilter}
+            ${operationFilter}
        )
-       SELECT operation, phase, duration_ms, rn, phase_rows FROM (
+       SELECT operation, phase, duration_ms, rn FROM (
          SELECT operation, phase, duration_ms,
                 ROW_NUMBER() OVER (
                   PARTITION BY operation, phase ORDER BY created_at DESC, id DESC
-                ) AS rn,
-                COUNT(*) OVER (PARTITION BY phase) AS phase_rows
+                ) AS rn
            FROM sampled
        )
-       WHERE rn <= ?
        ORDER BY rn, operation, phase
        LIMIT ?`
     )
@@ -235,7 +256,6 @@ export async function phaseDurationStats(
   const groups = new Map<string, { operation: string; phase: string; durations: number[] }>();
   let truncated = rows.length >= MAX_PHASE_STATS_TOTAL_ROWS;
   for (const raw of rows) {
-    if (typeof raw.phase_rows === 'number' && raw.phase_rows >= phaseScanLimit) truncated = true;
     if (typeof raw.rn === 'number' && raw.rn > sampleLimit) {
       truncated = true;
       continue;
