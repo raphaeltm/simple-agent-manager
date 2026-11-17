@@ -44,18 +44,18 @@ bootstrap classification is wrong. Instant has its own working path
 
 ## Checklist
 
-- [ ] Move ACP lifecycle helpers from `agent-session-bootstrap.ts` into their own module
-- [ ] Classify the restore outcome: `restored`, `degraded`, or `transcript_only`
+- [x] Move ACP lifecycle helpers from `agent-session-bootstrap.ts` into their own module
+- [x] Classify the restore outcome: `restored`, `degraded`, or `transcript_only`
       (`transcript-replay` + `transcript_only_sleep_fallback`); everything else still throws
-- [ ] Share the reason constant between the restore response and the classifier
-- [ ] Persist an honest transcript-only system notice (no restore claimed)
-- [ ] Shared contract fixture `tests/fixtures/session-snapshot-restore-transcript-only-v1.json`
-- [ ] Go: real restore handler maps the fixture's control-plane body to the fixture's VM body
-- [ ] TS: real fallback sleep produces the fixture's control-plane body through the real route
-- [ ] TS: real TaskRunner `handleAgentSession` fed the fixture's VM body starts the agent fresh,
+- [x] Share the reason constant between the restore response and the classifier
+- [x] Persist an honest transcript-only system notice (no restore claimed)
+- [x] Shared contract fixture `tests/fixtures/session-snapshot-restore-transcript-only-v1.json`
+- [x] Go: real restore handler maps the fixture's control-plane body to the fixture's VM body
+- [x] TS: real fallback sleep produces the fixture's control-plane body through the real route
+- [x] TS: real TaskRunner `handleAgentSession` fed the fixture's VM body starts the agent fresh,
       commits the wake and moves the task to `in_progress`
-- [ ] Controls: `snapshot_missing_or_unavailable` and unknown statuses still fail
-- [ ] Discrimination: revert the classifier change, confirm the TaskRunner test goes red
+- [x] Controls: `snapshot_missing_or_unavailable` and unknown statuses still fail
+- [x] Discrimination: revert the classifier change, confirm the TaskRunner test goes red
 - [ ] Note the WIP-over-budget follow-up on the idea
 
 ## Acceptance criteria
@@ -64,3 +64,12 @@ bootstrap classification is wrong. Instant has its own working path
   prompt and the task reaches `in_progress` (test + staging where possible).
 - A restore answer of `transcript-replay` for any other reason still fails closed.
 - The chat gets a system notice that does not claim a restore.
+
+## Implementation notes
+
+- Discrimination (recorded): neutering the `transcript_only` branch turned only
+  `starts the agent fresh from the transcript…` red with
+  `Strict session restore failed (transcript-replay: transcript_only_sleep_fallback)`. Widening it to
+  any `transcript-replay` turned exactly the two `snapshot_missing_or_unavailable` / no-reason
+  controls red. Dropping `reason` from the Go answer turned the Go contract test red.
+- Docs: `session-troubleshooting.md` (new notice, VM wake wording), `recent-product-changes.md`.

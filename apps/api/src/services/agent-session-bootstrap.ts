@@ -4,11 +4,13 @@ import { type drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { maybeJsonRecord } from '../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { buildSamBootstrapInstructions } from './agent-bootstrap-prompt';
 import {
   createAcpSessionWithLogging,
+  type FreshStartReason,
   prepareAcpSessionForFreshStart,
   runMaybePhased,
   transitionAcpSessionToRunning,
@@ -33,6 +35,7 @@ import {
   parseSessionRuntimeContract,
   resolveSessionRuntimeContract,
 } from './session-runtime-contract';
+import { TRANSCRIPT_ONLY_SLEEP_FALLBACK_REASON } from './session-snapshot-restore-response';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -87,7 +90,8 @@ export interface SamAwareAgentStartResult {
   initialPromptSent: boolean;
   /**
    * Outcome of the snapshot restore this start ran, if any. `degraded` covers every restore
-   * failure the VM agent reports (HOME, WIP or git, not only the agent context), so only
+   * failure the VM agent reports (HOME, WIP or git, not only the agent context) and a
+   * transcript-only sleep fallback that had no files to restore, so only
    * `restored` proves the replacement holds the snapshot's files.
    */
   snapshotRestore?: 'restored' | 'degraded';
@@ -133,13 +137,30 @@ async function ensureAgentSessionRow(
   });
 }
 
-function shouldStartFreshAfterSnapshotRestore(restored: unknown): boolean {
-  const restoreRecord =
-    restored && typeof restored === 'object' ? (restored as Record<string, unknown>) : null;
+/**
+ * What the VM agent's restore (`restoreSessionSnapshot` in
+ * `packages/vm-agent/internal/server/session_snapshot_restore.go`) leaves the wake to do:
+ * - `restored`: the saved agent session was loaded; do not start a new one.
+ * - `degraded`: the files or the agent context could not all come back; start fresh.
+ * - `transcript-replay` with `transcript_only_sleep_fallback`: the bounded sleep fallback saved
+ *   no recovery point, so there was nothing to restore (`sessionSnapshotRestoreResponse`). The
+ *   workspace is the fresh checkout create-workspace provisioned and the agent session is
+ *   untouched, so start fresh from the transcript (policy a3780107). The recovery task already
+ *   carries the transcript-only wake prompt (`sessionRecoveryInitialPrompt`).
+ * Anything else fails the wake. That includes `transcript-replay` for a snapshot that vanished
+ * after the wake claimed it (`snapshot_missing_or_unavailable`), which this does not cover.
+ */
+function snapshotRestoreOutcome(restored: unknown): 'restored' | FreshStartReason {
+  const restoreRecord = maybeJsonRecord(restored);
   const status = restoreRecord?.status;
-  if (status === 'restored') return false;
-  if (status === 'degraded') return true;
-  throw new Error(`Strict session restore failed (${String(status ?? 'unknown')})`);
+  if (status === 'restored') return 'restored';
+  if (status === 'degraded') return 'degraded_restore';
+  const reason = restoreRecord?.reason;
+  if (status === 'transcript-replay' && reason === TRANSCRIPT_ONLY_SLEEP_FALLBACK_REASON) {
+    return 'transcript_only';
+  }
+  const detail = typeof reason === 'string' && reason ? `: ${reason.slice(0, 80)}` : '';
+  throw new Error(`Strict session restore failed (${String(status ?? 'unknown')}${detail})`);
 }
 
 export async function startSamAwareAgentSession(
@@ -303,20 +324,27 @@ export async function startSamAwareAgentSession(
           ? restoreAgentSessionOnNode(...args, guardedMutationOptions)
           : restoreAgentSessionOnNode(...args);
       });
-      shouldStartFreshSession = shouldStartFreshAfterSnapshotRestore(restored);
-      if (shouldStartFreshSession) {
+      const restoreOutcome = snapshotRestoreOutcome(restored);
+      shouldStartFreshSession = restoreOutcome !== 'restored';
+      if (restoreOutcome !== 'restored') {
         log.warn('agent_session_bootstrap.snapshot_restore_degraded_starting_fresh', {
           projectId: input.projectId,
           chatSessionId: input.chatSessionId,
           restoreSnapshotChatSessionId,
           workspaceId: input.workspaceId,
           agentSessionId,
+          restoreOutcome,
         });
         if (!acpSessionId) {
           acpSessionId = await createAcpSessionWithLogging(env, input, agentSessionId);
         }
         if (acpSessionId) {
-          acpSessionId = await prepareAcpSessionForFreshStart(env, input, agentSessionId);
+          acpSessionId = await prepareAcpSessionForFreshStart(
+            env,
+            input,
+            agentSessionId,
+            restoreOutcome
+          );
         }
       }
     }

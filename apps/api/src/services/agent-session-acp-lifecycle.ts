@@ -37,10 +37,25 @@ export async function createAcpSessionWithLogging(
   }
 }
 
+/** Why a snapshot wake starts the agent fresh instead of resuming its saved session. */
+export type FreshStartReason = 'degraded_restore' | 'transcript_only';
+
+/**
+ * The chat notice for a fresh start. Neither claims an exact restore (policy 2adacc8f); the
+ * transcript-only one also says that no files came back, because none did.
+ */
+const FRESH_START_NOTICES: Record<FreshStartReason, string> = {
+  degraded_restore:
+    'SAM restored this sleeping conversation from a degraded snapshot, so the agent is starting fresh and will read the persisted transcript before continuing.',
+  transcript_only:
+    "SAM could not restore this conversation's workspace: its last sleep saved no snapshot or Git recovery point. The agent is starting fresh in a new checkout and will read the persisted transcript before continuing. Files and uncommitted work from the previous workspace were not restored.",
+};
+
 export async function prepareAcpSessionForFreshStart(
   env: Env,
   input: SamAwareAgentStartInput,
-  agentSessionId: string
+  agentSessionId: string,
+  reason: FreshStartReason = 'degraded_restore'
 ): Promise<string> {
   try {
     if (input.chatSessionId) {
@@ -49,7 +64,7 @@ export async function prepareAcpSessionForFreshStart(
         input.projectId,
         input.chatSessionId,
         'system',
-        'SAM restored this sleeping conversation from a degraded snapshot, so the agent is starting fresh and will read the persisted transcript before continuing.',
+        FRESH_START_NOTICES[reason],
         null,
         `degraded-wake-${agentSessionId}`
       );
@@ -58,12 +73,16 @@ export async function prepareAcpSessionForFreshStart(
       projectDataService.prepareAcpSessionForFreshStart(env, input.projectId, agentSessionId, {
         actorType: input.actor.type,
         actorId: input.actor.id,
-        reason: `${input.actor.reasonPrefix} prepared fresh start after degraded snapshot restore`,
+        reason:
+          reason === 'transcript_only'
+            ? `${input.actor.reasonPrefix} prepared fresh start after transcript-only sleep fallback`
+            : `${input.actor.reasonPrefix} prepared fresh start after degraded snapshot restore`,
         workspaceId: input.workspaceId,
         nodeId: input.nodeId,
         metadata: {
           chatSessionId: input.chatSessionId ?? null,
           restoreSnapshotChatSessionId: input.restoreSnapshotChatSessionId ?? null,
+          freshStartReason: reason,
         },
       })
     );
