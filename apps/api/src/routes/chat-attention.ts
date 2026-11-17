@@ -423,7 +423,7 @@ export async function archiveInteractionAttention(
 ): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
   await requireProjectCapability(db, projectId, userId, 'task:write');
-  await requireSessionWriter(env, projectId, sessionId, userId, {
+  const writer = await requireSessionWriter(env, projectId, sessionId, userId, {
     db,
     action: 'archive the agent request in this session',
   });
@@ -435,4 +435,6 @@ export async function archiveInteractionAttention(
     throw markRejectedBeforeEffects(errors.conflict('Attention request is already resolved'));
   const resolved = await projectDataService.archiveInteractionMarker(env, projectId, markerId);
   if (resolved === 0) throw errors.conflict('Attention request is already resolved');
+  // A grantee's archive is recorded like their answers and question archives.
+  await recordSharedSessionAnswer(env, writer, { markerId, archived: true });
 }

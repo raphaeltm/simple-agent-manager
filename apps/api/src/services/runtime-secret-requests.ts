@@ -469,12 +469,12 @@ export async function fulfillRuntimeSecretRequest(
   return { request: toRuntimeSecretRequest(resolved, input.actorName, claimedAt), agentNotified };
 }
 
-/** Caller has verified `secret:write` on the project. */
 /**
  * Archive a pending secret request from the inbox: it closes as declined and the agent is told
  * nothing (Raphaël, 2026-11-17: every inbox kind archives silently). `notified_at` is set in the
  * closing write, so the notice sweep (`retryRuntimeSecretRequestNotices`) never sends one, and the
- * request is no longer pending, so its expiry does not tell the agent either.
+ * request is no longer pending, so its expiry does not tell the agent either. The caller has
+ * authorized the actor (`requireActable`: task:write and the item's `canAct`).
  */
 export async function archiveRuntimeSecretRequest(
   db: Db,
@@ -499,6 +499,7 @@ export async function archiveRuntimeSecretRequest(
   });
 }
 
+/** Caller has verified `secret:write` on the project. */
 export async function declineRuntimeSecretRequest(
   env: Env,
   db: Db,

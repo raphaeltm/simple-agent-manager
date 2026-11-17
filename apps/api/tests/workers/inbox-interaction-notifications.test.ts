@@ -13,6 +13,8 @@ import { projectInteractionAttention } from '../../src/durable-objects/interacti
 import type { NotificationService } from '../../src/durable-objects/notification';
 import type { Env } from '../../src/env';
 import { handleAppError } from '../../src/middleware/app-error-handler';
+import { requireApproved, requireAuth } from '../../src/middleware/auth';
+import { chatRoutes } from '../../src/routes/chat';
 import { acpInteractionCallbackRoute } from '../../src/routes/projects/acp-interaction-callback';
 import { signCallbackToken } from '../../src/services/jwt';
 import * as projectDataService from '../../src/services/project-data';
@@ -218,6 +220,69 @@ describe('ACP interaction notifications and undelivered answers (slice E)', () =
       cookie
     );
     expect([404, 409]).toContain(again.status);
+
+    await runInDurableObject(store, async (_instance, state) => {
+      state.storage.sql.exec(`DELETE FROM outbox`);
+      await state.storage.deleteAlarm();
+    });
+  });
+
+  it('a teammate the chat is shared with can archive a permission, and the archive is audited', async () => {
+    const { userId, projectId, chatSessionId, interactionId, store } = await setup();
+    await drain(store);
+    const markerId = await runInDurableObject(store, async (_instance, state) => {
+      const row = state.storage.sql
+        .exec(
+          'SELECT attention_marker_id FROM interactions WHERE interaction_id = ?',
+          interactionId
+        )
+        .one() as { attention_marker_id: string };
+      return row.attention_marker_id;
+    });
+    const granteeId = `inbox-e-grantee-${crypto.randomUUID()}`;
+    await seedUser(granteeId);
+    await testEnv.DATABASE.prepare(
+      `INSERT INTO project_members (project_id, user_id, role, status) VALUES (?, ?, 'maintainer', 'active')`
+    )
+      .bind(projectId, granteeId)
+      .run();
+    const ownerCookie = await seedSignedInUser(userId);
+    const granteeCookie = await seedSignedInUser(granteeId);
+    const shareApp = new Hono<{ Bindings: Env }>();
+    shareApp.onError(handleAppError);
+    shareApp.use('/api/projects/*', requireAuth(), requireApproved());
+    shareApp.route('/api/projects/:projectId/sessions', chatRoutes);
+    const shared = await shareApp.request(
+      `/api/projects/${projectId}/sessions/${chatSessionId}/access/grants`,
+      {
+        method: 'POST',
+        headers: { Cookie: ownerCookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: granteeId,
+          durationMinutes: 30,
+          acknowledgeSharedCredentials: true,
+        }),
+      },
+      testEnv
+    );
+    expect(shared.status).toBeLessThan(300);
+
+    const ref = `attention:${chatSessionId}:${markerId}`;
+    const archived = await post(
+      `/api/projects/${projectId}/inbox/items/${encodeURIComponent(ref)}/archive`,
+      granteeCookie
+    );
+    expect(archived.status).toBe(200);
+    const { events } = await projectDataService.listActivityEvents(
+      testEnv,
+      projectId,
+      'session.shared_answer',
+      10,
+      null,
+      chatSessionId
+    );
+    expect(JSON.stringify(events)).toContain(markerId);
+    expect(JSON.stringify(events)).toContain('"archived":true');
 
     await runInDurableObject(store, async (_instance, state) => {
       state.storage.sql.exec(`DELETE FROM outbox`);
