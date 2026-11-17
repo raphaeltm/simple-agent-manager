@@ -273,11 +273,22 @@ describe('legacy-read markers', () => {
     expect(result.invalidMarkers).toEqual([{ file: 's.sh', line: 1, task: archived }]);
   });
 
-  it('does not reach a read more than three lines below the marker', () => {
-    const text = [`# sam:secret-readback-allowed ${OPEN_TASK}`, 'a', 'b', 'c', read].join('\n');
-    expect(scanText('s.sh', text, isOpen).findings).toHaveLength(1);
-    const near = [`# sam:secret-readback-allowed ${OPEN_TASK}`, 'a', 'b', read].join('\n');
-    expect(scanText('s.sh', near, isOpen).findings).toHaveLength(0);
+  it('excuses only the line directly below the marker', () => {
+    const below = [`# sam:secret-readback-allowed ${OPEN_TASK}`, read].join('\n');
+    expect(scanText('s.sh', below, isOpen).findings).toHaveLength(0);
+    const further = [`# sam:secret-readback-allowed ${OPEN_TASK}`, 'a', read].join('\n');
+    expect(scanText('s.sh', further, isOpen).findings).toHaveLength(1);
+  });
+
+  it.each([
+    ['set -x', 'xtrace'],
+    ['env', 'env-dump'],
+    ['const p = await crypto.subtle.decrypt(a, b, c);', 'decryption'],
+  ])('never excuses %s, even on a marked line', (line, rule) => {
+    const text = `# sam:secret-readback-allowed ${OPEN_TASK}\n${line}`;
+    const result = scanText('s.sh', text, isOpen);
+    expect(result.findings.map((finding) => finding.rule)).toEqual([rule]);
+    expect(result.allowed).toEqual([]);
   });
 });
 

@@ -518,13 +518,17 @@ fi
 # deploy-time only so an admin account cannot turn it on. When the GitHub secret is removed the
 # Worker secret is deleted too, so removing the secret and redeploying switches the feature off.
 AGENT_SIGN_IN_TRUST="${AGENT_SIGN_IN_TRUST:-}"
+# A secondary installation's own trust (its GitHub secret, never the primary's or a derived one).
+if [[ -z "$AGENT_SIGN_IN_TRUST" && "${AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET:-}" == "true" ]]; then
+  AGENT_SIGN_IN_TRUST="${SECONDARY_AGENT_SIGN_IN_TRUST:-}"
+fi
 if [ -n "$AGENT_SIGN_IN_TRUST" ]; then
   set_worker_secret "AGENT_SIGN_IN_TRUST" "$AGENT_SIGN_IN_TRUST" "$ENVIRONMENT" "false"
 elif [[ "${AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET:-false}" == "true" ]]; then
-  # A secondary installation's trust is its own GitHub secret (AGENT_SIGN_IN_TRUST_STAGING2 for
-  # staging2), which the workflow step "Configure Secondary Agent Sign-In Trust" sets, or a Worker
-  # secret an admin set by hand; deploys never derive one, so nothing here deletes it. Revoking it
-  # therefore means deleting the Worker secret by hand, not just the GitHub secret.
+  # A secondary installation without its own trust secret (AGENT_SIGN_IN_TRUST_STAGING2 for
+  # staging2) keeps whatever the Worker has, an earlier value or one an admin set by hand; deploys
+  # never derive one, so nothing here deletes it. Revoking it therefore means deleting the Worker
+  # secret by hand, not just the GitHub secret.
   echo -e "${YELLOW}ℹ  AGENT_SIGN_IN_TRUST not supplied for this installation — leaving the Worker secret unchanged${NC}"
 else
   echo -e "${YELLOW}ℹ  AGENT_SIGN_IN_TRUST not set — agent sign-in disabled; removing any previous value${NC}"

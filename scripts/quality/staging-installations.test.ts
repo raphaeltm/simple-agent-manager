@@ -508,18 +508,11 @@ describe('deploy-reusable.yml secondary installation wiring', () => {
     expect(configure).toContain(
       "AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET: ${{ steps.deploy_resources.outputs.secondary == 'true' && 'true' || '' }}"
     );
-    expect(configure).not.toContain('AGENT_SIGN_IN_TRUST_STAGING2');
-    // The secondary's own trust goes from its GitHub secret to Wrangler on stdin, secondary only.
-    const trust = step('Configure Secondary Agent Sign-In Trust');
-    expect(trust).toContain("steps.deploy_resources.outputs.secondary == 'true'");
-    expect(trust).toContain(
-      "SECONDARY_AGENT_SIGN_IN_TRUST: ${{ steps.deploy_resources.outputs.installation == 'staging2' && secrets.AGENT_SIGN_IN_TRUST_STAGING2 || '' }}"
+    // A secondary's own trust is passed straight in and written in the same bulk deployment.
+    expect(configure).toContain(
+      "SECONDARY_AGENT_SIGN_IN_TRUST: ${{ steps.deploy_resources.outputs.secondary == 'true' && steps.deploy_resources.outputs.installation == 'staging2' && secrets.AGENT_SIGN_IN_TRUST_STAGING2 || '' }}"
     );
-    expect(trust).toContain('printf \'%s\' "$SECONDARY_AGENT_SIGN_IN_TRUST" |');
-    expect(trust).toContain(
-      'wrangler secret put AGENT_SIGN_IN_TRUST --env "$DEPLOY_ENV" >/dev/null 2>&1'
-    );
-    expect(trust).not.toMatch(/secrets\.AGENT_SIGN_IN_TRUST\b(?!_)/);
+    expect(workflow).not.toContain('wrangler secret put');
     expect(workflow).not.toMatch(/derive-trust|agent-sign-in-trust\.json/);
   });
 

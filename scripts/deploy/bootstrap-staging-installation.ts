@@ -9,8 +9,7 @@
  * `.claude/rules/83-no-secret-readback-in-ci.md`). An admin adds the installation's platform
  * cloud credential and agent key by hand in Admin → Credentials and picks machines in Admin →
  * Infrastructure; the agent sign-in trust comes from the installation's own GitHub secret
- * (`AGENT_SIGN_IN_TRUST_STAGING2` for staging2, set by the deploy step "Configure Secondary Agent
- * Sign-In Trust"). The manual steps are in
+ * (`AGENT_SIGN_IN_TRUST_STAGING2` for staging2, written by configure-secrets.sh). The manual steps are in
  * `.agent-instructions/reference/rules/13-staging-verification-full.md`, "Two Staging
  * Installations".
  *

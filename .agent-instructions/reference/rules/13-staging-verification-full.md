@@ -53,8 +53,8 @@ Audience `https://api.sammy2.party/api/auth/workload-identity-login`; targets
 `staging2-agent-admin` (superadmin) or `staging2-agent-user` (ordinary user). Add the returned
 cookie for `.sammy2.party`. The issuer and allowed source project/user are the same as for
 `staging`. The trust comes from the `staging` Environment's GitHub secret
-`AGENT_SIGN_IN_TRUST_STAGING2`, which the deploy step "Configure Secondary Agent Sign-In Trust"
-pipes straight from the secret to `wrangler secret put` on stdin. Deploys
+`AGENT_SIGN_IN_TRUST_STAGING2`, which deploys pass straight to `configure-secrets.sh` (as
+`SECONDARY_AGENT_SIGN_IN_TRUST`, in the same bulk secret write). Deploys
 never derive it from staging's trust. While that secret is unset, a deploy leaves staging2's
 Worker secret as it is, so revoking it means deleting the Worker secret by hand as well. The staging smoke token works on staging2 only where a
 registration row already exists (the one made before 2026-11-17 does). Deploys no longer register it,

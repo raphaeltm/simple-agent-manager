@@ -227,7 +227,8 @@ The shell-only rules never apply to JS/TS, so code such as `value || env` is not
 
 A legacy line that cannot go yet is accepted only when all of these hold:
 
-- it carries `# sam:secret-readback-allowed <task>` on the same line or up to three lines above;
+- it is a `show-secrets` finding (a decryption, trace or dump is never excused);
+- it carries `# sam:secret-readback-allowed <task>` on the same line or the line directly above;
 - `ALLOWED_LEGACY_READS` in the checker pins that file and task together;
 - the task is still open, under `tasks/backlog/` or `tasks/active/`.
 

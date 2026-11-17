@@ -23,8 +23,10 @@
  * workflow YAML only, so JS/TS such as `value || env` is not reported.
  *
  * A legacy line that cannot be removed yet is accepted only with a marker on the same line or
- * up to three lines above it, naming its tracking task, and only when that file and task are an
+ * directly above it, naming its tracking task, and only when that file and task are an
  * entry in ALLOWED_LEGACY_READS and the task is still open (under tasks/backlog/ or tasks/active/):
+ * Only a `show-secrets` finding can be excused; a decryption, trace or dump next to a marker
+ * is still reported.
  *
  *   # sam:secret-readback-allowed tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md
  *
@@ -153,7 +155,10 @@ export function decryptImportLines(text: string): number[] {
 }
 
 const MARKER = /sam:secret-readback-allowed\s+(\S+)/;
-const MARKER_REACH = 3;
+/** A marker excuses the read on its own line or the line directly below it, nothing further. */
+const MARKER_REACH = 1;
+/** Only a legacy Pulumi readback can be excused; decryption, tracing and dumps never can. */
+const EXCUSABLE_RULES: ReadonlySet<RuleId> = new Set(['show-secrets']);
 const SCANNED_ROOTS = ['.github', 'scripts', 'infra'];
 const SCANNED_EXTENSIONS = /\.(?:ya?ml|sh|bash|[cm]?[jt]s)$/;
 /** `Dockerfile`, `Dockerfile.ci`, `app.Dockerfile`: RUN lines are shell. */
@@ -197,7 +202,7 @@ export function scanText(
   const result: ScanResult = { findings: [], allowed: [], invalidMarkers: [] };
   const report = (index: number, rule: RuleId): void => {
     const finding: Finding = { file, line: index + 1, rule, text: lines[index].trim() };
-    const task = markerTask(lines, index, isAllowed);
+    const task = EXCUSABLE_RULES.has(rule) ? markerTask(lines, index, isAllowed) : null;
     if (task) result.allowed.push({ ...finding, task });
     else result.findings.push(finding);
   };

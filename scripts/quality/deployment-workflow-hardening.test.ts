@@ -951,14 +951,17 @@ describe('deployment workflow hardening', () => {
   );
 
   it.each([
-    ['deletes the Worker trust when no trust is supplied', undefined, null],
-    ['keeps a secondary installation trust when its secret is unset', 'true', undefined],
+    ['deletes the Worker trust when no trust is supplied', undefined, '', null],
+    ['keeps a secondary installation trust when its secret is unset', 'true', '', undefined],
+    ['sets a secondary installation trust from its own secret', 'true', '{"s":2}', '{"s":2}'],
+    ['never uses a secondary trust on the primary', undefined, '{"s":2}', null],
   ])(
     'worker secret configuration %s',
-    (_label, keep, expected) => {
+    (_label, keep, secondary, expected) => {
       const result = runConfigureSecrets({
         AGENT_SIGN_IN_TRUST: '',
         AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET: keep,
+        SECONDARY_AGENT_SIGN_IN_TRUST: secondary,
       });
       try {
         expect(result.status).toBe(0);

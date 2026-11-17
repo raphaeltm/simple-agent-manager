@@ -1979,8 +1979,10 @@ jobs:
       # A secondary installation shares this environment's account-level credentials but not
       # its identity: OAuth/App callbacks, signing, encryption and analytics overrides belong to
       # the primary installation, so they are not passed and Pulumi generates the keys. Its agent
-      # sign-in trust is its own GitHub secret (AGENT_SIGN_IN_TRUST_STAGING2), set by "Configure
-      # Secondary Agent Sign-In Trust" below; configure-secrets.sh leaves it alone.
+      # sign-in trust is its own GitHub secret (AGENT_SIGN_IN_TRUST_STAGING2), passed straight to
+      # configure-secrets.sh as SECONDARY_AGENT_SIGN_IN_TRUST and written in the same bulk secret
+      # deployment; unset, the Worker value is left as it is. A new secondary installation needs
+      # its own secret name in that expression.
       # Nothing here reads, derives or copies a secret (.claude/rules/83-no-secret-readback-in-ci.md).
       - name: Configure Worker Secrets
         if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
@@ -2020,8 +2022,9 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           SMOKE_TEST_AUTH_ENABLED: ${{ secrets.SMOKE_TEST_AUTH_ENABLED }}
-          # The primary's trust never reaches a secondary; "Configure Secondary Agent Sign-In Trust" sets its own.
+          # The primary's trust never reaches a secondary, and a secondary's never reaches the primary.
           AGENT_SIGN_IN_TRUST: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.AGENT_SIGN_IN_TRUST || '' }}
+          SECONDARY_AGENT_SIGN_IN_TRUST: ${{ steps.deploy_resources.outputs.secondary == 'true' && steps.deploy_resources.outputs.installation == 'staging2' && secrets.AGENT_SIGN_IN_TRUST_STAGING2 || '' }}
           DEPLOY_SIGNING_PRIVATE_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.DEPLOY_SIGNING_PRIVATE_KEY || '' }}
           DEPLOY_SIGNING_PUBLIC_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.DEPLOY_SIGNING_PUBLIC_KEY || '' }}
           SEGMENT_WRITE_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.SEGMENT_WRITE_KEY || '' }}
@@ -2031,30 +2034,6 @@ jobs:
           DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN: ${{ secrets.DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN }}
           DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID }}
           WORKER_SECRET_BULK_MAX_OPS: ${{ vars.WORKER_SECRET_BULK_MAX_OPS }}
-          DEPLOY_ENV: ${{ steps.deploy_resources.outputs.environment }}
-
-      # A secondary installation's agent sign-in trust is its own GitHub secret, handed from the
-      # secret straight to Wrangler on stdin (policy 795e72a6). Unset leaves the Worker value as it
-      # is (configure-secrets.sh keeps it for a secondary). A new secondary installation gets its
-      # own secret name here.
-      - name: Configure Secondary Agent Sign-In Trust
-        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) && steps.deploy_resources.outputs.secondary == 'true' }}
-        run: |
-          if [ -z "$SECONDARY_AGENT_SIGN_IN_TRUST" ]; then
-            echo "::notice::No AGENT_SIGN_IN_TRUST secret for $INSTALLATION; its Worker value is left unchanged."
-            exit 0
-          fi
-          if ! printf '%s' "$SECONDARY_AGENT_SIGN_IN_TRUST" |
-            pnpm --filter @simple-agent-manager/api exec wrangler secret put AGENT_SIGN_IN_TRUST --env "$DEPLOY_ENV" >/dev/null 2>&1; then
-            echo "::error::Could not set AGENT_SIGN_IN_TRUST on $INSTALLATION (Wrangler output withheld)."
-            exit 1
-          fi
-          echo "AGENT_SIGN_IN_TRUST set on $INSTALLATION."
-        env:
-          SECONDARY_AGENT_SIGN_IN_TRUST: ${{ steps.deploy_resources.outputs.installation == 'staging2' && secrets.AGENT_SIGN_IN_TRUST_STAGING2 || '' }}
-          INSTALLATION: ${{ steps.deploy_resources.outputs.installation }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           DEPLOY_ENV: ${{ steps.deploy_resources.outputs.environment }}
 
       # Secret writes create one fresh Worker deployment. Publish code once after all
