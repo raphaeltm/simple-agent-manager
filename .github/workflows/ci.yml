@@ -241,16 +241,8 @@ jobs:
               - 'scripts/quality/ci*.test.ts'
               - 'scripts/ci/run-with-apt-mirror-fallback.sh'
             repo-quality:
-              # Every scripts/ directory pnpm quality:no-secret-readback scans (with infra/**, below);
-              # a new scripts/ directory belongs here too.
-              - '.github/**'
-              - 'scripts/ci/**'
-              - 'scripts/deploy/**'
-              - 'scripts/diagnostics/**'
-              - 'scripts/e2e/**'
-              - 'scripts/opencode/**'
-              - 'scripts/vm/**'
-              - 'scripts/quality/**'
+              - 'scripts/quality/check-runtime-tunables*'
+              - 'scripts/quality/runtime-tunables-baseline.json'
               - 'apps/api/**'
               - 'apps/web/**'
               - 'infra/**'
@@ -416,6 +408,14 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # Policy 795e72a6 / rule 83: no Pulumi secret readback, credential decryption, shell
+      # tracing or environment dumps in workflow, deploy, infra or CI-script code. Here, not in a
+      # path-filtered job, so every PR runs it whatever it touches. Blocking from the start: zero
+      # findings outside real instances in 25 sampled commits since June 2026
+      # (scripts/quality/README.md).
+      - name: No secret readback in CI code (policy 795e72a6)
+        run: pnpm quality:no-secret-readback
 
       - name: Install verified Gitleaks release
         env:
@@ -874,13 +874,6 @@ jobs:
 
       - name: DO migration safety check (blocks destructive patterns in Durable Object SQLite)
         run: pnpm quality:do-migration-safety
-
-      # Policy 795e72a6 / rule 83: no Pulumi secret readback, credential decryption, shell
-      # tracing or environment dumps in workflow, deploy, infra or CI-script code. Blocking from
-      # the start: zero findings outside real instances in 25 sampled commits since June 2026
-      # (scripts/quality/README.md).
-      - name: No secret readback in CI code (policy 795e72a6)
-        run: pnpm quality:no-secret-readback
 
       - name: AST-based code quality checks
         run: pnpm quality:ast-checks

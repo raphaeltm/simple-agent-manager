@@ -202,7 +202,7 @@ are created, so a lint would be mostly noise.
 ## No secret readback in CI code (policy 795e72a6)
 
 `pnpm quality:no-secret-readback` (`scripts/quality/check-no-secret-readback.ts`) is blocking in
-Code Quality Checks. It scans every `.yml`, `.yaml`, `.sh`, JS/TS file and Dockerfile under
+the Secret Scan job. It scans every `.yml`, `.yaml`, `.sh`, JS/TS file and Dockerfile under
 `.github/`, `scripts/` and `infra/`, except tests (`*.test.*`, `*.spec.*`, `test-*.sh`, `__tests__/`,
 `fixtures/`) and itself. Comment lines are skipped, apart from a tracing shebang on line 1.
 
@@ -233,9 +233,8 @@ Today the only entry is the Pulumi readback in `scripts/deploy/configure-secrets
 `tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md` (idea 01M7M5PJCY4T3CR715AFKRM74R).
 Every value that read returns is masked before any other use.
 
-The CI path filter runs the check when `.github/**`, `infra/**`, the deploy, CI, diagnostics, e2e,
-opencode or vm script directories, or the check itself change. It also runs on every change that
-triggers Code Quality Checks for other reasons.
+It runs in the Secret Scan job, which has no path filter, so every pull request and every
+canonical `main` push runs it, whatever the change touches.
 
 ### Measurements (2026-11-17)
 

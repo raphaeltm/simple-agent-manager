@@ -88,8 +88,8 @@ describe('deterministic quality-program CI wiring', () => {
     expect(quality).toContain('run: pnpm quality:runtime-tunables');
     expect(quality).toContain('check-runtime-tunables.test.ts');
     const changes = jobBlock(ci, 'changes');
-    // scripts/quality/** covers check-runtime-tunables* and runtime-tunables-baseline.json.
-    expect(changes).toContain("- 'scripts/quality/**'");
+    expect(changes).toContain("- 'scripts/quality/check-runtime-tunables*'");
+    expect(changes).toContain("- 'scripts/quality/runtime-tunables-baseline.json'");
   });
 
   it('keeps public-site changes on a narrow CI path', () => {
@@ -102,6 +102,12 @@ describe('deterministic quality-program CI wiring', () => {
     expect(changes).toContain('ci-workflow:');
     expect(changes).toContain("- 'apps/www/**'");
     expect(changes).not.toContain("- 'scripts/**'");
+
+    // The secret-readback guard scans every scripts/ path, so it runs in the unfiltered Secret
+    // Scan job rather than behind a path filter (policy 795e72a6).
+    const secretScan = jobBlock(ci, 'secret-scan');
+    expect(secretScan).toContain('run: pnpm quality:no-secret-readback');
+    expect(secretScan).not.toContain('needs.changes.outputs');
 
     // CI-routing changes run the wiring tests inside Code Quality Checks (the
     // separate CI Workflow job was folded in to save a runner slot).
