@@ -284,6 +284,13 @@ type SessionHost struct {
 	opencodeUsageKey   atomic.Value // string
 	codexRolloutReader codexRolloutTailReader
 
+	// Run token usage (Insights slice U, session_host_run_usage.go): per-model
+	// running totals for this host's lifetime, reported cumulatively under one
+	// epoch. runUsageModel is the configured model, used when the harness does
+	// not say which model a turn ran on.
+	runUsage      runUsageAccumulator
+	runUsageModel atomic.Value // string
+
 	// Viewers (guarded by viewerMu)
 	viewerMu sync.RWMutex
 	viewers  map[string]*Viewer

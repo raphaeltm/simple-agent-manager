@@ -1,3 +1,5 @@
+import type { RunReceiptTokens } from './insights-run-usage';
+
 /**
  * The Run receipt (Insights slice R): one read of where a task-backed run's time went, what it
  * produced, which account it ran on, what it used and what slowed it down.
@@ -84,7 +86,13 @@ export interface RunReceiptPhase {
 }
 
 /** A part of the receipt that could not be read; the rest is still returned. */
-export type RunReceiptSection = 'outcome' | 'toolCalls' | 'waiting' | 'comparison' | 'account';
+export type RunReceiptSection =
+  | 'outcome'
+  | 'toolCalls'
+  | 'waiting'
+  | 'comparison'
+  | 'account'
+  | 'tokens';
 
 export interface RunReceiptPullRequest {
   number: number;
@@ -175,8 +183,8 @@ export interface RunReceipt {
   resources: RunReceiptResources;
   /** Null when tool calls could not be counted (archived or unavailable). */
   toolCalls: RunReceiptToolCalls | null;
-  /** Token usage arrives with Insights slice U; until then it is never estimated. */
-  tokens: { state: 'not_reported' };
+  /** Measured token usage per model (slice U), or `not_reported`; never estimated. */
+  tokens: RunReceiptTokens;
   /** Up to three, largest delay first. */
   slowedDown: RunReceiptSlowItem[];
   unavailable: RunReceiptSection[];

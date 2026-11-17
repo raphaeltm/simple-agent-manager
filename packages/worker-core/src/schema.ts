@@ -6029,3 +6029,46 @@ export const lifecyclePhaseTimings = sqliteTable(
     createdIdx: index('idx_lifecycle_phase_timings_created').on(table.createdAt),
   })
 );
+
+/**
+ * Insights slice U: measured token usage per run (chat session) x model x credential key.
+ * Migration 0253. Writers: `apps/api/src/services/agent-run-usage.ts`. Reads:
+ * `packages/operations/src/insights-run-usage.ts`. Counters are cumulative; see the migration.
+ */
+export const agentRunUsage = sqliteTable(
+  'agent_run_usage',
+  {
+    id: integer('id').primaryKey(),
+    projectId: text('project_id').notNull(),
+    chatSessionId: text('chat_session_id').notNull(),
+    workspaceId: text('workspace_id'),
+    agentSessionId: text('agent_session_id'),
+    source: text('source').notNull(),
+    usageEpoch: text('usage_epoch').notNull(),
+    model: text('model').notNull().default(''),
+    credentialKey: text('credential_key').notNull().default(''),
+    credentialSource: text('credential_source'),
+    agentType: text('agent_type'),
+    inputTokens: integer('input_tokens').notNull().default(0),
+    outputTokens: integer('output_tokens').notNull().default(0),
+    cacheReadTokens: integer('cache_read_tokens').notNull().default(0),
+    cacheWriteTokens: integer('cache_write_tokens').notNull().default(0),
+    reasoningTokens: integer('reasoning_tokens'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    keyIdx: uniqueIndex('idx_agent_run_usage_key').on(
+      table.projectId,
+      table.chatSessionId,
+      table.source,
+      table.usageEpoch,
+      table.model,
+      table.credentialKey
+    ),
+    projectUpdatedIdx: index('idx_agent_run_usage_project_updated').on(
+      table.projectId,
+      table.updatedAt
+    ),
+  })
+);
