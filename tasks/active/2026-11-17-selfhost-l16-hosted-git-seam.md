@@ -35,15 +35,17 @@ working exactly as today.
 
 ## Checklist
 
-- [ ] `apps/api/src/services/hosted-git/backend.ts`: `resolveArtifactsBackend`, `isArtifactsAvailable`, self-host
+- [x] `apps/api/src/services/hosted-git/backend.ts`: `resolveArtifactsBackend`, `isArtifactsAvailable`, self-host
       registration hook (`registerArtifactsBackendFallback`)
-- [ ] Route all `env.ARTIFACTS` callers through it (index, project-create, crud delete, runtime-git-token)
-- [ ] repo-hosting `artifacts` port (`resolve`) + wiring; repo-browse uses it
-- [ ] C15 in `workspace-git-source.ts`, `repository` required on the source type, callers pass it (no new D1 reads)
-- [ ] vm-agent `isBoundHostedArtifactsHost` in its own file; `withGitToken` + `needsCredentialHelperForConfig` use it
-- [ ] Tests: backend resolution (enabled/disabled/binding/fallback/binding-wins), C15 (CF host, hosted host, malformed,
+- [x] Route all `env.ARTIFACTS` callers through it (index, project-create, crud delete, runtime-git-token)
+- [x] repo-hosting `artifacts` port (`resolve`) + wiring; repo-browse uses it
+- [x] C15 in `workspace-git-source.ts`, `repository` required on the source type, callers pass it (no new D1 reads)
+- [x] vm-agent `isBoundHostedArtifactsHost` in its own file; `withGitToken` + `needsCredentialHelperForConfig` use it
+- [x] Tests: backend resolution (enabled/disabled/binding/fallback/binding-wins), C15 (CF host, hosted host, malformed,
       github unchanged) through real callers, Go withGitToken + credential helper with controls, repo-browse port
-- [ ] Docs sync
+- [x] Docs sync: no user-facing doc impact. Cloudflare behaviour is unchanged and
+      `guides/project-files.md` (ARTIFACTS_ENABLED gate) stays accurate; self-host hosted-git docs ship with the
+      self-host build.
 
 ## Acceptance criteria
 
@@ -53,3 +55,17 @@ working exactly as today.
 - An Artifacts project whose remote is not `*.artifacts.cloudflare.net` gets cloneUrl + repositoryHost; the VM agent
   attaches the token only to that bound host (unit, Go).
 - No D1 read added to any workspace-creation path.
+
+## Review fixes
+
+- cloudflare-specialist: the config test copied the handler, so `/api/config/artifacts-enabled` moved to
+  `routes/artifacts-config.ts` and the test mounts the real module; legacy NodeLifecycle payload guard made explicit
+  (`typeof repository !== 'string'`).
+- go-specialist: the credential helper would answer a bound self-hosted host with username `x-access-token` while the
+  clone used `x`; the git-token route now returns `username: 'x'` for a bound (non-Cloudflare) host only, so Cloudflare
+  responses are unchanged and already-deployed agents get it. Added Go cases for case, port, empty bound host,
+  non-artifacts provider.
+- security-auditor: documented that `projects.repository` for Artifacts projects is server-assigned (LOW-1).
+- Old agent + new control plane on a self-hosted install cannot clone a hosted repository (no token attached): not
+  reachable on Cloudflare, and self-host placement already rejects nodes whose agent build differs from the required
+  release (rule 54), so hosted projects only land on agents with this change.

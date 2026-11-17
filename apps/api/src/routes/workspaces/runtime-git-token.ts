@@ -20,6 +20,7 @@ import {
   verifyGitLabProjectAccess,
 } from '../../services/gitlab';
 import { resolveArtifactsBackend } from '../../services/hosted-git/backend';
+import { boundArtifactsRepositoryHost } from '../../services/workspace-git-source';
 import { assertRepositoryAccess } from '../projects/_helpers';
 import {
   assertWorkspaceAcceptsCallback,
@@ -271,6 +272,10 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       token: tokenSecret,
       expiresAt: tokenResult.expiresAt ?? tokenResult.expires_at,
       cloneUrl,
+      // The VM agent's credential helper answers with username "x" only for Cloudflare Artifacts
+      // hosts it knows by name. For a bound self-hosted host, name it here so a refresh presents
+      // the same username the clone used. Cloudflare responses are unchanged.
+      ...(boundArtifactsRepositoryHost(cloneUrl) ? { username: 'x' } : {}),
     });
   }
 

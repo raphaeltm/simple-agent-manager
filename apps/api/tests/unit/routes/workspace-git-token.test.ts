@@ -492,6 +492,8 @@ describe('workspace git-token GitHub scoping', () => {
         token: 'hosted-token',
         expiresAt: '2026-06-06T20:00:00.000Z',
         cloneUrl: remote,
+        // The bound self-hosted host gets the same username the clone used.
+        username: 'x',
       });
     } finally {
       registerArtifactsBackendFallback(null);

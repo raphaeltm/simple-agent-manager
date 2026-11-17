@@ -81,6 +81,7 @@ import { aiProxyAnthropicRoutes } from './routes/ai-proxy-anthropic';
 import { aiProxyPassthroughRoutes } from './routes/ai-proxy-passthrough';
 import { analyticsIngestRoutes } from './routes/analytics-ingest';
 import { apiTokenRoutes } from './routes/api-tokens';
+import { artifactsConfigRoutes } from './routes/artifacts-config';
 import { authRoutes } from './routes/auth';
 import { bootstrapRoutes } from './routes/bootstrap';
 import { cachedCommandRoutes } from './routes/cached-commands';
@@ -186,7 +187,6 @@ import { scheduled } from './scheduled/handler';
 import { handleInboundAgentEmail } from './services/agent-email/inbound';
 import { agentEmailConfig } from './services/agent-email/setup-state';
 import { isAgentSignInEnabled } from './services/agent-sign-in/config';
-import { isArtifactsAvailable } from './services/hosted-git/backend';
 import { isInstantRuntimeAvailable } from './services/vm-agent-container';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -273,10 +273,7 @@ app.get('/health', (c) => {
 });
 
 // Public config — exposes feature flags the UI needs before auth
-app.get('/api/config/artifacts-enabled', (c) => {
-  applyCacheHeaders(c, 'public-config');
-  return c.json({ enabled: isArtifactsAvailable(c.env) });
-});
+app.route('/api/config', artifactsConfigRoutes);
 
 app.route('/api/config', platformCapabilitiesRoutes);
 

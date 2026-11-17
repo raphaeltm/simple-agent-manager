@@ -102,3 +102,48 @@ func TestWithGitTokenBoundHostIsExact(t *testing.T) {
 		}
 	}
 }
+
+// Positive cases the exact match must keep accepting: the control plane binds
+// url.host (lowercased, port included), and git may present either case.
+func TestWithGitTokenBoundHostCaseAndPort(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		bound, url, want string
+	}{
+		{"API.Sam.Example", "https://api.sam.example/git/d.git", "https://x:t@api.sam.example/git/d.git"},
+		{"api.sam.example", "https://API.SAM.EXAMPLE/git/d.git", "https://x:t@API.SAM.EXAMPLE/git/d.git"},
+		{"api.sam.example:8443", "https://api.sam.example:8443/git/d.git", "https://x:t@api.sam.example:8443/git/d.git"},
+	}
+	for _, tc := range cases {
+		cfg := &config.Config{RepoProvider: "artifacts", RepositoryHost: tc.bound}
+		got, err := withGitToken(tc.url, "t", cfg)
+		if err != nil {
+			t.Fatalf("withGitToken(%s): %v", tc.url, err)
+		}
+		if got != tc.want {
+			t.Fatalf("bound %q url %q: got %s want %s", tc.bound, tc.url, got, tc.want)
+		}
+	}
+}
+
+// An empty bound host never matches, and only the artifacts provider binds a
+// hosted host for the credential helper.
+func TestBoundHostedArtifactsHostGuards(t *testing.T) {
+	t.Parallel()
+
+	if isBoundHostedArtifactsHost(&config.Config{RepoProvider: "artifacts"}, "") {
+		t.Fatal("empty bound host must not match an empty url host")
+	}
+	if isBoundHostedArtifactsHost(nil, "api.sam.example") {
+		t.Fatal("nil config must not match")
+	}
+	github := &config.Config{
+		RepoProvider:   "github",
+		RepositoryHost: "api.sam.example",
+		CloneURL:       "https://api.sam.example/git/demo.git",
+	}
+	if needsCredentialHelperForConfig(github) {
+		t.Fatal("a bound host on a non-artifacts provider must not enable the credential helper")
+	}
+}

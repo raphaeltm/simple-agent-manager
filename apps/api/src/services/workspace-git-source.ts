@@ -49,22 +49,36 @@ function isCloudflareArtifactsHost(host: string): boolean {
  * Cloudflare Artifacts remote nothing is added: the VM agent knows that host by name. A remote on
  * any other host (a self-hosted install's own git server) is bound as `repositoryHost`, the only
  * host the VM agent then attaches the workspace's git token to (`isBoundHostedArtifactsHost`).
+ *
+ * This trusts `repository` because SAM assigns it: `project-create.ts` stores the backend's remote
+ * and no route lets a user edit it for an Artifacts project. A route that ever does must validate
+ * the host, or it lets a user send a workspace token to any https host.
  */
-function resolveArtifactsGitSource(repository: string): WorkspaceGitSource {
+/**
+ * The host the VM agent must be bound to for an Artifacts remote, or null when none is needed: a
+ * Cloudflare Artifacts host (the VM agent knows those by name), a non-https or unparseable remote,
+ * or a direct-provisioning request persisted by NodeLifecycle before `repository` was passed.
+ */
+export function boundArtifactsRepositoryHost(repository: string | undefined): string | null {
+  if (typeof repository !== 'string') return null;
+  let url: URL;
+  try {
+    url = new URL(repository);
+  } catch {
+    return null;
+  }
+  const host = url.host.toLowerCase();
+  if (url.protocol !== 'https:' || !host || isCloudflareArtifactsHost(host)) return null;
+  return host;
+}
+
+function resolveArtifactsGitSource(repository: string | undefined): WorkspaceGitSource {
   const artifactsSource: WorkspaceGitSource = {
     ...DEFAULT_GITHUB_SOURCE,
     repoProvider: 'artifacts',
   };
-  let url: URL;
-  try {
-    // A direct-provisioning request persisted by NodeLifecycle before this field existed carries
-    // no repository; `new URL(undefined)` throws, and the project keeps the Cloudflare behaviour.
-    url = new URL(repository);
-  } catch {
-    return artifactsSource;
-  }
-  const host = url.host.toLowerCase();
-  if (url.protocol !== 'https:' || !host || isCloudflareArtifactsHost(host)) return artifactsSource;
+  const host = boundArtifactsRepositoryHost(repository);
+  if (!host || !repository) return artifactsSource;
   return { ...artifactsSource, cloneUrl: repository, repositoryHost: host };
 }
 
