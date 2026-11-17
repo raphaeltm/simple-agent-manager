@@ -22,7 +22,7 @@ Data flow: user follow-up → ProjectData acceptPromptDelivery → session_inbox
 - `session-recovery.ts` reuses/requeues or replaces the task; retains sleep snapshot and releases previous task/workspace chat links. Snapshot lifecycle may create a checkpoint before any sleep; mere snapshot presence must not exclude startup.
 - Nullers (recovery cleanup, unlink/stop) must not qualify an unrelated task. Query binds both project and exact chat; never falls back to project-wide queued work.
 - Change only no-workspace target resolution. Add one bounded existence read there; no extra queries on live runtime path. Target file is 494 lines, so isolate startup lookup in a small service to stay within source-size rule.
-- No public API, env, schema, or architecture change. Existing queue contract is restored; document behavior in architecture/overview.md and validation here and in PR.
+- No public API, env, schema, or architecture change. Existing queue contract is restored; document behavior in architecture/durable-objects.md and validation here and in PR.
 
 ## Checklist / acceptance
 
@@ -33,11 +33,11 @@ Data flow: user follow-up → ProjectData acceptPromptDelivery → session_inbox
 - [x] Existing TTL expires a still-waiting follow-up without renewal.
 - [x] Genuine slept sessions with queued recovery tasks still reach recovery.
 - [x] in_progress missing runtime, terminal tasks, project/chat mismatch, snapshot authority and allowWake=false controls retain behavior.
-- [ ] Relevant local tests, lint/typecheck/build and full dispatched CI complete.
+- [x] Relevant local tests, lint/typecheck/build and full dispatched CI complete.
 - [x] Local specialist reviews complete and findings resolved.
-- [ ] Reserve/deploy staging, verify changed flow, clean up and release lease.
-- [ ] Draft PR includes Closes #2847, contribution credit, review/CI/staging evidence and explicit draft-only constraint.
-- [ ] Update SAM idea with PR and findings; leave task file active pending human completion confirmation.
+- [x] Reserve/deploy staging, verify changed flow, clean up and release lease.
+- [x] Draft PR includes Closes #2847, contribution credit, review/CI/staging evidence and explicit draft-only constraint.
+- [x] Update SAM idea with PR and findings; leave task file active pending human completion confirmation.
 
 ## Verification evidence
 
@@ -49,4 +49,19 @@ Post-fix validation: final startup Workers suite 17/17 passed; three adjacent su
 
 Broad local test run: 38/39 package tasks passed. API collected 1,088 files (1,083 passed, three skipped, two failed); all three failures were 5-second timeouts in unchanged archive-sharding/default-capacity-pools tests. Both files passed in isolation with unchanged timeouts and one worker: 230/230. Logs: `.tmp/2847/full-test.log` and `.tmp/2847/isolated-timeouts.log`. No unrelated timeout changes.
 
-SonarCloud identified 21 duplicated lines in the new delivery claim test harness. Consolidated the four identical copies into `tests/workers/helpers/vm-prompt-delivery.ts`; the provider-limit helper re-exports it to preserve callers. Test-engineer re-review PASS: config, bindings, claim selection, hooks and timing unchanged. Five affected Workers suites are revalidating; runtime implementation unchanged.
+SonarCloud identified 21 duplicated lines in the new delivery claim test harness. Consolidated the four identical copies into `tests/workers/helpers/vm-prompt-delivery.ts`; the provider-limit helper re-exports it to preserve callers. Test-engineer re-review PASS: config, bindings, claim selection, hooks and timing unchanged. All five affected Workers suites passed (49/49), including after the safe-main merge; runtime implementation unchanged.
+
+Final code validation on `365a5a82dd82c6b34f76bb761b52c2b57fc5c371`: full manually dispatched [CI 44124710948](https://github.com/raphaeltm/simple-agent-manager/actions/runs/44124710948) passed all three API and seven Workers shards, CLI, other packages, lint, build/typecheck and quality checks while PR remains draft. Quick draft CI, E2E mock/worker smoke and SonarCloud also passed. Local post-merge build passed 18 tasks/297 docs pages, API typecheck, secret-readback policy gate and all five affected Workers suites (49/49). The safe deployment prerequisite #2841 merged into main and this branch; no readiness/merge/production action was taken for this PR.
+
+## Live staging evidence (2026-11-17 UTC)
+
+[Deployment 44147093759](https://github.com/raphaeltm/simple-agent-manager/actions/runs/44147093759) succeeded, including the actual smoke-test step, on the exact code-validation head above. Cloudflare reported API version `bdcadf88-b09f-49c9-993d-ffdd7b62e867` at 100%, annotated with that commit. Workload sign-in as the manually configured `staging2-test-user` succeeded after the safe deployment applied its trust; dashboard, projects and infrastructure settings loaded in Chromium and screenshots were inspected. One bounded fresh VM used the user's explicit Claude OAuth configuration and existing compute pool, without changing shared settings.
+
+- 18:57:43: submit created project `01M7NDYAY28R2GZ73VYPVVHKKC`, task `01M7NDYCTJ8EQYE9D781ZRK5TB` and chat `f8bfae1e-1a5f-4114-a36b-389c4308902d`.
+- 18:57:44: task was `queued` / `node_selection`, workspace NULL. At 18:57:45 one follow-up was accepted as queued, delivery `01M7NDYK1P8SK8PQVMFQJ18976`.
+- 18:58–19:02: conversation stayed active, task queued with no workspace, no error and no sleep snapshot. A fresh VM heartbeated; its ready signal arrived at 19:02:11 without intervention. Workspace `01M7NE6VPSC3PYQ4K98NK3B8M8` linked at 19:02:18; delegated at 19:02:21 and in_progress at 19:02:56.
+- 19:04:05.703: initial assistant response. At 19:04:10.977–11.065: original queued follow-up response, each marker exactly once, in order, without resending. Final session active/idle, task `in_progress` / `awaiting_followup`, error NULL and no retained sleep snapshot. The verification reader was corrected to join transcript streaming chunks; the product was not changed for this harness assumption.
+- Desktop and 375×667 mobile delivery screenshots were inspected. Evidence retained in SAM library `/engineering/2847/`: pending `01M7NE52TM2YP9G557HWK3N2CE`, delivered desktop `01M7NEFEDHX8HTBW3AWYTSAKSP`, mobile `01M7NEFH5KJ88EHYJSRPXJYFNK`, timeline `01M7NEFKR515CBD47GEA6RAYRD`, response JSON `01M7NEFPV6W5Q82PNFZ9TB5TTP`.
+- Cleanup: session stopped 19:07:55; workspace already absent (404) through normal stop cleanup; strict VM deletion returned 200 at 19:08:45, project deletion 200 at 19:08:46. D1 independently confirmed the disposable project/task/workspace/node absent; baseline node `01M7M63HHAKV258FPFNC9Y04AB` preserved. Cleanup evidence `01M7NEKMDN9TSPWK14XR60SXBH`.
+
+Staging release [44155480622](https://github.com/raphaeltm/simple-agent-manager/actions/runs/44155480622) succeeded after checks and cleanup. At 19:11:03 UTC readback showed holder NULL and the next queued task in its turn; normal early-release handoff sent to that task. No live hour-long TTL or genuine-sleep matrix was run; those controls are covered through the real migrated D1/ProjectData regressions. CodeRabbit automatic check is SKIPPED for this draft; no review has arrived and no ready-only review phase was triggered. Task file stays active pending human confirmation.
