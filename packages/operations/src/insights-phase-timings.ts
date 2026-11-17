@@ -18,9 +18,15 @@ import { OperationError } from './errors';
 
 const DAY_MS = 86_400_000;
 
-/** Newest rows read per (operation, phase) to compute percentiles. Callers may pass another cap. */
+/**
+ * Newest rows read per (operation, phase) to compute percentiles. Callers may pass another cap.
+ * Work bound (rule 81): pairs come from a closed vocabulary (the VM phases under workspace, sleep
+ * and wake, plus runner steps under runner_start and runner_wake; about 30 pairs per skill or
+ * profile in practice). One call reads at most pairs x (sample + 1) index entries and rows: about
+ * 15k at the default, 60k at the maximum, whatever the retained history.
+ */
 export const DEFAULT_PHASE_STATS_SAMPLE_LIMIT = 500;
-export const MAX_PHASE_STATS_SAMPLE_LIMIT = 20_000;
+export const MAX_PHASE_STATS_SAMPLE_LIMIT = 2_000;
 /** Rows one stats read returns in total, whatever the number of phases (a memory bound). */
 export const MAX_PHASE_STATS_TOTAL_ROWS = 20_000;
 export const DEFAULT_PHASE_STATS_WINDOW_DAYS = 30;
@@ -193,7 +199,8 @@ export async function phaseDurationStats(
     ...scopeBinds,
     ...scopeBinds,
     ...scopeBinds,
-    // Each pair's sample.
+    // Each pair's sample: the row's own project (defence in depth), then the index range.
+    projectId,
     ...scopeBinds,
     since,
     sampleLimit + 1,
@@ -225,7 +232,8 @@ export async function phaseDurationStats(
            -- CROSS JOIN fixes the loop order: pairs outside, rows by id inside. D1 keeps no
            -- planner statistics, and a plain JOIN let SQLite scan the whole table instead.
            CROSS JOIN lifecycle_phase_timings t
-             ON t.id IN (
+             ON t.project_id = ?
+            AND t.id IN (
                SELECT s.id FROM lifecycle_phase_timings s
                 WHERE s.project_id = ?
                   AND s.${byColumn} = ?
