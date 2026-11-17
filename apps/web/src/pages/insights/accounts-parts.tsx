@@ -200,14 +200,14 @@ export function AccountCard({
         <UsageRow
           label="Tokens"
           line={tokensLine(account.tokens, usageLimited)}
-          testId="insights-account-tokens"
+          testId="insights-usage-tokens"
         />
       )}
       {account.spend && (
         <UsageRow
           label="Spend"
           line={spendLine(account.spend, usageLimited)}
-          testId="insights-account-spend"
+          testId="insights-usage-spend"
         />
       )}
       {account.usage && (

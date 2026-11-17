@@ -87,8 +87,21 @@ whose agent session recorded no credential appear as **Account not recorded**.
   long in total (**Paused now** while one is still going).
 - **Limits now** (your own accounts): the provider's last-reported windows, the same chip as the chat
   header. Open it for every window and when it resets.
-- **Spend** (API keys): **Not reported** for now. SAM does not yet record how many tokens each run
-  used, and it does not estimate.
+- **Tokens** (every account): the tokens the account's runs used in the range (input, output,
+  cache reads and cache writes), and that total divided by the account's merged pull requests. A run
+  through SAM's AI proxy is counted once, from the proxy's own measurement, even though the agent
+  reports the same calls. Agents that report no token counts contribute nothing, so a total can be
+  low rather than wrong.
+- **Spend** (API keys only): an **estimate** at SAM's model catalog prices, never a bill, with the
+  estimate per merged pull request beside it. Subscriptions and SAM's platform credential show tokens
+  only. A model SAM has no price for, or a custom OpenAI-compatible endpoint, is named under the
+  figure and makes the total partial (**At least**); SAM never guesses a price. A key with no
+  measured usage in the range shows **Not reported**. A teammate's personal key shows its tokens but
+  its spend is **Private**: only the key's owner sees it, as with its name. Shared project keys show
+  spend to every member.
+
+Tokens and spend cover usage SAM recorded since the range began, while **Merged** counts runs that
+ended in the range, so a run that spans the range's start counts its later usage only.
 
 The ring around each account's icon is its colour in the chart below.
 
@@ -125,6 +138,6 @@ whichever affected more work.
 ## For administrators
 
 How many ideas "idea to merged" looks at, how many flaky checks and waiting ideas are listed, the
-rework window, how many limit waits the Accounts tab examines and how many stalls it lists are
-runtime settings under **Admin → Settings → Operations** (`insights.flow*`, `insights.accounts*`).
+rework window, how many limit waits the Accounts tab examines, how many stalls it lists and how many
+token usage rows it reads are runtime settings under **Admin → Settings → Operations** (`insights.flow*`, `insights.accounts*`).
 See [Admin settings](/docs/guides/admin-settings/).

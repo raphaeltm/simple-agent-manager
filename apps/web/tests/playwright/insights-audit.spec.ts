@@ -267,7 +267,24 @@ test.describe('Insights', () => {
     ).toContainText('Teammates’ accounts (2)');
     const key = page.getByTestId('insights-account-cred:cc-key');
     await expect(key).toContainText('API key · pay as you go');
-    await expect(key.getByText('Not reported')).toHaveCount(1);
+    // An API key's spend: an estimate, and per merged pull request.
+    await expect(key.getByTestId('insights-usage-spend')).toContainText('~$41.27');
+    await expect(key.getByTestId('insights-usage-spend')).toContainText('~$3.44 per merged PR');
+    await expect(key.getByTestId('insights-usage-spend')).toContainText(
+      'Estimated at SAM’s model prices.'
+    );
+    await expect(key.getByTestId('insights-usage-tokens')).toContainText('21.6M');
+    await expect(key.getByTestId('insights-usage-tokens')).toContainText('1.8M per merged PR');
+    // A subscription shows tokens, never money.
+    await expect(own.getByTestId('insights-usage-tokens')).toContainText('48.2M');
+    await expect(own.getByTestId('insights-usage-spend')).toHaveCount(0);
+    // A teammate's key: tokens, spend private. A key with no usage: not reported.
+    const mates = page.getByTestId('insights-account-teammate:claude-code:api_key');
+    await expect(mates.getByTestId('insights-usage-tokens')).toContainText('2.3M');
+    await expect(mates.getByTestId('insights-usage-spend')).toContainText('Private');
+    const spare = page.getByTestId('insights-account-cred:cc-key2');
+    await expect(spare.getByTestId('insights-usage-spend')).toContainText('Not reported');
+    await expect(spare.getByTestId('insights-usage-tokens')).toHaveCount(0);
     await expect(page.getByTestId('insights-accounts-chart')).toBeVisible();
     await expect(page.getByTestId('insights-stall-list').locator('li')).toHaveCount(6);
     await expect(page.getByTestId('insights-stall-list')).toContainText(
@@ -283,6 +300,19 @@ test.describe('Insights', () => {
     await setupScene(page, 'realistic', [], 'stress');
     await page.goto(`${BASE}/accounts?range=90d`);
     await expect(page.locator('[data-testid^="insights-account-"]')).toHaveCount(8);
+    // Partial spend names every unpriced model and reads as a floor; capped usage says so too.
+    const key = page.getByTestId('insights-account-cred:cc-x');
+    await expect(key.getByTestId('insights-usage-spend')).toContainText('At least ~$12,345.68');
+    await expect(key.getByTestId('insights-usage-spend')).toContainText(
+      'mystery-model-with-an-extremely-long-name-that-has-no-catalog-price-at-all'
+    );
+    await expect(key.getByTestId('insights-usage-tokens')).toContainText('412M+');
+    await expect(
+      page
+        .getByTestId('insights-account-project:openai-codex:api_key')
+        .getByTestId('insights-usage-spend')
+    ).toContainText('No estimate');
+    await expect(page.getByText(/tokens and spend are a floor/)).toBeVisible();
     // Untrusted names render as text, never as markup.
     await expect(page.getByText('<script>alert("x")</script> 🔑 key').first()).toBeVisible();
     // Five accounts get a colour; the other three fold into "Other".
