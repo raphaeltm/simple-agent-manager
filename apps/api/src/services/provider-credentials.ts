@@ -17,6 +17,7 @@ import { resolveForConsumer } from './composable-credentials/resolve';
 import { decrypt } from './encryption';
 import { createGcpProviderForEnv } from './gcp-provider-factory';
 import { createGcpTokenProvider } from './gcp-token-provider';
+import { buildProviderConfigForEnv } from './infomaniak-provider-settings';
 import { getPlatformCloudCredential } from './platform-credentials';
 import {
   buildProviderConfig,
@@ -178,7 +179,7 @@ async function createProviderFromDecryptedToken(
     };
   }
 
-  const config = buildProviderConfig(providerName, decryptedToken, env);
+  const config = await buildProviderConfigForEnv(providerName, decryptedToken, env);
   return { provider: createProvider(config), providerName, credentialSource };
 }
 
@@ -275,7 +276,7 @@ async function createProviderFromComposableConfig(
       credentialSource,
     };
   }
-  const config = buildProviderConfig(providerName, token, env);
+  const config = await buildProviderConfigForEnv(providerName, token, env);
   return { provider: createProvider(config), providerName, credentialSource };
 }
 
@@ -429,7 +430,7 @@ async function createProviderForUserLegacy(
         };
       }
 
-      const config = buildProviderConfig(providerName, decryptedToken, env);
+      const config = await buildProviderConfigForEnv(providerName, decryptedToken, env);
       return {
         provider: createProvider(config),
         providerName,
@@ -493,7 +494,7 @@ async function createProviderForUserLegacy(
       };
     }
 
-    const config = buildProviderConfig(providerName, decryptedToken, env);
+    const config = await buildProviderConfigForEnv(providerName, decryptedToken, env);
     return {
       provider: createProvider(config),
       providerName,
@@ -541,7 +542,7 @@ async function createProviderForUserLegacy(
     };
   }
 
-  const config = buildProviderConfig(platformProvider, decryptedToken, env);
+  const config = await buildProviderConfigForEnv(platformProvider, decryptedToken, env);
   return {
     provider: createProvider(config),
     providerName: platformProvider,

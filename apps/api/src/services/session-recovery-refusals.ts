@@ -36,6 +36,14 @@ const SESSION_RECOVERY_REFUSALS: Record<string, SessionRecoveryRefusalClassifica
     action: 'retry',
     description: 'This conversation is moving storage locations. SAM will retry the wake shortly.',
   },
+  // A blocked provider-limit hold has no automatic wake: only the owner's Resume (which records
+  // the wait as released first) may start one. Retry-class so nothing is reported as a failed
+  // wake and no claim spends the wake budget; the chat shows the hold and its actions.
+  provider_limit_blocked: {
+    action: 'retry',
+    description:
+      'This conversation is paused by an AI provider usage limit and needs review before it can wake.',
+  },
   stale_eviction_generation: {
     action: 'drop',
     description: 'This wake belongs to an older runtime generation and was dropped.',
