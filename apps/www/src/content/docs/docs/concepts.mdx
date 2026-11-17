@@ -170,7 +170,7 @@ See the [AI Agents guide](/docs/guides/agents/) and [Chat Features guide](/docs/
 
 ## Notifications
 
-SAM includes an in-app notification system with real-time delivery via WebSocket:
+SAM includes an in-app notification system with real-time delivery via WebSocket. Questions, secret requests and Operations approvals are [Inbox](/docs/guides/inbox/) items you answer there; the other notifications are listed under the Inbox's **Updates** chip:
 
 | Type                  | Urgency | Trigger                                                                                                                   |
 | --------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------- |
@@ -184,6 +184,7 @@ SAM includes an in-app notification system with real-time delivery via WebSocket
 | `comment`             | Low     | New comments on your chat or your threads                                                                                 |
 | `session_access`      | Medium  | A chat is shared with you, or your access to it is extended or removed; or a teammate passes your chat on to someone else |
 | `operations_approval` | High    | An Operations agent asks to run an action (superadmins)                                                                   |
+| `secret_request`      | High    | An agent asks you to supply a secret value through the card in its chat                                                   |
 
 See the [Notifications guide](/docs/guides/notifications/) for full details.
 
