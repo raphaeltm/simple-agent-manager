@@ -48,7 +48,8 @@ export async function updateSetupSessionD1Status(
   binds.push(id);
   let where = 'id = ?';
   // A late active-phase write must never resurrect a cancellation/terminal row.
-  if (extra?.onlyIfActive || ACTIVE_SETUP_STATUSES.some((active) => active === status)) {
+  const activeStatuses: readonly SetupSessionStatus[] = ACTIVE_SETUP_STATUSES;
+  if (extra?.onlyIfActive || activeStatuses.includes(status)) {
     where += ` AND status IN (${ACTIVE_SETUP_STATUSES.map(() => '?').join(', ')})`;
     binds.push(...ACTIVE_SETUP_STATUSES);
   }

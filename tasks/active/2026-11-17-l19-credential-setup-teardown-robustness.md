@@ -120,3 +120,7 @@ Final continuation local evidence: full API run completed1093passingfiles/16715p
 - [x] Final focused suites: teardown40/native12/existing30/admin3 =85/85; scanner15/15; API TypeScript/scopedESLint/migration safety/runtime-tunable/secret-readback checks pass. Surgical D1 guard, overlap counter and settlement-cap mutations each reproduced the intended regression before restoration. Tests also cover all four provisioning await phases, legacy rows, late scrub settlement, eviction and actual recovery timers.
 - [x] Independent Cloudflare/security/constitution and test/completion/public-doc reviews PASS for this implementation delta. Final current-head CI remains required.
 - [ ] Agreed live staging checks, fixture cleanup, lease release and coordinator merge-hold release remain pending; no staging resources have been created by this continuation.
+
+## Sonar follow-up
+
+Sonar's green aggregate still exposed four open findings through its PR issue API. Cleanup and scanner orchestration now use small named step/check helpers; the reason ternary uses explicit returns and active-status membership uses typed `includes`. No matching rule, await order, timeout or lifecycle behavior changed. API82/82 and scanner15/15 pass; exact scanner output matches the prior version on48fixtures plus all5repository migration files. TypeScript/scopedlint/format/diff checks and independent CF/security/test-completion extraction review PASS. Refreshed current-head Sonar analysis remains required.

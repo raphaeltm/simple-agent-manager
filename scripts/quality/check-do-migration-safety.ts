@@ -127,112 +127,104 @@ export function extractSqlFromTypeScript(
   return results;
 }
 
+type ViolationLocation = Pick<Violation, 'file' | 'line'>;
+
+function dropTableViolation(line: string, location: ViolationLocation): Violation | undefined {
+  const match = line.match(/DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)/i);
+  if (!match) return;
+  const tableName = match[1];
+  // Preserve failed-recreation cleanup and the source-line allowlist.
+  if (
+    tableName.endsWith('_new') ||
+    tableName.endsWith('_tmp') ||
+    ALLOWLISTED_VIOLATIONS.has(`${location.file}:${location.line}`)
+  )
+    return;
+  return {
+    ...location,
+    pattern: 'DROP TABLE in DO migration',
+    message:
+      `DROP TABLE ${tableName} in a Durable Object migration is irreversible. ` +
+      `DO SQLite has NO time-travel recovery (unlike D1). ` +
+      `Use ALTER TABLE ADD COLUMN or CREATE TABLE IF NOT EXISTS instead.`,
+  };
+}
+
+function deleteWithoutWhereViolation(
+  line: string,
+  context: string,
+  location: ViolationLocation
+): Violation | undefined {
+  const match = line.match(/DELETE\s+FROM\s+(\w+)/i);
+  if (
+    !match ||
+    /WHERE/i.test(context) ||
+    ALLOWLISTED_VIOLATIONS.has(`${location.file}:${location.line}`)
+  )
+    return;
+  return {
+    ...location,
+    pattern: 'DELETE FROM without WHERE in DO migration',
+    message:
+      `DELETE FROM ${match[1]} without WHERE will wipe all rows. ` +
+      `DO SQLite has no recovery mechanism. Add a WHERE clause.`,
+  };
+}
+
+function updateWithoutWhereViolation(
+  line: string,
+  context: string,
+  location: ViolationLocation
+): Violation | undefined {
+  const match = line.match(/UPDATE\s+(\w+)\s+SET\b/i);
+  if (
+    !match ||
+    /WHERE/i.test(context) ||
+    ALLOWLISTED_VIOLATIONS.has(`${location.file}:${location.line}`)
+  )
+    return;
+  return {
+    ...location,
+    pattern: 'UPDATE without WHERE in DO migration',
+    message:
+      `UPDATE ${match[1]} SET without WHERE will modify all rows. ` +
+      `If this is an intentional backfill, add a WHERE clause (e.g., WHERE column IS NULL).`,
+  };
+}
+
+function truncateViolation(line: string, location: ViolationLocation): Violation | undefined {
+  const match = line.match(/TRUNCATE\s+(?:TABLE\s+)?(\w+)/i);
+  if (!match) return;
+  // TRUNCATE has never honored the allowlist; preserve that strict behavior.
+  return {
+    ...location,
+    pattern: 'TRUNCATE in DO migration',
+    message: `TRUNCATE ${match[1]} is irreversible in DO SQLite.`,
+  };
+}
+
 export function scanDoMigrations(filePath: string): Violation[] {
   const violations: Violation[] = [];
   const content = readFileSync(filePath, 'utf-8');
   const basename = filePath.split('/').pop() ?? filePath;
-  const sqlBlocks = extractSqlFromTypeScript(content);
-
-  for (const { sql, lineStart } of sqlBlocks) {
+  for (const { sql, lineStart } of extractSqlFromTypeScript(content)) {
     const sqlLines = sql.split('\n');
-
     for (let i = 0; i < sqlLines.length; i++) {
       const line = sqlLines[i];
-      const absoluteLine = lineStart + i;
-
-      // Skip comments
       if (line.trim().startsWith('--')) continue;
-
-      // 1. DROP TABLE (never allowed in DO migrations)
-      const dropTableMatch = line.match(
-        /DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)/i
-      );
-      if (dropTableMatch) {
-        const tableName = dropTableMatch[1];
-        // Allow dropping _new/_tmp tables (cleanup of failed recreation)
-        if (
-          !tableName.endsWith('_new') &&
-          !tableName.endsWith('_tmp')
-        ) {
-          const key = `${basename}:${absoluteLine}`;
-          if (!ALLOWLISTED_VIOLATIONS.has(key)) {
-            violations.push({
-              file: basename,
-              line: absoluteLine,
-              pattern: 'DROP TABLE in DO migration',
-              message:
-                `DROP TABLE ${tableName} in a Durable Object migration is irreversible. ` +
-                `DO SQLite has NO time-travel recovery (unlike D1). ` +
-                `Use ALTER TABLE ADD COLUMN or CREATE TABLE IF NOT EXISTS instead.`,
-            });
-          }
-        }
-      }
-
-      // 2. DELETE FROM without WHERE
-      const deleteMatch = line.match(/DELETE\s+FROM\s+(\w+)/i);
-      if (deleteMatch) {
-        const tableName = deleteMatch[1];
-        // Check next few lines for WHERE clause
-        const context = sqlLines
-          .slice(i, Math.min(i + 3, sqlLines.length))
-          .join(' ');
-        if (!/WHERE/i.test(context)) {
-          const key = `${basename}:${absoluteLine}`;
-          if (!ALLOWLISTED_VIOLATIONS.has(key)) {
-            violations.push({
-              file: basename,
-              line: absoluteLine,
-              pattern: 'DELETE FROM without WHERE in DO migration',
-              message:
-                `DELETE FROM ${tableName} without WHERE will wipe all rows. ` +
-                `DO SQLite has no recovery mechanism. Add a WHERE clause.`,
-            });
-          }
-        }
-      }
-
-      // 3. UPDATE without WHERE (data corruption risk)
-      const updateMatch = line.match(/UPDATE\s+(\w+)\s+SET\b/i);
-      if (updateMatch) {
-        const tableName = updateMatch[1];
-        const context = sqlLines
-          .slice(i, Math.min(i + 3, sqlLines.length))
-          .join(' ');
-        // Allow UPDATE with WHERE (backfill patterns are fine)
-        if (!/WHERE/i.test(context)) {
-          // Allow known safe backfill patterns (e.g., SET column = rowid WHERE column IS NULL)
-          // The existing migration 007 does: UPDATE chat_messages SET sequence = rowid WHERE sequence IS NULL
-          // That has a WHERE so it won't trigger this check.
-          const key = `${basename}:${absoluteLine}`;
-          if (!ALLOWLISTED_VIOLATIONS.has(key)) {
-            violations.push({
-              file: basename,
-              line: absoluteLine,
-              pattern: 'UPDATE without WHERE in DO migration',
-              message:
-                `UPDATE ${tableName} SET without WHERE will modify all rows. ` +
-                `If this is an intentional backfill, add a WHERE clause (e.g., WHERE column IS NULL).`,
-            });
-          }
-        }
-      }
-
-      // 4. TRUNCATE (not valid in SQLite but catch anyway)
-      const truncateMatch = line.match(
-        /TRUNCATE\s+(?:TABLE\s+)?(\w+)/i
-      );
-      if (truncateMatch) {
-        violations.push({
-          file: basename,
-          line: absoluteLine,
-          pattern: 'TRUNCATE in DO migration',
-          message: `TRUNCATE ${truncateMatch[1]} is irreversible in DO SQLite.`,
-        });
+      const location = { file: basename, line: lineStart + i };
+      // DELETE/UPDATE retain the same three-line WHERE lookahead.
+      const context = sqlLines.slice(i, Math.min(i + 3, sqlLines.length)).join(' ');
+      for (const violation of [
+        dropTableViolation(line, location),
+        deleteWithoutWhereViolation(line, context, location),
+        updateWithoutWhereViolation(line, context, location),
+        truncateViolation(line, location),
+      ]) {
+        if (violation) violations.push(violation);
       }
     }
   }
-
   return violations;
 }
 
