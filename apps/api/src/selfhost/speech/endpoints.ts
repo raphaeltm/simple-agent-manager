@@ -16,6 +16,7 @@ import { outboundMaxRedirectsValue } from '../../services/outbound-fetch-setting
 import {
   DEFAULT_SPEECH_ENDPOINT_TIMEOUT_MS,
   DEFAULT_SPEECH_SYNTHESIS_MAX_AUDIO_BYTES,
+  DEFAULT_SPEECH_TRANSCRIPTION_MAX_RESPONSE_BYTES,
   type SpeechEndpointKind,
   speechSettingName,
   validSpeechBaseUrl,
@@ -34,6 +35,7 @@ export interface SpeechEndpoint {
   /** Per-request budget (`speech.endpointTimeoutMs`). */
   timeoutMs: number;
   maxAudioBytes: number;
+  maxTranscriptionResponseBytes: number;
 }
 
 export class SpeechEndpointError extends Error {
@@ -71,6 +73,7 @@ export async function resolveSpeechEndpoint(
       speechSettingName(null, 'endpointTimeoutMs'),
       'outbound.maxRedirects',
       speechSettingName('synthesis', 'maxAudioBytes'),
+      speechSettingName('transcription', 'maxResponseBytes'),
     ]);
     values = details.map((detail) => detail.value);
   } catch (err) {
@@ -80,8 +83,17 @@ export async function resolveSpeechEndpoint(
     });
     return null;
   }
-  const [baseUrl, apiKey, model, allowPrivate, voice, timeout, maxRedirects, maxAudioBytes] =
-    values;
+  const [
+    baseUrl,
+    apiKey,
+    model,
+    allowPrivate,
+    voice,
+    timeout,
+    maxRedirects,
+    maxAudioBytes,
+    maxTranscriptionResponseBytes,
+  ] = values;
   const modelId = stringValue(model);
   if (!validSpeechBaseUrl(kind, baseUrl) || !modelId) return null;
   if (kind === 'synthesis' && !stringValue(voice)) return null;
@@ -103,6 +115,12 @@ export async function resolveSpeechEndpoint(
       typeof maxAudioBytes === 'number' && Number.isInteger(maxAudioBytes) && maxAudioBytes > 0
         ? maxAudioBytes
         : DEFAULT_SPEECH_SYNTHESIS_MAX_AUDIO_BYTES,
+    maxTranscriptionResponseBytes:
+      typeof maxTranscriptionResponseBytes === 'number' &&
+      Number.isInteger(maxTranscriptionResponseBytes) &&
+      maxTranscriptionResponseBytes > 0
+        ? maxTranscriptionResponseBytes
+        : DEFAULT_SPEECH_TRANSCRIPTION_MAX_RESPONSE_BYTES,
     timeoutMs:
       typeof timeout === 'number' && Number.isInteger(timeout) && timeout > 0
         ? timeout
@@ -141,7 +159,9 @@ export async function transcribeWithEndpoint(
   form.set('model', endpoint.model);
   form.set('response_format', 'json');
   const response = await send(endpoint, '/audio/transcriptions', { method: 'POST', body: form });
-  const payload = maybeJsonRecord(await response.json().catch(() => null));
+  const bytes = await readSpeechResponse(response, endpoint.maxTranscriptionResponseBytes);
+  // Parse only the bounded buffer; invalid provider JSON must not leak its contents in errors.
+  const payload = maybeJsonRecord(await new Response(bytes).json().catch(() => null));
   if (typeof payload?.text !== 'string') {
     throw new SpeechEndpointError(
       'transcription',
@@ -181,24 +201,24 @@ export async function synthesizeWithEndpoint(
       'The synthesis endpoint returned non-audio content'
     );
   }
-  return readAudio(response, endpoint.maxAudioBytes);
+  return readSpeechResponse(response, endpoint.maxAudioBytes);
 }
 
 /** Bound actual streamed bytes even when Content-Length is absent or untruthful. */
-async function readAudio(response: Response, maxBytes: number): Promise<ArrayBuffer> {
+async function readSpeechResponse(response: Response, maxBytes: number): Promise<ArrayBuffer> {
   const reader = response.body?.getReader();
   if (!reader) return new ArrayBuffer(0);
   const chunks: Uint8Array[] = [];
   let size = 0;
   try {
     if (Number(response.headers.get('content-length')) > maxBytes) {
-      throw new Error('Speech audio exceeds configured byte limit');
+      throw new Error('Speech response exceeds configured byte limit');
     }
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > maxBytes) throw new Error('Speech audio exceeds configured byte limit');
+      if (size > maxBytes) throw new Error('Speech response exceeds configured byte limit');
       chunks.push(value);
     }
     const bytes = new Uint8Array(size);

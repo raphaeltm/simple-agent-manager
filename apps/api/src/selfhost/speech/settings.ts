@@ -32,6 +32,8 @@ export const DEFAULT_SPEECH_SYNTHESIS_REQUESTS_PER_HOUR = 120;
 
 /** Per-chunk audio ceiling; about two minutes of uncompressed mono speech. */
 export const DEFAULT_SPEECH_SYNTHESIS_MAX_AUDIO_BYTES = 8 * 1024 * 1024;
+/** Bound provider JSON before parsing it (speech.transcription.maxResponseBytes). */
+export const DEFAULT_SPEECH_TRANSCRIPTION_MAX_RESPONSE_BYTES = 1024 * 1024;
 
 const MAX_URL_LENGTH = 2048;
 const MAX_API_KEY_LENGTH = 4096;
@@ -146,6 +148,13 @@ export const SPEECH_ENDPOINT_SETTINGS: readonly AdminSettingDefinition[] = [
   ...COMMON_KEYS.map((key) => definition('transcription', key)),
   ...COMMON_KEYS.map((key) => definition('synthesis', key)),
   definition('synthesis', 'voice'),
+  integerDefinition(
+    speechSettingName('transcription', 'maxResponseBytes'),
+    DEFAULT_SPEECH_TRANSCRIPTION_MAX_RESPONSE_BYTES,
+    'AI models',
+    'Maximum transcription JSON response bytes, checked before parsing. Oversized transcripts are refused.',
+    { min: 1, max: 4 * 1024 * 1024 }
+  ),
   integerDefinition(
     speechSettingName('synthesis', 'maxAudioBytes'),
     DEFAULT_SPEECH_SYNTHESIS_MAX_AUDIO_BYTES,

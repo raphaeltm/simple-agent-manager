@@ -93,3 +93,5 @@ OpenAI speech reference verified Nov17: https://developers.openai.com/api/refere
 requires voice. Compatibility providers should configure their own valid voice. Missing audio MIME is accepted for
 compatible raw-byte endpoints; known non-audio is refused. Endpoint partial retries now spend regeneration calls
 instead of introducing a new cache-identity contract. The existing final-audio cache behavior is unchanged.
+
+- [x] Sixth automated finding (transcription JSON unbounded): reuse shared bounded stream reader before JSON parsing, configurable speech.transcription.maxResponseBytes (1MiB default,4MiB max); three route regressions RED before fix and GREEN with exact13-byte control; delta security/Cloudflare/completion PASS.

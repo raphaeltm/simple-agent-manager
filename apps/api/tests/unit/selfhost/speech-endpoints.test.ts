@@ -177,6 +177,41 @@ describe('speech-to-text through an OpenAI-compatible endpoint', () => {
     expect((await resolvePublicPlatformCapabilities(env)).speechToText).toBe(true);
   });
 
+  it.each([undefined, '1', '99'])(
+    'bounds transcription JSON with Content-Length=%s before parsing',
+    async (length) => {
+      const { env } = boxEnv();
+      await configure(env, {
+        'speech.transcription.baseUrl': 'https://stt.example.com/v1',
+        'speech.transcription.model': 'whisper-large-v3',
+        'speech.transcription.maxResponseBytes': 13,
+      });
+      const cancel = vi.fn();
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode(JSON.stringify({ text: 'oversized transcript' }))
+          );
+        },
+        cancel,
+      });
+      fetchMock.mockResolvedValueOnce(
+        new Response(stream, {
+          headers: {
+            'Content-Type': 'application/json',
+            ...(length ? { 'Content-Length': length } : {}),
+          },
+        })
+      );
+      expect((await postAudio(env)).status).toBe(503);
+      expect(cancel).toHaveBeenCalledTimes(1);
+      fetchMock.mockResolvedValueOnce(Response.json({ text: 'ok' })); // exactly13bytes
+      const control = await postAudio(env);
+      expect(control.status).toBe(200);
+      expect(await control.json()).toEqual({ text: 'ok' });
+    }
+  );
+
   it('answers 503 (not 500) and does not echo the upstream body when the endpoint fails', async () => {
     const { env } = boxEnv();
     await configure(env, {
