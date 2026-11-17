@@ -17,12 +17,13 @@ export async function resolveReverseTunnelAgentOrigin(env: Env, nodeId: string):
   )
     .bind(nodeId)
     .first<{ port: unknown }>();
-  if (typeof row?.port !== 'number') {
+  const port = row ? Number(row.port) : Number.NaN;
+  if (!Number.isInteger(port)) {
     throw new Error(
       `Node ${nodeId} has no active reverse-tunnel lease for its current incarnation`
     );
   }
   // Caddy and fetch() connect to exactly this loopback port: never outside the lease range.
-  assertReverseTunnelUpstreamPort(env, row.port);
-  return reverseTunnelUpstreamOrigin(row.port);
+  assertReverseTunnelUpstreamPort(env, port);
+  return reverseTunnelUpstreamOrigin(port);
 }
