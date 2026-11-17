@@ -45,9 +45,12 @@ function setup(provider: 'infomaniak' | 'hetzner') {
     KV: createMemoryKv(),
     ENCRYPTION_KEY: generateEncryptionKey(),
   } as unknown as Env;
-  const allocate = (bootDiskSizeGb: number | null) =>
+  const allocate = (
+    bootDiskSizeGb: number | null,
+    entryPoint: 'direct-node' | 'direct-workspace' | 'session-snapshot-relay' = 'direct-node'
+  ) =>
     resolveCanonicalVmAllocationPlan(drizzle(database, { schema }) as never, env, {
-      entryPoint: 'direct-node',
+      entryPoint,
       taskId: 'task-boot-disk',
       userId: USER_ID,
       projectId: null,
@@ -103,6 +106,26 @@ describe('requested Infomaniak boot volume admission', () => {
     expect(await allocate(120)).toMatchObject({ providerInstanceBootDiskSizeGb: 120 });
     const refused = await allocate(200);
     expect('error' in refused && refused.error).toContain('150GB');
+  });
+
+  it('applies to workspace create requests too', async () => {
+    const { allocate } = setup('infomaniak');
+    const refused = await allocate(4_096, 'direct-workspace');
+    expect('error' in refused && refused.error).toContain('infomaniak.bootVolumeGb');
+  });
+
+  it('does not cap a size replayed from an existing node after the setting is lowered', async () => {
+    // The session-snapshot relay copies a source node's stored size. A node recorded at 200 GB
+    // when the setting allowed it must keep resolving after an admin lowers the setting.
+    const { allocate, setBootVolumeGb } = setup('infomaniak');
+    await setBootVolumeGb(40);
+    expect(await allocate(200, 'session-snapshot-relay')).toMatchObject({
+      effectiveProvider: 'infomaniak',
+      providerInstanceBootDiskSizeGb: 200,
+    });
+    // Control: the same size as a new request is refused.
+    const refused = await allocate(200, 'direct-node');
+    expect('error' in refused && refused.error).toContain('40GB');
   });
 
   it('does not apply the Infomaniak cap to other providers', async () => {

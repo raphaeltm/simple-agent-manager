@@ -197,11 +197,13 @@ export async function resolveCanonicalVmAllocationPlan(
     };
   }
 
-  const bootDiskRefusal = await refuseOversizedRequestedBootDisk(
-    env,
-    credential.providerName,
-    input.explicit?.native?.providerInstanceBootDiskSizeGb
-  );
+  const bootDiskRefusal = BOOT_DISK_SIZE_IS_USER_SUPPLIED[input.entryPoint]
+    ? await refuseOversizedRequestedBootDisk(
+        env,
+        credential.providerName,
+        input.explicit?.native?.providerInstanceBootDiskSizeGb
+      )
+    : null;
   if (bootDiskRefusal) return { error: bootDiskRefusal, errorKind: 'placement' };
 
   if (
@@ -267,6 +269,28 @@ export async function resolveCanonicalVmAllocationPlan(
     native: normalizeNativeRequest(input.explicit?.native),
   });
 }
+
+/**
+ * Whether `explicit.native.providerInstanceBootDiskSizeGb` from this entry point is a size a user
+ * just asked for (capped below) or one replayed from an existing record. The session-snapshot relay
+ * copies a source node's stored size, which must keep resolving after an admin lowers the setting.
+ * Exhaustive on purpose: a new entry point must decide which kind it is.
+ */
+const BOOT_DISK_SIZE_IS_USER_SUPPLIED: Readonly<Record<PlacementEntryPoint, boolean>> = {
+  'direct-node': true,
+  'direct-workspace': true,
+  'task-submit': false,
+  'deployment-provisioning': false,
+  'session-snapshot-relay': false,
+  'mcp-dispatch': false,
+  'sam-session-dispatch': false,
+  'trigger-submit': false,
+  'retry-subtask': false,
+  'task-run': false,
+  'session-recovery': false,
+  'orchestrator-dispatch': false,
+  'orchestration-retry': false,
+};
 
 /**
  * A user-supplied `bootDiskSizeGb` (node create, workspace create) is capped here, where the request
