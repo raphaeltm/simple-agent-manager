@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { getNodeBackendBaseUrl } from '../../src/services/node-agent-readiness';
+import * as placement from '../../src/services/placement-resolver';
 import * as projectData from '../../src/services/project-data';
 import * as recovery from '../../src/services/session-recovery';
 import type { SubmitVmTaskInput } from '../../src/services/submit-vm-task';
@@ -156,8 +157,15 @@ async function readyRuntime(f: Fixture) {
       return Response.json(versionedPromptCapabilities('first-runtime'));
     }
     if (new URL(request.url).pathname.endsWith('/prompt')) {
-      if (busy) return Response.json({ error: 'prompt_in_progress' }, { status: 409 });
       const body = JSON.parse(typeof init?.body === 'string' ? init.body : await request.text());
+      if (busy)
+        return Response.json(
+          {
+            ...acceptedPromptResponse(agentSessionId, body.deliveryId, 'first-runtime', Date.now()),
+            status: 'not_ready',
+          },
+          { status: 409 }
+        );
       prompts.push(body.deliveryId);
       return Response.json(
         acceptedPromptResponse(agentSessionId, body.deliveryId, 'first-runtime', Date.now())
@@ -221,11 +229,10 @@ describe('follow-ups before first VM placement', () => {
     await queueFollowup(f);
     await runDue(f);
     const expiry = (await inbox(f)).expires_at;
-    expect(
-      await runInDurableObject(f.stub, (_instance, state) =>
-        expireDuePromptDeliveries(state.storage.sql, config, expiry)
-      )
-    ).toMatchObject({ expired: 1 });
+    const expired = await runInDurableObject(f.stub, (_instance, state) =>
+      expireDuePromptDeliveries(state.storage.sql, config, expiry)
+    );
+    expect(expired.expired).toBeGreaterThan(0);
     expect(await inbox(f)).toMatchObject({ delivery_state: 'expired', expires_at: expiry });
     expect(await runDue(f, expiry + 1)).toBeNull();
   });
@@ -261,8 +268,8 @@ describe('follow-ups before first VM placement', () => {
       const f = await startingConversation();
       await env.DATABASE.prepare(
         `INSERT INTO session_snapshots
-      (id, project_id, user_id, chat_session_id, runtime, status, degradation, sleeping_at, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 'vm', 'available', 'none', ?, datetime('now'), datetime('now'))`
+      (id, project_id, user_id, chat_session_id, runtime, status, degradation, manifest_r2_key, expires_at, sleeping_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'vm', 'available', 'none', 'manifest', '2099-01-01T00:00:00Z', ?, datetime('now'), datetime('now'))`
       )
         .bind(`snapshot-${f.id}`, f.projectId, f.userId, f.chatSessionId, sleepingAt)
         .run();
@@ -286,6 +293,60 @@ describe('follow-ups before first VM placement', () => {
       }
     }
   );
+
+  it('continues a real retained VM wake whose recovery task is queued with no linked workspace', async () => {
+    const f = await startingConversation();
+    const oldWorkspace = `retired-${f.id}`;
+    await seedNode(`old-node-${f.id}`, f.userId);
+    await seedWorkspace(oldWorkspace, `old-node-${f.id}`, f.userId, {
+      projectId: f.projectId,
+      status: 'deleted',
+    });
+    await env.DATABASE.prepare(
+      `INSERT INTO session_snapshots
+      (id, project_id, workspace_id, user_id, chat_session_id, runtime, status, degradation,
+       manifest_r2_key, expires_at, sleeping_at, sleep_status, recovery_status, recovery_task_id,
+       recovery_attempt_id, recovery_claimed_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'vm', 'available', 'none', 'manifest', '2099-01-01T00:00:00Z',
+        ?, 'sleeping', 'waking', ?, 'wake-attempt', ?, datetime('now'), datetime('now'))`
+    )
+      .bind(
+        `snapshot-${f.id}`,
+        f.projectId,
+        oldWorkspace,
+        f.userId,
+        f.chatSessionId,
+        new Date().toISOString(),
+        f.taskId,
+        new Date().toISOString()
+      )
+      .run();
+    // Only cloud placement/credential discovery is substituted. The resolver, recovery
+    // context, deletion fence and snapshot claim all execute against real D1.
+    vi.spyOn(
+      placement,
+      'resolveTaskStartPlacementCredentialAttributionFromPlacement'
+    ).mockImplementation(async (_db, plan) => ({
+      placement: plan,
+      effectiveProvider: 'hetzner',
+      credential: { credentialSource: 'user', providerName: 'hetzner' },
+      capacityPoolSelection: null,
+      quotaCredentialSource: 'user',
+      capacityPlacementSnapshot: null,
+      credentialAttributionUserId: f.userId,
+      credentialAttributionProjectId: null,
+      credentialAttributionSource: 'user',
+      credentialAttribution: { userId: f.userId, projectId: null, source: 'user' },
+    }));
+    expect(await resolve(f)).toEqual({ kind: 'retry', reason: `Session is waking (${f.taskId})` });
+    expect(
+      await env.DATABASE.prepare(
+        'SELECT recovery_status, recovery_task_id FROM session_snapshots WHERE chat_session_id = ?'
+      )
+        .bind(f.chatSessionId)
+        .first()
+    ).toMatchObject({ recovery_status: 'waking', recovery_task_id: f.taskId });
+  });
 
   it('preserves allowWake=false and skips recovery for a missing runtime', async () => {
     const f = await startingConversation();

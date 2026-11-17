@@ -22,12 +22,12 @@ Data flow: user follow-up → ProjectData acceptPromptDelivery → session_inbox
 - `session-recovery.ts` reuses/requeues or replaces the task; retains sleep snapshot and releases previous task/workspace chat links. Snapshot lifecycle may create a checkpoint before any sleep; mere snapshot presence must not exclude startup.
 - Nullers (recovery cleanup, unlink/stop) must not qualify an unrelated task. Query binds both project and exact chat; never falls back to project-wide queued work.
 - Change only no-workspace target resolution. Add one bounded existence read there; no extra queries on live runtime path. Target file is 494 lines, so isolate startup lookup in a small service to stay within source-size rule.
-- No public API, env, schema, or architecture change. Existing queue contract is restored; document behavior and validation here and in PR, with no broad reference-doc churn.
+- No public API, env, schema, or architecture change. Existing queue contract is restored; document behavior in architecture/overview.md and validation here and in PR.
 
 ## Checklist / acceptance
 
-- [ ] Finish writer inventory with exact paths and verification evidence.
-- [ ] Real-D1 regression goes red pre-fix for initial queued/delegated follow-ups.
+- [x] Finish writer inventory with exact paths and verification evidence.
+- [x] Real-D1 regression goes red pre-fix for initial queued/delegated follow-ups.
 - [ ] Hold draft/ready/queued/delegated conversations without retained sleep, without recovery or failure.
 - [ ] Real durable inbox keeps retry attempts below cap; delivers after readiness and first turn end.
 - [ ] Existing TTL expires a still-waiting follow-up without renewal.
@@ -38,3 +38,9 @@ Data flow: user follow-up → ProjectData acceptPromptDelivery → session_inbox
 - [ ] Reserve/deploy staging, verify changed flow, clean up and release lease.
 - [ ] Draft PR includes Closes #2847, contribution credit, review/CI/staging evidence and explicit draft-only constraint.
 - [ ] Update SAM idea with PR and findings; leave task file active pending human completion confirmation.
+
+## Verification evidence
+
+Clean pre-fix Workers run (2026-11-17 09:19 UTC): 16 tests collected, 8 expected failures / 8 passing controls, no fixture or collection failures. The draft/ready/queued/delegated inbox slices fail with `wake_refused / sleeping_snapshot_missing`; eventual-delivery/TTL and checkpoint controls fail from the same incorrect classification. Log: `.tmp/2847/red-confirmed.log` (local). Root baseline lint 22/22 and typecheck 36/36 succeeded.
+
+Writer inventory verified by independent Cloudflare review: `submit-vm-task-effects.ts:65–80`, `reserved-task-submission-storage.ts:25–47`, `routes/mcp/dispatch-tool.ts:451–481,610–615`, `project-orchestrator/scheduling.ts:483–518`; `/sam` dispatch/retry and trigger submission use reserved task storage. TaskRunner `workspace-steps.ts:79–86` commits queued → delegated, `in-progress-transition.ts:43–75` commits delegated → in_progress. `session-linking.ts` binds workspace+task before handoff; recovery nullers keep retained sleep history, and sleeping_at is cleared after replacement linkage. These are inspected real writers, while the new regression executes the primary web writer.
