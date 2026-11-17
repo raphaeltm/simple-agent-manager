@@ -130,8 +130,8 @@ function createDoContext() {
         row = { ...row, cleanup_pending: 0 };
       } else if (normalized.includes('set cleanup_scrub_state = 1') && row) {
         row = { ...row, cleanup_scrub_state: 1 };
-      } else if (normalized.includes('set cleanup_scrub_state = 2') && row) {
-        row = { ...row, cleanup_scrub_state: 2 };
+      } else if (normalized.includes('set cleanup_scrub_state = ?') && row) {
+        row = { ...row, cleanup_scrub_state: args[0] };
       } else if (normalized.includes('set cleanup_sandbox_io_pending = coalesce') && row) {
         row = {
           ...row,
@@ -358,7 +358,7 @@ describe('native Codex setup route vertical slice', () => {
       );
       await ready;
       const sandbox = {
-        exec: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
+        exec: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0, success: true }),
         writeFile: vi.fn(async (path: string, value: string) => {
           files.set(path, value);
         }),
@@ -528,7 +528,7 @@ describe('native Codex setup route vertical slice', () => {
         writeFile: vi.fn(async (path: string, content: string) => {
           files.set(path, content);
         }),
-        exec: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
+        exec: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0, success: true }),
         exists: vi.fn(async (path: string) => ({ exists: files.has(path) })),
         readFile: vi.fn(async (path: string) => ({ content: files.get(path) ?? '' })),
       };

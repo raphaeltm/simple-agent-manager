@@ -19,6 +19,7 @@ import {
   withTimeout,
 } from '../../services/sandbox';
 import { releaseSetupSlot } from '../../services/setup-session-pool';
+import { readCleanupRow } from './cleanup-recovery';
 import { updateSetupSessionD1Status } from './d1-status';
 import { beginSandboxFlight } from './lifecycle-io';
 import type { SetupSessionRow } from './schema';
@@ -26,6 +27,8 @@ import type { SetupSessionRow } from './schema';
 export interface SetupSessionCleanupContext {
   env: Env;
   sql: SqlStorage;
+  deferPending(row: SetupSessionRow): Promise<boolean>;
+  claimAttempt(row: SetupSessionRow): Promise<boolean>;
   /** Schedule recovery after a failed attempt, even if the old alarm already fired. */
   rearmAlarm(): Promise<void>;
   /** Disarm the recovery alarm once the cleanup has finished. */
@@ -66,26 +69,15 @@ export async function runSetupSessionCleanup(
     : interactiveTimeoutMs;
   // Repair first, including while SDK uncertainty prevents destructive cleanup.
   const d1Repaired = await repairTerminalD1(env, row, resumed, execTimeoutMs);
-  if ((row.cleanup_sandbox_io_pending ?? 0) > 0 || row.cleanup_scrub_state === 1) {
-    logPendingProvisioningScrub(row);
-    await context.rearmAlarm();
-    return;
-  }
+  row = readCleanupRow(sql, row.id) ?? row;
+  if (await context.deferPending(row)) return;
+  if (resumed && !(await context.claimAttempt(row))) return;
   if (skipsScrub(row, resumed)) {
     log.info('credential_setup.scrub_skipped', { sessionId: row.id, reason: scrubSkipReason(row) });
   } else {
     await scrubSetupDirectory(context, row, execTimeoutMs);
   }
-  const scrubState = sql
-    .exec<{ cleanup_scrub_state: number | null }>(
-      'SELECT cleanup_scrub_state FROM setup_session WHERE id = ?',
-      row.id
-    )
-    .toArray()[0]?.cleanup_scrub_state;
-  if (scrubState === 1) {
-    await context.rearmAlarm();
-    return;
-  }
+  if (await context.deferPending(row)) return;
   const destroyed = await destroySetupSandbox(context, row, resumed, execTimeoutMs);
   const released = await releaseSetupPool(env, row, resumed, execTimeoutMs);
   // Failed/unfinished steps preserve both the obligation and a future recovery alarm.
@@ -104,17 +96,8 @@ export async function runSetupSessionCleanup(
   });
 }
 
-function logPendingProvisioningScrub(row: SetupSessionRow): void {
-  if (row.cleanup_from_status === 'provisioning') {
-    log.info('credential_setup.scrub_skipped', {
-      sessionId: row.id,
-      reason: 'provisioning_still_in_flight',
-    });
-  }
-}
-
 function scrubSkipReason(row: SetupSessionRow): string {
-  if (row.cleanup_scrub_state === 2) return 'scrub_already_settled';
+  if (row.cleanup_scrub_state === 2) return 'scrub_already_succeeded';
   if (row.cleanup_sandbox_destroyed === 1) return 'sandbox_already_destroyed';
   return 'never_left_provisioning';
 }
@@ -167,11 +150,17 @@ async function scrubSetupDirectory(
         );
         const observed = execution.then(
           async (result) => {
-            await recordScrubSettled(context, row.id, () => settled(!scrubAllowed));
+            const succeeded = result.success === true && result.exitCode === 0;
+            await recordScrubSettled(context, row.id, succeeded, () => settled(!scrubAllowed));
+            if (!succeeded)
+              log.warn('credential_setup.scrub_failed', {
+                sessionId: row.id,
+                reason: 'command_unsuccessful',
+              });
             return result;
           },
           async (error: unknown) => {
-            await recordScrubSettled(context, row.id, () => settled(!scrubAllowed));
+            await recordScrubSettled(context, row.id, false, () => settled(!scrubAllowed));
             throw error;
           }
         );
@@ -248,15 +237,17 @@ async function releaseSetupPool(
   }
 }
 
-/** SDK settlement is positive evidence; eviction or an outer deadline is not. */
+/** Only a successful command proves scrubbing; settlement alone clears uncertainty. */
 async function recordScrubSettled(
   context: SetupSessionCleanupContext,
   sessionId: string,
+  succeeded: boolean,
   settleFlight: () => Promise<void>
 ): Promise<void> {
   try {
     context.sql.exec(
-      `UPDATE setup_session SET cleanup_scrub_state = 2 WHERE id = ? AND cleanup_scrub_state = 1`,
+      `UPDATE setup_session SET cleanup_scrub_state = ? WHERE id = ? AND cleanup_scrub_state = 1`,
+      succeeded ? 2 : null,
       sessionId
     );
     await settleFlight();

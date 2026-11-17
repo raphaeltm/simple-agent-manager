@@ -29,8 +29,9 @@
  *      clear the marker and the alarm. The alarm joins a cleanup already running in
  *      this isolate instead of starting a second one.
  * If the isolate dies during step 3, `alarm()` finds a terminal row with
- * `cleanup_pending = 1` and resumes the cleanup, at most
- * DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS times.
+ * `cleanup_pending = 1` and resumes the cleanup with at most
+ * DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS work attempts. Unsettled SDK
+ * flights wait for settlement or an immutable watchdog without spending attempts.
  *
  * Storage: embedded SQLite (wrangler `new_sqlite_classes`). The constructor runs
  * the additive DDL in `./schema.ts`, which the DO migration safety check scans.
@@ -54,11 +55,11 @@ import {
   SANDBOX_PERMANENT_STARTUP_MESSAGE,
   type SetupSessionStatus,
 } from '../../services/credential-setup-config';
-import { persistError } from '../../services/observability-errors';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import { getSandboxInstance, shellQuote } from '../../services/sandbox';
 import { CredentialValidator } from '../../services/validation';
 import { runSetupSessionCleanup } from './cleanup';
+import { claimCleanupAttempt, deferPendingCleanup } from './cleanup-recovery';
 import { type SetupSessionD1Extra, updateSetupSessionD1Status } from './d1-status';
 import { type DeviceAuthState, driverFailure } from './driver-state';
 import {
@@ -666,43 +667,6 @@ export class CredentialSetupSession extends DurableObject<Env> {
       await this.deleteAlarmBestEffort();
       return;
     }
-    const attempts = (row.cleanup_attempts ?? 0) + 1;
-    if (attempts > DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS) {
-      log.error('credential_setup.cleanup_abandoned', {
-        sessionId: row.id,
-        status: row.status,
-        cleanupFromStatus: row.cleanup_from_status,
-        attempts: row.cleanup_attempts,
-      });
-      this.sql.exec(`UPDATE setup_session SET cleanup_attempts = ? WHERE id = ?`, attempts, row.id);
-      await this.deleteAlarmBestEffort();
-      // Persist a safe operator-visible error; no credential material or captured
-      // sandbox error text belongs in the alert. Pool leases independently expire
-      // on admission, while this row preserves the unresolved cleanup obligation.
-      if (this.env.OBSERVABILITY_DATABASE) {
-        this.ctx.waitUntil(
-          persistError(
-            this.env.OBSERVABILITY_DATABASE,
-            {
-              source: 'api',
-              level: 'error',
-              message: 'credential_setup.cleanup_abandoned',
-              sessionId: row.id,
-              context: { status: row.status, cleanupFromStatus: row.cleanup_from_status, attempts },
-            },
-            this.env
-          ).catch(() => log.error('credential_setup.cleanup_alert_failed', { sessionId: row.id }))
-        );
-      }
-      return;
-    }
-    this.sql.exec(`UPDATE setup_session SET cleanup_attempts = ? WHERE id = ?`, attempts, row.id);
-    log.warn('credential_setup.cleanup_resumed', {
-      sessionId: row.id,
-      status: row.status,
-      cleanupFromStatus: row.cleanup_from_status,
-      attempt: attempts,
-    });
     await this.trackCleanup(this.resumeClaimedCleanup(row));
   }
 
@@ -717,6 +681,8 @@ export class CredentialSetupSession extends DurableObject<Env> {
       {
         env: this.env,
         sql: this.sql,
+        deferPending: (current) => deferPendingCleanup(this.ctx, this.env, this.sql, current),
+        claimAttempt: (current) => claimCleanupAttempt(this.ctx, this.env, this.sql, current),
         deleteAlarm: () => this.deleteAlarmBestEffort(),
         waitUntil: (work) => this.ctx.waitUntil(work),
         rearmAlarm: () => armCleanupAlarmBestEffort(this.ctx, row),

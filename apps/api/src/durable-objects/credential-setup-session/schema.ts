@@ -32,11 +32,11 @@ export type SetupSessionRow = {
   cleanup_pending: number | null;
   /** Status the session had when teardown claimed it (decides whether to scrub). */
   cleanup_from_status: string | null;
-  /** Number of alarm-driven recoveries of an interrupted cleanup. */
+  /** Number of recovery work attempts; pending SDK watchdog wakes do not count. */
   cleanup_attempts: number | null;
   /** 1 only after sandbox.destroy() succeeds; recovery must not restart that sandbox. */
   cleanup_sandbox_destroyed: number | null;
-  /** NULL: not invoked; 1: SDK exec may still start work; 2: original exec settled. */
+  /** NULL: scrub needed; 1: SDK exec may still start work; 2: scrub succeeded. */
   cleanup_scrub_state: number | null;
   /** NULL legacy; positive count of original SDK flights; 0 all observed settled. */
   cleanup_sandbox_io_pending: number | null;

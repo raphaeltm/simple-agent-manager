@@ -1155,7 +1155,8 @@ for all keys, budgets, proxy availability and accounting limits.
 `credentialSetup.cleanupRecoveryStepTimeoutMs` (Operations) limits each remote step when a
 guided credential-login cleanup is retried by its recovery alarm: D1 repair, sandbox scrub,
 sandbox destruction and pool release. The default is 5,000 ms per step (range 1–10,000 ms),
-capped by `SANDBOX_EXEC_TIMEOUT_MS`. At most three recovery attempts run. Remote waits total
+capped by `SANDBOX_EXEC_TIMEOUT_MS`. At most three recovery attempts run; waiting for an
+already-issued SDK operation does not consume an attempt. Remote waits total
 at most 20 seconds per attempt by default (40 seconds at the maximum), plus the existing
 bounded settings read. Only recovery reads this setting; inline cancellation keeps the
 interactive sandbox timeout.
@@ -1165,4 +1166,7 @@ successful destruction or release its pool slot while earlier sandbox work may s
 the container. Unfinished cleanup remains marked pending. If an isolate dies before that
 work's settlement is observed, recovery preserves the uncertainty. After the recovery cap,
 the session is quarantined and reported as an operator-visible platform error; a late
-settlement does not reset the cap. A timed-out destruction never records destruction proof.
+settlement does not reset the cap. Pending SDK work has a separate watchdog at the later
+of the original session expiry and one interactive timeout plus a capture poll after teardown.
+Observed settlement wakes cleanup earlier. A timed-out destruction never records destruction
+proof, and a rejected or nonzero scrub remains retryable until scrub or destruction succeeds.

@@ -1,0 +1,125 @@
+/** Pending SDK work has a watchdog, not a failed-network-attempt budget. */
+import type { Env } from '../../env';
+import { log } from '../../lib/logger';
+import { DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS } from '../../services/credential-setup-config';
+import { persistError } from '../../services/observability-errors';
+import { getSandboxConfig } from '../../services/sandbox';
+import type { SetupSessionRow } from './schema';
+
+export function readCleanupRow(sql: SqlStorage, sessionId: string): SetupSessionRow | undefined {
+  return sql
+    .exec<SetupSessionRow>('SELECT * FROM setup_session WHERE id = ?', sessionId)
+    .toArray()[0];
+}
+
+function pendingDeadline(env: Env, row: SetupSessionRow): number | null {
+  const timeout = getSandboxConfig(env).execTimeoutMs;
+  const completedAt = row.completed_at;
+  if (typeof completedAt !== 'number') return null;
+  const clocks = [row.expires_at, completedAt, timeout, row.capture_poll_ms];
+  if (!clocks.every((value) => typeof value === 'number' && Number.isFinite(value) && value > 0))
+    return null;
+  const deadline = Math.max(row.expires_at, completedAt + timeout + row.capture_poll_ms);
+  return Number.isFinite(new Date(deadline).getTime()) ? deadline : null;
+}
+
+async function deleteRecoveryAlarm(ctx: DurableObjectState): Promise<void> {
+  try {
+    await ctx.storage.deleteAlarm();
+  } catch {
+    /* Already disarmed. */
+  }
+}
+
+export async function quarantineCleanup(
+  ctx: DurableObjectState,
+  env: Env,
+  sql: SqlStorage,
+  row: SetupSessionRow,
+  reason = 'attempts_exhausted'
+): Promise<void> {
+  if ((row.cleanup_attempts ?? 0) > DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS) {
+    await deleteRecoveryAlarm(ctx);
+    return;
+  }
+  const attempts = DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS + 1;
+  sql.exec(`UPDATE setup_session SET cleanup_attempts = ? WHERE id = ?`, attempts, row.id);
+  const context = {
+    status: row.status,
+    cleanupFromStatus: row.cleanup_from_status,
+    attempts: row.cleanup_attempts,
+    reason,
+  };
+  log.error('credential_setup.cleanup_abandoned', { sessionId: row.id, ...context });
+  await deleteRecoveryAlarm(ctx);
+  if (env.OBSERVABILITY_DATABASE) {
+    ctx.waitUntil(
+      persistError(
+        env.OBSERVABILITY_DATABASE,
+        {
+          source: 'api',
+          level: 'error',
+          message: 'credential_setup.cleanup_abandoned',
+          sessionId: row.id,
+          context,
+        },
+        env
+      ).catch(() => log.error('credential_setup.cleanup_alert_failed', { sessionId: row.id }))
+    );
+  }
+}
+
+/** Read after awaits; setAlarm is issued before yielding so a later settlement wins. */
+export async function deferPendingCleanup(
+  ctx: DurableObjectState,
+  env: Env,
+  sql: SqlStorage,
+  row: SetupSessionRow
+): Promise<boolean> {
+  row = readCleanupRow(sql, row.id) ?? row;
+  if (row.cleanup_pending !== 1) return true;
+  if ((row.cleanup_attempts ?? 0) > DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS) {
+    await deleteRecoveryAlarm(ctx);
+    return true;
+  }
+  if ((row.cleanup_sandbox_io_pending ?? 0) <= 0 && row.cleanup_scrub_state !== 1) return false;
+  if (row.cleanup_from_status === 'provisioning')
+    log.info('credential_setup.scrub_skipped', {
+      sessionId: row.id,
+      reason: 'provisioning_still_in_flight',
+    });
+  const deadline = pendingDeadline(env, row);
+  if (deadline === null || Date.now() >= deadline) {
+    await quarantineCleanup(ctx, env, sql, row, 'sdk_uncertainty_watchdog');
+    return true;
+  }
+  try {
+    await ctx.storage.setAlarm(deadline);
+  } catch {
+    log.error('credential_setup.cleanup_alarm_failed', { sessionId: row.id });
+  }
+  return true;
+}
+
+/** Count work only after terminal D1 repair and pending-flight deferral. */
+export async function claimCleanupAttempt(
+  ctx: DurableObjectState,
+  env: Env,
+  sql: SqlStorage,
+  row: SetupSessionRow
+): Promise<boolean> {
+  row = readCleanupRow(sql, row.id) ?? row;
+  const attempts = (row.cleanup_attempts ?? 0) + 1;
+  if (attempts > DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS) {
+    await quarantineCleanup(ctx, env, sql, row);
+    return false;
+  }
+  sql.exec(`UPDATE setup_session SET cleanup_attempts = ? WHERE id = ?`, attempts, row.id);
+  log.warn('credential_setup.cleanup_resumed', {
+    sessionId: row.id,
+    status: row.status,
+    cleanupFromStatus: row.cleanup_from_status,
+    attempt: attempts,
+  });
+  return true;
+}

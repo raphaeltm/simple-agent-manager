@@ -245,8 +245,8 @@ function createFakeSql() {
       if (row) row = { ...row, cleanup_scrub_state: 1 };
       return { toArray: () => [] };
     }
-    if (q.includes('update setup_session set cleanup_scrub_state = 2')) {
-      if (row) row = { ...row, cleanup_scrub_state: 2 };
+    if (q.includes('update setup_session set cleanup_scrub_state = ?')) {
+      if (row) row = { ...row, cleanup_scrub_state: args[0] };
       return { toArray: () => [] };
     }
     if (q.startsWith('select cleanup_scrub_state'))
@@ -317,7 +317,7 @@ function createFakeCtx() {
 
 function createFakeSandbox() {
   return {
-    exec: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
+    exec: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0, success: true }),
     writeFile: vi.fn().mockResolvedValue(undefined),
     readFile: vi.fn().mockImplementation(async (path: string) => ({
       content: path.endsWith('device-auth-state.json')
@@ -624,7 +624,7 @@ describe('CredentialSetupSession — alarm() provisioning step', () => {
     const { instance, ctx, database } = createDO();
     await Promise.resolve();
     const fakeSandbox = createFakeSandbox();
-    fakeSandbox.exec.mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+    fakeSandbox.exec.mockResolvedValue({ stdout: '', stderr: '', exitCode: 0, success: true });
     fakeSandbox.exec.mockRejectedValueOnce(new Error('mkdir failed: no space left'));
     vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
 

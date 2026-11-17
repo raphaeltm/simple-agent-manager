@@ -32,25 +32,13 @@ import { resolve } from 'node:path';
 import ts from 'typescript';
 
 export const DO_MIGRATION_FILES = [
-  resolve(
-    import.meta.dirname,
-    '../../packages/project-data/src/do/migrations.ts'
-  ),
-  resolve(
-    import.meta.dirname,
-    '../../apps/api/src/durable-objects/notification-migrations.ts'
-  ),
+  resolve(import.meta.dirname, '../../packages/project-data/src/do/migrations.ts'),
+  resolve(import.meta.dirname, '../../apps/api/src/durable-objects/notification-migrations.ts'),
   // Migration 072's DDL and legacy-row copy live beside the comment core (it is invoked
   // from migrations.ts); scan it like the ledger itself.
-  resolve(
-    import.meta.dirname,
-    '../../packages/project-data/src/do/anchored-comments-migration.ts'
-  ),
+  resolve(import.meta.dirname, '../../packages/project-data/src/do/anchored-comments-migration.ts'),
   // setup-session-pool uses inline constructor DDL (pure DO-SQLite) — scan it.
-  resolve(
-    import.meta.dirname,
-    '../../apps/api/src/durable-objects/setup-session-pool.ts'
-  ),
+  resolve(import.meta.dirname, '../../apps/api/src/durable-objects/setup-session-pool.ts'),
   // CredentialSetupSession keeps every DO-SQLite DDL statement (CREATE TABLE IF NOT
   // EXISTS plus guarded ALTER TABLE ADD COLUMN) in schema.ts. Its index.ts is not
   // scanned: it also writes D1 through a dynamic `SET ${...}` UPDATE that this
@@ -94,9 +82,7 @@ const ALLOWLISTED_VIOLATIONS = new Set<string>([]);
  * strings. Retain raw string bodies (including template interpolations) and
  * source line numbers for the existing SQL checks and diagnostics.
  */
-export function extractSqlFromTypeScript(
-  content: string
-): { sql: string; lineStart: number }[] {
+export function extractSqlFromTypeScript(content: string): { sql: string; lineStart: number }[] {
   const results: { sql: string; lineStart: number }[] = [];
   const SQL_KEYWORDS = /\b(CREATE|DROP|DELETE|INSERT|UPDATE|ALTER|TRUNCATE|SELECT)\b/i;
   const source = ts.createSourceFile(
@@ -130,7 +116,7 @@ export function extractSqlFromTypeScript(
 type ViolationLocation = Pick<Violation, 'file' | 'line'>;
 
 function dropTableViolation(line: string, location: ViolationLocation): Violation | undefined {
-  const match = line.match(/DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)/i);
+  const match = /DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)/i.exec(line);
   if (!match) return;
   const tableName = match[1];
   // Preserve failed-recreation cleanup and the source-line allowlist.
@@ -155,7 +141,7 @@ function deleteWithoutWhereViolation(
   context: string,
   location: ViolationLocation
 ): Violation | undefined {
-  const match = line.match(/DELETE\s+FROM\s+(\w+)/i);
+  const match = /DELETE\s+FROM\s+(\w+)/i.exec(line);
   if (
     !match ||
     /WHERE/i.test(context) ||
@@ -176,7 +162,7 @@ function updateWithoutWhereViolation(
   context: string,
   location: ViolationLocation
 ): Violation | undefined {
-  const match = line.match(/UPDATE\s+(\w+)\s+SET\b/i);
+  const match = /UPDATE\s+(\w+)\s+SET\b/i.exec(line);
   if (
     !match ||
     /WHERE/i.test(context) ||
@@ -193,7 +179,7 @@ function updateWithoutWhereViolation(
 }
 
 function truncateViolation(line: string, location: ViolationLocation): Violation | undefined {
-  const match = line.match(/TRUNCATE\s+(?:TABLE\s+)?(\w+)/i);
+  const match = /TRUNCATE\s+(?:TABLE\s+)?(\w+)/i.exec(line);
   if (!match) return;
   // TRUNCATE has never honored the allowlist; preserve that strict behavior.
   return {
@@ -244,9 +230,7 @@ function main(): void {
       );
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
-        console.log(
-          `  ${filePath.split('/').pop()}: SKIPPED (file not found)`
-        );
+        console.log(`  ${filePath.split('/').pop()}: SKIPPED (file not found)`);
       } else {
         throw e;
       }
@@ -256,25 +240,19 @@ function main(): void {
   console.log('');
 
   if (allViolations.length > 0) {
-    console.error(
-      `DO migration safety check FAILED — ${allViolations.length} violation(s):\n`
-    );
+    console.error(`DO migration safety check FAILED — ${allViolations.length} violation(s):\n`);
     for (const v of allViolations) {
       console.error(`  ${v.file}:${v.line}`);
       console.error(`  Pattern: ${v.pattern}`);
       console.error(`  ${v.message}`);
       console.error('');
     }
-    console.error(
-      'DO SQLite has NO time-travel recovery. Destructive operations are permanent.'
-    );
+    console.error('DO SQLite has NO time-travel recovery. Destructive operations are permanent.');
     console.error('See .claude/rules/31-migration-safety.md\n');
     process.exit(1);
   }
 
-  console.log(
-    'DO migration safety check passed. All migrations are non-destructive.'
-  );
+  console.log('DO migration safety check passed. All migrations are non-destructive.');
 }
 
 // Only run main when executed directly (not when imported for testing).

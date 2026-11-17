@@ -50,7 +50,7 @@ COLUMN` would ship unscanned. Fix: move all DO-SQLite DDL into
   `capture_poll_ms`), scrub bound = `SANDBOX_EXEC_TIMEOUT_MS`. The recovery-attempt cap (3) is a
   crash-loop circuit breaker, exported as `DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS`.
 - Rule 81: the monitor poll is not ported, so the per-start cost on Cloudflare is zero. Recovery
-  cost: at most 3 extra alarm runs per failed/interrupted teardown, each one cached/bounded settings read, scrub + destroy (default5s each, max10s each), release + D1 repair, followed on exhaustion by one quarantine/observability write. No new per-start I/O.
+  cost: at most 3 extra alarm runs per failed/interrupted teardown, each one cached/bounded settings read, scrub + destroy (default5s each, max10s each), release + D1 repair, followed on exhaustion by one quarantine/observability write. No new remote settings reads per start. SDK tracking adds two local SQL counter writes per chain; at most two polling chains/four writes per poll (~1,200 over default15min TTL/3s polls), plus finite provisioning/verification/scrub chains.
 
 ## Implementation checklist
 
@@ -113,7 +113,7 @@ Final continuation local evidence: full API run completed1093passingfiles/16715p
 
 ## Final SDK-flight and mirror follow-ups
 
-- [x] Durable nullable `cleanup_scrub_state` records not-issued/uncertain/observed-settled scrub work. A deadline cannot prove SDK cancellation; pending work prevents destruction proof, slot release and clearing the cleanup obligation. Original settlement is registered with `waitUntil`; eviction remains uncertain and reaches the existing bounded quarantine. Late settlement never resets the attempt cap.
+- [x] Durable nullable `cleanup_scrub_state` records needed/uncertain/successfully-scrubbed work. A deadline cannot prove SDK cancellation; pending work prevents destruction proof, slot release and clearing the cleanup obligation. Original settlement is registered with `waitUntil`; eviction remains uncertain and reaches the existing bounded quarantine. Late settlement never resets the attempt cap.
 - [x] A durable SDK-flight counter covers provisioning, device-state polling, verification-code writes, credential reads and scrub. Each original chain owns one increment/decrement; overlapping calls cannot clear each other's obligation. Every SDK await is followed by an authoritative status check before further SDK work. Fresh sessions initialize the counter to zero; legacy NULL remains conservative.
 - [x] All active D1 transitions are active-only writes. A delayed admitting write cannot resurrect a row after cancellation, even before recovery repair.
 - [x] Recovery D1 repair and pool release use the same short configurable deadline as scrub and destroy. Four remote waits total at most 20 seconds by default/40 seconds maximum per attempt, plus the existing bounded settings read. The quarantine alert is background work after its durable disposition.
@@ -124,3 +124,12 @@ Final continuation local evidence: full API run completed1093passingfiles/16715p
 ## Sonar follow-up
 
 Sonar's green aggregate still exposed four open findings through its PR issue API. Cleanup and scanner orchestration now use small named step/check helpers; the reason ternary uses explicit returns and active-status membership uses typed `includes`. No matching rule, await order, timeout or lifecycle behavior changed. API82/82 and scanner15/15 pass; exact scanner output matches the prior version on48fixtures plus all5repository migration files. TypeScript/scopedlint/format/diff checks and independent CF/security/test-completion extraction review PASS. Refreshed current-head Sonar analysis remains required.
+
+## Pending-work watchdog and scrub-success review fixes
+
+- [x] Pending-only alarms do not consume the three recovery work attempts. A single immutable watchdog uses the later of session expiry and teardown time plus configured interactive timeout and one poll. Original settlement schedules prompt recovery; expiry or invalid clocks quarantine once with the obligation retained.
+- [x] D1 terminal repair runs before pending deferral; a fresh post-await local row read prevents a stale watchdog from replacing the settlement wake. Actual attempt claiming follows deferral.
+- [x] Only SDK success=true plus exitCode0 records successful scrubbing. Rejection, unsuccessful result and nonzero exit reset to retryable NULL; if destruction also fails, recovery retries the scrub.
+- [x] Two pre-fix red proofs reproduced budget spending and false scrub success. Final teardown47/47 and existing30/native12 pass; admin3 unchanged from prior validation. Secret-readback guard reports zero findings. Independent Cloudflare/security/constitution delta review PASS.
+- [x] Four new minor scanner RegExp.exec suggestions addressed without changing regex behavior; scanner15, five real files and48-fixture output parity pass.
+- [ ] New pushed candidate still requires its own CI/Sonar analysis and live staging gates.
