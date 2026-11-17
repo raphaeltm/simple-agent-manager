@@ -19,6 +19,7 @@ import {
   makeMockUser,
   screenshot,
 } from './audit-helpers';
+import { docsShot } from './docs-shot';
 import { type AccountsScene, makeAccounts } from './insights-accounts-fixtures';
 import { type FlowScene, makeFlow } from './insights-fixtures';
 import { makeSetups, type SetupsScene } from './insights-setups-fixtures';
@@ -155,6 +156,8 @@ function onlyOn(names: string[]) {
 }
 test.beforeEach(onlyOn(['iPhone SE (375x667)', 'Desktop (1280x800)']));
 
+const isPhoneViewport = (page: Page) => (page.viewportSize()?.width ?? 0) < 640;
+
 async function capture(page: Page, name: string) {
   await expect(page.getByText('Something went wrong')).toHaveCount(0);
   await assertNoOverflow(page);
@@ -200,6 +203,8 @@ test.describe('Insights', () => {
       page.getByTestId('insights-waiting-ideas').getByRole('link', { name: /Tax ID validation/ })
     ).toHaveAttribute('href', `/projects/${PROJECT_ID}/ideas/idea-c`);
     await expect(page.getByTestId('insights-waiting-ideas')).toContainText('PR open, CI red');
+    // Docs image (insights.md): the first screen, before capture() grows the scrollers.
+    await docsShot(page, isPhoneViewport(page) ? 'insights-flow-mobile' : 'insights-flow');
     await capture(page, 'insights-flow-realistic');
   });
 

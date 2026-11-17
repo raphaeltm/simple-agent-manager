@@ -30,6 +30,7 @@ import {
   screenshot,
 } from './audit-helpers';
 import { RUNS, SCHEDULES, TRIGGERS } from './automation-fixtures';
+import { docsShot } from './docs-shot';
 import { KIND_ITEMS, MANY_ITEMS } from './inbox-fixtures';
 import { makeFlow } from './insights-fixtures';
 
@@ -591,7 +592,7 @@ async function expectTaskBoxPinned(page: Page) {
 }
 
 test.describe('Project Overview', () => {
-  test('normal project', async ({ page }) => {
+  test('normal project', async ({ page }, testInfo) => {
     await setupScene(page, {
       scene: 'normal',
       budget: 'normal',
@@ -620,6 +621,8 @@ test.describe('Project Overview', () => {
       `/projects/${PROJECT_ID}/insights/flow?range=7d`
     );
     await expectTaskBoxPinned(page);
+    // Docs image (project-overview.md): the first screen, before capture() grows the scrollers.
+    await docsShot(page, isPhone(testInfo) ? 'project-overview-mobile' : 'project-overview');
     await capture(page, 'overview-normal');
   });
 

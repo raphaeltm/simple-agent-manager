@@ -65,6 +65,8 @@ Above the cards, a summary shows what this costs every session, for example _"4,
 to every agent session from 12 pinned policies"_ and _"6 on demand, listed by title (640
 characters) and sent in full only when they match the task"_.
 
+![The Policies tab of Agent Context. A summary reads "316 characters sent to every agent session from 2 pinned policies" and "2 on demand, listed by title (121 characters) and sent in full only when they match the task". Below it, the rule "Never merge with a failing check" and the constraint "Migrations only add columns" are both active, each with its content and a Pinned / On demand switch set to Pinned, with how many characters it adds to every agent session.](/images/docs/agent-context-policies.png)
+
 Pin what must hold for every piece of work: security rules, merge rules, things that broke
 production before. Set narrow policies on demand: a rule about blog posts, a pricing preference, how
 to run one integration. Long pinned policies crowd the instructions every agent reads before it

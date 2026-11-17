@@ -13,6 +13,7 @@ import {
   screenshot,
   seedTheme,
 } from './audit-helpers';
+import { docsShot } from './docs-shot';
 
 const PROJECT_ID = 'proj-receipt-1';
 const SESSION_ID = 'cs-receipt-1';
@@ -620,6 +621,8 @@ test.describe('Run receipt — chat tool rail', () => {
     );
     await expect(drawer.getByText('Not reported')).toHaveCount(0);
     await assertInViewport(page);
+    // Docs image (chat-features.md, Run Receipt): the open receipt beside the chat.
+    if ((page.viewportSize()?.width ?? 0) >= 1280) await docsShot(page, 'run-receipt');
     await capture(page, 'run-receipt-tokens');
   });
 

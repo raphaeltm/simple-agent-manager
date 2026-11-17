@@ -11,6 +11,14 @@ more work from the bottom of the page.
 the right of the app bar on a phone. Links that point at one chat (a notification about a chat,
 **Open chat** on an inbox item or a receipt, a row in Running now) still open that chat directly.
 
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/project-overview-mobile.png 2x" />
+  <img
+    src="/images/docs/project-overview.png"
+    alt="A project's Overview on a desktop. Needs you, with a count of 5 and an All 5 link, lists a permission to run a migration with 4 minutes left, an approval, and a stack of three questions from the chat Ship billing. Below it is the task box with To, the profile Opus 5.5 Build and Send. On the right, Running now lists five chats, the first paused on a question in amber; This week shows Merged 28, Idea to merged 1.6d and CI first try 64% with the top blocker, a flaky check; Budgets shows one ring per account, Personal Max and Work Pro, with Personal Max's 5-hour window 38% left."
+  />
+</picture>
+
 ## Layout
 
 - **On a phone**, top to bottom: **Needs you**, **Running now**, **This week**, **Budgets**,

@@ -162,6 +162,8 @@ button (`packages/operations/src/inbox-error-core.ts`, `apps/api/src/services/in
 | An automation keeps failing, or SAM paused it                      | **Automation "Nightly deps" was paused after 3 failed runs**    | **Resume** when paused, otherwise none |
 | Your answer to an agent was never confirmed delivered              | **Your answer didn't reach the agent in "Ship billing"**        | **Open chat**                          |
 
+![A Problem open in the Inbox on a desktop. The list on the left ends with "Couldn't start: the GitHub App no longer has access to acme/billing", from the chat Fix rounding in tax totals, never started. The open item reads Problem · Never started, the same title, "Each run stopped at clone repository", a collapsed Context line, and Retry and Open chat buttons pinned at the bottom.](/images/docs/inbox-problem.png)
+
 A task you stop yourself, or one that ends normally, files nothing. A failed task gets its item
 within about five minutes. If the same thing fails again, the open item is updated instead of a
 new one filed. When it recovers (the task is retried, the chat wakes, the automation runs), the

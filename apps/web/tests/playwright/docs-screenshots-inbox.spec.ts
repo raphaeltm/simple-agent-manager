@@ -23,6 +23,14 @@ test.describe('docs: inbox on a desktop', () => {
     await docsShot(page, 'inbox-desktop');
   });
 
+  test('a Problem SAM filed, with its fix as the button', async ({ page }) => {
+    await setupInboxMocks(page, { items: DOCS_ITEMS, answered: [], archived: [] });
+    const params = new URLSearchParams({ item: 'ask:err-1', project: 'p-billing' });
+    await page.goto(`/inbox?${params.toString()}`);
+    await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
+    await docsShot(page, 'inbox-problem');
+  });
+
   test('the quick view behind the inbox icon', async ({ page }) => {
     await setupInboxMocks(page, { items: DOCS_ITEMS, answered: [], archived: [] });
     await page.goto('/projects/p-billing/ideas');
