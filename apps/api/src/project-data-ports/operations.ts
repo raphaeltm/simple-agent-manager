@@ -13,13 +13,15 @@ export const operationsPort: OperationsPort = {
   skipUnsubscribedGitHubCi: async (env) =>
     (await resolveAdminSetting(workerEnv(env), 'events.skipUnsubscribedGitHubCi')) === true,
   messageMergeConfig: async (env) => {
-    const [enabled, maxRowBytes, recentIds] = await Promise.all([
+    const [enabled, maxRowBytes, recentIds, toolUpdatesEnabled] = await Promise.all([
       resolveAdminSetting(workerEnv(env), 'chat.messageMergingEnabled'),
       resolveAdminSetting(workerEnv(env), 'chat.messageMergeMaxRowBytes'),
       resolveAdminSetting(workerEnv(env), 'chat.messageMergeRecentIds'),
+      resolveAdminSetting(workerEnv(env), 'chat.toolCallMergingEnabled'),
     ]);
     return {
       enabled: enabled === true,
+      toolUpdatesEnabled: toolUpdatesEnabled === true,
       maxRowBytes: Number(maxRowBytes),
       recentIds: Number(recentIds),
     };
