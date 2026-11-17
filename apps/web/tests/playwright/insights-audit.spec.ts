@@ -2,10 +2,13 @@
  * Visual and layout audit for the Insights page (Insights slice F) at 375×667 and 1280×800.
  * The Flow read is served exactly as the API answers it (`insights-fixtures.ts`). Scenes: a
  * realistic month, a stressed project (long names, every stop reason, 13 weeks, a capped idea
- * sample), an empty project, a failed read, the range switch, and the coming-soon tab.
+ * sample), an empty project, a failed read and the range switch.
  * Accounts (slice A, `insights-accounts-fixtures.ts`): a realistic month, a stressed project
  * (long and hostile names, eight accounts, 13 weeks, a capped stall scan), an empty project, a
  * failed read, a failed stall section, and a range switch held mid-flight.
+ * Agent setups (slice S, `insights-setups-fixtures.ts`): a realistic month with suggestions, a
+ * stressed project (long and hostile names, 30 setups, every missing measure), an empty project,
+ * a failed read, the grouping switch, and applying a suggestion through PATCH skill.
  */
 import { expect, type Page, test } from '@playwright/test';
 import { isInsightsRange } from '@simple-agent-manager/shared';
@@ -19,14 +22,18 @@ import {
   routeInsightsApi,
 } from './insights-audit-support';
 import { type FlowScene, makeFlow } from './insights-fixtures';
+import { makeSetups, type SetupsScene } from './insights-setups-fixtures';
 
 async function setupScene(
   page: Page,
   scene: FlowScene | 'error',
   requests: string[] = [],
-  accountsScene: AccountsScene | 'error' = 'realistic'
+  accountsScene: AccountsScene | 'error' = 'realistic',
+  setupsScene: SetupsScene | 'error' = 'realistic',
+  skillPatches: Array<{ skillId: string; body: unknown }> = []
 ) {
-  await routeInsightsApi(page, (url, _route, respond) => {
+  const applied = new Set<string>();
+  await routeInsightsApi(page, (url, route, respond) => {
     const range = url.searchParams.get('range');
     if (url.pathname === `/api/projects/${PROJECT_ID}/insights/flow`) {
       requests.push(range ?? '');
@@ -42,6 +49,30 @@ async function setupScene(
         200,
         makeAccounts(PROJECT_ID, isInsightsRange(range) ? range : '30d', accountsScene)
       );
+    }
+    if (url.pathname === `/api/projects/${PROJECT_ID}/insights/setups`) {
+      const groupBy = url.searchParams.get('groupBy');
+      requests.push(`setups:${range ?? ''}:${groupBy ?? ''}`);
+      if (setupsScene === 'error')
+        return respond(500, { error: 'INTERNAL_ERROR', message: 'Insights are unavailable' });
+      const body = makeSetups(
+        PROJECT_ID,
+        isInsightsRange(range) ? range : '30d',
+        groupBy === 'skill' || groupBy === 'model' ? groupBy : 'profile',
+        setupsScene
+      );
+      // A skill that was changed no longer has its suggestion, as the real read behaves.
+      body.suggestions = body.suggestions.filter((s) => !applied.has(s.apply.skillId));
+      return respond(200, body);
+    }
+    const skillPatch = url.pathname.match(
+      new RegExp(`^/api/projects/${PROJECT_ID}/skills/([^/]+)$`)
+    );
+    if (skillPatch && route.request().method() === 'PATCH') {
+      const skillId = skillPatch[1] ?? '';
+      skillPatches.push({ skillId, body: route.request().postDataJSON() });
+      applied.add(skillId);
+      return respond(200, { id: skillId, projectId: PROJECT_ID, name: skillId });
     }
     return undefined;
   });
@@ -137,15 +168,113 @@ test.describe('Insights', () => {
     await capture(page, 'insights-flow-7d');
   });
 
-  test('the Agent setups tab says it is coming', async ({ page }) => {
+  test('agent setups with a realistic month', async ({ page }) => {
     await setupScene(page, 'realistic');
     await page.goto(`${BASE}/flow`);
     await page.getByRole('tab', { name: 'Agent setups', exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`${BASE}/agent-setups`));
-    await expect(page.getByTestId('insights-coming-soon-agent-setups')).toContainText(
-      'coming soon'
+    const section = page.getByTestId('insights-section-setups');
+    // The table on a wide screen, cards on a phone: whichever is shown carries the numbers.
+    const visible = section.locator(
+      '[data-testid="insights-setups-table"]:visible, [data-testid="insights-setups-cards"]:visible'
     );
-    await capture(page, 'insights-coming-soon');
+    await expect(visible).toHaveCount(1);
+    await expect(visible).toContainText('Opus 5.5 Chat');
+    await expect(visible).toContainText('78%');
+    await expect(visible).toContainText('34 merged');
+    // A measure that covers only some runs says so in words.
+    await expect(visible).toContainText('2.4M· partial');
+    await expect(visible).toContainText('3.1M');
+    await expect(visible).toContainText('3.4 / 8 GB');
+    await expect(visible).toContainText('No profile');
+    await expect(visible).toContainText('Not reported');
+    await expect(page.getByTestId('insights-setups-compare')).toBeVisible();
+    await expect(page.getByTestId('insights-setups-suggestion')).toHaveCount(2);
+    await expect(page.getByText('Use Sonnet 5.5 Fast for fix')).toBeVisible();
+    await expect(page.getByText('do asks for 8 GB but peaks at 3.4 GB')).toBeVisible();
+    await capture(page, 'insights-setups-realistic');
+  });
+
+  test('agent setups at a tablet width uses cards, not a squeezed table', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'Desktop (1280x800)', 'one extra width is enough');
+    await page.setViewportSize({ width: 900, height: 800 });
+    await setupScene(page, 'realistic');
+    await page.goto(`${BASE}/agent-setups`);
+    await expect(page.getByTestId('insights-setups-cards')).toBeVisible();
+    await expect(page.getByTestId('insights-setups-table')).toBeHidden();
+    await capture(page, 'insights-setups-tablet-900');
+  });
+
+  test('switching the grouping asks for it and keeps the URL', async ({ page }) => {
+    const requests: string[] = [];
+    await setupScene(page, 'realistic', requests);
+    await page.goto(`${BASE}/agent-setups`);
+    await expect(page.getByTestId('insights-section-setups')).toBeVisible();
+    await page.getByRole('button', { name: 'Skill', exact: true }).click();
+    await expect(page).toHaveURL(/groupBy=skill/);
+    await expect(page.getByRole('button', { name: 'Skill', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+    await expect
+      .poll(() => requests.filter((r) => r.startsWith('setups:')))
+      .toEqual(['setups:30d:profile', 'setups:30d:skill']);
+  });
+
+  test('applying a suggestion updates the skill through PATCH and the suggestion goes', async ({
+    page,
+  }) => {
+    const patches: Array<{ skillId: string; body: unknown }> = [];
+    await setupScene(page, 'realistic', [], 'realistic', 'realistic', patches);
+    await page.goto(`${BASE}/agent-setups`);
+    const button = page.getByRole('button', { name: 'Make Sonnet 5.5 Fast the default for fix' });
+    await expect(button).toBeVisible();
+    await button.click();
+    await expect
+      .poll(() => patches)
+      .toEqual([{ skillId: 'sk-fix', body: { defaultProfileId: 'p-sonnet' } }]);
+    await expect(page.getByText(/Sonnet 5\.5 Fast is now the default for fix/)).toBeVisible();
+    await expect(page.getByTestId('insights-setups-suggestion')).toHaveCount(1);
+    // Liveness: the other suggestion is still offered.
+    await expect(page.getByRole('button', { name: 'Request 4.5 GB for do' })).toBeVisible();
+  });
+
+  test('agent setups under stress', async ({ page }) => {
+    await setupScene(page, 'realistic', [], 'realistic', 'stress');
+    await page.goto(`${BASE}/agent-setups`);
+    await expect(page.getByText(/Showing the newest \d+ runs/)).toBeVisible();
+    const section = page.getByTestId('insights-section-setups');
+    const visible = section.locator(
+      '[data-testid="insights-setups-table"]:visible, [data-testid="insights-setups-cards"]:visible'
+    );
+    await expect(visible).toContainText('A teammate’s profile');
+    await expect(visible).toContainText('Removed profile');
+    await expect(visible).toContainText('3 out of memory');
+    await expect(visible).toContainText('No merge');
+    // Hostile text renders as text.
+    await expect(visible).toContainText('<script>alert("x")</script>');
+    await capture(page, 'insights-setups-stress');
+  });
+
+  test('agent setups for an empty project', async ({ page }) => {
+    await setupScene(page, 'realistic', [], 'realistic', 'empty');
+    await page.goto(`${BASE}/agent-setups`);
+    await expect(page.getByTestId('insights-setups-empty')).toContainText('No runs in this range');
+    await expect(page.getByTestId('insights-section-setups-suggestions')).toContainText(
+      'at least 10 finished runs'
+    );
+    // Liveness: the grouping control renders above the empty state.
+    await expect(page.getByRole('button', { name: 'Model', exact: true })).toBeVisible();
+    await capture(page, 'insights-setups-empty');
+  });
+
+  test('a failed agent setups read says so and offers a retry', async ({ page }) => {
+    await setupScene(page, 'realistic', [], 'realistic', 'error');
+    await page.goto(`${BASE}/agent-setups`);
+    await expect(page.getByRole('button', { name: /retry|try again/i })).toBeVisible();
+    await capture(page, 'insights-setups-error');
   });
 
   test('accounts with a realistic month', async ({ page }) => {

@@ -1,14 +1,13 @@
 ---
 title: Insights
-description: See how work moves from idea to merged in a project — merge times, CI on the first try, why runs stop, flaky checks, the ideas that have waited longest, which accounts carried the work, and where work waits on people.
+description: See how work moves from idea to merged in a project — merge times, CI on the first try, why runs stop, flaky checks, the ideas that have waited longest, which agent setups work best, which accounts carried the work, and where work waits on people.
 ---
 
 **Insights** is a project page, in the project's navigation on desktop and on a phone. It shows how
 work moves from idea to merged pull request, over the last **7**, **30** or **90 days** (the range
 control at the top right; the range stays in the page's address, so a link keeps it).
 
-It has four tabs. **Flow**, **Accounts** and **People** are described below. **Agent setups** is
-coming; until then it says what it will show.
+It has four tabs, all described below: **Flow**, **Agent setups**, **Accounts** and **People**.
 
 Every number is worked out from what SAM already records about tasks, ideas, pull requests and
 their checks. Nothing is estimated: when SAM has no record for something, the page says so.
@@ -64,6 +63,57 @@ and the commit it opened with, so a flip on a commit that was later pushed over 
 Open ideas a person filed in the range, oldest first (ideas an automation or incident filed are
 left out, as on the Ideas page), with how many runs worked on each and where it stands
 (not started, pull request open with CI red, stuck, and so on). Select one to open it.
+
+## Agent setups
+
+Which setup does this kind of work best on this repository. Choose what a setup is with **Group
+by**: the agent **Profile** a run used, the **Skill** it ran, or the **Model** (the model the
+profile or skill asked for; runs that asked for none appear as the agent's **default model**). The
+choice stays in the page's address. The runs are the same ones Flow counts.
+
+### Each setup
+
+- **Runs**, and how many merged a pull request.
+- **Merged without rework**: of the runs that finished, the share whose pull request merged and was
+  not followed, within the rework window, by another pull request on the same branch. A run that
+  failed or was stopped counts against its setup. Flow's rework figure also counts a follow-up
+  linked to the same idea; this tab counts the same-branch kind only, so the two can differ.
+- **Median to pull request**: from the run being asked for (time waiting for a machine included)
+  to the first pull request it opened, over the runs that opened one.
+- **Nudges per run**: messages a person sent into the run's chat while it was going — a typed
+  follow-up or a comment addressed to the agent. The task's own first prompt, messages from other
+  agents and SAM's own prompts are not nudges. **Not recorded** when the chats can't be read. An
+  installation that switched durable prompt delivery off (`DURABLE_PROMPT_DELIVERY_ENABLED=false`;
+  it is on by default) does not mark follow-ups, so they are not counted there.
+- **Tokens per merged PR**: the tokens (input, output and cache) that the agent or SAM's AI proxy
+  reported for the setup's runs, divided by how many of those runs merged. A run continued after
+  waking from sleep shares its chat, and its tokens are counted once. Runs whose agent reports no
+  tokens are left out and the figure says how many did report; with none it reads **Not
+  reported**. SAM never estimates tokens.
+- **Memory p90 / requested**: the 90th percentile of each run's peak memory against the memory the
+  runs asked for, with any out-of-memory kills. **Not recorded** when the runs have no resource
+  telemetry.
+
+A figure that covers only some of a setup's runs says **partial**, and a setup with fewer finished
+runs than the suggestion minimum says **few runs**. Another member's personal profile or skill is
+never named; it appears as **A teammate's profile** (or skill). **Compared** puts the five busiest
+setups side by side on merges, time to pull request and nudges.
+
+### Suggestions
+
+When the numbers support it, the tab suggests a change to one of this project's skills, applied
+with one tap through the skill's own settings (you need permission to edit the project):
+
+- **A default profile for a skill**: offered when, among the skill's finished runs, a project
+  profile merged without rework clearly more often (by 20 points by default) than the skill's
+  current default profile, or than the next-best profile when it has none. Each profile compared
+  needs at least 10 finished runs of that skill; with fewer, one run moves the rate by ten points
+  and the difference is noise.
+- **A memory request for a skill**: offered when at least 10 of the skill's runs recorded their
+  peak memory and the 90th percentile, plus 25% headroom, differs from what the skill asks for by
+  a gigabyte or more. It never suggests asking for less after an out-of-memory kill.
+
+Once applied, the suggestion goes away because the skill no longer matches it.
 
 ## Accounts
 
@@ -181,7 +231,8 @@ whichever affected more work.
 ## For administrators
 
 How many ideas "idea to merged" looks at, how many flaky checks and waiting ideas are listed, the
-rework window, how many limit waits the Accounts tab examines and how many stalls it lists, and how
-many items People lists per person and how many review requests it examines are runtime settings
-under **Admin → Settings → Operations** (`insights.flow*`, `insights.accounts*`, `insights.people*`).
+rework window, how many limit waits the Accounts tab examines and how many stalls it lists, how
+many runs Agent setups examines and when it makes a suggestion, and how many items People lists per
+person and how many review requests it examines are runtime settings under **Admin → Settings →
+Operations** (`insights.flow*`, `insights.accounts*`, `insights.setups*`, `insights.people*`).
 See [Admin settings](/docs/guides/admin-settings/).

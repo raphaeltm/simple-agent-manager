@@ -1,5 +1,5 @@
 /**
- * Insights page limits, Flow, Accounts and People tabs (listed under "Operations" in Admin → Settings). Runtime settings rather
+ * Insights page limits, Flow, Agent setups, Accounts and People tabs (listed under "Operations" in Admin → Settings). Runtime settings rather
  * than Worker vars (policy 9017df94, `.claude/rules/07`). The definitions carry no imports so the
  * admin settings registry can depend on them; `getInsightsPageLimits` resolves them per request.
  */
@@ -46,6 +46,34 @@ export const INSIGHTS_PAGE_SETTINGS = [
     range: { min: 1, max: 50 },
   },
   {
+    name: 'insights.setupsRunScanCap',
+    defaultValue: 2000,
+    description:
+      'Runs, newest first, examined on Insights · Agent setups. The page says when the cap cut the range short.',
+    range: { min: 100, max: 10000 },
+  },
+  {
+    name: 'insights.setupsSuggestionMinRuns',
+    defaultValue: 10,
+    description:
+      'Finished runs each compared setup needs before Insights · Agent setups suggests a default profile or a memory request for a skill.',
+    range: { min: 3, max: 200 },
+  },
+  {
+    name: 'insights.setupsSuggestionMinGapPercent',
+    defaultValue: 20,
+    description:
+      'Points by which a profile must beat the one it is compared with on "merged without rework" before it is suggested as a skill default.',
+    range: { min: 5, max: 80 },
+  },
+  {
+    name: 'insights.setupsMemoryHeadroomPercent',
+    defaultValue: 25,
+    description:
+      'Headroom added to the 90th-percentile peak memory when suggesting a memory request for a skill.',
+    range: { min: 0, max: 200 },
+  },
+  {
     name: 'insights.peopleWaitingItemsListed',
     defaultValue: 10,
     description:
@@ -70,6 +98,10 @@ export interface InsightsPageLimits {
   reworkWindowDays: number;
   accountsStallScanCap: number;
   accountsEpisodesListed: number;
+  setupsRunScanCap: number;
+  setupsSuggestionMinRuns: number;
+  setupsSuggestionMinGapPercent: number;
+  setupsMemoryHeadroomPercent: number;
   peopleWaitingItemsListed: number;
   peopleReviewScanCap: number;
 }
@@ -81,6 +113,10 @@ const KEYS: Record<InsightsPageSettingName, keyof InsightsPageLimits> = {
   'insights.flowReworkWindowDays': 'reworkWindowDays',
   'insights.accountsStallScanCap': 'accountsStallScanCap',
   'insights.accountsEpisodesListed': 'accountsEpisodesListed',
+  'insights.setupsRunScanCap': 'setupsRunScanCap',
+  'insights.setupsSuggestionMinRuns': 'setupsSuggestionMinRuns',
+  'insights.setupsSuggestionMinGapPercent': 'setupsSuggestionMinGapPercent',
+  'insights.setupsMemoryHeadroomPercent': 'setupsMemoryHeadroomPercent',
   'insights.peopleWaitingItemsListed': 'peopleWaitingItemsListed',
   'insights.peopleReviewScanCap': 'peopleReviewScanCap',
 };
