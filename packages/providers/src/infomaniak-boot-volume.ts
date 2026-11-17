@@ -79,11 +79,12 @@ function isValidBootVolumeGb(value: unknown): value is number {
 }
 
 /**
- * An explicit `bootDiskSizeGb` is a user-supplied value (`POST /api/nodes`, workspace create), and
+ * The admission rule for a user-supplied `bootDiskSizeGb` (`POST /api/nodes`, workspace create):
  * the VM may run on a shared platform credential, so the configured size is the largest volume a
- * request may ask for: the admin decides how much block storage one node can take. Smaller explicit
- * sizes down to the minimum are allowed. Sizes carried by a pool plan are server-derived and are not
- * limited here. Throws `invalid_config` before any provider request.
+ * request may ask for. Smaller sizes down to the minimum are allowed. Enforced by the API where the
+ * request is admitted (`canonical-vm-allocation.ts`), not in `createVM`: sizes stored on node rows
+ * and plans reach `createVM` the same way and must keep provisioning after an admin lowers the
+ * setting. Throws `invalid_config`.
  */
 export function assertInfomaniakRequestedBootVolumeAllowed(
   requestedGb: number | undefined,

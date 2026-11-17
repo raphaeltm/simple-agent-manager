@@ -1,4 +1,7 @@
-import type { NativeVMConfig } from '@simple-agent-manager/providers';
+import {
+  assertInfomaniakRequestedBootVolumeAllowed,
+  type NativeVMConfig,
+} from '@simple-agent-manager/providers';
 import { emptyCapacityPoolMessage } from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPlacementSnapshot,
@@ -15,6 +18,7 @@ import { type drizzle } from 'drizzle-orm/d1';
 
 import type * as schema from '../db/schema';
 import type { Env } from '../env';
+import { resolveInfomaniakBootVolumeGb } from './infomaniak-provider-settings';
 import {
   capacityPlacementSnapshotForCandidate,
   directPlacementAuditSnapshot,
@@ -193,6 +197,13 @@ export async function resolveCanonicalVmAllocationPlan(
     };
   }
 
+  const bootDiskRefusal = await refuseOversizedRequestedBootDisk(
+    env,
+    credential.providerName,
+    input.explicit?.native?.providerInstanceBootDiskSizeGb
+  );
+  if (bootDiskRefusal) return { error: bootDiskRefusal, errorKind: 'placement' };
+
   if (
     input.requiredCredentialSource &&
     credential.credentialSource !== input.requiredCredentialSource
@@ -255,6 +266,33 @@ export async function resolveCanonicalVmAllocationPlan(
     vmLocation: placement.vmLocation,
     native: normalizeNativeRequest(input.explicit?.native),
   });
+}
+
+/**
+ * A user-supplied `bootDiskSizeGb` (node create, workspace create) is capped here, where the request
+ * is admitted, not in the provider: sizes stored on node rows and plans reach `createVM` the same
+ * way and must keep provisioning after an admin lowers the setting. Infomaniak boots from a volume
+ * of any requested size, and the VM may run on a shared platform credential, so the admin setting
+ * `infomaniak.bootVolumeGb` is the largest size a request may ask for. Fixed-root providers reject
+ * sizes above their included disk in `createVM` (`assertIncludedBootDiskCapacity`); GCP's explicit
+ * sizes are uncapped (tasks/backlog/2026-11-17-infomaniak-boot-volume-follow-ups.md).
+ */
+async function refuseOversizedRequestedBootDisk(
+  env: Env,
+  providerName: CredentialProvider,
+  requestedGb: number | null | undefined
+): Promise<string | null> {
+  if (providerName !== 'infomaniak' || requestedGb === null || requestedGb === undefined)
+    return null;
+  try {
+    assertInfomaniakRequestedBootVolumeAllowed(
+      requestedGb,
+      await resolveInfomaniakBootVolumeGb(env)
+    );
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
 }
 
 export function explicitRuntimeAdapterSnapshot(input: {

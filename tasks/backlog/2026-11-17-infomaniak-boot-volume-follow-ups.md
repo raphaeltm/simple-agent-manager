@@ -24,7 +24,8 @@ that PR to the root-disk fix; none blocks it.
    `auth_error`; Nova reports instance/core quota as 403. Classify by recovery action (rule 72) and
    enumerate consumers (rule 67) before changing the arm.
 3. **Explicit `bootDiskSizeGb` on platform credentials (GCP).** Fixed for Infomaniak in PR #2854:
-   an explicit size above `infomaniak.bootVolumeGb` is refused before any request. GCP still honours
+   an explicit size above `infomaniak.bootVolumeGb` is refused at admission
+   (`resolveCanonicalVmAllocationPlan`). GCP still honours
    explicit sizes with no upper bound on platform credentials; decide a cross-provider policy.
 4. **Unlabeled boot volumes.** Base Nova `block_device_mapping_v2` cannot set volume metadata, so a
    boot volume left behind by a failed Nova delete cascade is invisible to SAM. Consider an

@@ -5,7 +5,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { VMConfig, VMInstance } from '../../src';
-import { createProvider, INFOMANIAK_ROOT_DISK_METADATA_KEY, InfomaniakProvider } from '../../src';
+import {
+  assertInfomaniakRequestedBootVolumeAllowed,
+  createProvider,
+  INFOMANIAK_ROOT_DISK_METADATA_KEY,
+  InfomaniakProvider,
+} from '../../src';
 
 const AUTH_URL = 'https://identity.test/v3';
 const COMPUTE = 'https://compute.test/v2.1/project';
@@ -233,25 +238,23 @@ describe('Infomaniak boot volume (#2842)', () => {
     });
   });
 
-  it('refuses an explicit bootDiskSizeGb above the configured size before any request', async () => {
-    // A user-supplied size may land on a shared platform credential: the admin setting caps it.
-    const fetchMock = vi.spyOn(globalThis, 'fetch');
+  it('provisions a stored boot size above a since-lowered configured size', async () => {
+    // A node row or plan recorded 200 GB when the setting allowed it; an admin then lowered the
+    // setting to 80. Rows reach createVM exactly like requests, so createVM must not refuse them:
+    // the cap belongs to admission (assertInfomaniakRequestedBootVolumeAllowed in the API).
+    const nova = fakeNova();
     const provider = new InfomaniakProvider('id', 'secret', { authUrl: AUTH_URL });
 
-    await expect(
-      provider.createVM({
-        ...baseConfig,
-        native: {
-          instanceType: 'a4-ram8-disk20-perf1',
-          bootDiskSizeGb: 4_096,
-          resources: { vcpuCount: 4, memoryMb: 8192, diskGb: 80 },
-        },
-      })
-    ).rejects.toMatchObject({
-      category: 'invalid_config',
-      message: expect.stringContaining('infomaniak.bootVolumeGb'),
+    await provider.createVM({
+      ...baseConfig,
+      native: {
+        instanceType: 'a4-ram8-disk20-perf1',
+        bootDiskSizeGb: 200,
+        resources: { vcpuCount: 4, memoryMb: 8192, diskGb: 80 },
+      },
     });
-    expect(fetchMock).not.toHaveBeenCalled();
+
+    expect(lastMapping(nova).volume_size).toBe(200);
   });
 
   it('does not cap a server-derived plan disk above the configured size', async () => {
@@ -482,5 +485,22 @@ describe('Infomaniak data volumes stay separate from boot volumes', () => {
       labels: { managed: 'simple-agent-manager', env: 'e1' },
     });
     expect(volumes.map((volume) => volume.id)).toEqual(['data-vol']);
+  });
+});
+
+describe('Infomaniak requested boot volume admission rule', () => {
+  it('allows no request, and sizes at or below the configured size', () => {
+    expect(() => assertInfomaniakRequestedBootVolumeAllowed(undefined, 80)).not.toThrow();
+    expect(() => assertInfomaniakRequestedBootVolumeAllowed(60, 80)).not.toThrow();
+    expect(() => assertInfomaniakRequestedBootVolumeAllowed(80, 80)).not.toThrow();
+  });
+
+  it('refuses a size above the configured size with invalid_config', () => {
+    expect(() => assertInfomaniakRequestedBootVolumeAllowed(81, 80)).toThrow(
+      expect.objectContaining({
+        category: 'invalid_config',
+        message: expect.stringContaining('infomaniak.bootVolumeGb'),
+      })
+    );
   });
 });

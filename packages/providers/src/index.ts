@@ -174,6 +174,7 @@ export {
 export { HETZNER_SIZE_CONFIGS } from './hetzner-metadata';
 export {
   applyInfomaniakBootVolumeSize,
+  assertInfomaniakRequestedBootVolumeAllowed,
   DEFAULT_INFOMANIAK_BOOT_VOLUME_GB,
   INFOMANIAK_BOOT_VOLUME_MAX_GB,
   INFOMANIAK_BOOT_VOLUME_MIN_GB,
