@@ -15,8 +15,8 @@ vi.mock('../../../src/services/admin-settings-resolution', () => ({
 }));
 
 import { AiTokenBudgetCounter } from '../../../src/durable-objects/ai-token-budget-counter';
-import { __resetLastKnownCeilingForTest } from '../../../src/services/ai-proxy-ports';
 import type { Env } from '../../../src/env';
+import { __resetLastKnownCeilingForTest } from '../../../src/services/ai-proxy-ports';
 import { checkAiUsageGate, incrementProviderUsage } from '../../../src/services/ai-token-budget';
 import { attachTokenUsageAccounting } from '../../../src/services/ai-token-usage-accounting';
 import { createSqlStorage } from './sql-storage-test-utils';

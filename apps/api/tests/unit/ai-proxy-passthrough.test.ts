@@ -2,8 +2,8 @@ vi.mock('../../src/services/outbound-fetch-settings', () => ({
   resolveOutboundMaxRedirects: async () => 3,
 }));
 /** URL-path-based proxy auth routes and usage tracking. */
-import { Hono } from 'hono';
 import { PLATFORM_AI_MODELS } from '@simple-agent-manager/shared';
+import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Route protocol tests mock D1; real pin enforcement is covered by provider-limit-platform-attribution.test.ts.
