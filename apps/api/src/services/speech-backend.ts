@@ -8,6 +8,7 @@
  * does not contain it.
  */
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import {
   getWorkersAiBindingOrNull,
   type PublicPlatformCapabilities,
@@ -78,10 +79,19 @@ export async function resolvePublicPlatformCapabilities(
   const base = publicPlatformCapabilities(env);
   if (getWorkersAiBindingOrNull(env) || !extension) return base;
   const backend = extension;
+  // A backend that cannot answer counts as absent, so the app hides the control rather than
+  // offering one that fails; the reason goes to the log.
+  const absentOnError = (kind: string) => (err: unknown) => {
+    log.warn('speech_backend.capability_unavailable', {
+      kind,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  };
   const [transcription, synthesis] = await Promise.all([
-    backend.transcription(env).catch(() => null),
+    backend.transcription(env).catch(absentOnError('transcription')),
     getTTSConfig(env).enabled === true
-      ? backend.synthesis(env).catch(() => null)
+      ? backend.synthesis(env).catch(absentOnError('synthesis'))
       : Promise.resolve(null),
   ]);
   return {

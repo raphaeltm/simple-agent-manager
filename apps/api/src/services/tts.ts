@@ -73,17 +73,11 @@ export async function generateSpeechAudioChunk(
   config: TTSConfig = {}
 ): Promise<ArrayBuffer> {
   if (isSynthesisBackend(ai)) {
-    const encoding = config.encoding ?? DEFAULT_TTS_ENCODING;
-    return retryWithBackoff(
-      async () => {
-        const buffer = await ai.synthesize(text, encoding);
-        if (buffer.byteLength === 0) throw new Error('Speech backend returned empty audio');
-        return buffer;
-      },
-      config.retryAttempts ?? DEFAULT_TTS_RETRY_ATTEMPTS,
-      config.retryBaseDelayMs ?? DEFAULT_TTS_RETRY_BASE_DELAY_MS,
-      'tts_backend_chunk'
-    );
+    // One call per chunk, no retry: every call spends the admin's endpoint, and a 4xx (bad key,
+    // unknown model) would only repeat. The client retries the whole read-aloud if it wants to.
+    const buffer = await ai.synthesize(text, config.encoding ?? DEFAULT_TTS_ENCODING);
+    if (buffer.byteLength === 0) throw new Error('Speech backend returned empty audio');
+    return buffer;
   }
   const model = config.model ?? DEFAULT_TTS_MODEL;
   const speaker = config.speaker ?? DEFAULT_TTS_SPEAKER;
@@ -436,7 +430,12 @@ export async function synthesizeSpeech(
     const chunkSize = config.chunkSize ?? DEFAULT_TTS_CHUNK_SIZE;
     const maxChunks = config.maxChunks ?? DEFAULT_TTS_MAX_CHUNKS;
     // One chunk of headroom: sentence-boundary splitting can need more chunks than length / size.
-    processedText = fallbackStripMarkdown(inputText).slice(0, chunkSize * Math.max(1, maxChunks - 1));
+    const limit = chunkSize * Math.max(1, maxChunks - 1);
+    const stripped = fallbackStripMarkdown(inputText);
+    if (stripped.length > limit) {
+      log.info('tts.backend_text_truncated', { storageId, textLength: stripped.length, limit });
+    }
+    processedText = stripped.slice(0, limit);
   } else if (summarized) {
     // Summarize long text via LLM
     log.info('tts.summary_mode', {
