@@ -44,5 +44,7 @@ describe('ProjectData initialization across ended HTTP requests', () => {
     expect(warmResult).toMatchObject({ persisted: true, ensureCalls: 2, createCalls: 2 });
     expect(warmResult.sessionId).not.toBe(result.sessionId);
     expect(warm.status).toBe(200);
-  });
+    // Real workerd RPCs share CPU with the full native shard; the fixture still
+    // rejects a stranded initialization within its independent one-second deadline.
+  }, 20_000);
 });
