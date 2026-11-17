@@ -48,6 +48,8 @@ export interface ReassignControl {
   /** The ref being handed on, if any. While one is in flight every other submit waits. */
   pendingRef: string | null;
   error: { ref: string; message: string } | null;
+  /** The last completed hand-on; `seq` grows by one per success. */
+  done: { ref: string; seq: number } | null;
   onReassign: (ref: string, target: ReassignTarget) => void;
 }
 
@@ -87,7 +89,6 @@ export function WaitingGroup({
         <div className="flex min-w-0 flex-1 flex-col">
           <h3
             id={headingId}
-            tabIndex={-1}
             className="m-0 break-words text-[14px] font-semibold text-fg-primary [overflow-wrap:anywhere]"
           >
             {title}
@@ -131,7 +132,11 @@ function WaitingRow({
   group: InsightsWaitingGroup;
   reassign: ReassignControl;
 }) {
-  const [open, setOpen] = useState(false);
+  // The `done.seq` when the form was opened: a later success for this row closes it.
+  const [openedAt, setOpenedAt] = useState<number | null>(null);
+  const open =
+    openedAt !== null &&
+    !(reassign.done && reassign.done.ref === item.ref && reassign.done.seq > openedAt);
   const triggerRef = useRef<HTMLDivElement>(null);
   const Icon = item.kind ? KIND_ICON[item.kind] : Lock;
   const ref = item.ref;
@@ -140,7 +145,7 @@ function WaitingRow({
   const error = ref !== null && reassign.error?.ref === ref ? reassign.error.message : null;
   const title = item.title ?? (item.kind ? KIND_LABEL[item.kind] : 'An item you cannot open');
   const meta = item.private
-    ? 'Only its age is shown to you'
+    ? null
     : [
         item.kind ? KIND_LABEL[item.kind] : null,
         item.blocking ? 'an agent is waiting on it' : null,
@@ -160,13 +165,15 @@ function WaitingRow({
           >
             {title}
           </span>
-          <span
-            className={`text-[12.5px] ${item.blocking ? 'font-semibold text-fg-primary' : 'text-fg-muted'}`}
-          >
-            {meta}
-          </span>
+          {meta && (
+            <span
+              className={`text-[12.5px] ${item.blocking ? 'font-semibold text-fg-primary' : 'text-fg-muted'}`}
+            >
+              {meta}
+            </span>
+          )}
         </span>
-        <span className="shrink-0 text-[12.5px] text-fg-muted">
+        <span className="shrink-0 font-mono text-[12.5px] text-fg-muted">
           <span className="sr-only">Waiting for </span>
           {formatDuration(item.ageMs)}
         </span>
@@ -182,7 +189,7 @@ function WaitingRow({
               pending={pending}
               busy={busy}
               onCancel={() => {
-                setOpen(false);
+                setOpenedAt(null);
                 // Focus returns to the control that opened the form.
                 requestAnimationFrame(() => triggerRef.current?.querySelector('button')?.focus());
               }}
@@ -194,7 +201,7 @@ function WaitingRow({
                 variant="ghost"
                 size="sm"
                 className={TOUCH}
-                onClick={() => setOpen(true)}
+                onClick={() => setOpenedAt(reassign.done?.seq ?? 0)}
                 aria-label={`Reassign ${title}`}
               >
                 Reassign
@@ -202,7 +209,11 @@ function WaitingRow({
             </div>
           )}
           {error && (
-            <p role="alert" className="m-0 text-[12.5px] text-[var(--sam-color-danger)]">
+            <p
+              id={`${ref}-reassign-error`}
+              role="alert"
+              className="m-0 text-[12.5px] text-[var(--sam-color-danger)]"
+            >
               {error}
             </p>
           )}
@@ -235,6 +246,7 @@ function ReassignForm({
   onSubmit: (target: ReassignTarget) => void;
 }) {
   const id = useId();
+  const errorId = `${itemRef}-reassign-error`;
   const [value, setValue] = useState('');
   const options = control.members.filter((member) => member.userId !== holder);
   return (
@@ -256,7 +268,8 @@ function ReassignForm({
         value={value}
         // eslint-disable-next-line jsx-a11y/no-autofocus -- the person just asked for this form
         autoFocus
-        disabled={pending || control.membersLoading}
+        disabled={pending}
+        aria-describedby={errorId}
         onChange={(event) => setValue(event.target.value)}
         className="min-h-11 min-w-0 sm:max-w-[260px]"
       >

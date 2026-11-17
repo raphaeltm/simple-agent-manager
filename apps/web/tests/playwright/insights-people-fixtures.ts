@@ -10,7 +10,7 @@ import type {
   ProjectPeopleResponse,
 } from '@simple-agent-manager/shared';
 
-export type PeopleScene = 'realistic' | 'moved' | 'stress' | 'empty';
+export type PeopleScene = 'realistic' | 'moved' | 'single' | 'single-moved' | 'stress' | 'empty';
 
 const NOW = Date.parse('2026-11-16T12:00:00.000Z');
 const MIN = 60_000;
@@ -145,6 +145,26 @@ function moved(): Pick<ProjectPeopleResponse, 'waiting' | 'reviewPickup' | 'firs
   return { ...base, waiting: { ...base.waiting, groups } };
 }
 
+/** Only one task the viewer may hand on: their own "Confirm the new tax table". */
+function single(): Pick<ProjectPeopleResponse, 'waiting' | 'reviewPickup' | 'firstPerson'> {
+  const base = realistic();
+  const groups = base.waiting.groups.map((g) => ({
+    ...g,
+    items: g.items.map((i) => (i.ref === 'ask:t-2' ? i : { ...i, canReassign: false })),
+  }));
+  return { ...base, waiting: { ...base.waiting, groups } };
+}
+
+/** After that single task moved to Sam: nothing left the viewer may hand on. */
+function singleMoved(): Pick<ProjectPeopleResponse, 'waiting' | 'reviewPickup' | 'firstPerson'> {
+  const base = moved();
+  const groups = base.waiting.groups.map((g) => ({
+    ...g,
+    items: g.items.map((i) => ({ ...i, canReassign: false })),
+  }));
+  return { ...base, waiting: { ...base.waiting, groups } };
+}
+
 function stress(): Pick<ProjectPeopleResponse, 'waiting' | 'reviewPickup' | 'firstPerson'> {
   const longName =
     'Maximiliana Wolfeschlegelsteinhausenbergerdorff-Featherstonehaugh de la Cruz y Montenegro';
@@ -208,13 +228,17 @@ export function makePeople(
       ? realistic()
       : scene === 'moved'
         ? moved()
-        : scene === 'stress'
-          ? stress()
-          : {
-              waiting: { groups: [], total: 0, listed: 10 },
-              reviewPickup: { state: 'not_recorded' as const, waiting: 0, recordedSince: null },
-              firstPerson: { closed: 0, firstPerson: 0, share: null },
-            };
+        : scene === 'single'
+          ? single()
+          : scene === 'single-moved'
+            ? singleMoved()
+            : scene === 'stress'
+              ? stress()
+              : {
+                  waiting: { groups: [], total: 0, listed: 10 },
+                  reviewPickup: { state: 'not_recorded' as const, waiting: 0, recordedSince: null },
+                  firstPerson: { closed: 0, firstPerson: 0, share: null },
+                };
   return {
     projectId,
     range,

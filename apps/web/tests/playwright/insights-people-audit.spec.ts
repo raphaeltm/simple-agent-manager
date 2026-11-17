@@ -117,7 +117,7 @@ async function setupScene(page: Page, scene: PeopleScene | 'error', rec?: Record
           message: 'The assignee is not an active project member',
         });
       // After the move the task waits on Sam: serve that state next.
-      current = 'moved';
+      current = current === 'single' ? 'single-moved' : 'moved';
       return respond(200, { ref: 'ask:t-2', status: 'open', agentNotified: true });
     }
     if (path.includes('/sessions')) return respond(200, { sessions: [], total: 0, hasMore: false });
@@ -170,7 +170,6 @@ test.describe('Insights · People', () => {
     await expect(priya).toContainText('3 open · oldest 3.2 days · 1 blocking');
     // Another member's private items show their age only.
     await expect(priya.getByText('An item you cannot open')).toHaveCount(2);
-    await expect(priya).toContainText('Only its age is shown to you');
     // Reassign is offered only on the three human tasks the viewer may hand on.
     await expect(page.getByRole('button', { name: /^Reassign / })).toHaveCount(3);
     await expect(page.getByTestId('insights-waiting-group-user-insights')).toContainText('You');
@@ -223,6 +222,39 @@ test.describe('Insights · People', () => {
       },
     ]);
     expect(rec.people.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test('handing on the last movable task keeps the announcement and focus', async ({ page }) => {
+    const rec: Recorder = { people: [], reassigns: [] };
+    await setupScene(page, 'single', rec);
+    await page.goto(`${BASE}/people`);
+    await expect(page.getByRole('button', { name: /^Reassign / })).toHaveCount(1);
+    await page
+      .getByRole('button', { name: 'Reassign Confirm the new tax table with accounting' })
+      .click();
+    const form = page.getByTestId('insights-reassign-form-ask:t-2');
+    await form.getByRole('combobox').selectOption({ label: 'Sam Okafor' });
+    await form.getByRole('button', { name: 'Hand it on' }).click();
+    await expect(page.getByTestId('insights-waiting-group-user-sam')).toContainText(
+      'Confirm the new tax table with accounting'
+    );
+    // Nothing movable is left, yet the region that announced and took focus is still mounted.
+    await expect(page.getByRole('button', { name: /^Reassign / })).toHaveCount(0);
+    await expect(page.getByTestId('insights-reassign-status')).toHaveText(
+      'Handed on to Sam Okafor.'
+    );
+    await expect(page.getByTestId('insights-waiting-region')).toBeFocused();
+  });
+
+  test('the light theme', async ({ page }) => {
+    await setupScene(page, 'realistic');
+    await page.goto(`${BASE}/people`);
+    await page.evaluate(() => document.documentElement.setAttribute('data-ui-theme', 'sam-light'));
+    await page
+      .getByRole('button', { name: 'Reassign Check the EU VAT report renders for Belgium' })
+      .click();
+    await expect(page.getByTestId('insights-reassign-form-ask:t-3')).toBeVisible();
+    await capture(page, 'insights-people-light');
   });
 
   test('a refused reassign says why and keeps the form open; cancel returns focus', async ({

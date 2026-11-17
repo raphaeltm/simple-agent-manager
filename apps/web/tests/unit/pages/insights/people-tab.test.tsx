@@ -199,7 +199,6 @@ describe('PeopleBody', () => {
     renderBody(data());
     const sam = screen.getByTestId('insights-waiting-group-user-2');
     expect(sam).toHaveTextContent('An item you cannot open');
-    expect(sam).toHaveTextContent('Only its age is shown to you');
     expect(within(sam).queryByRole('button')).toBeNull();
     // Liveness: the reassignable tasks in the viewer's group do get the control.
     expect(screen.getAllByRole('button', { name: /^Reassign / })).toHaveLength(2);

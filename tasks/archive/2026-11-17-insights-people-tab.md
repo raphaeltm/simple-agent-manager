@@ -72,31 +72,41 @@ people, no per-person output counts**):
 
 ## Implementation checklist
 
-- [ ] Migration + drizzle schema for `pull_request_review_requests`
-- [ ] Webhook ingest: review_requested, review_request_removed, pull_request_review.submitted
-- [ ] Shared types `packages/shared/src/types/insights-people.ts` + exports
-- [ ] Settings `insights.peopleWaitingItemsListed`, `insights.peopleReviewScanCap`
-- [ ] `projectPeople` op + SQL module, rows validated per row (rule 50)
-- [ ] REST route + tests (range 400, foreign/missing project 404, no-store)
-- [ ] Real-SQL op tests: foreign-project attack + owner control per statement; privacy (no title of
+- [x] Migration + drizzle schema for `pull_request_review_requests`
+- [x] Webhook ingest: review_requested, review_request_removed, pull_request_review.submitted
+- [x] Shared types `packages/shared/src/types/insights-people.ts` + exports
+- [x] Settings `insights.peopleWaitingItemsListed`, `insights.peopleReviewScanCap`
+- [x] `projectPeople` op + SQL module, rows validated per row (rule 50)
+- [x] REST route + tests (range 400, foreign/missing project 404, no-store)
+- [x] Real-SQL op tests: foreign-project attack + owner control per statement; privacy (no title of
       unreadable items); first-person with reassigned/departed rows; pickup median/p90 and
       not-recorded; malformed rows skipped; round-trip count
-- [ ] Webhook ingest tests through `ingestPullRequestWebhook` with production-shaped payloads
-- [ ] Web: `reassignInboxTask` client (existing route), query options, `PeopleTab`, route swap,
+- [x] Webhook ingest tests through `ingestPullRequestWebhook` with production-shaped payloads
+- [x] Web: `reassignInboxTask` client (existing route), query options, `PeopleTab`, route swap,
       remove the People placeholder (narrow or delete `ComingSoonTab`)
-- [ ] Web tests (render, reassign calls the route and invalidates)
-- [ ] Playwright audit 375/1280: realistic, empty, stress
-- [ ] Docs: Insights section of the project guide
-- [ ] Post migration number + interface on feature.insights; files on feature.inbox
+- [x] Web tests (render, reassign calls the route and invalidates)
+- [x] Playwright audit 375/1280: realistic, empty, stress
+- [x] Docs: Insights section of the project guide
+- [x] Post migration number + interface on feature.insights; files on feature.inbox
 
 ## Acceptance criteria
 
-- [ ] People tab shows Waiting on grouped by assignee (oldest first, ages, unassigned group)
-- [ ] Reassign of a human task from the tab works through the Inbox route and refreshes the list
-- [ ] Review pickup median/p90 per project from webhook-recorded events; before recording: "not
+- [x] People tab shows Waiting on grouped by assignee (oldest first, ages, unassigned group)
+- [x] Reassign of a human task from the tab works through the Inbox route and refreshes the list
+- [x] Review pickup median/p90 per project from webhook-recorded events; before recording: "not
       recorded"
-- [ ] First-person share is correct for never-reassigned, reassigned and team-origin asks
-- [ ] No per-person output counts anywhere; other people's private items show no titles
-- [ ] ≤ 4 round trips; project predicate in every statement, attack tests on real SQL
+- [x] First-person share is correct for never-reassigned, reassigned and team-origin asks
+- [x] No per-person output counts anywhere; other people's private items show no titles
+- [x] ≤ 4 round trips; project predicate in every statement, attack tests on real SQL
 - [ ] Staging: real asks/tasks, reassign end to end, real PR review request via webhook (or stated
       plainly if the staging App cannot)
+
+## Implementation notes
+
+- Migration 0257: `pull_request_review_requests` plus `idx_asks_project_status_resolved` (review: D1
+  plan for the first-person read).
+- Private waiting items carry only their age (security review); departed assignees read as
+  "A former member"; review cycles close on `pull_request.closed`.
+- staging2 has no GitHub App, so the webhook-delivered review request cannot be exercised there;
+  the real ingest is covered by unit tests with production-shaped payloads, and production D1 is
+  checked after deploy.

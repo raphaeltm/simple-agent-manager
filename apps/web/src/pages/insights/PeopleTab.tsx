@@ -136,14 +136,10 @@ export function PeopleBody({ data }: { data: ProjectPeopleResponse }) {
         >
           {waitingFailed && waiting.groups.length === 0 ? (
             <Empty>What is waiting could not be loaded.</Empty>
-          ) : canReassignAny ? (
-            <WaitingWithReassign data={data} />
           ) : (
-            <WaitingList
-              groups={waiting.groups}
-              projectId={data.projectId}
-              reassign={NO_REASSIGN}
-            />
+            // Always the same component, so a hand-on that removes the last movable task keeps
+            // its focus target and announcement mounted; only the member list is gated.
+            <WaitingWithReassign data={data} needsMembers={canReassignAny} />
           )}
         </FlowSection>
         <div className="flex min-w-0 flex-col gap-[var(--sam-space-gutter)]">
@@ -180,25 +176,24 @@ export function PeopleBody({ data }: { data: ProjectPeopleResponse }) {
   );
 }
 
-// Hoisted on purpose: a stable control for lists with nothing to reassign.
-const NO_REASSIGN: ReassignControl = {
-  members: [],
-  membersLoading: false,
-  pendingRef: null,
-  error: null,
-  onReassign: () => undefined,
-};
-
 /**
  * The waiting list with reassign wired: loads the member list only when something can move. One
  * hand-on runs at a time; on success the People read and the Inbox are refreshed, the move is
  * announced, and focus goes to the list (the row the person acted on has moved away).
  */
-function WaitingWithReassign({ data }: { data: ProjectPeopleResponse }) {
+function WaitingWithReassign({
+  data,
+  needsMembers,
+}: {
+  data: ProjectPeopleResponse;
+  needsMembers: boolean;
+}) {
   const queryScope = useQueryScope();
   const queryClient = useQueryClient();
-  const { members, isPending: membersLoading } = useProjectMembers(data.projectId);
+  const { members, isPending } = useProjectMembers(needsMembers ? data.projectId : null);
+  const membersLoading = needsMembers && isPending;
   const [error, setError] = useState<{ ref: string; message: string } | null>(null);
+  const [done, setDone] = useState<{ ref: string; seq: number } | null>(null);
   const [announcement, setAnnouncement] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
   const mutation = useMutation({
@@ -208,7 +203,9 @@ function WaitingWithReassign({ data }: { data: ProjectPeopleResponse }) {
       setError(null);
       setAnnouncement('');
     },
-    onSuccess: (_result, { target }) => {
+    onSuccess: (_result, { ref, target }) => {
+      // The row's form closes now, even if the refresh below fails.
+      setDone((previous) => ({ ref, seq: (previous?.seq ?? 0) + 1 }));
       const who =
         'team' in target
           ? 'the team'
@@ -234,11 +231,17 @@ function WaitingWithReassign({ data }: { data: ProjectPeopleResponse }) {
   );
   const pendingRef = mutation.isPending ? (mutation.variables?.ref ?? null) : null;
   const control = useMemo<ReassignControl>(
-    () => ({ members, membersLoading, pendingRef, error, onReassign }),
-    [members, membersLoading, pendingRef, error, onReassign]
+    () => ({ members, membersLoading, pendingRef, error, done, onReassign }),
+    [members, membersLoading, pendingRef, error, done, onReassign]
   );
   return (
-    <div ref={listRef} tabIndex={-1} className="min-w-0 outline-none">
+    <div
+      ref={listRef}
+      tabIndex={-1}
+      className="min-w-0 outline-none"
+      data-testid="insights-waiting-region"
+      aria-label="Waiting on"
+    >
       <p
         role="status"
         aria-live="polite"
