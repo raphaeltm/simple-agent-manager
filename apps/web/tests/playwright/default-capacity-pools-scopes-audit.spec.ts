@@ -748,102 +748,82 @@ test.describe('Default capacity pool scope surfaces', () => {
     await editStressedPool(page, 'user', `default-capacity-pools-user-edit-${suffix}`);
   });
 
-  test('personal page on the shared pool warns when it cannot fit the installation default', async ({
-    page,
-  }, testInfo) => {
-    await setupCommonMocks(page, user, 'installation');
-    // The person has no pool of their own, so the page shows the shared (installation) pool,
-    // read-only. The installation overrides the default workspace to 8 vCPU / 16 GB; the
-    // largest allowed machine (16 GB) keeps 1 GB for its host, so nothing can place one.
-    const body = {
-      ...defaultsResponse('installation'),
-      placementSettings: {
-        version: 1,
-        sourceGeneration: 7,
-        legacyWorkloadAdapterVersion: 1,
-        selectionWeights: { priority: 1, price: 1, fit: 1, capacity: 1, candidateOrder: 1 },
-        rolloutCohortPercent: 100,
-        source: {
-          legacyWorkloadMapping: 'default',
-          platformDefaults: 'persisted',
-          selection: 'default',
+  for (const scenario of [
+    {
+      name: 'installation default exceeds every machine',
+      minVcpu: 8,
+      minMemoryGb: 16,
+      unavailable: false,
+    },
+    { name: 'unavailable fitting machine', minVcpu: 2, minMemoryGb: 4, unavailable: true },
+  ]) {
+    test(`personal shared pool warns: ${scenario.name}`, async ({ page }, testInfo) => {
+      await setupCommonMocks(page, user, 'installation');
+      // A live undersized candidate plus a fitting active candidate absent from the latest catalog.
+      const body = {
+        ...defaultsResponse('installation'),
+        placementSettings: {
+          version: 1,
+          sourceGeneration: 7,
+          legacyWorkloadAdapterVersion: 1,
+          selectionWeights: { priority: 1, price: 1, fit: 1, capacity: 1, candidateOrder: 1 },
+          rolloutCohortPercent: 100,
+          source: {
+            legacyWorkloadMapping: 'default',
+            platformDefaults: 'persisted',
+            selection: 'default',
+          },
+          resourceDefaults: {
+            legacyWorkloadMapping: {},
+            platformDefaults: {
+              minVcpu: scenario.minVcpu,
+              minMemoryGb: scenario.minMemoryGb,
+              minDiskGb: 40,
+              exclusiveNode: false,
+            },
+          },
+          hostMemoryReserveMb: 1024,
         },
-        resourceDefaults: {
-          legacyWorkloadMapping: {},
-          platformDefaults: { minVcpu: 8, minMemoryGb: 16, minDiskGb: 40, exclusiveNode: false },
-        },
-        hostMemoryReserveMb: 1024,
-      },
-    };
-    await page.route('**/api/capacity-pools/defaults*', (route) => jsonResponse(route, 200, body));
-    await page.goto('/settings/infrastructure');
+      };
+      if (scenario.unavailable) {
+        body.effective.candidates = body.effective.candidates
+          .slice(0, 2)
+          .map((candidate, index) => ({
+            ...candidate,
+            status: 'active',
+            providerInstanceType: index === 0 ? 'cx23' : 'cx33',
+            providerInstanceVcpuCount: index === 0 ? 2 : 4,
+            providerInstanceMemoryMb: index === 0 ? 4096 : 8192,
+            providerInstanceDiskGb: 80,
+            catalogAvailability: index === 0 ? 'available' : 'last-known-unavailable',
+            providerInstanceCatalogSource: 'api',
+          }));
+      }
+      await page.route('**/api/capacity-pools/defaults*', (route) =>
+        jsonResponse(route, 200, body)
+      );
+      await page.goto('/settings/infrastructure');
 
-    const warning = page.getByText(/No allowed machine can run a default workspace/);
-    await expect(warning).toBeVisible();
-    await expect(warning).toContainText('It needs 8 vCPU, 16 GB of memory and 40 GB of disk');
-    await expect(warning).toContainText('at least 8 vCPU, 17 GB of memory and 40 GB of disk');
-    await expect(page.getByText(/Your work uses the shared compute pool/)).toBeVisible();
-    await assertNoOverflow(page);
-    await screenshotNearHeading(
-      page,
-      POOL_HEADINGS.user,
-      `default-capacity-pools-user-fit-warning-${getProjectSuffix(testInfo.project.name)}`
-    );
-  });
-
-  test('unavailable fitting machine does not suppress the default workspace warning', async ({
-    page,
-  }, testInfo) => {
-    await setupCommonMocks(page, user, 'installation');
-    // A live undersized candidate plus a fitting active candidate absent from the latest catalog.
-    const body = {
-      ...defaultsResponse('installation'),
-      placementSettings: {
-        version: 1,
-        sourceGeneration: 7,
-        legacyWorkloadAdapterVersion: 1,
-        selectionWeights: { priority: 1, price: 1, fit: 1, capacity: 1, candidateOrder: 1 },
-        rolloutCohortPercent: 100,
-        source: {
-          legacyWorkloadMapping: 'default',
-          platformDefaults: 'persisted',
-          selection: 'default',
-        },
-        resourceDefaults: {
-          legacyWorkloadMapping: {},
-          platformDefaults: { minVcpu: 2, minMemoryGb: 4, minDiskGb: 40, exclusiveNode: false },
-        },
-        hostMemoryReserveMb: 1024,
-      },
-    };
-    body.effective.candidates = body.effective.candidates.slice(0, 2).map((candidate, index) => ({
-      ...candidate,
-      status: 'active',
-      providerInstanceType: index === 0 ? 'cx23' : 'cx33',
-      providerInstanceVcpuCount: index === 0 ? 2 : 4,
-      providerInstanceMemoryMb: index === 0 ? 4096 : 8192,
-      providerInstanceDiskGb: 80,
-      catalogAvailability: index === 0 ? 'available' : 'last-known-unavailable',
-      providerInstanceCatalogSource: 'api',
-    }));
-    await page.route('**/api/capacity-pools/defaults*', (route) => jsonResponse(route, 200, body));
-    await page.goto('/settings/infrastructure');
-
-    const warning = page.getByText(/No allowed machine can run a default workspace/);
-    await expect(warning).toBeVisible();
-    await expect(warning).toContainText('It needs 2 vCPU, 4 GB of memory and 40 GB of disk');
-    await expect(warning).toContainText('at least 2 vCPU, 5 GB of memory and 40 GB of disk');
-    await expect(page.getByText(/Your work uses the shared compute pool/)).toBeVisible();
-    await assertNoOverflow(page);
-    await screenshotNearHeading(
-      page,
-      POOL_HEADINGS.user,
-      `default-capacity-pools-unavailable-fit-warning-${getProjectSuffix(testInfo.project.name)}`,
-      { outputDir: '../../.tmp/l15/unavailable-fit-screenshots' }
-    );
-    await warning.scrollIntoViewIfNeeded();
-    await page.screenshot({ path: testInfo.outputPath('unavailable-fit-warning.png') });
-  });
+      const warning = page.getByText(/No allowed machine can run a default workspace/);
+      await expect(warning).toBeVisible();
+      await expect(warning).toContainText(
+        `It needs ${scenario.minVcpu} vCPU, ${scenario.minMemoryGb} GB of memory and 40 GB of disk`
+      );
+      await expect(warning).toContainText(
+        `at least ${scenario.minVcpu} vCPU, ${scenario.minMemoryGb + 1} GB of memory and 40 GB of disk`
+      );
+      await expect(page.getByText(/Your work uses the shared compute pool/)).toBeVisible();
+      await assertNoOverflow(page);
+      await screenshotNearHeading(
+        page,
+        POOL_HEADINGS.user,
+        `default-capacity-pools-${scenario.unavailable ? 'unavailable' : 'installation'}-fit-warning-${getProjectSuffix(testInfo.project.name)}`,
+        { outputDir: '../../.tmp/l15/unavailable-fit-screenshots' }
+      );
+      await warning.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: testInfo.outputPath('unavailable-fit-warning.png') });
+    });
+  }
 
   test('ordinary user on the shared pool sees the fit warning from its safe summary', async ({
     page,
