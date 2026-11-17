@@ -27,8 +27,8 @@ narrow, supported change for SAM or needs a coordinated migration, and finish or
 - [x] Update `apps/www/.../guides/local-development.md` Node version line
 - [x] Add a real-`BrowserRouter` regression test: deep link, relative `<Navigate replace>`, back/forward
 - [x] lint, typecheck, web tests, build
-- [ ] Local Playwright visual audit desktop/mobile on key routed surfaces
-- [ ] Reviews: ui-ux, security, constitution, task-completion
+- [x] Visual audit: CI Playwright Visual Tests passed; staging browser run at desktop/mobile (local Chromium blocked, see notes)
+- [x] Reviews: ui-ux, security, constitution, task-completion (all PASS)
 - [ ] Staging: navigation, auth, deep-link, back/forward on leased installation
 - [ ] CI + CodeRabbit request/wait, merge, production deploy + smoke
 
@@ -45,3 +45,4 @@ narrow, supported change for SAM or needs a coordinated migration, and finish or
   red on the "Back leaves the project" assertion; restored.
 - Local Playwright could not launch Chromium (missing system lib `libnspr4`, needs sudo); visual audit
   evidence comes from CI's Playwright Visual Tests job and the staging browser run.
+- CI on 43458efb failed only on PR-body wording and a main-branch fixture clock bug (fixed by #2861, merged in).
