@@ -7,10 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -106,26 +104,8 @@ func runRealAdapterSteer(t *testing.T, tc realAdapterSteerCase, model *steerMode
 	}, MessageBufferSize: 200, ViewerSendBuffer: 64})
 	defer host.Stop()
 
-	cmd := exec.CommandContext(ctx, tc.command, tc.args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Env = append(os.Environ(), tc.env...)
-	cmd.Dir = tc.cwd
-	cmd.Stderr = io.Discard
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		_ = cmd.Wait()
-	}()
+	stdin, stdout, stop := startACPAdapterProcess(ctx, t, tc.cwd, tc.env, tc.command, tc.args...)
+	defer stop()
 
 	client := acpsdk.NewClientSideConnection(&sessionHostClient{host: host}, stdin, stdout)
 	host.mu.Lock()

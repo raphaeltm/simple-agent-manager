@@ -119,8 +119,8 @@ empty log, or one without `session_start` entries, is reported as a mismatch; pa
 ### Test-quality Stop gate
 
 `.claude/hooks/verify-test-quality.mjs` runs at the end of every Claude Code turn
-(`.claude/settings.json`; observed firing in a fresh session, idea 01M7H32EK6S4E31EHWVSJSENR5).
-It is not configured for Codex: see "Codex hooks" below. It reads every change on the
+(`.claude/settings.json`; observed firing in a fresh session, idea 01M7H32EK6S4E31EHWVSJSENR5)
+and every Codex turn (`.codex/config.toml`; see "Codex hooks" below). It reads every change on the
 branch (commits since the merge base with `origin/main`, staged, unstaged and untracked
 files) and reports two classes:
 
@@ -143,18 +143,33 @@ that (`.claude/rules/35-vertical-slice-testing.md`).
 ### Codex hooks
 
 Codex runs repository hooks (`.codex/config.toml` or `.codex/hooks.json`) only for a
-trusted project, and only hook definitions that have themselves been trusted. SAM-managed
-Codex sessions trust neither: on 2026-11-16 a probe with the hook script committed
-(task 01M7HZ6Q1EVPVPCBN00AM3WN8A) saw no SessionStart, no PreToolUse context and no Stop
-prompt, and the session's `~/.codex/config.toml` had no trust entry for the repository
-(`CODEX_HOME` unset). The same applies to every other setting in `.codex/config.toml`.
-So no repository hook is configured for Codex. A rule-delivery hook (SessionStart and
-PreToolUse injection of path-scoped rule bodies, bounded, with a log) and the Codex Stop
-entry are kept on branch `sam/codex-rule-delivery-hook` until SAM decides whether its
-Codex sessions should trust repository hooks. Until then Codex reaches path-scoped rules
-through the `AGENTS.md` indexes only. `--check` still validates any Codex hook entry
-against the current schema, so a malformed one (like the flat `[[hooks.Stop]]` that held
-no handler) cannot come back unnoticed.
+trusted project, and only hook definitions that have themselves been trusted by hash, which
+normally takes an interactive `/hooks` review. codex-acp already marks the session's roots
+as trusted projects, so the repository's `.codex/` layer loads; SAM's vm-agent supplies the
+missing hook trust: `CODEX_CONFIG`, which codex-acp passes to every app-server thread,
+carries `bypass_hook_trust: true` (`buildCodexACPManagedConfigEnv` in
+`packages/vm-agent/internal/acp/session_host_agent_config.go`; decision: SAM idea
+01M7J0TXAHGRY8CWA7Y7SJZAK0). Before that change no repository hook ran in a SAM Codex
+session (probe task 01M7HZ6Q1EVPVPCBN00AM3WN8A).
+`TestCodexRunsRepositoryHooksWithSAMConfig`
+(`packages/vm-agent/internal/acp/session_host_codex_repo_hooks_process_test.go`) runs the
+real codex-acp and Codex CLI with that config against a synthetic model; set
+`SAM_CODEX_ACP_ADAPTER` and `SAM_CODEX_CLI` to run it.
+
+Two hooks are configured for Codex:
+
+- `.codex/hooks/rule-context.mjs` (SessionStart and PreToolUse on `Bash` and `apply_patch`)
+  adds the bodies of the path-scoped rules that govern the files a tool call touches, most
+  specific scope first, capped per call (`SAM_CODEX_RULE_CONTEXT_MAX_BYTES`, default 40,000
+  bytes, below the handler's `additionalContextLimit`), and names the rules it had no room
+  for. The first write to files whose rules were never delivered is refused once with the
+  rules attached. Deliveries are logged to `.tmp/instruction-loads/codex-<session>.jsonl`.
+  It reads `.codex/hooks/rule-scopes.json`, which `--write` generates from the instruction
+  model, so it runs without `node_modules`.
+- The test-quality Stop gate above.
+
+`--check` validates every Codex hook entry against the current schema, so a malformed one
+(like the flat `[[hooks.Stop]]` that held no handler) cannot come back unnoticed.
 
 ## Rule 73: optional fields must not overwrite on absence
 
