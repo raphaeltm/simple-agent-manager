@@ -850,6 +850,12 @@ export const asks = sqliteTable(
       table.status,
       table.createdAt
     ),
+    // Insights · People "answered by the first person asked" (migration 0258).
+    projectStatusResolvedIdx: index('idx_asks_project_status_resolved').on(
+      table.projectId,
+      table.status,
+      table.resolvedAt
+    ),
     sessionStatusIdx: index('idx_asks_session_status').on(table.sourceSessionId, table.status),
     openExpiryIdx: index('idx_asks_open_expiry')
       .on(table.expiresAt)
@@ -1513,6 +1519,44 @@ export const pullRequestHeads = sqliteTable(
       table.projectId,
       table.repository,
       table.headSha
+    ),
+  })
+);
+
+/**
+ * One review request cycle per reviewer of a pull request (migration 0258), written by the GitHub
+ * webhook ingest (`services/github-pull-request-reviews.ts`). Insights · People reads it for review
+ * pickup time, per project only: `reviewerKey` exists to match a review to its request.
+ */
+export const pullRequestReviewRequests = sqliteTable(
+  'pull_request_review_requests',
+  {
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    prNumber: integer('pr_number').notNull(),
+    /** 'user' | 'team' */
+    reviewerKind: text('reviewer_kind').notNull(),
+    reviewerKey: text('reviewer_key').notNull(),
+    requestedAt: text('requested_at').notNull(),
+    firstReviewAt: text('first_review_at'),
+    removedAt: text('removed_at'),
+  },
+  (table) => ({
+    pk: primaryKey({
+      columns: [
+        table.projectId,
+        table.repository,
+        table.prNumber,
+        table.reviewerKind,
+        table.reviewerKey,
+        table.requestedAt,
+      ],
+    }),
+    projectRequested: index('idx_pull_request_review_requests_project_requested').on(
+      table.projectId,
+      table.requestedAt
     ),
   })
 );

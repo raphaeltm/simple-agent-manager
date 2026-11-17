@@ -2,109 +2,47 @@
  * Visual and layout audit for the Insights page (Insights slice F) at 375×667 and 1280×800.
  * The Flow read is served exactly as the API answers it (`insights-fixtures.ts`). Scenes: a
  * realistic month, a stressed project (long names, every stop reason, 13 weeks, a capped idea
- * sample), an empty project, a failed read, the range switch, and the coming-soon tabs.
+ * sample), an empty project, a failed read and the range switch.
  * Accounts (slice A, `insights-accounts-fixtures.ts`): a realistic month, a stressed project
  * (long and hostile names, eight accounts, 13 weeks, a capped stall scan), an empty project, a
  * failed read, a failed stall section, and a range switch held mid-flight.
+ * Agent setups (slice S, `insights-setups-fixtures.ts`): a realistic month with suggestions, a
+ * stressed project (long and hostile names, 30 setups, every missing measure), an empty project,
+ * a failed read, the grouping switch, and applying a suggestion through PATCH skill.
  */
-import { expect, type Page, type Route, test, type TestInfo } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 import { isInsightsRange } from '@simple-agent-manager/shared';
 
-import {
-  assertNoClippedOverflow,
-  assertNoOverflow,
-  makeMockUser,
-  screenshot,
-} from './audit-helpers';
+import { docsShot } from './docs-shot';
 import { type AccountsScene, makeAccounts } from './insights-accounts-fixtures';
+import {
+  auditOnPhoneAndDesktop,
+  BASE,
+  capture,
+  PROJECT_ID,
+  routeInsightsApi,
+} from './insights-audit-support';
 import { type FlowScene, makeFlow } from './insights-fixtures';
-
-const PROJECT_ID = 'proj-insights';
-const USER_ID = 'user-insights';
-const BASE = `/projects/${PROJECT_ID}/insights`;
-
-const MOCK_USER = makeMockUser({
-  email: 'raph@example.com',
-  name: 'Raph',
-  sessionId: 'session-insights',
-  userId: USER_ID,
-});
-
-const MOCK_PROJECT = {
-  id: PROJECT_ID,
-  name: 'Acme Billing',
-  repository: 'acme/billing',
-  repoProvider: 'github',
-  defaultBranch: 'main',
-  userId: USER_ID,
-  installationId: 'inst-1',
-  defaultWorkspaceProfile: 'full',
-  defaultDevcontainerConfigName: '',
-  createdAt: '2026-10-01T00:00:00Z',
-  updatedAt: '2026-11-15T00:00:00Z',
-  multiplayerActive: false,
-  summary: {
-    activeWorkspaceCount: 0,
-    activeSessionCount: 0,
-    lastActivityAt: null,
-    taskCountsByStatus: {},
-    linkedWorkspaces: 0,
-  },
-};
+import { makeSetups, type SetupsScene } from './insights-setups-fixtures';
 
 async function setupScene(
   page: Page,
   scene: FlowScene | 'error',
   requests: string[] = [],
-  accountsScene: AccountsScene | 'error' = 'realistic'
+  accountsScene: AccountsScene | 'error' = 'realistic',
+  setupsScene: SetupsScene | 'error' = 'realistic',
+  skillPatches: Array<{ skillId: string; body: unknown }> = []
 ) {
-  await page.addInitScript((id) => {
-    localStorage.setItem(`sam-onboarding-wizard-dismissed-${id}`, 'true');
-  }, USER_ID);
-  await page.route(/^https?:\/\/[^/]+\/api\//, async (route: Route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname;
-    const respond = (status: number, body: unknown) =>
-      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
-    if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
-    if (path === '/api/cc/credentials') return respond(200, { credentials: [] });
-    if (path === '/api/cc/configurations') return respond(200, { configurations: [] });
-    if (path === '/api/cc/attachments') return respond(200, { attachments: [] });
-    if (path === '/api/cc/profile-attachments') return respond(200, { attachments: [] });
-    if (path === '/api/credentials/resolution-status') return respond(200, { consumers: [] });
-    if (path === '/api/credentials/limits')
-      return respond(200, { credentials: [], generatedAt: Date.now() });
-    if (path === '/api/credentials') return respond(200, []);
-    if (path === '/api/agents') return respond(200, { agents: [] });
-    if (path === `/api/projects/${PROJECT_ID}/overview`)
-      return respond(200, {
-        projectId: PROJECT_ID,
-        running: { items: [], total: 0, waitingOnViewerTotal: 0 },
-        recent: { ideas: [], mergedPullRequests: [] },
-        unavailable: [],
-        generatedAt: new Date().toISOString(),
-      });
-    if (path === `/api/projects/${PROJECT_ID}/agent-profiles`) return respond(200, { items: [] });
-    if (path === `/api/projects/${PROJECT_ID}/skills`) return respond(200, { items: [] });
-    if (path === `/api/projects/${PROJECT_ID}/triggers`) return respond(200, { triggers: [] });
-    if (path === `/api/projects/${PROJECT_ID}/members`)
-      return respond(200, { members: [], inviteLinks: [], accessRequests: [] });
-    if (path === '/api/trial-status')
-      return respond(200, { available: false, hasInfraCredential: true });
-    if (path.startsWith('/api/notifications'))
-      return respond(200, { notifications: [], unreadCount: 0 });
-    if (path === '/api/projects')
-      return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
-    if (path === `/api/projects/${PROJECT_ID}`) return respond(200, MOCK_PROJECT);
-    if (path === `/api/projects/${PROJECT_ID}/insights/flow`) {
-      const range = url.searchParams.get('range');
+  const applied = new Set<string>();
+  await routeInsightsApi(page, (url, route, respond) => {
+    const range = url.searchParams.get('range');
+    if (url.pathname === `/api/projects/${PROJECT_ID}/insights/flow`) {
       requests.push(range ?? '');
       if (scene === 'error')
         return respond(500, { error: 'INTERNAL_ERROR', message: 'Insights are unavailable' });
       return respond(200, makeFlow(PROJECT_ID, isInsightsRange(range) ? range : '30d', scene));
     }
-    if (path === `/api/projects/${PROJECT_ID}/insights/accounts`) {
-      const range = url.searchParams.get('range');
+    if (url.pathname === `/api/projects/${PROJECT_ID}/insights/accounts`) {
       requests.push(`accounts:${range ?? ''}`);
       if (accountsScene === 'error')
         return respond(500, { error: 'INTERNAL_ERROR', message: 'Insights are unavailable' });
@@ -113,40 +51,37 @@ async function setupScene(
         makeAccounts(PROJECT_ID, isInsightsRange(range) ? range : '30d', accountsScene)
       );
     }
-    if (path.includes('/sessions')) return respond(200, { sessions: [], total: 0, hasMore: false });
-    return respond(200, {});
-  });
-}
-
-function onlyOn(names: string[]) {
-  return ({ page: _page }: { page: Page }, testInfo: TestInfo) => {
-    test.skip(!names.includes(testInfo.project.name), 'audited on a phone and desktop');
-  };
-}
-test.beforeEach(onlyOn(['iPhone SE (375x667)', 'Desktop (1280x800)']));
-
-async function capture(page: Page, name: string) {
-  await expect(page.getByText('Something went wrong')).toHaveCount(0);
-  await assertNoOverflow(page);
-  await assertNoClippedOverflow(page);
-  // The page root fits the viewport (rule 56): it is never sized by its own content.
-  const rootWidth = await page
-    .getByTestId('project-insights')
-    .evaluate((el) => el.getBoundingClientRect().width);
-  expect(rootWidth).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
-  // The app shell scrolls inside <main>: grow every scroller to its content so the
-  // screenshot shows the whole page, not the first screen.
-  await page.evaluate(() => {
-    let node = document.querySelector<HTMLElement>('[data-testid="project-insights"]');
-    while (node) {
-      node.style.overflow = 'visible';
-      node.style.height = 'auto';
-      node.style.maxHeight = 'none';
-      node = node.parentElement;
+    if (url.pathname === `/api/projects/${PROJECT_ID}/insights/setups`) {
+      const groupBy = url.searchParams.get('groupBy');
+      requests.push(`setups:${range ?? ''}:${groupBy ?? ''}`);
+      if (setupsScene === 'error')
+        return respond(500, { error: 'INTERNAL_ERROR', message: 'Insights are unavailable' });
+      const body = makeSetups(
+        PROJECT_ID,
+        isInsightsRange(range) ? range : '30d',
+        groupBy === 'skill' || groupBy === 'model' ? groupBy : 'profile',
+        setupsScene
+      );
+      // A skill that was changed no longer has its suggestion, as the real read behaves.
+      body.suggestions = body.suggestions.filter((s) => !applied.has(s.apply.skillId));
+      return respond(200, body);
     }
+    const skillPatch = url.pathname.match(
+      new RegExp(`^/api/projects/${PROJECT_ID}/skills/([^/]+)$`)
+    );
+    if (skillPatch && route.request().method() === 'PATCH') {
+      const skillId = skillPatch[1] ?? '';
+      skillPatches.push({ skillId, body: route.request().postDataJSON() });
+      applied.add(skillId);
+      return respond(200, { id: skillId, projectId: PROJECT_ID, name: skillId });
+    }
+    return undefined;
   });
-  await screenshot(page, name);
 }
+
+auditOnPhoneAndDesktop();
+
+const isPhoneViewport = (page: Page) => (page.viewportSize()?.width ?? 0) < 640;
 
 test.describe('Insights', () => {
   test('flow with a realistic month', async ({ page }) => {
@@ -170,6 +105,8 @@ test.describe('Insights', () => {
       page.getByTestId('insights-waiting-ideas').getByRole('link', { name: /Tax ID validation/ })
     ).toHaveAttribute('href', `/projects/${PROJECT_ID}/ideas/idea-c`);
     await expect(page.getByTestId('insights-waiting-ideas')).toContainText('PR open, CI red');
+    // Docs image (insights.md): the first screen, before capture() grows the scrollers.
+    await docsShot(page, isPhoneViewport(page) ? 'insights-flow-mobile' : 'insights-flow');
     await capture(page, 'insights-flow-realistic');
   });
 
@@ -236,18 +173,113 @@ test.describe('Insights', () => {
     await capture(page, 'insights-flow-7d');
   });
 
-  test('the other tabs say they are coming', async ({ page }) => {
+  test('agent setups with a realistic month', async ({ page }) => {
     await setupScene(page, 'realistic');
     await page.goto(`${BASE}/flow`);
-    for (const [tab, id] of [
-      ['Agent setups', 'agent-setups'],
-      ['People', 'people'],
-    ] as const) {
-      await page.getByRole('tab', { name: tab, exact: true }).click();
-      await expect(page).toHaveURL(new RegExp(`${BASE}/${id}`));
-      await expect(page.getByTestId(`insights-coming-soon-${id}`)).toContainText('coming soon');
-    }
-    await capture(page, 'insights-coming-soon');
+    await page.getByRole('tab', { name: 'Agent setups', exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`${BASE}/agent-setups`));
+    const section = page.getByTestId('insights-section-setups');
+    // The table on a wide screen, cards on a phone: whichever is shown carries the numbers.
+    const visible = section.locator(
+      '[data-testid="insights-setups-table"]:visible, [data-testid="insights-setups-cards"]:visible'
+    );
+    await expect(visible).toHaveCount(1);
+    await expect(visible).toContainText('Opus 5.5 Chat');
+    await expect(visible).toContainText('78%');
+    await expect(visible).toContainText('34 merged');
+    // A measure that covers only some runs says so in words.
+    await expect(visible).toContainText('2.4M· partial');
+    await expect(visible).toContainText('3.1M');
+    await expect(visible).toContainText('3.4 / 8 GB');
+    await expect(visible).toContainText('No profile');
+    await expect(visible).toContainText('Not reported');
+    await expect(page.getByTestId('insights-setups-compare')).toBeVisible();
+    await expect(page.getByTestId('insights-setups-suggestion')).toHaveCount(2);
+    await expect(page.getByText('Use Sonnet 5.5 Fast for fix')).toBeVisible();
+    await expect(page.getByText('do asks for 8 GB but peaks at 3.4 GB')).toBeVisible();
+    await capture(page, 'insights-setups-realistic');
+  });
+
+  test('agent setups at a tablet width uses cards, not a squeezed table', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'Desktop (1280x800)', 'one extra width is enough');
+    await page.setViewportSize({ width: 900, height: 800 });
+    await setupScene(page, 'realistic');
+    await page.goto(`${BASE}/agent-setups`);
+    await expect(page.getByTestId('insights-setups-cards')).toBeVisible();
+    await expect(page.getByTestId('insights-setups-table')).toBeHidden();
+    await capture(page, 'insights-setups-tablet-900');
+  });
+
+  test('switching the grouping asks for it and keeps the URL', async ({ page }) => {
+    const requests: string[] = [];
+    await setupScene(page, 'realistic', requests);
+    await page.goto(`${BASE}/agent-setups`);
+    await expect(page.getByTestId('insights-section-setups')).toBeVisible();
+    await page.getByRole('button', { name: 'Skill', exact: true }).click();
+    await expect(page).toHaveURL(/groupBy=skill/);
+    await expect(page.getByRole('button', { name: 'Skill', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+    await expect
+      .poll(() => requests.filter((r) => r.startsWith('setups:')))
+      .toEqual(['setups:30d:profile', 'setups:30d:skill']);
+  });
+
+  test('applying a suggestion updates the skill through PATCH and the suggestion goes', async ({
+    page,
+  }) => {
+    const patches: Array<{ skillId: string; body: unknown }> = [];
+    await setupScene(page, 'realistic', [], 'realistic', 'realistic', patches);
+    await page.goto(`${BASE}/agent-setups`);
+    const button = page.getByRole('button', { name: 'Make Sonnet 5.5 Fast the default for fix' });
+    await expect(button).toBeVisible();
+    await button.click();
+    await expect
+      .poll(() => patches)
+      .toEqual([{ skillId: 'sk-fix', body: { defaultProfileId: 'p-sonnet' } }]);
+    await expect(page.getByText(/Sonnet 5\.5 Fast is now the default for fix/)).toBeVisible();
+    await expect(page.getByTestId('insights-setups-suggestion')).toHaveCount(1);
+    // Liveness: the other suggestion is still offered.
+    await expect(page.getByRole('button', { name: 'Request 4.5 GB for do' })).toBeVisible();
+  });
+
+  test('agent setups under stress', async ({ page }) => {
+    await setupScene(page, 'realistic', [], 'realistic', 'stress');
+    await page.goto(`${BASE}/agent-setups`);
+    await expect(page.getByText(/Showing the newest \d+ runs/)).toBeVisible();
+    const section = page.getByTestId('insights-section-setups');
+    const visible = section.locator(
+      '[data-testid="insights-setups-table"]:visible, [data-testid="insights-setups-cards"]:visible'
+    );
+    await expect(visible).toContainText('A teammate’s profile');
+    await expect(visible).toContainText('Removed profile');
+    await expect(visible).toContainText('3 out of memory');
+    await expect(visible).toContainText('No merge');
+    // Hostile text renders as text.
+    await expect(visible).toContainText('<script>alert("x")</script>');
+    await capture(page, 'insights-setups-stress');
+  });
+
+  test('agent setups for an empty project', async ({ page }) => {
+    await setupScene(page, 'realistic', [], 'realistic', 'empty');
+    await page.goto(`${BASE}/agent-setups`);
+    await expect(page.getByTestId('insights-setups-empty')).toContainText('No runs in this range');
+    await expect(page.getByTestId('insights-section-setups-suggestions')).toContainText(
+      'at least 10 finished runs'
+    );
+    // Liveness: the grouping control renders above the empty state.
+    await expect(page.getByRole('button', { name: 'Model', exact: true })).toBeVisible();
+    await capture(page, 'insights-setups-empty');
+  });
+
+  test('a failed agent setups read says so and offers a retry', async ({ page }) => {
+    await setupScene(page, 'realistic', [], 'realistic', 'error');
+    await page.goto(`${BASE}/agent-setups`);
+    await expect(page.getByRole('button', { name: /retry|try again/i })).toBeVisible();
+    await capture(page, 'insights-setups-error');
   });
 
   test('accounts with a realistic month', async ({ page }) => {
@@ -267,7 +299,24 @@ test.describe('Insights', () => {
     ).toContainText('Teammates’ accounts (2)');
     const key = page.getByTestId('insights-account-cred:cc-key');
     await expect(key).toContainText('API key · pay as you go');
-    await expect(key.getByText('Not reported')).toHaveCount(1);
+    // An API key's spend: an estimate, and per merged pull request.
+    await expect(key.getByTestId('insights-usage-spend')).toContainText('~$41.27');
+    await expect(key.getByTestId('insights-usage-spend')).toContainText('~$3.44 per merged PR');
+    await expect(key.getByTestId('insights-usage-spend')).toContainText(
+      'Estimated at SAM’s model prices.'
+    );
+    await expect(key.getByTestId('insights-usage-tokens')).toContainText('21.6M');
+    await expect(key.getByTestId('insights-usage-tokens')).toContainText('1.8M per merged PR');
+    // A subscription shows tokens, never money.
+    await expect(own.getByTestId('insights-usage-tokens')).toContainText('48.2M');
+    await expect(own.getByTestId('insights-usage-spend')).toHaveCount(0);
+    // A teammate's key: tokens, spend private. A key with no usage: not reported.
+    const mates = page.getByTestId('insights-account-teammate:claude-code:api_key');
+    await expect(mates.getByTestId('insights-usage-tokens')).toContainText('2.3M');
+    await expect(mates.getByTestId('insights-usage-spend')).toContainText('Private');
+    const spare = page.getByTestId('insights-account-cred:cc-key2');
+    await expect(spare.getByTestId('insights-usage-spend')).toContainText('Not reported');
+    await expect(spare.getByTestId('insights-usage-tokens')).toHaveCount(0);
     await expect(page.getByTestId('insights-accounts-chart')).toBeVisible();
     await expect(page.getByTestId('insights-stall-list').locator('li')).toHaveCount(6);
     await expect(page.getByTestId('insights-stall-list')).toContainText(
@@ -283,6 +332,23 @@ test.describe('Insights', () => {
     await setupScene(page, 'realistic', [], 'stress');
     await page.goto(`${BASE}/accounts?range=90d`);
     await expect(page.locator('[data-testid^="insights-account-"]')).toHaveCount(8);
+    // Partial spend names every unpriced model and reads as a floor; capped usage says so too.
+    const key = page.getByTestId('insights-account-cred:cc-x');
+    await expect(key.getByTestId('insights-usage-spend')).toContainText('At least ~$12,345.68');
+    await expect(key.getByTestId('insights-usage-spend')).toContainText(
+      'mystery-model-with-an-extremely-long-name-that-has-no-catalog-price-at-all'
+    );
+    await expect(key.getByTestId('insights-usage-tokens')).toContainText('412M+');
+    await expect(
+      page
+        .getByTestId('insights-account-project:openai-codex:api_key')
+        .getByTestId('insights-usage-spend')
+    ).toContainText('No estimate');
+    await expect(key.getByTestId('insights-usage-tokens')).toContainText(
+      'Cut at the usage row limit, so this is a floor.'
+    );
+    // A long unpriced list is cut after three names.
+    await expect(key.getByTestId('insights-usage-spend')).not.toContainText(' more.');
     // Untrusted names render as text, never as markup.
     await expect(page.getByText('<script>alert("x")</script> 🔑 key').first()).toBeVisible();
     // Five accounts get a colour; the other three fold into "Other".
@@ -323,6 +389,24 @@ test.describe('Insights', () => {
     await expect(own).toContainText('Not loaded');
     await expect(own).not.toContainText('Never');
     await capture(page, 'insights-accounts-partial');
+  });
+
+  test('accounts with the token read unavailable say "Not loaded", not nothing', async ({
+    page,
+  }) => {
+    await setupScene(page, 'realistic', [], 'tokens-failed');
+    await page.goto(`${BASE}/accounts`);
+    await expect(
+      page.getByText('Some numbers could not be loaded: tokens and spend.')
+    ).toBeVisible();
+    const key = page.getByTestId('insights-account-cred:cc-key');
+    await expect(key.getByTestId('insights-usage-tokens')).toContainText('Not loaded');
+    await expect(key.getByTestId('insights-usage-spend')).toContainText('Not loaded');
+    // A subscription has no spend row to fail; its runs still show (liveness).
+    const own = page.getByTestId('insights-account-cred:cc-max');
+    await expect(own.getByTestId('insights-usage-spend')).toHaveCount(0);
+    await expect(own).toContainText('64');
+    await capture(page, 'insights-accounts-tokens-failed');
   });
 
   test('switching range on accounts keeps the cards on screen until the new range arrives', async ({

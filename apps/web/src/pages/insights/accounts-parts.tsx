@@ -14,6 +14,7 @@ import { CircleHelp, KeyRound, PauseCircle, Server, UserRound, UsersRound } from
 import type { ReactNode } from 'react';
 
 import { CredentialLimitChip } from '../../components/credential-limits/CredentialLimitChip';
+import { NOT_LOADED_LINE, spendLine, tokensLine, type UsageLine } from './accounts-usage';
 import { Empty } from './flow-parts';
 import { bucketLabel, formatDuration } from './format';
 
@@ -21,7 +22,7 @@ import { bucketLabel, formatDuration } from './format';
  * Series colours for the chart. Green is left out (it means working or primary in SAM Glass), and
  * so is amber (waiting on you). Accounts beyond these share "Other".
  */
-const SERIES_COLORS = [
+export const SERIES_COLORS = [
   'var(--sam-admin-chart-series-2)',
   'var(--sam-admin-chart-series-3)',
   'var(--sam-admin-chart-series-9)',
@@ -29,7 +30,7 @@ const SERIES_COLORS = [
   'var(--sam-admin-chart-series-12)',
 ] as const;
 /** "Other" and runs whose account was not recorded: neutral slate, never a loud hue. */
-const NEUTRAL_COLOR = 'var(--sam-person-auto)';
+export const NEUTRAL_COLOR = 'var(--sam-person-auto)';
 
 const KIND_LABELS: Record<InsightsAccount['kind'], string> = {
   subscription: 'Subscription',
@@ -129,13 +130,30 @@ function pausedValue(account: InsightsAccount): ReactNode {
   );
 }
 
-function spendText(spend: NonNullable<InsightsAccount['spend']>): string {
-  if (spend.state === 'not_reported') return 'Not reported';
-  const per =
-    spend.perMergedPullRequestUsd === null
-      ? ''
-      : ` · $${spend.perMergedPullRequestUsd.toFixed(2)} per merged pull request`;
-  return `$${spend.costUsd.toFixed(2)}${per}`;
+/** A Tokens or Spend row: the figure, its per-merged-PR detail, and a note under it. */
+function UsageRow({ label, line, testId }: { label: string; line: UsageLine; testId: string }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1" data-testid={testId}>
+      <Row label={label}>
+        <span
+          className={
+            line.muted ? 'whitespace-nowrap font-normal text-fg-muted' : 'whitespace-nowrap'
+          }
+        >
+          {line.value}
+        </span>
+        {line.detail && (
+          <>
+            {' '}
+            <span className="whitespace-nowrap font-normal text-fg-muted">· {line.detail}</span>
+          </>
+        )}
+      </Row>
+      {line.note && (
+        <p className="m-0 text-[11.5px] text-fg-muted [overflow-wrap:anywhere]">{line.note}</p>
+      )}
+    </div>
+  );
 }
 
 export function AccountCard({
@@ -143,12 +161,18 @@ export function AccountCard({
   color,
   now,
   stallsUnavailable = false,
+  usageLimited = false,
+  tokensUnavailable = false,
 }: {
   account: InsightsAccount;
   color: string;
   now: number;
   /** The stall read failed: say so rather than "Never". */
   stallsUnavailable?: boolean;
+  /** The usage read hit its row cap: tokens and spend are a floor. */
+  usageLimited?: boolean;
+  /** The usage read failed: say so rather than leaving the rows out. */
+  tokensUnavailable?: boolean;
 }) {
   const title = accountTitle(account);
   return (
@@ -179,7 +203,28 @@ export function AccountCard({
           note={!stallsUnavailable && account.stalls.ongoing ? 'Paused now' : undefined}
         />
       </div>
-      {account.spend && <Row label="Spend">{spendText(account.spend)}</Row>}
+      {tokensUnavailable ? (
+        <UsageRow label="Tokens" line={NOT_LOADED_LINE} testId="insights-usage-tokens" />
+      ) : (
+        account.tokens && (
+          <UsageRow
+            label="Tokens"
+            line={tokensLine(account.tokens, usageLimited)}
+            testId="insights-usage-tokens"
+          />
+        )
+      )}
+      {tokensUnavailable && account.kind === 'api_key' ? (
+        <UsageRow label="Spend" line={NOT_LOADED_LINE} testId="insights-usage-spend" />
+      ) : (
+        account.spend && (
+          <UsageRow
+            label="Spend"
+            line={spendLine(account.spend, usageLimited)}
+            testId="insights-usage-spend"
+          />
+        )
+      )}
       {account.usage && (
         <Row label="Limits now">
           <CredentialLimitChip credential={account.usage} now={now} size="sm" />

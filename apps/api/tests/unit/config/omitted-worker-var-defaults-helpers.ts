@@ -16,7 +16,7 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
  */
 const ALTERNATIVE_VALUES: Readonly<Record<string, string>> = {
   D1_SESSION_MODE: 'disabled',
-  VM_AGENT_TRANSPORT: 'cloudflare-tunnel',
+  VM_AGENT_TRANSPORT: 'reverse-tunnel',
   VM_AGENT_TUNNEL_PORT: '9555', // 8443 is the main listener and must remain forbidden.
   // Exercised through real cloud-init validation: no invented second pinned release.
   CLOUDFLARED_VERSION: 'unsupported-test-release',

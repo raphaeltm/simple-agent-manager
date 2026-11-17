@@ -6,17 +6,18 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
 import { assertNoOverflow, makeMockUser, screenshot } from './audit-helpers';
+import { docsShot } from './docs-shot';
 
 const MOCK_USER = makeMockUser({
   email: 'test@example.com',
-  name: 'Test User',
+  name: 'Dana Reyes',
   sessionId: 'session-1',
   userId: 'user-1',
 });
 
 const MOCK_PROJECT = {
   id: 'proj-1',
-  name: 'Test Project',
+  name: 'Acme Billing',
   repository: 'testuser/test-repo',
   defaultBranch: 'main',
   userId: 'user-1',
@@ -164,6 +165,14 @@ const INJECT_MODE_POLICIES = [
       injectMode: i % 3 === 0 ? 'on_demand' : 'pinned',
     })
   ),
+];
+
+/** Readable, realistic policies for the docs image (agent-context.md); no stress cases. */
+const DOCS_POLICIES = [
+  makePolicy({ id: 'pd1', category: 'rule', title: 'Never merge with a failing check', content: 'Wait for every required check to pass before merging. A red check blocks the merge, even when the failure looks unrelated.' }),
+  makePolicy({ id: 'pd3', category: 'preference', title: 'Blog posts stay technical', content: 'Posts on the engineering blog cover what we built and how, not pricing or sales.', injectMode: 'on_demand' }),
+  makePolicy({ id: 'pd2', category: 'constraint', title: 'Migrations only add columns', content: 'Database migrations may add tables and columns but never drop or rename them in the same release.' }),
+  makePolicy({ id: 'pd4', category: 'delegation', title: 'Agents choose test strategy themselves', content: 'Pick the test approach without asking; explain the choice in the pull request.', injectMode: 'on_demand' }),
 ];
 
 const NORMAL_OBSERVATIONS = [
@@ -547,6 +556,17 @@ test.describe('Agent Context — Mobile', () => {
 
 test.describe('Agent Context — Desktop', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
+
+  test('docs: policies with the pinned and on-demand switch', async ({ page }) => {
+    await setupMocks(page, { policies: DOCS_POLICIES });
+    await page.goto('/projects/proj-1/agent-context');
+    await page.click('button:has-text("Policies")');
+    const summary = page.getByLabel('Policy size in agent sessions');
+    await expect(summary).toContainText('from 2 pinned policies');
+    await expect(summary).toContainText('2 on demand');
+    await assertNoOverflow(page);
+    await docsShot(page, 'agent-context-policies');
+  });
 
   test('overview tab renders', async ({ page }) => {
     await setupMocks(page);

@@ -76,6 +76,11 @@ export async function runOperatorAgent(options: {
     metadata: JSON.stringify({ source: config.aigSource, userId, turnId: turn.id }),
     sessionAffinity: `sam-${turn.conversation_id}`,
   });
+  const customEndpoint =
+    typeof model === 'object' &&
+    model !== null &&
+    'provider' in model &&
+    String(model.provider).startsWith('sam-openai-compatible');
   assertCurrent();
   let toolAttempted = false;
   let inferenceFailed = false;
@@ -128,7 +133,7 @@ export async function runOperatorAgent(options: {
       maxSteps: config.maxTurns - startedSteps,
       ...(correcting ? { instructions: `${instructions}\n${GROUNDING_CORRECTION}` } : {}),
       modelSettings: { maxOutputTokens: config.maxTokens, maxRetries: 0 },
-      providerOptions: operatorProviderOptions(config.model),
+      providerOptions: operatorProviderOptions(customEndpoint ? '' : config.model),
       // Same scheduling as generate(): a tool starts after its step, behind prepareStep's gates.
       eagerToolExecution: false,
       onChunk: (chunk) => {
@@ -158,7 +163,7 @@ export async function runOperatorAgent(options: {
         if (step.finishReason === 'error') inferenceFailed = true;
         if (step.toolCalls.length > 0) toolAttempted = true;
         live?.stepFinished(step.toolCalls.length > 0);
-        await recordOperatorStepUsage(env, userId, config, catalogModel, step);
+        await recordOperatorStepUsage(env, userId, config, catalogModel, step, customEndpoint);
       },
     });
     const full = await output.getFullOutput();

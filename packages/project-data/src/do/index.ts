@@ -8,7 +8,7 @@
  * See: specs/018-project-first-architecture/research.md
  * See: specs/018-project-first-architecture/data-model.md
  */
-import type { RunReceiptFactsInput } from '@simple-agent-manager/shared';
+import type { RunNudgeWindow, RunReceiptFactsInput } from '@simple-agent-manager/shared';
 import {
   type AcpSessionEventActorType,
   type AcpSessionStatus,
@@ -121,6 +121,7 @@ import * as reconciliation from './reconciliation';
 import { releaseQuestionHold } from './reconciliation-candidate-state';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import { instrumentRowUsage, RowUsage } from './row-usage';
+import { countRunNudges } from './run-nudges';
 import { getRunReceiptFacts } from './run-receipt-facts';
 import { checkRuntimeHeartbeatTimeouts } from './runtime-heartbeat-policy';
 import { withoutSamNotice } from './sam-notice-metadata';
@@ -3137,6 +3138,11 @@ export class ProjectData extends DurableObject<Env> {
   /** One chat's run-receipt facts: tool calls, questions, last agent message (`run-receipt-facts.ts`). */
   getRunReceiptFacts(input: RunReceiptFactsInput) {
     return getRunReceiptFacts(this.sql, input);
+  }
+
+  /** Human follow-ups per run window, for Insights · Agent setups (`run-nudges.ts`). */
+  countRunNudges(windows: RunNudgeWindow[], maxWindows: number) {
+    return countRunNudges(this.sql, windows, maxWindows);
   }
 
   async createAcpSession(opts: {

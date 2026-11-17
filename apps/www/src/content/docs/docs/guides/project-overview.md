@@ -11,6 +11,14 @@ more work from the bottom of the page.
 the right of the app bar on a phone. Links that point at one chat (a notification about a chat,
 **Open chat** on an inbox item or a receipt, a row in Running now) still open that chat directly.
 
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/project-overview-mobile.png 2x" />
+  <img
+    src="/images/docs/project-overview.png"
+    alt="A project's Overview. Needs you, with a count of 5 and an All 5 link, lists a permission to run a migration with 4 minutes left, an approval, and a stack of three questions from the chat Ship billing. Running now lists the chats agents are working on, the first paused on a question in amber. The task box (Start a task…) is at the bottom. On a desktop, the right column also shows This week (Merged 28, Idea to merged 1.6d, CI first try 64%, and a flaky check as the top blocker) and Budgets, one ring per account; on a phone the sections stack, and the screen shows Needs you and the start of Running now."
+  />
+</picture>
+
 ## Layout
 
 - **On a phone**, top to bottom: **Needs you**, **Running now**, **This week**, **Budgets**,
@@ -23,12 +31,12 @@ the right of the app bar on a phone. Links that point at one chat (a notificatio
 ### Needs you
 
 The first items of this project's [Inbox](/docs/guides/inbox/): the questions, permission requests,
-secrets, approvals, reviews and problems waiting for you, in the same order as the Inbox. A phone
-shows three, a desktop five; the number next to the heading counts them all, and **All** opens the
-project Inbox.
+secrets, approvals, reviews, tasks and problems waiting for you, in the same order as the Inbox. A phone
+shows three, a desktop five; the number next to the heading counts them all, and **All**, followed by
+that number, opens the project Inbox.
 
 Tap an item to open it in the Inbox. Answer it there: a one-line receipt confirms it and the next
-item opens. **Back** returns you to the Overview, where the count is already lower. When nothing is
+item opens. **Back to Overview** returns you to the Overview, where the count is already lower. When nothing is
 waiting, the section is a single line, **Nothing needs you.**
 
 ### Running now
@@ -65,7 +73,8 @@ One ring per account your project's profiles run on: the ring is the usage left 
 the same ring the profile picker shows. Calm accounts are just a ring. Words appear only when
 something needs your attention, and they name the window, for example
 **Personal Max: Weekly window · 6% left · resets 2d 3h**, an account that is paused, or a profile
-with no account connected. See [Usage limits](/docs/guides/agents/#usage-limits).
+with no account connected. **Accounts** opens the project's **Settings → Accounts**, where you connect and switch them. See
+[Usage limits](/docs/guides/agents/#usage-limits).
 
 ### Automations
 
@@ -77,7 +86,7 @@ Automation page.
 ### Recently
 
 The three ideas updated most recently and the three pull requests merged most recently. Ideas open
-their page; pull requests open on GitHub. See [Ideas](/docs/guides/ideas/).
+their page; pull requests open on GitHub. **Ideas** opens the project's Ideas page. See [Ideas](/docs/guides/ideas/).
 
 ## Start a task from the Overview
 

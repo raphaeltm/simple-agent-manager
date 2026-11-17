@@ -15,9 +15,8 @@ export const PROXY_ELIGIBLE_AGENTS: ReadonlySet<string> = new Set(
   ).map((capability) => capability.agentType)
 );
 
-export function isAiProxyEnabled(env: Pick<Env, 'AI_PROXY_ENABLED'>): boolean {
-  return (env.AI_PROXY_ENABLED ?? 'true') !== 'false';
-}
+import { isAiProxyEnabled } from './ai-proxy-availability';
+export { isAiProxyEnabled };
 
 /**
  * Claude Code and Codex use the platform proxy only after the person explicitly chose SAM as the
@@ -31,13 +30,13 @@ export function requiresExplicitSamProvider(agentType: string): boolean {
  * True when a run of `agentType` with no credential of its own would start on the platform proxy.
  * OpenCode is proxy-eligible for passthrough but always needs its own key, so it never qualifies.
  */
-export function samProxyFallbackAvailable(
-  env: Pick<Env, 'AI_PROXY_ENABLED'>,
+export async function samProxyFallbackAvailable(
+  env: Env,
   agentType: string,
   providerMode: string | null
-): boolean {
+): Promise<boolean> {
   return (
-    isAiProxyEnabled(env) &&
+    (await isAiProxyEnabled(env)) &&
     PROXY_ELIGIBLE_AGENTS.has(agentType) &&
     requiresExplicitSamProvider(agentType) &&
     providerMode === 'sam'

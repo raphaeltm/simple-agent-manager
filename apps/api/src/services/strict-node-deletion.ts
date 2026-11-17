@@ -20,6 +20,7 @@ import {
   type ProviderDeletionOutcome,
   sendProviderDeletion,
 } from './node-provider-deletion';
+import { releaseTerminatedNodeIngress } from './node-provisioning-ingress';
 import {
   deleteWithCurrentOwnerCredential,
   NodeTeardownBlockedError,
@@ -27,7 +28,6 @@ import {
 } from './node-teardown-authority';
 import { recordNodeTeardownBlocked } from './node-teardown-blocked';
 import { isNodeCapacitySourceReleased } from './node-teardown-provenance';
-import { releaseNodeTunnels } from './node-tunnel-cleanup';
 import {
   type ContainerWorkspaceDeletionAuthority,
   requireNodeWorkspaceArtifactsDeleted,
@@ -169,10 +169,6 @@ async function deleteStrictProviderInstance(
  * managed tunnel-transport VM nodes own tunnels: legacy nodes and Instant containers pay
  * nothing, and an incarnation missed here is still found by the sweep's own non-live scan.
  */
-async function releaseTerminatedNodeTunnels(env: Env, node: NodeRow): Promise<void> {
-  if (node.runtime !== 'vm' || node.transport !== 'cloudflare-tunnel') return;
-  await releaseNodeTunnels(env, node.id, 'runtime_terminated');
-}
 
 async function markWorkspaceRuntimeTerminationConfirmed(
   db: NodeDb,
@@ -404,7 +400,7 @@ export async function deleteNodeResourcesStrict(
       );
     }
     await markWorkspaceRuntimeTerminationConfirmed(db, node, node.runtimeTerminationConfirmedAt);
-    await releaseTerminatedNodeTunnels(env, node);
+    await releaseTerminatedNodeIngress(env, node);
     return {
       providerVm: node.providerInstanceId ? 'already-absent' : 'no-instance',
       runtimeTerminationConfirmedAt: node.runtimeTerminationConfirmedAt,
@@ -484,7 +480,7 @@ export async function deleteNodeResourcesStrict(
   const runtimeTerminationConfirmedAt = await markRuntimeTerminationConfirmed(db, node);
   // The proof makes this incarnation non-live, which releases its Cloudflare tunnel (if it
   // had one). Never throws: the tunnel journal keeps the identity for the cron sweep.
-  await releaseTerminatedNodeTunnels(env, node);
+  await releaseTerminatedNodeIngress(env, node);
   if (options.cleanupDns !== false) {
     await deleteStrictNodeDnsRecord(
       node,
