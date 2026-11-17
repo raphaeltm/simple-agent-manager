@@ -301,6 +301,75 @@ describe('server read-aloud through an OpenAI-compatible endpoint', () => {
     expect(fetchMock.mock.calls.length).toBe(callsAfterFirst);
   });
 
+  it('calls the endpoint once per chunk (no retry) and answers 503 on a transient failure', async () => {
+    const { env } = boxEnv({ TTS_RETRY_ATTEMPTS: '3' });
+    await configure(env, {
+      'speech.synthesis.baseUrl': 'https://tts.example.com/v1',
+      'speech.synthesis.model': 'kokoro',
+    });
+    fetchMock.mockResolvedValueOnce(new Response('busy', { status: 503 }));
+    fetchMock.mockResolvedValue(new Response(AUDIO_BYTES));
+
+    const res = await postSynthesize(env);
+    expect(res.status).toBe(503);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses empty audio from the endpoint instead of storing it', async () => {
+    const { r2, stored } = createR2();
+    const { env } = boxEnv({ R2: r2 });
+    await configure(env, {
+      'speech.synthesis.baseUrl': 'https://tts.example.com/v1',
+      'speech.synthesis.model': 'kokoro',
+    });
+    fetchMock.mockResolvedValueOnce(new Response(new Uint8Array()));
+
+    const res = await postSynthesize(env);
+    expect(res.status).toBe(503);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(stored.size).toBe(0);
+  });
+
+  it('bounds the text sent to the endpoint by the configurable chunk limits', async () => {
+    const { env } = boxEnv({ TTS_CHUNK_SIZE: '40', TTS_MAX_CHUNKS: '3' } as Partial<Env>);
+    await configure(env, {
+      'speech.synthesis.baseUrl': 'https://tts.example.com/v1',
+      'speech.synthesis.model': 'kokoro',
+    });
+    fetchMock.mockImplementation(async () => new Response(AUDIO_BYTES));
+
+    const res = await app().request(
+      '/api/tts/synthesize',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'One short sentence here. '.repeat(40), storageId: 'msg-long' }),
+      },
+      env
+    );
+    expect(res.status).toBe(200);
+    const sent = fetchMock.mock.calls
+      .map(([, init]) => (JSON.parse(String((init as RequestInit).body)) as { input: string }).input)
+      .join(' ');
+    // chunk size x (max chunks - 1) = 80 characters of the 1,000 sent.
+    expect(sent.replace(/\s+/g, ' ').trim().length).toBeLessThanOrEqual(80);
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it('uses the configured endpoint timeout for every request', async () => {
+    const { env } = boxEnv();
+    await configure(env, {
+      'speech.transcription.baseUrl': 'https://stt.example.com/v1',
+      'speech.transcription.model': 'whisper-large-v3',
+      'speech.endpointTimeoutMs': 4_321,
+    });
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    fetchMock.mockResolvedValueOnce(Response.json({ text: 'ok' }));
+
+    expect((await postAudio(env)).status).toBe(200);
+    expect(timeout).toHaveBeenCalledWith(4_321);
+  });
+
   it('TTS_ENABLED=false still turns read-aloud off even with an endpoint', async () => {
     const { env } = boxEnv({ TTS_ENABLED: 'false' });
     await configure(env, {
@@ -371,6 +440,22 @@ describe('Cloudflare behaviour is unchanged', () => {
       textToSpeech: false,
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('capabilities', () => {
+  it('reports a backend that cannot answer as absent, and keeps the other one', async () => {
+    const { env } = boxEnv();
+    await configure(env, {
+      'speech.synthesis.baseUrl': 'https://tts.example.com/v1',
+      'speech.synthesis.model': 'kokoro',
+    });
+    vi.spyOn(speechEndpointBackend, 'transcription').mockRejectedValueOnce(new Error('boom'));
+
+    expect(await resolvePublicPlatformCapabilities(env)).toMatchObject({
+      speechToText: false,
+      textToSpeech: true,
+    });
   });
 });
 

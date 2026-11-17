@@ -51,8 +51,19 @@ point (`installAdminSettingDefinitions`).
 - [x] Tests: vertical slice through routes + settings store + guardedFetch; Cloudflare control; nothing-installed control;
       import-graph guard; each guard mutation-checked
 - [x] Docs: API reference capabilities paragraph, chat-features voice/TTS note
-- [ ] Full quality suite, reviewers (cloudflare-specialist, security-auditor, task-completion-validator)
+- [x] Reviewers: security-auditor and cloudflare-specialist (no CRITICAL/HIGH; retry amplification, truncation log,
+      capability log fixed), task-completion-validator (WARN, no CRITICAL/HIGH; added no-retry, empty-audio, truncation,
+      timeout and capability-fallback tests, each mutation-checked)
+- [x] API lint + typecheck; related suites (31 files, 467 tests) pass
 - [ ] Staging: read-aloud plays audio, mic returns text, capabilities both true (Cloudflare unchanged)
+
+## Notes
+
+- Retry: the integration branch retried each endpoint chunk 3x. Dropped: every call spends the admin's endpoint and
+  a 4xx would only repeat; a transient failure answers 503 and the client can retry the read-aloud.
+- No audio-duration limit exists on main or on the integration branch; size (`MAX_AUDIO_SIZE_BYTES`), TTS text and
+  chunk limits and the endpoint timeout are the configurable bounds.
+- Staging can only prove the Cloudflare path (binding present): nothing on main calls `installSpeechEndpoints()`.
 
 ## Acceptance criteria
 
