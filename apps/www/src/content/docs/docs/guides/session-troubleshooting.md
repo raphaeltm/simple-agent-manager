@@ -193,7 +193,8 @@ never switches to another model, profile, or credential to get around a limit.
 **Already started, then went to sleep at the limit?** The owner can choose **Resume anyway**
 on the waiting notice after resetting the same account's limit or enabling extra usage. SAM
 restores the saved session and delivers its queued message using the same account and profile,
-including an account chosen specifically for that run.
+including an account chosen specifically for that run. If no message is queued, the restored
+session waits for your next message; SAM does not replay an earlier prompt.
 Your choice applies to the current wait only and can use extra credits. If the account or profile
 changed, review the selection first. If the provider rejects again, SAM pauses again. An expired
 or unavailable saved workspace cannot be forced to restore. If recovery cannot get started or

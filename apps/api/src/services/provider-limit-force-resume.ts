@@ -283,7 +283,7 @@ async function grantSavedProviderLimitResume(
   async function restoreHold() {
     // A definitive failure restores only our receipt. A concurrent recovery or
     // fresh rejection must never be overwritten, nor its claim released.
-    await env.DATABASE.prepare(
+    const restored = await env.DATABASE.prepare(
       `UPDATE tasks SET provider_limit_wait_json=?,admission_state='provider_limit_waiting',
          admission_reason=?,admission_next_retry_at=?
        WHERE id=? AND provider_limit_wait_json IS ? AND (workspace_id IS ? OR (status='sleeping' AND workspace_id IS NULL))
@@ -304,6 +304,7 @@ async function grantSavedProviderLimitResume(
         retainedSnapshot.recovery_status
       )
       .run();
+    return restored.meta.changes === 1;
   }
 }
 
@@ -312,7 +313,7 @@ async function ensureApprovedRecoveryRunner(
   task: schema.Task,
   chatSessionId: string,
   approval: ProviderLimitRecoveryApproval,
-  restoreHold: () => Promise<void>
+  restoreHold: () => Promise<boolean>
 ): Promise<string> {
   let result: SessionRecoveryResult;
   try {
@@ -324,11 +325,17 @@ async function ensureApprovedRecoveryRunner(
       providerLimitApproval: approval,
     });
   } catch {
-    await restoreHold();
+    if (!(await restoreHold()))
+      throw acceptedRecoveryPending(
+        'Resume accepted; recovery changed while confirming, refresh shortly'
+      );
     throw errors.conflict('Recovery did not confirm; refresh and try again shortly');
   }
   if (result.status !== 'waking') {
-    await restoreHold();
+    if (!(await restoreHold()))
+      throw acceptedRecoveryPending(
+        'Resume accepted; recovery changed while confirming, refresh shortly'
+      );
     throw errors.conflict(`Unable to resume the saved task: ${result.reason}`);
   }
   // An existing/raced claim can return waking before any runner was created.
@@ -351,7 +358,7 @@ async function handleRefusedRecoveryNudge(
   env: Env,
   task: Pick<schema.Task, 'id' | 'projectId' | 'userId' | 'chatSessionId'>,
   recoveryAttemptId: string | null,
-  restoreHold: () => Promise<void>
+  restoreHold: () => Promise<boolean>
 ): Promise<never> {
   let status;
   try {
@@ -372,7 +379,10 @@ async function handleRefusedRecoveryNudge(
     })
   )
     throw acceptedRecoveryPending('Resume accepted; the recovery runner will be repaired shortly');
-  await restoreHold();
+  if (!(await restoreHold()))
+    throw acceptedRecoveryPending(
+      'Resume accepted; recovery changed while confirming, refresh shortly'
+    );
   throw errors.conflict('The existing recovery runner is unavailable; try again shortly');
 }
 

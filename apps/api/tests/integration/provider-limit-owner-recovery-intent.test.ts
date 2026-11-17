@@ -375,6 +375,36 @@ describe('durable owner-approved provider recovery', () => {
       status: 'queued',
     });
   }, 1000);
+  it.each([false, true])(
+    'reports a refused nudge consistently with rollback ownership (claim advanced: %s)',
+    async (claimAdvanced) => {
+      const originalWait = task().provider_limit_wait_json;
+      boundary.nudge.mockResolvedValueOnce(false);
+      boundary.status.mockImplementationOnce(async () => {
+        if (claimAdvanced) d1.exec("UPDATE session_snapshots SET recovery_attempt_id='next-claim'");
+        return { completed: true };
+      });
+
+      const response = await resume();
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: claimAdvanced ? 'RECOVERY_ACCEPTED_PENDING' : 'CONFLICT',
+      });
+      expect(task().admission_state).toBe(
+        claimAdvanced ? 'provider_limit_recovery_pending' : 'provider_limit_waiting'
+      );
+      if (claimAdvanced) {
+        expect(wait().ownerOverride).toMatchObject({ recoveryPending: true });
+        expect(claim().recovery_attempt_id).toBe('next-claim');
+      } else {
+        expect(task().provider_limit_wait_json).toBe(originalWait);
+        expect(claim().recovery_attempt_id).toBe('existing-claim');
+      }
+      expect(boundary.start).not.toHaveBeenCalled();
+      expect(boundary.nudge).toHaveBeenCalledOnce();
+    }
+  );
+
   it('retains pending consent when the claim advances after a successful nudge', async () => {
     const receipt = await interruptAfterRelease();
     boundary.nudge.mockImplementationOnce(async () => {

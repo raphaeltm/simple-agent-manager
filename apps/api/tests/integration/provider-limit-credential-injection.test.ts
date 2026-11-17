@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
+import { log } from '../../src/lib/logger';
 import { AppError } from '../../src/middleware/error';
 import { runtimeRoutes } from '../../src/routes/workspaces/runtime';
 import { assertProviderLimitCredentialPin } from '../../src/services/provider-limit-credential-pin';
@@ -66,7 +67,7 @@ describe('provider wait credential pin at the authenticated secret injection rou
       )
       .run(JSON.stringify({ ...wait, phase: 'released' }));
   }
-  async function inject() {
+  async function inject(overrides: Record<string, unknown> = {}) {
     const app = new Hono<{ Bindings: Env }>();
     app.onError((err, c) =>
       err instanceof AppError
@@ -79,7 +80,7 @@ describe('provider wait credential pin at the authenticated secret injection rou
       {
         method: 'POST',
         headers: { Authorization: 'Bearer test-callback', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agentType: 'opencode', agentSessionId: 'agent-1' }),
+        body: JSON.stringify({ agentType: 'opencode', agentSessionId: 'agent-1', ...overrides }),
       },
       env
     );
@@ -162,6 +163,118 @@ describe('provider wait credential pin at the authenticated secret injection rou
       sqlite.prepare('UPDATE tasks SET provider_limit_wait_json=?').run(JSON.stringify(approved));
       return JSON.stringify(approved);
     }
+
+    it('fails closed for scoped consent missing its expiry and logs the specific check safely', async () => {
+      const approved = JSON.parse(scopedApproval());
+      delete approved.ownerOverride.expiresAt;
+      sqlite.prepare('UPDATE tasks SET provider_limit_wait_json=?').run(JSON.stringify(approved));
+      const warning = vi.spyOn(log, 'warn');
+      try {
+        const response = await inject();
+        expect(response.status).toBe(409);
+        expect(await response.text()).not.toContain(key.secret);
+        expect(warning).toHaveBeenCalledWith(
+          'provider_limit.credential_pin_refused',
+          expect.objectContaining({
+            taskId: 'task-1',
+            workspaceId: 'workspace-1',
+            check: 'missing_approval_expiry',
+            action: 'blocked',
+          })
+        );
+        expect(JSON.stringify(warning.mock.calls)).not.toContain(key.reference);
+        expect(JSON.stringify(warning.mock.calls)).not.toContain(key.secret);
+      } finally {
+        warning.mockRestore();
+      }
+    });
+
+    it('reports a lost block CAS truthfully without replacing newer consent', async () => {
+      const approved = scopedApproval();
+      key.reference = 'cc_credentials:other';
+      const prepare = env.DATABASE.prepare.bind(env.DATABASE);
+      env.DATABASE.prepare = ((query: string) => {
+        if (query.includes('UPDATE tasks SET provider_limit_wait_json = ?'))
+          sqlite.exec("UPDATE tasks SET status='in_progress'");
+        return prepare(query);
+      }) as typeof env.DATABASE.prepare;
+      const warning = vi.spyOn(log, 'warn');
+      try {
+        const response = await inject();
+        expect(response.status).toBe(409);
+        const body = await response.text();
+        expect(body).toContain('Provider recovery state changed');
+        expect(body).not.toContain('task blocked');
+        expect(
+          (
+            sqlite.prepare('SELECT provider_limit_wait_json AS value FROM tasks').get() as {
+              value: string;
+            }
+          ).value
+        ).toBe(approved);
+        expect(warning).toHaveBeenCalledWith(
+          'provider_limit.credential_pin_refused',
+          expect.objectContaining({ action: 'block_cas_lost' })
+        );
+      } finally {
+        warning.mockRestore();
+      }
+    });
+
+    it('rejects another agent type without revoking consent for the approved callback', async () => {
+      const approved = scopedApproval();
+      const refused = await inject({ agentType: 'claude-code' });
+      expect(refused.status).toBe(409);
+      expect(await refused.text()).not.toContain(key.secret);
+      expect(
+        (
+          sqlite.prepare('SELECT provider_limit_wait_json AS value FROM tasks').get() as {
+            value: string;
+          }
+        ).value
+      ).toBe(approved);
+      const allowed = await inject();
+      expect(allowed.status, await allowed.clone().text()).toBe(200);
+    });
+
+    it('binds a pre-expiry release to the first injected agent session without revoking its consent', async () => {
+      scopedApproval();
+      expect((await inject()).status).toBe(200);
+      const saved = (
+        sqlite.prepare('SELECT provider_limit_wait_json AS value FROM tasks').get() as {
+          value: string;
+        }
+      ).value;
+      sqlite.exec(`INSERT INTO agent_sessions(id,user_id,workspace_id,status,agent_credential_generation,agent_profile_id,skill_id)
+        VALUES('agent-2','user-1','workspace-1','running',0,'approved-profile','approved-skill')`);
+      const refused = await inject({ agentSessionId: 'agent-2' });
+      expect(refused.status).toBe(409);
+      expect(await refused.text()).not.toContain(key.secret);
+      expect(
+        (
+          sqlite.prepare('SELECT provider_limit_wait_json AS value FROM tasks').get() as {
+            value: string;
+          }
+        ).value
+      ).toBe(saved);
+      expect((await inject()).status).toBe(200);
+    });
+
+    it('preserves original receipt JSON field order when stamping first injection', async () => {
+      const approved = JSON.parse(scopedApproval());
+      const reversed = Object.fromEntries(Object.entries(approved).reverse());
+      reversed.ownerOverride = Object.fromEntries(Object.entries(approved.ownerOverride).reverse());
+      const receipt = JSON.stringify(reversed);
+      sqlite.prepare('UPDATE tasks SET provider_limit_wait_json=?').run(receipt);
+      expect((await inject()).status).toBe(200);
+      const row = sqlite
+        .prepare(
+          `SELECT json_remove(provider_limit_wait_json,'$.ownerOverride.firstInjection')
+        =json_remove(?,'$.ownerOverride.firstInjection') AS identical FROM tasks`
+        )
+        .get(receipt) as { identical: number };
+      expect(row.identical).toBe(1);
+    });
 
     it.each([false, true])(
       'fences the explicit run-account identity at secret injection, changed=%s',
@@ -653,13 +766,12 @@ describe('provider wait credential pin at the authenticated secret injection rou
       await expectDeniedApproval();
     });
 
-    it.each(['workspace', 'session', 'callback generation', 'late authorization'])(
+    it.each(['workspace', 'callback generation', 'late authorization'])(
       'denies expired refresh with a mismatched first authorization %s',
       async (change) => {
         const approved = expiredScopedApproval(true);
         const marker = approved.ownerOverride.firstInjection;
         if (change === 'workspace') marker.workspaceId = 'other-workspace';
-        else if (change === 'session') marker.agentSessionId = 'other-session';
         else if (change === 'callback generation')
           marker.callbackGeneration = 'replaced-generation';
         else marker.authorizedAt = approved.ownerOverride.expiresAt;

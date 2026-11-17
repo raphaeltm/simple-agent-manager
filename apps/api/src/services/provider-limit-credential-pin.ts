@@ -7,6 +7,7 @@ import * as v from 'valibot';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import { resolveProfileCredentialContext } from './composable-credentials/profile-context';
 import { credentialLimitReferenceKey } from './credential-limit-events/values';
@@ -134,6 +135,31 @@ async function assertTaskCredentialPin(
   if (!task.provider_limit_wait_json && !task.admission_state?.startsWith('provider_limit_'))
     return;
   const approval = wait?.ownerOverride;
+  const refusal = (check: string, action: string) =>
+    log.warn('provider_limit.credential_pin_refused', {
+      taskId: task.id,
+      workspaceId,
+      projectId: task.projectId,
+      sessionId: task.chatSessionId,
+      requestedAgentSessionId,
+      approvedAgentSessionId: approval?.firstInjection?.agentSessionId,
+      requestedAgentType,
+      approvedAgentType: approval?.agentType,
+      check,
+      action,
+    });
+  // A foreign callback cannot consume or revoke this run's owner consent.
+  if (
+    approval &&
+    ((requestedAgentType !== undefined &&
+      approval.agentType !== undefined &&
+      requestedAgentType !== approval.agentType) ||
+      (approval.firstInjection !== undefined &&
+        requestedAgentSessionId !== approval.firstInjection.agentSessionId))
+  ) {
+    refusal('callback_identity_mismatch', 'request_refused');
+    throw errors.conflict('Provider recovery approval belongs to a different agent callback');
+  }
   const db = drizzle(env.DATABASE, { schema });
   const taskProfileId = await resolveTaskPinProfile(db, env, task, approval);
   const runtime =
@@ -161,7 +187,7 @@ async function assertTaskCredentialPin(
     : null;
   const current =
     approval?.expiresAt !== undefined ? await readCurrentScopedPin(env, task, request) : null;
-  let approvalInvalid = isScopedApprovalInvalid(
+  let invalidCheck = scopedApprovalFailure(
     task,
     approval,
     {
@@ -177,29 +203,31 @@ async function assertTaskCredentialPin(
   );
   if (
     approval?.expiresAt !== undefined &&
-    !approvalInvalid &&
+    !invalidCheck &&
     request.finalInjection &&
     wait?.credentialKey &&
     key === wait.credentialKey &&
     wait.phase !== 'blocked'
   ) {
     const authorization = await authorizeFinalInjection(env, task, wait, request);
-    if (authorization === 'superseded')
+    if (authorization === 'superseded') {
+      refusal('attribution_superseded', 'request_refused');
       throw errors.conflict('Credential attribution was superseded; retry the current request');
-    approvalInvalid = authorization !== 'authorized';
+    }
+    invalidCheck = authorization === 'authorized' ? null : 'final_injection_authority';
   }
   if (
     wait?.credentialKey &&
     key === wait.credentialKey &&
     wait.phase !== 'blocked' &&
-    !approvalInvalid
+    !invalidCheck
   )
     return;
   let reason = 'Blocked: provider recovery credential pin is unavailable; review before resuming.';
   if (wait?.phase === 'blocked') reason = wait.reason;
   else if (wait?.credentialKey)
     reason = 'Blocked: selected provider credential changed; review before resuming.';
-  await env.DATABASE.prepare(
+  const blocked = await env.DATABASE.prepare(
     `UPDATE tasks SET provider_limit_wait_json = ?, admission_state = 'provider_limit_blocked', admission_reason = ?, admission_next_retry_at = NULL
     WHERE id = ? AND workspace_id = ? AND status IS ? AND started_at IS ?
       AND status IN ('queued','delegated','in_progress','sleeping')
@@ -218,11 +246,20 @@ async function assertTaskCredentialPin(
       task.provider_limit_wait_json
     )
     .run();
-  throw errors.conflict('Provider limit recovery requires review; task blocked');
+  const didBlock = blocked.meta.changes === 1;
+  refusal(
+    invalidCheck ?? (wait?.phase === 'blocked' ? 'already_blocked' : 'credential_pin_mismatch'),
+    didBlock ? 'blocked' : 'block_cas_lost'
+  );
+  throw errors.conflict(
+    didBlock
+      ? 'Provider limit recovery requires review; task blocked'
+      : 'Provider recovery state changed; refresh before retrying'
+  );
 }
 
 /** Approval expiry bounds handoff; every selected-scope fence still applies to refreshes. */
-function isScopedApprovalInvalid(
+function scopedApprovalFailure(
   task: ProviderLimitPinTask,
   approval: ProviderLimitWait['ownerOverride'],
   {
@@ -243,7 +280,7 @@ function isScopedApprovalInvalid(
     requestedAgentSessionId?: string | null;
   },
   now: number
-): boolean {
+): string | null {
   // The deadline bounds starting recovery, not refreshing the same committed run.
   // A pre-sleep started_at or a bootstrap agent row cannot prove that handoff.
   const committedRun =
@@ -251,23 +288,34 @@ function isScopedApprovalInvalid(
     task.taskStartedAt !== null &&
     approval !== undefined &&
     Date.parse(task.taskStartedAt) >= approval.grantedAt;
-  return (
-    approval?.expiresAt !== undefined &&
-    (!current ||
-      (approval.expiresAt <= now &&
-        !(
-          committedRun &&
-          hasPriorInjection(task, approval, requestedAgentSessionId, current.credentialGeneration)
-        )) ||
-      (requestedAgentType !== undefined && requestedAgentType !== approval.agentType) ||
-      taskProfileId !== approval.profileId ||
-      runtimeProfileId === undefined ||
-      runtimeSkillId !== approval.skillId ||
-      task.skill_id !== approval.skillId ||
-      task.agent_configuration_id !== (approval.runConfigurationId ?? null) ||
-      (profile?.profileId ?? null) !== approval.profileId ||
-      (profile !== null && profile.agentType !== null && profile.agentType !== approval.agentType))
+  if (!approval) return null;
+  // Only the historical admission override (key + grant time) is unscoped.
+  const scoped = Object.keys(approval).some(
+    (field) => !['credentialKey', 'grantedAt'].includes(field)
   );
+  if (!scoped) return null;
+  if (approval.expiresAt === undefined) return 'missing_approval_expiry';
+  if (!current) return 'current_scope_unavailable';
+  if (
+    approval.expiresAt <= now &&
+    !(
+      committedRun &&
+      hasPriorInjection(task, approval, requestedAgentSessionId, current.credentialGeneration)
+    )
+  )
+    return 'approval_expired_without_committed_injection';
+  if (requestedAgentType !== undefined && requestedAgentType !== approval.agentType)
+    return 'agent_type_mismatch';
+  if (taskProfileId !== approval.profileId) return 'task_profile_mismatch';
+  if (runtimeProfileId === undefined) return 'runtime_profile_unavailable';
+  if (runtimeSkillId !== approval.skillId || task.skill_id !== approval.skillId)
+    return 'skill_mismatch';
+  if (task.agent_configuration_id !== (approval.runConfigurationId ?? null))
+    return 'run_configuration_mismatch';
+  if ((profile?.profileId ?? null) !== approval.profileId) return 'resolved_profile_mismatch';
+  if (profile !== null && profile.agentType !== null && profile.agentType !== approval.agentType)
+    return 'resolved_agent_type_mismatch';
+  return null;
 }
 
 /** The final scope is read after profile/skill resolution; membership is never cached. */
@@ -354,23 +402,23 @@ function hasPriorInjection(
   );
 }
 
-// Shared atomic deadline/committed-run fence for release and supersession classification.
+// Shared atomic marker/deadline fence for release and supersession classification.
 const FINAL_INJECTION_AUTHORITY_SQL = `AND (
+        json_extract(t.provider_limit_wait_json,'$.ownerOverride.firstInjection') IS NULL OR (
+          json_extract(t.provider_limit_wait_json,'$.ownerOverride.firstInjection.workspaceId')=w.id
+          AND json_extract(t.provider_limit_wait_json,'$.ownerOverride.firstInjection.callbackGeneration') IS w.callback_generation
+          AND json_extract(t.provider_limit_wait_json,'$.ownerOverride.firstInjection.agentSessionId')=a.id
+          AND json_extract(t.provider_limit_wait_json,'$.ownerOverride.firstInjection.credentialGeneration')<=a.agent_credential_generation
+          AND json_extract(t.provider_limit_wait_json,'$.ownerOverride.firstInjection.authorizedAt')>=json_extract(t.provider_limit_wait_json,'$.ownerOverride.grantedAt')
+          AND json_extract(t.provider_limit_wait_json,'$.ownerOverride.firstInjection.authorizedAt')<json_extract(t.provider_limit_wait_json,'$.ownerOverride.expiresAt')))
+      AND (
         (ROUND((julianday('now')-2440587.5)*86400000)
           >=json_extract(t.provider_limit_wait_json,'$.ownerOverride.grantedAt')
           AND ROUND((julianday('now')-2440587.5)*86400000)
           <json_extract(t.provider_limit_wait_json,'$.ownerOverride.expiresAt'))
         OR (t.status='in_progress' AND julianday(t.started_at)>=julianday(
             json_extract(t.provider_limit_wait_json,'$.ownerOverride.grantedAt')/1000.0,'unixepoch')
-          AND json_extract(t.provider_limit_wait_json,'$.ownerOverride.firstInjection.authorizedAt')
-            >=json_extract(t.provider_limit_wait_json,'$.ownerOverride.grantedAt')
-          AND json_extract(t.provider_limit_wait_json,'$.ownerOverride.firstInjection.authorizedAt')
-            <json_extract(t.provider_limit_wait_json,'$.ownerOverride.expiresAt')
-          AND json_extract(t.provider_limit_wait_json,'$.ownerOverride.firstInjection.workspaceId')=w.id
-          AND json_extract(t.provider_limit_wait_json,'$.ownerOverride.firstInjection.callbackGeneration') IS w.callback_generation
-          AND json_extract(t.provider_limit_wait_json,'$.ownerOverride.firstInjection.agentSessionId')=a.id
-          AND json_extract(t.provider_limit_wait_json,'$.ownerOverride.firstInjection.credentialGeneration')
-            <=a.agent_credential_generation)
+          AND json_extract(t.provider_limit_wait_json,'$.ownerOverride.firstInjection') IS NOT NULL)
       )`;
 
 async function authorizeFinalInjection(
@@ -383,6 +431,7 @@ async function authorizeFinalInjection(
   const generation = request.finalInjection?.credentialGeneration;
   if (
     !approval ||
+    !task.provider_limit_wait_json ||
     !request.requestedAgentSessionId ||
     !Number.isSafeInteger(generation) ||
     !generation ||
@@ -410,7 +459,14 @@ async function authorizeFinalInjection(
       ${FINAL_INJECTION_AUTHORITY_SQL})`
   )
     .bind(
-      JSON.stringify({ ...wait, ownerOverride: { ...approval, firstInjection } }),
+      // Preserve receipt field order; parsing the schema canonicalizes it differently.
+      JSON.stringify({
+        ...JSON.parse(task.provider_limit_wait_json),
+        ownerOverride: {
+          ...JSON.parse(task.provider_limit_wait_json).ownerOverride,
+          firstInjection,
+        },
+      }),
       task.id,
       ...scope.values,
       generation,
@@ -428,7 +484,6 @@ async function authorizeFinalInjection(
     .first();
   return newer?.valid === 1 ? 'superseded' : 'invalid';
 }
-
 async function resolveTaskPinProfile(
   db: ReturnType<typeof drizzle<typeof schema>>,
   env: Env,
