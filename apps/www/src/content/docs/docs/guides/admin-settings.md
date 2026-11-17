@@ -197,6 +197,7 @@ before you try again.
 | Chat          | `chat.profileUsageWindowDays`, `chat.profilePinCandidateLimit`                                                                                                   | 30                                                | How far back the new-chat profile picker looks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | —                                                                                 |
 | Chat          | `secrets.*`                                                                                                                                                      | see [Chat](#chat) below                           | Agent secret requests: how long they stay open, allowed expiries, the open-request cap, retention and purging                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | —                                                                                 |
 | AI models     | `aiModels.*` (below)                                                                                                                                             | see below                                         | Which AI models agents may call, and the spending limits                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | —                                                                                 |
+| AI models     | `overviewBrief.*` ([Project Overview brief](#project-overview-brief))                                                                                            | see below                                         | How often the generated brief on each Project Overview is written, and whether it is on                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | —                                                                                 |
 | Email         | `agentEmail.*` (below)                                                                                                                                           | see below                                         | Limits for agent email (preview)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | —                                                                                 |
 
 **Operations** also holds the [lifecycle latency budgets](#lifecycle-latency-monitoring), limits for [workflows](#workflows), [linked work](#linked-work), pull
@@ -331,20 +332,23 @@ Listed under **Chat**. Bounds for the [run receipt](/docs/reference/api/#get-api
 ## Insights page
 
 Listed under **Operations**. Bounds for the project [Insights](/docs/guides/insights/) Flow, Agent
-setups and Accounts tabs (`packages/operations/src/insights-page-settings.ts`).
+setups, Accounts and People tabs (`packages/operations/src/insights-page-settings.ts`).
 
-| Setting                                  | Default | Range      | What it limits                                                                                                                          |
-| ---------------------------------------- | ------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `insights.flowIdeaSampleCap`             | 100     | 10–500     | Ideas, newest-updated first, examined for "idea to merged"; the page says when the cap cut it short                                     |
-| `insights.flowWaitingIdeasLimit`         | 5       | 1–20       | Ideas shown under "Ideas waiting longest"                                                                                               |
-| `insights.flowFlakyChecksLimit`          | 5       | 1–20       | Checks shown under "Flaky checks"                                                                                                       |
-| `insights.flowReworkWindowDays`          | 7       | 1–30       | Days after a merge in which another pull request on the same branch or idea counts as rework                                            |
-| `insights.accountsStallScanCap`          | 500     | 50–5,000   | Usage-limit waits and exhausted limit windows, newest first, examined for "Stalled on a limit"; the page says when the cap cut it short |
-| `insights.accountsEpisodesListed`        | 10      | 1–50       | Limit stalls listed under "Stalled on a limit"                                                                                          |
-| `insights.setupsRunScanCap`              | 2,000   | 100–10,000 | Runs, newest first, examined on Agent setups; the page says when the cap cut the range short                                            |
-| `insights.setupsSuggestionMinRuns`       | 10      | 3–200      | Finished runs each compared setup needs before Agent setups suggests a skill change                                                     |
-| `insights.setupsSuggestionMinGapPercent` | 20      | 5–80       | Points by which a profile must beat the one it is compared with to be suggested as a skill default                                      |
-| `insights.setupsMemoryHeadroomPercent`   | 25      | 0–200      | Headroom added to the 90th-percentile peak memory when suggesting a memory request                                                      |
+| Setting                                  | Default | Range      | What it limits                                                                                                                                    |
+| ---------------------------------------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `insights.flowIdeaSampleCap`             | 100     | 10–500     | Ideas, newest-updated first, examined for "idea to merged"; the page says when the cap cut it short                                               |
+| `insights.flowWaitingIdeasLimit`         | 5       | 1–20       | Ideas shown under "Ideas waiting longest"                                                                                                         |
+| `insights.flowFlakyChecksLimit`          | 5       | 1–20       | Checks shown under "Flaky checks"                                                                                                                 |
+| `insights.flowReworkWindowDays`          | 7       | 1–30       | Days after a merge in which another pull request on the same branch or idea counts as rework                                                      |
+| `insights.accountsStallScanCap`          | 500     | 50–5,000   | Usage-limit waits and exhausted limit windows, newest first, examined for "Stalled on a limit"; the page says when the cap cut it short           |
+| `insights.accountsEpisodesListed`        | 10      | 1–50       | Limit stalls listed under "Stalled on a limit"                                                                                                    |
+| `insights.accountsUsageRowCap`           | 500     | 50–5,000   | Measured token usage rows (one per account and model), largest first, read for Accounts tokens and spend; the page says when the cap cut it short |
+| `insights.setupsRunScanCap`              | 2,000   | 100–10,000 | Runs, newest first, examined on Agent setups; the page says when the cap cut the range short                                                      |
+| `insights.setupsSuggestionMinRuns`       | 10      | 3–200      | Finished runs each compared setup needs before Agent setups suggests a skill change                                                               |
+| `insights.setupsSuggestionMinGapPercent` | 20      | 5–80       | Points by which a profile must beat the one it is compared with to be suggested as a skill default                                                |
+| `insights.setupsMemoryHeadroomPercent`   | 25      | 0–200      | Headroom added to the 90th-percentile peak memory when suggesting a memory request                                                                |
+| `insights.peopleWaitingItemsListed`      | 10      | 1–50       | Open items listed per person under "Waiting on" (each person still shows how many are open)                                                       |
+| `insights.peopleReviewScanCap`           | 2,000   | 100–20,000 | Review requests in the range, newest first, examined for "Review pickup"; the page says when the cap cut it short                                 |
 
 ## Node provisioning
 
@@ -756,6 +760,33 @@ These control [AI models for agents](/docs/guides/ai-models-for-agents/): the Cl
 
 Lowering the maximum also caps projects that set a higher limit earlier.
 
+### Project Overview brief
+
+The [brief](/docs/guides/project-overview/#the-brief) at the top of each Project Overview is
+written by a small model (Gemma 4 26B on Workers AI) through SAM's AI Gateway, on the platform's
+account. These bound how often it runs.
+
+| Setting                              | Default | Range    | What it controls                                                                                                  |
+| ------------------------------------ | ------- | -------- | ----------------------------------------------------------------------------------------------------------------- |
+| `overviewBrief.enabled`              | on      | on/off   | Whether briefs are written and shown. Off: no model calls, and every Overview is just its sections                |
+| `overviewBrief.minIntervalMinutes`   | 30      | 1–1,440  | Fewest minutes between two briefs for one project. A change sooner waits, and the old brief is shown dimmed       |
+| `overviewBrief.dailyCap`             | 24      | 0–288    | Most briefs one project may write in a UTC day, failed attempts included. 0 stops new briefs                      |
+| `overviewBrief.checkIntervalSeconds` | 60      | 10–3,600 | Fewest seconds between two checks of whether a project's facts changed; each check is one batch of database reads |
+
+At the defaults one project costs at most 24 model calls a day. A call sends at most about 3,000
+input tokens (the instructions and up to eight items of each kind) and gets at most 400 back, so at
+the model's published price ($0.10 per million input and $0.30 per million output tokens) a call
+costs at most about $0.0004: about $0.01 per project per day and $0.30 per project per month in the
+worst case. Quiet projects make no calls.
+
+When an [OpenAI-compatible model server](#use-an-openai-compatible-model-server) is set, the brief
+goes there instead, with the titles model (`llm.openAICompatible.taskTitleModel`, else
+`llm.openAICompatible.model`). The same call limits apply; the price is that server's. With no model
+route at all, briefs are not written and each Overview is just its sections.
+
+<!-- Verified: services/project-brief/refresh.ts:callModel (purpose 'taskTitle'),
+     services/ai-proxy-shared.ts:fetchWorkersAIChatCompletion, services/llm-chat-target.ts. -->
+
 ## Email
 
 These limit [email triggers](/docs/guides/email-triggers/) (preview). Every value is a whole number.
@@ -1064,11 +1095,37 @@ available, the runtime deadline governs legacy platform configuration and sessio
 Pending cache loads expire on deadline; late results cannot republish stale data. No deployment
 configuration is required.
 
+## GitHub CI event storage
+
+`events.skipUnsubscribedGitHubCi` defaults to **on** in Operations. In
+`ProjectData.admitProjectEvent` (`packages/project-data/src/do/index.ts`), a GitHub
+`check_run`, `check_suite`, or `workflow_run` event with no matching active, unexpired
+subscription returns `skipped_no_subscriber` with no event receipt or match written.
+Other GitHub events, channel publications, lifecycle, schedule, workflow and credential
+history retain their existing behavior (`project-events.ts`). Subscriptions do not
+backfill earlier CI events: check current GitHub status before and immediately after
+subscribing.
+
+The superadmin event inspector no longer lists skipped CI events. Its CI storage
+summary shows the effective switch and counts by source/type in the current usage
+window (`ProjectEventInspector.tsx`). These counters live only in the object's memory:
+they reset on window flush or eviction, and are not a durable traffic history. The
+existing `project_data.row_usage` log includes the same bounded admission counters;
+overflow is disclosed separately. An empty event list does not establish an absence
+of CI traffic.
+
+Turn the switch **off** to retain all future unmatched CI receipts. This does not
+recover earlier skipped events. Already stored receipts keep their delivery-key
+replay, duplicate count and fingerprint-conflict behavior in either mode. A skipped
+event has no delivery-key ledger; a later redelivery is evaluated against the
+subscriptions active at that later admission. GitHub trigger execution remains
+independent of canonical project-event storage (`routes/github-webhook.ts`).
 ## Use an OpenAI-compatible model server
 
 Under **AI models**, set `llm.openAICompatible.baseUrl`, the model ID and optional API key.
 The endpoint replaces Workers AI chat calls and the SAM agent's model route. Purpose-specific
-model settings are available for agents, titles, diagnosis and the Workers AI proxy route.
+model settings are available for agents, titles (also used by the
+[Project Overview brief](#project-overview-brief)), diagnosis and the Workers AI proxy route.
 Private hosts require the separate `allowPrivateNetwork` confirmation; metadata hosts are always
 refused. Reset the base URL to restore normal routing. See the
 [endpoint configuration reference](/docs/reference/configuration/#openai-compatible-model-endpoint)

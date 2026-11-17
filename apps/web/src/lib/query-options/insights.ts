@@ -7,7 +7,7 @@
 import type { InsightsRange, InsightsSetupGrouping } from '@simple-agent-manager/shared';
 import { queryOptions } from '@tanstack/react-query';
 
-import { getProjectAccounts, getProjectFlow, getProjectSetups } from '../api';
+import { getProjectAccounts, getProjectFlow, getProjectPeople, getProjectSetups } from '../api';
 import { INSIGHTS_STALE_TIME_MS } from '../query-stale-times';
 
 export const insightsQueryKeys = {
@@ -25,6 +25,11 @@ export const insightsQueryKeys = {
     range: InsightsRange,
     groupBy: InsightsSetupGrouping
   ) => [...insightsQueryKeys.setupsOfProject(queryScope, projectId), range, groupBy] as const,
+  /** Every range of a project's People read, for invalidation after a reassign. */
+  peopleAll: (queryScope: string, projectId: string) =>
+    [...insightsQueryKeys.all(queryScope), 'people', projectId] as const,
+  people: (queryScope: string, projectId: string, range: InsightsRange) =>
+    [...insightsQueryKeys.peopleAll(queryScope, projectId), range] as const,
 };
 
 export function projectFlowQueryOptions(
@@ -72,6 +77,23 @@ export function projectSetupsQueryOptions(
   return queryOptions({
     queryKey: insightsQueryKeys.setups(queryScope, projectId, range, groupBy),
     queryFn: () => getProjectSetups(projectId, range, groupBy),
+    staleTime: INSIGHTS_STALE_TIME_MS,
+    placeholderData: (previous) => (previous?.projectId === projectId ? previous : undefined),
+  });
+}
+
+/**
+ * Insights · People, per project and range. Not persisted: it carries the titles of the inbox items
+ * the viewer may open. Same stale-while-revalidate behaviour as Flow.
+ */
+export function projectPeopleQueryOptions(
+  queryScope: string,
+  projectId: string,
+  range: InsightsRange
+) {
+  return queryOptions({
+    queryKey: insightsQueryKeys.people(queryScope, projectId, range),
+    queryFn: () => getProjectPeople(projectId, range),
     staleTime: INSIGHTS_STALE_TIME_MS,
     placeholderData: (previous) => (previous?.projectId === projectId ? previous : undefined),
   });

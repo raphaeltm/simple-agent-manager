@@ -496,3 +496,35 @@ it('never exposes stale secret override text in the list or its diagnostics', as
     warn.mockRestore();
   }
 });
+
+it('keeps canonical tool merging OFF by default and accepts only a typed boolean kill switch', async () => {
+  expect(await resolveAdminSetting(bindings, 'chat.toolCallMergingEnabled')).toBe(false);
+  expect(
+    (
+      await request(
+        {},
+        { expectedRevision: 0, changes: [{ name: 'chat.toolCallMergingEnabled', value: 'true' }] }
+      )
+    ).status
+  ).toBe(400);
+  expect(
+    (
+      await request(
+        {},
+        { expectedRevision: 0, changes: [{ name: 'chat.toolCallMergingEnabled', value: true }] }
+      )
+    ).status
+  ).toBe(200);
+  await invalidateAdminSettings(bindings);
+  expect(await resolveAdminSetting(bindings, 'chat.toolCallMergingEnabled')).toBe(true);
+  expect(
+    (
+      await request(
+        {},
+        { expectedRevision: 1, changes: [{ name: 'chat.toolCallMergingEnabled', value: false }] }
+      )
+    ).status
+  ).toBe(200);
+  await invalidateAdminSettings(bindings);
+  expect(await resolveAdminSetting(bindings, 'chat.toolCallMergingEnabled')).toBe(false);
+});

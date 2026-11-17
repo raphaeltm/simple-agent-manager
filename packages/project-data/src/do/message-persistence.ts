@@ -9,6 +9,7 @@ import * as messages from './messages';
 import { observeReconciliationMessage } from './reconciliation-episode';
 import * as sessionState from './session-state';
 import type { SessionIdentityGuard } from './sessions';
+import { hydrateCanonicalTools } from './tool-call-hydration';
 import type { Env } from './types';
 
 const log = createModuleLogger('project_data.messages');
@@ -24,6 +25,7 @@ export type BatchMessageInput = {
 };
 
 export type MessagePersistenceHooks = {
+  isLegacyToolClient?: (sessionId: string) => boolean;
   recordMessageIngest?: (metrics: MessageIngestMetrics) => void;
   transactionSync?: <T>(fn: () => T) => T;
   recalculateAlarm: () => Promise<void>;
@@ -152,8 +154,25 @@ export async function persistMessageBatchWithSideEffects(
     metrics?: MessageIngestMetrics;
   }
 ): Promise<MessageBatchPersistenceResult> {
-  const persist = () => messages.persistMessageBatch(sql, env, sessionId, batchMessages, merge);
+  if (merge && hooks.isLegacyToolClient?.(sessionId))
+    merge.config = { ...merge.config, toolLegacyClient: true };
+  const hydration =
+    merge?.config.toolUpdatesEnabled && merge.source?.outboxIncarnation
+      ? await hydrateCanonicalTools(sql, env, sessionId, merge.source, batchMessages, merge.config)
+      : undefined;
+  // Browser admission may interleave with R2 I/O; fence legacy caches at commit time.
+  if (merge && hooks.isLegacyToolClient?.(sessionId))
+    merge.config = { ...merge.config, toolLegacyClient: true };
+  const persist = () =>
+    messages.persistMessageBatch(
+      sql,
+      env,
+      sessionId,
+      batchMessages,
+      merge ? { ...merge, hydration } : undefined
+    );
   const result = hooks.transactionSync ? hooks.transactionSync(persist) : persist();
+  if (merge?.metrics) merge.metrics.toolHydratedRows = hydration?.size ?? 0;
   // Publish only after the synchronous transaction commits; later effects may fail.
   if (merge?.metrics) hooks.recordMessageIngest?.(merge.metrics);
   if (result.persisted === 0) {
