@@ -6137,7 +6137,6 @@ export const agentRunUsage = sqliteTable(
       table.projectId,
       table.updatedAt
     ),
-    updatedIdx: index('idx_agent_run_usage_updated').on(table.updatedAt),
   })
 );
 

@@ -14,6 +14,7 @@ import { handleAppError } from '../../src/middleware/app-error-handler';
 import { projectsRoutes } from '../../src/routes/projects';
 import { agentUsageCallbackRoute } from '../../src/routes/projects/agent-usage-callback';
 import { tasksRoutes } from '../../src/routes/tasks';
+import { invalidateAdminSettings } from '../../src/services/admin-settings';
 import { seedSignedInUser, seedTask } from './helpers/seed-d1';
 import { seedClaudeSession } from './helpers/usage-callback-session';
 
@@ -31,7 +32,7 @@ function app() {
 
 type Session = Awaited<ReturnType<typeof seedClaudeSession>>;
 
-function postUsage(session: Session, body: unknown) {
+function postUsage(session: Session, body: unknown, bindings = testEnv) {
   return app().request(
     `/api/projects/${session.projectId}/acp-sessions/${session.agentSessionId}/usage`,
     {
@@ -42,7 +43,7 @@ function postUsage(session: Session, body: unknown) {
       },
       body: JSON.stringify(body),
     },
-    testEnv
+    bindings
   );
 }
 
@@ -129,8 +130,12 @@ describe('run token usage from the VM agent callback to the receipt', () => {
   });
 
   it('bounds fresh callback epochs without blocking an admitted epoch update', async () => {
-    const previousLimit = testEnv.RUN_USAGE_MAX_ROWS_PER_SESSION;
-    testEnv.RUN_USAGE_MAX_ROWS_PER_SESSION = '2';
+    await testEnv.DATABASE.prepare(
+      "INSERT INTO platform_settings (key, value, updated_at) VALUES ('insights.runUsageMaxRowsPerSession', '2', ?)"
+    )
+      .bind(new Date().toISOString())
+      .run();
+    invalidateAdminSettings(testEnv);
     try {
       const suffix = crypto.randomUUID().slice(0, 8);
       const credentialReference = `cc_credentials:cred-run-usage-cap-${suffix}`;
@@ -172,9 +177,187 @@ describe('run token usage from the VM agent callback to the receipt', () => {
       );
       expect(rows).not.toContainEqual(expect.objectContaining({ model: 'new-model' }));
     } finally {
-      if (previousLimit === undefined) delete testEnv.RUN_USAGE_MAX_ROWS_PER_SESSION;
-      else testEnv.RUN_USAGE_MAX_ROWS_PER_SESSION = previousLimit;
+      await testEnv.DATABASE.prepare(
+        "DELETE FROM platform_settings WHERE key = 'insights.runUsageMaxRowsPerSession'"
+      ).run();
+      invalidateAdminSettings(testEnv);
     }
+  });
+
+  it('concurrent fresh epochs compete for the final row slot through real callbacks', async () => {
+    await testEnv.DATABASE.prepare(
+      "INSERT INTO platform_settings (key, value, updated_at) VALUES ('insights.runUsageMaxRowsPerSession', '3', ?)"
+    )
+      .bind(new Date().toISOString())
+      .run();
+    invalidateAdminSettings(testEnv);
+    try {
+      const suffix = crypto.randomUUID().slice(0, 8);
+      const credentialReference = `cc_credentials:race-${suffix}`;
+      const session = await seedClaudeSession(suffix, credentialReference);
+      const report = goTokenReport(session, credentialReference);
+      expect((await postUsage(session, report)).status).toBe(204); // two rows, one slot remains
+      const responses = await Promise.all(
+        Array.from({ length: 17 }, (_, index) =>
+          postUsage(session, {
+            ...report,
+            tokenUsage: {
+              epoch: `host-${index.toString(16).padStart(24, '0')}`,
+              models: [{ model: 'race-model', inputTokens: 1, outputTokens: 1 }],
+            },
+          })
+        )
+      );
+      expect(responses.map((response) => response.status)).toEqual(Array(17).fill(204));
+      expect(await storedRows(session.projectId)).toHaveLength(3);
+      expect(
+        (
+          await postUsage(session, {
+            ...report,
+            tokenUsage: {
+              epoch: contractFixture.tokenUsage.epoch,
+              models: [
+                { model: 'claude-opus-5-5', inputTokens: 1700, outputTokens: 400 },
+                { model: 'novel-mixed', inputTokens: 1, outputTokens: 1 },
+              ],
+            },
+            source: 'claude-acp.usage_update',
+            rateLimits: [
+              {
+                windowType: 'claude.five_hour',
+                provider: 'anthropic',
+                source: 'claude-acp.rate_limit',
+                status: 'allowed',
+                utilizationPercent: 30,
+                windowMinutes: 300,
+                resetsAt: Date.now() + 3600000,
+                observedAt: Date.now(),
+                freshnessMs: 0,
+              },
+            ],
+          })
+        ).status
+      ).toBe(204);
+      const rows = await storedRows(session.projectId);
+      expect(rows).toHaveLength(3);
+      expect(rows).toContainEqual(
+        expect.objectContaining({
+          model: 'claude-opus-5-5',
+          input_tokens: 1700,
+          output_tokens: 400,
+        })
+      );
+      expect(rows).not.toContainEqual(expect.objectContaining({ model: 'novel-mixed' }));
+      const window = await testEnv.DATABASE.prepare(
+        'SELECT utilization_percent FROM credential_limit_windows WHERE project_id = ?'
+      )
+        .bind(session.projectId)
+        .first<{ utilization_percent: number }>();
+      expect(window?.utilization_percent).toBe(30);
+      const taskId = `task-cap-${suffix}`;
+      await seedTask(taskId, session.projectId, session.userId, {
+        status: 'completed',
+        chatSessionId: session.chatSessionId,
+        workspaceId: session.workspaceId,
+      });
+      const cookie = await seedSignedInUser(session.userId);
+      const receipt = await app().request(
+        `/api/projects/${session.projectId}/tasks/${taskId}/receipt`,
+        { headers: { Cookie: cookie } },
+        testEnv
+      );
+      expect(receipt.status).toBe(200);
+      expect(await receipt.json()).toMatchObject({
+        tokens: { state: 'reported', total: { input: 1711, output: 403 } },
+      });
+    } finally {
+      await testEnv.DATABASE.prepare(
+        "DELETE FROM platform_settings WHERE key = 'insights.runUsageMaxRowsPerSession'"
+      ).run();
+      invalidateAdminSettings(testEnv);
+    }
+  });
+
+  it('keeps the token-report callback within the mutation I/O budget', async () => {
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const reference = `cc_credentials:budget-${suffix}`;
+    const session = await seedClaudeSession(suffix, reference);
+    let roundTrips = 0;
+    const database = new Proxy(testEnv.DATABASE, {
+      get(target, property) {
+        if (property === 'prepare')
+          return (query: string) => {
+            const observe = (statement: D1PreparedStatement): D1PreparedStatement =>
+              new Proxy(statement, {
+                get(value, method) {
+                  if (method === 'bind')
+                    return (...args: unknown[]) => observe(value.bind(...args));
+                  if (['run', 'all', 'first', 'raw'].includes(String(method)))
+                    return (...args: unknown[]) => {
+                      roundTrips++;
+                      return Reflect.apply(Reflect.get(value, method), value, args);
+                    };
+                  return Reflect.get(value, method);
+                },
+              });
+            return observe(target.prepare(query));
+          };
+        const value = Reflect.get(target, property);
+        if (property === 'batch')
+          return (...args: unknown[]) => {
+            roundTrips++;
+            return Reflect.apply(value, target, args);
+          };
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const namespace = new Proxy(testEnv.PROJECT_DATA, {
+      get(target, property) {
+        const value = Reflect.get(target, property);
+        if (property === 'get' || property === 'getByName')
+          return (...args: unknown[]) => {
+            const stub = Reflect.apply(value, target, args);
+            return new Proxy(stub, {
+              get(object, method) {
+                const rpc = Reflect.get(object, method);
+                return typeof rpc === 'function'
+                  ? (...params: unknown[]) => {
+                      roundTrips++;
+                      return Reflect.apply(rpc, object, params);
+                    }
+                  : rpc;
+              },
+            });
+          };
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    invalidateAdminSettings({ ...testEnv, DATABASE: database });
+    const response = await postUsage(
+      session,
+      {
+        ...goTokenReport(session, reference),
+        source: 'claude-acp.usage_update',
+        rateLimits: [
+          {
+            windowType: 'claude.five_hour',
+            provider: 'anthropic',
+            source: 'claude-acp.rate_limit',
+            status: 'allowed',
+            utilizationPercent: 30,
+            windowMinutes: 300,
+            resetsAt: Date.now() + 3600000,
+            observedAt: Date.now(),
+            freshnessMs: 0,
+          },
+        ],
+      },
+      { ...testEnv, DATABASE: database, PROJECT_DATA: namespace }
+    );
+    expect(response.status).toBe(204);
+    // All D1 statements/batches and ProjectData RPCs are observed; KV rate limiting is separate.
+    expect(roundTrips).toBeLessThanOrEqual(12);
+    expect(await storedRows(session.projectId)).toHaveLength(2);
   });
 
   it('keeps an old agent’s report (no tokenUsage) working and writes no usage', async () => {

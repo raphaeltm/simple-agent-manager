@@ -12,16 +12,11 @@
  * (`credentialLimitReferenceKey`), never a secret.
  */
 import type { MeasuredTokenUsage } from '@simple-agent-manager/ai-proxy';
-import {
-  DEFAULT_RUN_USAGE_MAX_ROWS_PER_SESSION,
-  DEFAULT_RUN_USAGE_RETENTION_BATCH_SIZE,
-  DEFAULT_RUN_USAGE_RETENTION_DAYS,
-  RUN_USAGE_MAX_TOKENS_PER_COUNTER,
-} from '@simple-agent-manager/shared';
-import { parsePositiveInt } from '@simple-agent-manager/worker-core';
+import { RUN_USAGE_MAX_TOKENS_PER_COUNTER } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { resolveAdminSetting } from './admin-settings';
 import { credentialLimitReferenceKey } from './credential-limit-events';
 
 export const AI_PROXY_USAGE_EPOCH = 'ai_proxy';
@@ -54,7 +49,7 @@ const UPSERT_VALUES = '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?';
 const CONFLICT_KEY = 'project_id, chat_session_id, source, usage_epoch, model, credential_key';
 
 /**
- * Admit every model in one statement or none. The count and insert share SQLite's write boundary,
+ * Admit all novel model keys in one statement or none; existing keys remain updatable. The count and insert share SQLite's write boundary,
  * so concurrent client-selected epochs cannot race past the configured per-run row ceiling.
  */
 const HARNESS_UPSERT_SQL = `WITH report(
@@ -79,12 +74,12 @@ const HARNESS_UPSERT_SQL = `WITH report(
     FROM incoming_raw
     GROUP BY model
   ),
-  usage_counts AS (
+  usage_counts AS MATERIALIZED (
     SELECT
-      (SELECT COUNT(*) FROM agent_run_usage existing
+      (SELECT COUNT(*) FROM (SELECT 1 FROM agent_run_usage existing
         WHERE existing.project_id = report.project_id
           AND existing.chat_session_id = report.chat_session_id
-          AND existing.source = 'harness') AS existing_rows,
+          AND existing.source = 'harness' LIMIT (SELECT max_rows + 1 FROM report))) AS existing_rows,
       (SELECT COUNT(*) FROM incoming
         WHERE NOT EXISTS (
           SELECT 1 FROM agent_run_usage existing
@@ -97,7 +92,7 @@ const HARNESS_UPSERT_SQL = `WITH report(
         )) AS new_rows
     FROM report
   ),
-  admission AS (
+  admission AS MATERIALIZED (
     SELECT new_rows = 0 OR existing_rows + new_rows <= report.max_rows AS allowed
     FROM report, usage_counts
   )
@@ -108,7 +103,15 @@ INSERT INTO agent_run_usage (${UPSERT_COLUMNS})
     incoming.input_tokens, incoming.output_tokens, incoming.cache_read_tokens,
     incoming.cache_write_tokens, incoming.reasoning_tokens, report.reported_at, report.reported_at
   FROM report, incoming, admission
-  WHERE admission.allowed
+  WHERE admission.allowed OR EXISTS (
+    SELECT 1 FROM agent_run_usage existing
+    WHERE existing.project_id = report.project_id
+      AND existing.chat_session_id = report.chat_session_id
+      AND existing.source = 'harness'
+      AND existing.usage_epoch = report.usage_epoch
+      AND existing.model = incoming.model
+      AND existing.credential_key = report.credential_key
+  )
   ON CONFLICT (${CONFLICT_KEY}) DO UPDATE SET
     input_tokens = MAX(input_tokens, excluded.input_tokens),
     output_tokens = MAX(output_tokens, excluded.output_tokens),
@@ -186,30 +189,29 @@ async function bindProxyRows(
   now: number
 ): Promise<D1PreparedStatement[]> {
   const credentialKey = (await credentialLimitReferenceKey(scope.credentialReference)) ?? '';
-  return normalizedModels(models)
-    .map((counts) =>
-      db
-        .prepare(PROXY_UPSERT_SQL)
-        .bind(
-          scope.projectId,
-          scope.chatSessionId,
-          scope.workspaceId,
-          scope.agentSessionId,
-          'ai_proxy',
-          AI_PROXY_USAGE_EPOCH,
-          counts.model,
-          credentialKey,
-          credentialKey ? scope.credentialSource : null,
-          scope.agentType,
-          counts.inputTokens,
-          counts.outputTokens,
-          counts.cacheReadTokens,
-          counts.cacheWriteTokens,
-          counts.reasoningTokens,
-          now,
-          now
-        )
-    );
+  return normalizedModels(models).map((counts) =>
+    db
+      .prepare(PROXY_UPSERT_SQL)
+      .bind(
+        scope.projectId,
+        scope.chatSessionId,
+        scope.workspaceId,
+        scope.agentSessionId,
+        'ai_proxy',
+        AI_PROXY_USAGE_EPOCH,
+        counts.model,
+        credentialKey,
+        credentialKey ? scope.credentialSource : null,
+        scope.agentType,
+        counts.inputTokens,
+        counts.outputTokens,
+        counts.cacheReadTokens,
+        counts.cacheWriteTokens,
+        counts.reasoningTokens,
+        now,
+        now
+      )
+  );
 }
 
 /**
@@ -218,7 +220,7 @@ async function bindProxyRows(
  * attribution; `scope` carries only server-verified values.
  */
 export async function recordHarnessRunUsage(
-  env: Pick<Env, 'DATABASE' | 'RUN_USAGE_MAX_ROWS_PER_SESSION'>,
+  env: Env,
   scope: RunUsageScope,
   epoch: string,
   models: RunUsageModelCounts[],
@@ -238,36 +240,9 @@ export async function recordHarnessRunUsage(
       credentialKey ? scope.credentialSource : null,
       scope.agentType,
       now,
-      parsePositiveInt(
-        env.RUN_USAGE_MAX_ROWS_PER_SESSION,
-        DEFAULT_RUN_USAGE_MAX_ROWS_PER_SESSION
-      ),
+      Number(await resolveAdminSetting(env, 'insights.runUsageMaxRowsPerSession')),
       JSON.stringify(normalized)
     )
-    .run();
-  return result.meta.changes ?? 0;
-}
-
-/** Delete one indexed batch of expired measured usage; the daily caller repeats on its next run. */
-export async function purgeExpiredRunUsage(
-  env: Pick<Env, 'DATABASE' | 'RUN_USAGE_RETENTION_DAYS' | 'RUN_USAGE_RETENTION_BATCH_SIZE'>,
-  now: number = Date.now()
-): Promise<number> {
-  const retentionDays = parsePositiveInt(
-    env.RUN_USAGE_RETENTION_DAYS,
-    DEFAULT_RUN_USAGE_RETENTION_DAYS
-  );
-  const batchSize = parsePositiveInt(
-    env.RUN_USAGE_RETENTION_BATCH_SIZE,
-    DEFAULT_RUN_USAGE_RETENTION_BATCH_SIZE
-  );
-  const cutoff = now - retentionDays * 86_400_000;
-  const result = await env.DATABASE.prepare(
-    `DELETE FROM agent_run_usage WHERE id IN (
-       SELECT id FROM agent_run_usage WHERE updated_at < ? ORDER BY updated_at, id LIMIT ?
-     )`
-  )
-    .bind(cutoff, batchSize)
     .run();
   return result.meta.changes ?? 0;
 }
@@ -291,7 +266,7 @@ export interface HarnessTokenUsageReport {
  * observations must not be retried because of it.
  */
 export async function recordHarnessTokenReport(
-  env: Pick<Env, 'DATABASE' | 'RUN_USAGE_MAX_ROWS_PER_SESSION'>,
+  env: Env,
   scope: RunUsageScope,
   report: HarnessTokenUsageReport
 ): Promise<void> {
