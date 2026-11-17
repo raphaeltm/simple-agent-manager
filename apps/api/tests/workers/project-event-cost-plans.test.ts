@@ -51,11 +51,6 @@ function observe(sql: SqlStorage) {
 
 function restoreLegacyIndexes(sql: SqlStorage) {
   sql.exec('DROP INDEX idx_project_event_matches_event_id');
-  sql.exec('DROP INDEX idx_project_events_credential_window');
-  sql.exec(`CREATE INDEX idx_project_events_credential_window
-    ON project_events(project_id, source, subject_type, subject_id,
-      json_extract(metadata_json, '$.windowType'), json_extract(metadata_json, '$.observedAt') DESC, id DESC)
-    WHERE state = 'recorded'`);
   sql.exec(
     'CREATE INDEX idx_project_events_project_source_type ON project_events(project_id,source,event_type,received_at DESC,id)'
   );
@@ -148,7 +143,7 @@ describe('project event physical storage cost', () => {
     });
   });
 
-  it('rearms the real RPC on cold admission, but writes four SQL rows and no alarm on the next unmatched admission', async () => {
+  it('rearms the real RPC on cold admission, but writes five SQL rows and no alarm on the next unmatched admission', async () => {
     const projectId = 'cost-rpc-alarm';
     const stub = stubFor(projectId);
     await stub.ensureProjectId(projectId);
@@ -165,7 +160,7 @@ describe('project event physical storage cost', () => {
         // The recalculation starts synchronously; an awaited getAlarm also drains its storage I/O.
         await state.storage.getAlarm();
         expect(created.matches).toEqual([]);
-        expect(observed.usage().written).toBe(4);
+        expect(observed.usage().written).toBe(5);
         expect(alarms).not.toHaveBeenCalled();
         const replay = await instance.admitProjectEvent(inputFor(projectId, 'warm'));
         expect(replay).toMatchObject({

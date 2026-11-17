@@ -574,8 +574,7 @@ describe('DO Migrations', () => {
       // updated_at, status/updated_at, reply thread/sequence, reply scope).
       // Project event cost (077): one FK lookup index; four retired event
       // indexes remain CREATE statements in the append-only migration history.
-      // 082 recreates the credential index with a narrower predicate; this mock counts CREATE statements.
-      expect(indexes).toHaveLength(149);
+      expect(indexes).toHaveLength(148);
       expect(indexes.some((query) => query.includes('idx_session_access_grants_expiry_due'))).toBe(
         true
       );

@@ -172,10 +172,10 @@ describe('ProjectData operation row usage in workerd', () => {
       await state.storage.deleteAlarm();
     });
     const labels = logs(spy)[0]!.labels;
-    // Cold scheduler state: 4 event rows + 4 scheduler rows + 2 alarm-schedule rows + setAlarm.
+    // Cold scheduler state: 5 event rows + 4 scheduler rows + 2 alarm-schedule rows + setAlarm.
     expect(labels.find((entry) => entry.label === 'admitProjectEvent')).toMatchObject({
       calls: 1,
-      rowsWritten: 11,
+      rowsWritten: 12,
       alarmWrites: 1,
     });
     // One heartbeat row + one existing alarm-schedule update + setAlarm.

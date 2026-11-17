@@ -1,6 +1,5 @@
 /** Signed webhook -> real producer and ProjectData SQLite, including a live CI wake. */
 import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
-import { MIGRATIONS } from '@simple-agent-manager/project-data/internal/do/migrations';
 import { admitProjectEvent } from '@simple-agent-manager/project-data/internal/do/project-events';
 import { createProjectEventSubscription } from '@simple-agent-manager/project-data/internal/do/project-events-subscriptions';
 import { RowUsage } from '@simple-agent-manager/project-data/internal/do/row-usage';
@@ -89,11 +88,6 @@ describe('unsubscribed CI admission', () => {
     await stub.ensureProjectId(projectId);
     await runInDurableObject(stub, (_instance, state) => {
       const raw = state.storage.sql;
-      // Reproduce the deployed pre-change credential index on the same real schema.
-      raw.exec('DROP INDEX idx_project_events_credential_window');
-      raw.exec(`CREATE INDEX idx_project_events_credential_window
-        ON project_events(project_id,source,subject_type,subject_id,json_extract(metadata_json,'$.windowType'),json_extract(metadata_json,'$.observedAt') DESC,id DESC)
-        WHERE state='recorded'`);
       raw.exec('DELETE FROM project_event_wake_scheduler_state WHERE project_id=?', projectId);
       const meter = new RowUsage(() => projectId);
       const sql = meter.sql(raw);
@@ -111,7 +105,6 @@ describe('unsubscribed CI admission', () => {
       meter.run('beforeWarm', () =>
         admitProjectEvent(sql, testEnv, projectId, input('before-warm'))
       );
-      MIGRATIONS.find((m) => m.name === '082-project-event-credential-index-scope')!.run(raw);
       meter.run('afterStored', () =>
         admitProjectEvent(sql, testEnv, projectId, input('after-stored'))
       );
@@ -124,29 +117,38 @@ describe('unsubscribed CI admission', () => {
       ).totals;
       expect(
         Object.fromEntries([...totals].map(([label, value]) => [label, value.rowsWritten]))
-      ).toEqual({ beforeCold: 9, beforeWarm: 5, afterStored: 4, afterSkipped: 0 });
+      ).toEqual({ beforeCold: 9, beforeWarm: 5, afterStored: 5, afterSkipped: 0 });
       expect(totals.get('afterSkipped')!.rowsRead).toBeLessThanOrEqual(2);
       createProjectEventSubscription(raw, testEnv, projectId, {
-        projectId, owner: { type: 'human', id: 'observer' }, idempotencyKey: 'cost-subscription',
-        filter: { version: 1, source: 'github', eventType: 'check_run.completed', subjectType: 'commit', subjectId: SHA },
+        projectId,
+        owner: { type: 'human', id: 'observer' },
+        idempotencyKey: 'cost-subscription',
+        filter: {
+          version: 1,
+          source: 'github',
+          eventType: 'check_run.completed',
+          subjectType: 'commit',
+          subjectId: SHA,
+        },
         deliveryPreference: { requested: 'record_only', resolved: 'record_only' },
       });
-      raw.exec('DROP INDEX idx_project_events_credential_window');
-      raw.exec(`CREATE INDEX idx_project_events_credential_window
-        ON project_events(project_id,source,subject_type,subject_id,json_extract(metadata_json,'$.windowType'),json_extract(metadata_json,'$.observedAt') DESC,id DESC)
-        WHERE state='recorded'`);
-      const beforeMatched = meter.run('beforeMatched', () => admitProjectEvent(sql, testEnv, projectId, input('before-matched'), false, true));
-      MIGRATIONS.find(m => m.name === '082-project-event-credential-index-scope')!.run(raw);
-      const afterMatched = meter.run('afterMatched', () => admitProjectEvent(sql, testEnv, projectId, input('after-matched'), false, true));
+      const beforeMatched = meter.run('beforeMatched', () =>
+        admitProjectEvent(sql, testEnv, projectId, input('before-matched'), false, false)
+      );
+      const afterMatched = meter.run('afterMatched', () =>
+        admitProjectEvent(sql, testEnv, projectId, input('after-matched'), false, true)
+      );
       expect(beforeMatched.matches).toHaveLength(1);
       expect(afterMatched.matches).toHaveLength(1);
-      expect({ beforeMatched: totals.get('beforeMatched')!.rowsWritten, afterMatched: totals.get('afterMatched')!.rowsWritten }).toMatchInlineSnapshot(`
+      expect({
+        beforeMatched: totals.get('beforeMatched')!.rowsWritten,
+        afterMatched: totals.get('afterMatched')!.rowsWritten,
+      }).toMatchInlineSnapshot(`
         {
-          "afterMatched": 25,
+          "afterMatched": 26,
           "beforeMatched": 26,
         }
       `);
-
     });
   });
   afterEach(() => vi.restoreAllMocks());
@@ -192,7 +194,10 @@ describe('unsubscribed CI admission', () => {
               holder.sql = original;
             };
             const alarm = vi.spyOn(state.storage, 'setAlarm');
-            verifyAlarm = () => { expect(alarm).not.toHaveBeenCalled(); alarm.mockRestore(); };
+            verifyAlarm = () => {
+              expect(alarm).not.toHaveBeenCalled();
+              alarm.mockRestore();
+            };
             usage(instance).flush(Date.now() + 15 * 60_000);
             beforeRetention = state.storage.sql
               .exec('SELECT next_retention_at FROM project_event_wake_scheduler_state')
@@ -205,7 +210,11 @@ describe('unsubscribed CI admission', () => {
             restore();
             verifyAlarm();
             const totals = (usage(instance) as unknown as { totals: Map<string, unknown> }).totals;
-            expect(totals.get('admitProjectEvent')).toMatchObject({ calls: 1, rowsWritten: 0, alarmWrites: 0 });
+            expect(totals.get('admitProjectEvent')).toMatchObject({
+              calls: 1,
+              rowsWritten: 0,
+              alarmWrites: 0,
+            });
             expect(
               state.storage.sql
                 .exec("SELECT count(*) n FROM project_events WHERE source='github'")
@@ -386,7 +395,7 @@ describe('unsubscribed CI admission', () => {
       }
     });
   });
-  it('preserves unsubscribed credential supersession and seeks its narrowed index', async () => {
+  it('preserves unsubscribed credential supersession and seeks its existing index', async () => {
     const projectId = `credential-index-${crypto.randomUUID()}`;
     const stub = env.PROJECT_DATA.get(
       env.PROJECT_DATA.idFromName(projectId)
@@ -456,43 +465,82 @@ describe('unsubscribed CI admission', () => {
     await withAgentMessageChannels(async () => {
       const f = await twoAgentProject();
       await withQuietAlarms(f, async () => {
-        const { subscription } = okBody<{ subscription: { id: string } }>(await f.a.tool('create_project_event_subscription', {
-          idempotencyKey: 'expired-ci', expiresAt: Date.now() + 1000,
-          filter: { version: 1, source: 'github', eventType: 'check_run.completed', subjectType: 'commit', subjectId: SHA },
-        }));
+        const { subscription } = okBody<{ subscription: { id: string } }>(
+          await f.a.tool('create_project_event_subscription', {
+            idempotencyKey: 'expired-ci',
+            expiresAt: Date.now() + 1000,
+            filter: {
+              version: 1,
+              source: 'github',
+              eventType: 'check_run.completed',
+              subjectType: 'commit',
+              subjectId: SHA,
+            },
+          })
+        );
         const originalClock = Date.now();
         const now = vi.spyOn(Date, 'now').mockReturnValue(originalClock + 2000);
         try {
-          const result = await svc.admitProjectEvent(testEnv, f.projectId, { source: 'github', eventType: 'check_run.completed', subject: { type: 'commit', id: SHA }, deliveryKey: 'expired', payloadFingerprint: 'fp' });
+          const result = await svc.admitProjectEvent(testEnv, f.projectId, {
+            source: 'github',
+            eventType: 'check_run.completed',
+            subject: { type: 'commit', id: SHA },
+            deliveryKey: 'expired',
+            payloadFingerprint: 'fp',
+          });
           expect(result).toEqual({ outcome: 'skipped_no_subscriber', event: null, matches: [] });
           await runInDurableObject(f.stub, (_instance, state) => {
-            expect(state.storage.sql.exec('SELECT last_matched_at FROM project_event_subscriptions WHERE id=?', subscription.id).one().last_matched_at).toBeNull();
+            expect(
+              state.storage.sql
+                .exec(
+                  'SELECT last_matched_at FROM project_event_subscriptions WHERE id=?',
+                  subscription.id
+                )
+                .one().last_matched_at
+            ).toBeNull();
           });
-        } finally { now.mockRestore(); }
+        } finally {
+          now.mockRestore();
+        }
       });
     });
   });
 
   it('discloses diagnostic overflow past its 32-type memory bound without extra SQLite writes', async () => {
     const projectId = `counter-bound-${crypto.randomUUID()}`;
-    const stub = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(projectId)) as DurableObjectStub<ProjectData>;
+    const stub = env.PROJECT_DATA.get(
+      env.PROJECT_DATA.idFromName(projectId)
+    ) as DurableObjectStub<ProjectData>;
     await stub.ensureProjectId(projectId);
     await runInDurableObject(stub, (_instance, state) => {
       const meter = new RowUsage(() => projectId);
       const sql = meter.sql(state.storage.sql);
       for (let n = 0; n < 34; n++) {
-        meter.run('admission', () => admitProjectEvent(sql, testEnv, projectId, { projectId,
-          source: 'sam.lifecycle', eventType: `fixture.type${n}`, subject: { type: 'session', id: 'fixture' },
-          deliveryKey: `event-${n}`, payloadFingerprint: 'fp' }));
+        meter.run('admission', () =>
+          admitProjectEvent(sql, testEnv, projectId, {
+            projectId,
+            source: 'sam.lifecycle',
+            eventType: `fixture.type${n}`,
+            subject: { type: 'session', id: 'fixture' },
+            deliveryKey: `event-${n}`,
+            payloadFingerprint: 'fp',
+          })
+        );
       }
       const snapshot = meter.projectEventAdmissions(true);
       expect(Object.keys(snapshot.counts)).toHaveLength(32);
       expect(snapshot.overflowCalls).toBe(2);
-      expect(Object.values(snapshot.counts).reduce((sum, count) => sum + count.calls, snapshot.overflowCalls)).toBe(34);
+      expect(
+        Object.values(snapshot.counts).reduce(
+          (sum, count) => sum + count.calls,
+          snapshot.overflowCalls
+        )
+      ).toBe(34);
       expect(state.storage.sql.exec('SELECT count(*) n FROM project_events').one().n).toBe(34);
       snapshot.counts['sam.lifecycle:fixture.type0']!.calls = 999;
-      expect(meter.projectEventAdmissions(true).counts['sam.lifecycle:fixture.type0']!.calls).toBe(1);
+      expect(meter.projectEventAdmissions(true).counts['sam.lifecycle:fixture.type0']!.calls).toBe(
+        1
+      );
     });
   });
-
 });
