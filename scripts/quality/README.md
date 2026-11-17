@@ -202,8 +202,8 @@ are created, so a lint would be mostly noise.
 ## No secret readback in CI code (policy 795e72a6)
 
 `pnpm quality:no-secret-readback` (`scripts/quality/check-no-secret-readback.ts`) is blocking in
-Code Quality Checks. It scans every `.yml`, `.yaml`, `.sh` and JS/TS file under `.github/`,
-`scripts/` and `infra/`, except tests (`*.test.*`, `*.spec.*`, `test-*.sh`, `__tests__/`,
+Code Quality Checks. It scans every `.yml`, `.yaml`, `.sh`, JS/TS file and Dockerfile under
+`.github/`, `scripts/` and `infra/`, except tests (`*.test.*`, `*.spec.*`, `test-*.sh`, `__tests__/`,
 `fixtures/`) and itself. Comment lines are skipped, apart from a tracing shebang on line 1.
 
 It reports four kinds of finding:
@@ -217,8 +217,8 @@ It reports four kinds of finding:
 - `xtrace`: `set -x` in any flag cluster or position (`set -euxo`, `set -e -x`), `set -o xtrace`,
   a `-x` shebang, and, in shell and YAML only, `bash -x`, `SHELLOPTS=…xtrace`, `BASH_XTRACEFD` and
   `trap … DEBUG`.
-- `env-dump`, in shell and YAML only: a bare `env`, `printenv`, `export -p` or `declare -p` at the
-  start of a command, including `run: env`.
+- `env-dump`, in shell, YAML and Dockerfiles only: a bare `env`, `printenv`, `export -p` or
+  `declare -p` at the start of a command, including `run: env` and `RUN env`.
 
 The shell-only rules never apply to JS/TS, so code such as `value || env` is not reported.
 

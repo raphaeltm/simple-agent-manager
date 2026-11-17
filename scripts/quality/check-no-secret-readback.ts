@@ -15,7 +15,8 @@
  *   env-dump      dumping the environment (`env`, `printenv`, `export -p`, `declare -p`)
  *
  * It scans workflow, action, deploy, infra and CI-script code: every file under `.github/`,
- * `scripts/` and `infra/` with a shell, YAML or JS/TS extension, except tests and this checker.
+ * `scripts/` and `infra/` with a shell, YAML or JS/TS extension, plus Dockerfiles, except tests
+ * and this checker.
  * Comment lines are skipped.
  *
  * Shell-only rules (`bash -x`, SHELLOPTS, `trap DEBUG`, environment dumps) apply to `.sh` and
@@ -63,8 +64,11 @@ interface Rule {
 
 /** Shell options that follow `set`/`bash` on one command, up to a separator or comment. */
 const SAME_COMMAND = String.raw`[^#\n;|&]*?`;
-/** The start of a shell command: line start, a YAML `run:` value, or after `;`, `&&`, `||`, `|`. */
-const COMMAND_START = String.raw`(?:^\s*(?:-\s*)?(?:run:\s*)?|[;&|]\s*)`;
+/**
+ * The start of a shell command: line start, a YAML `run:` value, a Dockerfile `RUN`, or after
+ * `;`, `&&`, `||`, `|`.
+ */
+const COMMAND_START = String.raw`(?:^\s*(?:-\s*)?(?:run:\s*|RUN\s+)?|[;&|]\s*)`;
 
 export const RULES: readonly Rule[] = [
   { id: 'show-secrets', pattern: /--show-secrets\b/ },
@@ -143,12 +147,14 @@ const MARKER = /sam:secret-readback-allowed\s+(\S+)/;
 const MARKER_REACH = 3;
 const SCANNED_ROOTS = ['.github', 'scripts', 'infra'];
 const SCANNED_EXTENSIONS = /\.(?:ya?ml|sh|bash|[cm]?[jt]s)$/;
+/** `Dockerfile`, `Dockerfile.ci`, `app.Dockerfile`: RUN lines are shell. */
+const DOCKERFILE = /(?:^|\/)(?:[\w.-]+\.)?Dockerfile(?:\.[\w-]+)?$/;
 const SKIPPED_DIRECTORIES = new Set(['node_modules', 'dist', '.git', '__tests__', 'fixtures']);
 const SELF = 'scripts/quality/check-no-secret-readback.ts';
 
 /** Test files, and this checker (its patterns are data, not reads). */
 export function isScannedPath(path: string): boolean {
-  if (!SCANNED_EXTENSIONS.test(path)) return false;
+  if (!SCANNED_EXTENSIONS.test(path) && !DOCKERFILE.test(path)) return false;
   if (path === SELF) return false;
   if (/\.(?:test|spec)\.[cm]?[jt]s$/.test(path) || /(?:^|\/)test-[^/]*\.sh$/.test(path)) {
     return false;
@@ -186,7 +192,7 @@ export function scanText(
     if (task) result.allowed.push({ ...finding, task });
     else result.findings.push(finding);
   };
-  const shell = SHELL_FILE.test(file);
+  const shell = SHELL_FILE.test(file) || DOCKERFILE.test(file);
   // Every file type: workflow YAML and shell heredocs carry inline JS.
   const importLines = new Set(decryptImportLines(text).map((line) => line - 1));
   lines.forEach((line, index) => {

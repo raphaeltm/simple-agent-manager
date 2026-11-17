@@ -278,6 +278,18 @@ describe('scanRepository', () => {
     expect(result.files).toBe(3);
   });
 
+  it('scans Dockerfiles as shell', () => {
+    const result = scanRepository(
+      repo({
+        'scripts/e2e/workspace-mock/Dockerfile': 'FROM node:22\nRUN set -eux; npm ci\nRUN env\n',
+      })
+    );
+    expect(result.findings.map((finding) => `${finding.line} ${finding.rule}`)).toEqual([
+      '2 xtrace',
+      '3 env-dump',
+    ]);
+  });
+
   it('accepts a marked read only while its task file is open in the repository', () => {
     const files = {
       'scripts/deploy/configure-secrets.sh': `# sam:secret-readback-allowed ${OPEN_TASK}\npulumi stack output k --show-secrets\n`,
@@ -334,5 +346,9 @@ describe('scanRepository', () => {
     expect(isScannedPath('scripts/deploy/configure-secrets.sh')).toBe(true);
     expect(isScannedPath('.github/workflows/deploy-reusable.yml')).toBe(true);
     expect(isScannedPath('infra/index.ts')).toBe(true);
+    expect(isScannedPath('scripts/e2e/workspace-mock/Dockerfile')).toBe(true);
+    expect(isScannedPath('scripts/ci/Dockerfile.fixture')).toBe(true);
+    expect(isScannedPath('infra/app.Dockerfile')).toBe(true);
+    expect(isScannedPath('scripts/ci/NotADockerfileReally.txt')).toBe(false);
   });
 });
