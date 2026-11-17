@@ -393,7 +393,7 @@ describe('projectInsights refuses every argument a method does not read', () => 
     receipt: ['taskId'],
     flow: ['range'],
     setups: ['range', 'groupBy'],
-    phases: ['skillId', 'agentProfileId', 'operation', 'windowDays'],
+    phases: ['skillId', 'agentProfileId', 'operation', 'phaseNames', 'windowDays'],
     accounts: ['range'],
   };
   const VALUES: Record<string, unknown> = {
@@ -403,6 +403,7 @@ describe('projectInsights refuses every argument a method does not read', () => 
     skillId: 's',
     agentProfileId: 'a',
     operation: 'workspace',
+    phaseNames: ['git_clone'],
     windowDays: 7,
   };
   const cases = PROJECT_INSIGHTS_METHODS.flatMap((method) =>
@@ -411,7 +412,7 @@ describe('projectInsights refuses every argument a method does not read', () => 
       .map((key) => [method, key] as const)
   );
   it('covers every method', () => {
-    expect(cases.length).toBe(5 * 7 - 9);
+    expect(cases.length).toBe(5 * 8 - 10);
   });
   it.each(cases)('%s refuses %s', async (method, key) => {
     await expect(

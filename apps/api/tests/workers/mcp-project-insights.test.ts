@@ -135,6 +135,10 @@ describe('project_insights through /mcp', () => {
     const accounts = data(await call(token, { method: 'accounts' }));
     expect(accounts).toMatchObject({ method: 'accounts', accounts: { range: '30d' } });
 
+    const bOnlyPhase = data(
+      await call(token, { method: 'phases', skillId: SKILL, phaseNames: ['volume_create'] })
+    );
+    expect(bOnlyPhase.phases).toMatchObject({ stats: [] });
     const phases = data(await call(token, { method: 'phases', skillId: SKILL }));
     expect(phases.phases).toMatchObject({
       stats: [{ operation: 'workspace', phase: 'git_clone', count: 2, medianMs: 40, p90Ms: 60 }],

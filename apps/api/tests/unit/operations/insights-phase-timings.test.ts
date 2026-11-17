@@ -134,6 +134,42 @@ describe('insights phase timings reads', () => {
     ]);
   });
 
+  it('caps the sample per phase, so a frequent phase cannot crowd out a rare one', async () => {
+    // Skew: 12 recent git_clone rows, then one older devcontainer_up row. A global newest-first
+    // cap of 5 would read only git_clone rows.
+    for (let i = 0; i < 12; i += 1) {
+      insert({ project: 'p', phase: 'git_clone', durationMs: 100 + i, ageMs: DAY - i * 1000 });
+    }
+    insert({ project: 'p', phase: 'devcontainer_up', durationMs: 900, ageMs: 5 * DAY });
+
+    const capped = await phaseDurationStats(db, {
+      projectId: 'p',
+      skillId: 'skill-1',
+      sampleLimit: 5,
+      now: NOW,
+    });
+    expect(capped.truncated).toBe(true);
+    expect(capped.stats.map((stat) => [stat.phase, stat.count])).toEqual([
+      ['devcontainer_up', 1],
+      ['git_clone', 5],
+    ]);
+    // The newest five git_clone rows are the ones kept (durations 107..111).
+    expect(capped.stats[1]).toMatchObject({ medianMs: 109, p90Ms: 111 });
+
+    // Control: a cap above every group reads everything and reports nothing cut.
+    const all = await phaseDurationStats(db, {
+      projectId: 'p',
+      skillId: 'skill-1',
+      sampleLimit: 50,
+      now: NOW,
+    });
+    expect(all.truncated).toBe(false);
+    expect(all.stats.map((stat) => [stat.phase, stat.count])).toEqual([
+      ['devcontainer_up', 1],
+      ['git_clone', 12],
+    ]);
+  });
+
   it('groups by operation, filters by profile and operation, and reports truncation', async () => {
     insert({ project: 'p', phase: 'workspace_ready', durationMs: 7, operation: 'runner_start' });
     insert({ project: 'p', phase: 'workspace_ready', durationMs: 9, operation: 'runner_wake' });

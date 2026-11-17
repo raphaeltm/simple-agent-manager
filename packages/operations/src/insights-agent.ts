@@ -28,6 +28,7 @@ import { OperationError } from './errors';
 import { projectAccounts } from './insights-accounts';
 import { projectFlow } from './insights-flow';
 import {
+  MAX_PHASE_STATS_PHASES,
   MAX_PHASE_STATS_WINDOW_DAYS,
   phaseDurationStats,
   type PhaseDurationStatsResult,
@@ -56,6 +57,13 @@ export const ProjectInsightsInputSchema = v.object({
   skillId: v.optional(id),
   agentProfileId: v.optional(id),
   operation: v.optional(v.pipe(v.string(), v.regex(/^[a-z_]{1,32}$/))),
+  phaseNames: v.optional(
+    v.pipe(
+      v.array(v.pipe(v.string(), v.regex(/^[a-z0-9_-]{1,64}$/))),
+      v.minLength(1),
+      v.maxLength(MAX_PHASE_STATS_PHASES)
+    )
+  ),
   windowDays: v.optional(
     v.pipe(v.number(), v.minValue(1), v.maxValue(MAX_PHASE_STATS_WINDOW_DAYS), v.integer())
   ),
@@ -257,7 +265,10 @@ export function agentAccounts(accounts: ProjectAccountsResponse) {
 /** Usual phase durations for one skill or profile; `phaseDurationStats` is a core without auth. */
 export async function projectPhaseStats(
   ctx: OperationContext,
-  input: Pick<ProjectInsightsInput, 'projectId' | 'skillId' | 'agentProfileId' | 'operation'> & {
+  input: Pick<
+    ProjectInsightsInput,
+    'projectId' | 'skillId' | 'agentProfileId' | 'operation' | 'phaseNames'
+  > & {
     windowDays?: number;
   }
 ): Promise<PhaseDurationStatsResult> {
@@ -273,6 +284,7 @@ export async function projectPhaseStats(
     skillId: input.skillId,
     agentProfileId: input.agentProfileId,
     operation: input.operation,
+    phases: input.phaseNames,
     windowDays: input.windowDays,
   });
 }
@@ -282,7 +294,7 @@ const ALLOWED: Record<ProjectInsightsMethod, ReadonlySet<keyof ProjectInsightsIn
   receipt: new Set(['taskId']),
   flow: new Set(['range']),
   setups: new Set(['range', 'groupBy']),
-  phases: new Set(['skillId', 'agentProfileId', 'operation', 'windowDays']),
+  phases: new Set(['skillId', 'agentProfileId', 'operation', 'phaseNames', 'windowDays']),
   accounts: new Set(['range']),
 };
 const OPTIONAL_KEYS = [
@@ -292,6 +304,7 @@ const OPTIONAL_KEYS = [
   'skillId',
   'agentProfileId',
   'operation',
+  'phaseNames',
   'windowDays',
 ] as const;
 

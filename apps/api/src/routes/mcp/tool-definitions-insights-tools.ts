@@ -33,6 +33,11 @@ export const INSIGHTS_TOOLS = [
           type: 'string',
           description: 'phases: only workspace, wake, sleep, runner_start or runner_wake.',
         },
+        phaseNames: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'phases: only these phases (default all).',
+        },
         windowDays: { type: 'number', description: 'phases: days back (default 30).' },
       },
       required: ['method'],

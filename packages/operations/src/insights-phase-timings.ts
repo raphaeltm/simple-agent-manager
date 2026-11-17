@@ -18,9 +18,11 @@ import { OperationError } from './errors';
 
 const DAY_MS = 86_400_000;
 
-/** Rows read to compute percentiles, newest first. Callers may pass a smaller or larger cap. */
-export const DEFAULT_PHASE_STATS_SAMPLE_LIMIT = 5_000;
+/** Newest rows read per (operation, phase) to compute percentiles. Callers may pass another cap. */
+export const DEFAULT_PHASE_STATS_SAMPLE_LIMIT = 500;
 export const MAX_PHASE_STATS_SAMPLE_LIMIT = 20_000;
+/** Rows one stats read returns in total, whatever the number of phases (a memory bound). */
+export const MAX_PHASE_STATS_TOTAL_ROWS = 20_000;
 export const DEFAULT_PHASE_STATS_WINDOW_DAYS = 30;
 export const MAX_PHASE_STATS_WINDOW_DAYS = 365;
 /** Distinct phases one stats call may ask for (the VM vocabulary plus runner steps fit). */
@@ -40,6 +42,7 @@ export interface PhaseDurationStatsInput {
   /** Rows older than `lifecycleLatency.retentionDays` (default 30) are purged, so a longer window
    *  returns at most the retained days. */
   windowDays?: number;
+  /** Newest successful rows read per (operation, phase). */
   sampleLimit?: number;
   now?: number;
 }
@@ -54,7 +57,8 @@ export interface PhaseDurationStat {
 
 export interface PhaseDurationStatsResult {
   windowDays: number;
-  /** True when the sample cap cut off older rows in the window. */
+  /** True when a phase had more rows in the window than its sample cap, so older ones were left
+   *  out, or when the total row bound was reached. Every phase still gets its newest rows. */
   truncated: boolean;
   /** Only phases with at least one successful sample; ordered by operation, then phase. */
   stats: PhaseDurationStat[];
@@ -126,8 +130,9 @@ export function nearestRankPercentile(sorted: readonly number[], fraction: numbe
 
 /**
  * Median and p90 duration per phase for one skill or one profile in one project over the last
- * `windowDays`, from successful phases only (a failed phase's time says nothing about the usual).
- * One query on `idx_lifecycle_phase_timings_skill_phase` / `_profile_phase`.
+ * `windowDays`, from successful phases only (a failed phase's time says nothing about the usual),
+ * over at most `sampleLimit` newest rows per (operation, phase). One query on
+ * `idx_lifecycle_phase_timings_skill_phase` / `_profile_phase`.
  */
 export async function phaseDurationStats(
   db: D1Database,
@@ -161,27 +166,42 @@ export async function phaseDurationStats(
   const phaseFilter = phases === null ? '' : `AND phase IN (${phases.map(() => '?').join(', ')})`;
   const bindings: Array<string | number> = [projectId, byId, ...(phases ?? [])];
   if (input.operation !== undefined) bindings.push(input.operation);
-  bindings.push(since, sampleLimit);
+  bindings.push(since, sampleLimit + 1, MAX_PHASE_STATS_TOTAL_ROWS);
 
+  // The cap is per (operation, phase), never global: a newest-first LIMIT over every phase lets
+  // one frequent phase crowd the others out of the sample (rule 65). One extra row per group shows
+  // whether that group was cut. The total bound is ordered by row number, so it trims every
+  // group's oldest rows before any group's newest.
   const result = await db
     .prepare(
-      `SELECT operation, phase, duration_ms
-         FROM lifecycle_phase_timings
-        WHERE project_id = ?
-          AND ${byColumn} = ?
-          ${phaseFilter}
-          ${operationFilter}
-          AND outcome = 'success'
-          AND created_at >= ?
-        ORDER BY created_at DESC
-        LIMIT ?`
+      `SELECT operation, phase, duration_ms, rn FROM (
+         SELECT operation, phase, duration_ms,
+                ROW_NUMBER() OVER (
+                  PARTITION BY operation, phase ORDER BY created_at DESC, id DESC
+                ) AS rn
+           FROM lifecycle_phase_timings
+          WHERE project_id = ?
+            AND ${byColumn} = ?
+            ${phaseFilter}
+            ${operationFilter}
+            AND outcome = 'success'
+            AND created_at >= ?
+       )
+       WHERE rn <= ?
+       ORDER BY rn, operation, phase
+       LIMIT ?`
     )
     .bind(...bindings)
     .all<Record<string, unknown>>();
   const rows = result.results ?? [];
 
   const groups = new Map<string, { operation: string; phase: string; durations: number[] }>();
+  let truncated = rows.length >= MAX_PHASE_STATS_TOTAL_ROWS;
   for (const raw of rows) {
+    if (typeof raw.rn === 'number' && raw.rn > sampleLimit) {
+      truncated = true;
+      continue;
+    }
     // One malformed row costs that row, not the read (`apps/api/.claude/rules/50`).
     const parsed = v.safeParse(DurationRowSchema, raw);
     if (!parsed.success) {
@@ -211,7 +231,7 @@ export async function phaseDurationStats(
       };
     })
     .sort((a, b) => a.operation.localeCompare(b.operation) || a.phase.localeCompare(b.phase));
-  return { windowDays, truncated: rows.length >= sampleLimit, stats };
+  return { windowDays, truncated, stats };
 }
 
 /**

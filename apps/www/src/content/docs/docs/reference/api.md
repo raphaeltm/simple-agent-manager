@@ -1179,8 +1179,8 @@ Connector lists; sam-mcp tool `project_insights`, `apps/api/src/routes/mcp/proje
 
 - `receipt` (`taskId`): `runReceipt`. `flow` (`range`): `projectFlow`. `setups` (`range`,
   `groupBy`): `projectSetups`. `accounts` (`range`): `projectAccounts`. `phases` (`skillId` or
-  `agentProfileId`, optional `operation` and `windowDays`): median and p90 per lifecycle phase from
-  `phaseDurationStats`. An argument the method does not read is `invalid_input`.
+  `agentProfileId`, optional `operation`, `phaseNames` and `windowDays`): median and p90 per
+  lifecycle phase from `phaseDurationStats`, over at most the 500 newest rows of each phase. An argument the method does not read is `invalid_input`.
 - Numbers only: no task, pull request or idea titles, no idea notes, no agent questions, no account
   names or credential references, no names of a teammate's profiles. CI check names are kept
   (capped at 100 characters) because they identify a flaky check. Accounts are keyed `account-1`,
