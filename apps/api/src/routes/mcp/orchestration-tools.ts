@@ -48,6 +48,7 @@ import {
 import { resolveCallerChatSession } from './mailbox-target';
 import { denyWhenMcpActorLacksCurrentProjectCapability } from './orchestration-authority';
 import { stopActiveChildAgentForRetry } from './orchestration-retry-stop';
+import { insertMcpRetriedTask } from './orchestration-retry-storage';
 
 // ─── retry_subtask ──────────────────────────────────────────────────────────
 
@@ -367,7 +368,7 @@ export async function handleRetrySubtask(
   const checkoutBranch = branchName;
 
   // Insert replacement task
-  await db.insert(schema.tasks).values({
+  await insertMcpRetriedTask(db, {
     id: taskId,
     projectId: tokenData.projectId,
     userId: tokenData.userId,
