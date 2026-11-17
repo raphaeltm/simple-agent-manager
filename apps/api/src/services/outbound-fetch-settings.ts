@@ -15,7 +15,7 @@ import { resolveAdminSettingDetailsMany } from './admin-settings-resolution';
 const UNREADABLE_SETTING_MAX_REDIRECTS = 0;
 
 /** A resolved `outbound.maxRedirects` value, or the default when it is absent or out of range. */
-function outboundMaxRedirectsValue(value: unknown): number {
+export function outboundMaxRedirectsValue(value: unknown): number {
   return typeof value === 'number' &&
     Number.isInteger(value) &&
     value >= 0 &&

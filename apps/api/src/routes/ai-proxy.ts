@@ -1,3 +1,4 @@
+import { hasLocalAiCostMetering } from '@simple-agent-manager/ai-proxy';
 /**
  * AI inference proxy — routes to Workers AI, Anthropic, or OpenAI via Cloudflare AI Gateway.
  *
@@ -48,6 +49,7 @@ import {
   schedulePlatformProxyLimitHeaders,
 } from './ai-proxy-platform-billing';
 import {
+  customEndpointResponses,
   forwardToAnthropic,
   forwardToOpenAI,
   forwardToOpenAIResponses,
@@ -222,7 +224,12 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
         model: modelId,
         credentialReference: attribution?.credentialReference ?? null,
         credentialSource: attribution?.credentialSource ?? null,
-      })
+      }),
+      {
+        costModelId: customEndpointResponses.has(response) ? undefined : modelId,
+        estimateMissingUsage:
+          customEndpointResponses.has(response) || hasLocalAiCostMetering(c.env),
+      }
     );
   } catch (err) {
     log.error('ai_proxy.fetch_error', {
@@ -346,7 +353,8 @@ aiProxyRoutes.post('/responses', async (c) => {
         model: modelId,
         credentialReference: openaiCredential.credentialReference,
         credentialSource: openaiCredential.credentialSource,
-      })
+      }),
+      { costModelId: modelId, estimateMissingUsage: hasLocalAiCostMetering(c.env) }
     );
   } catch (err) {
     log.error('ai_proxy.responses.fetch_error', {

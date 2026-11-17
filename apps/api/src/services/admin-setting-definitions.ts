@@ -13,6 +13,7 @@ import type { NodeTunnelSettingName } from './admin-settings-node-tunnel-definit
 import { type OutboundSettingName } from './admin-settings-outbound-definitions';
 import { type AgentEmailSettingName } from './agent-email/setting-definitions';
 import { type AgentModelSettingKey } from './agent-models/settings-definition';
+import type { AiProxySettingName } from './ai-proxy-settings';
 import { type ConnectorReadSettingName } from './connector-read-settings-definition';
 import {
   CONNECTOR_DEFAULTS,
@@ -22,6 +23,7 @@ import {
 import { type FleetOpsSettingName } from './fleet-ops/settings-definitions';
 import { type InboxSettingName } from './inbox-settings-definition';
 import { type LifecycleLatencySettingKey } from './lifecycle-latency/defaults';
+import type { LlmEndpointSettingName } from './llm-endpoint-settings';
 import { type OperationsTelemetrySettingName } from './operations-telemetry-defaults';
 import { type RuntimeSecretRequestSettingName } from './runtime-secret-request-settings-definition';
 import { type WORKFLOW_DEFAULTS } from './workflow-defaults';
@@ -31,6 +33,8 @@ export type AdminSettingValue = boolean | number | string | readonly string[] | 
 export type AdminSettingType = 'boolean' | 'integer' | 'string' | 'string-list' | 'enum';
 
 export type AdminSettingName =
+  | LlmEndpointSettingName
+  | AiProxySettingName
   | DeploymentPublishJobSettingName
   | 'deployments.publishCallbackMaxBodyBytes'
   | 'chat.messageMergingEnabled'
