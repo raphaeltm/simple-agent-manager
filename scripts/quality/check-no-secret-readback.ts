@@ -214,8 +214,14 @@ export function isScannedPath(path: string): boolean {
 /** A shebang that turns on tracing (`#!/bin/bash -x`, `#!/usr/bin/env -S bash -ex`). */
 const XTRACE_SHEBANG = /^#!.*\b(?:ba|z|da|k)?sh\s+-[A-Za-z]*x/;
 
+/**
+ * A line that holds only a comment. A block comment closed on the same line does not hide the code
+ * after it: `/* compat *\/ crypto.subtle.decrypt(...)` is scanned.
+ */
 function isCommentLine(line: string): boolean {
-  return /^\s*(?:#|\/\/|\/\*|\*)/.test(line);
+  const code = line.replace(/^(?:\s*\/\*.*?\*\/)+/, '');
+  if (code !== line && code.trim() === '') return true;
+  return /^\s*(?:#|\/\/|\/\*|\*)/.test(code);
 }
 
 /** A task path is open when it names an existing file under tasks/backlog or tasks/active. */
