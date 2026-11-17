@@ -223,7 +223,8 @@ It reports four kinds of finding:
   `trap … DEBUG`.
 - `env-dump`, in shell, YAML and Dockerfiles only: `env` with no command (options such as `-0`
   or `-u NAME` allowed), `printenv`, and a bare `export`, `declare` or `typeset` (flags allowed,
-  no names) at the start of a command, including `run: env` and `RUN env`.
+  no names) at the start of a command, including `run: env`, `RUN env`, and a subshell or
+  command substitution such as `echo "$(env)"`.
 
 The shell-only rules never apply to JS/TS, so code such as `value || env` is not reported.
 

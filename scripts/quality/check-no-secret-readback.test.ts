@@ -97,6 +97,12 @@ const POSITIVE: Array<[string, RuleId]> = [
   ['        run: env --null | sort', 'env-dump'],
   ['      - run: printenv | sort', 'env-dump'],
   ['cd infra && env | grep KEY', 'env-dump'],
+  ['echo "$(env)"', 'env-dump'],
+  ['        run: echo "$(printenv)" > env.txt', 'env-dump'],
+  ['echo "`env`"', 'env-dump'],
+  ['(env) | sort', 'env-dump'],
+  ['dump=$( env -0 )', 'env-dump'],
+  ['echo "$(declare -p CF_API_TOKEN)"', 'env-dump'],
   ['pulumi config get encryptionKey --stack staging', 'show-secrets'],
   ['const outputs = await stack.outputs({ showSecrets });', 'show-secrets'],
   ["const plain = await crypto.subtle['decrypt'](params, key, data);", 'decryption'],
@@ -151,6 +157,10 @@ const NEGATIVE = [
   'sudo -u runner make deploy',
   'declare -a items=(a b)',
   'declare -r MAX=3',
+  'echo "$(env node --version)"',
+  'NODE=$(command -v node)',
+  'ENV_NAME=$(environment_name)',
+  'echo "$(set -o)" | grep pipefail',
 ];
 
 describe('check-no-secret-readback rules', () => {

@@ -68,12 +68,16 @@ interface Rule {
 const SAME_COMMAND = String.raw`[^#\n;|&]*?`;
 /**
  * The start of a shell command: line start, a YAML `run:` value, a Dockerfile `RUN`, or after
- * `;`, `&&`, `||`, `|`.
+ * `;`, `&&`, `||`, `|`, or the opening of a subshell or command substitution (`(`, `$(`, a backtick),
+ * so `echo "$(env)"` counts as running `env`.
  */
 // Wrappers that still run the named command, with their own options: `command env`,
 // `sudo -E env`, `sudo -u runner printenv`, `exec env`.
 const WRAPPER = String.raw`(?:command|builtin|exec|sudo|nohup|time)(?:\s+(?:-[A-Za-z]+(?:\s+[^\s-]\S*)?|--[\w-]+(?:=\S+)?))*`;
-const COMMAND_START = String.raw`(?:^\s*(?:-\s*)?(?:run:\s*|RUN\s+)?|[;&|]\s*)(?:${WRAPPER}\s+)*`;
+const COMMAND_START = String.raw`(?:^\s*(?:-\s*)?(?:run:\s*|RUN\s+)?|[;&|(\x60]\s*)(?:${WRAPPER}\s+)*`;
+/** The end of a command with no further arguments: line end, a separator, a redirect, or the close
+ * of a subshell or command substitution. */
+const COMMAND_END = String.raw`\s*(?:$|[|>;&)\x60])`;
 
 /** An optional directory before a command name: `/bin/bash`, `/usr/bin/env`. */
 const EXECUTABLE_PATH = String.raw`(?:\S*/)?`;
@@ -124,7 +128,7 @@ export const RULES: readonly Rule[] = [
     pattern: new RegExp(
       // Options or NAME=VALUE only, no command after them: `env -0`, `env -u NAME`, `env A=1`, a bare `export`,
       // `declare -x` or `set` all print the (exported) environment.
-      String.raw`${COMMAND_START}${EXECUTABLE_PATH}(?:env(?:\s+(?:-u\s+\S+|--unset=\S+|-[-\w]+|[A-Za-z_]\w*=\S*))*|printenv|export(?:\s+-p)?|(?:declare|typeset)(?:\s+-[A-Za-z]+)*|set)\s*(?:$|[|>;&])`
+      String.raw`${COMMAND_START}${EXECUTABLE_PATH}(?:env(?:\s+(?:-u\s+\S+|--unset=\S+|-[-\w]+|[A-Za-z_]\w*=\S*))*|printenv|export(?:\s+-p)?|(?:declare|typeset)(?:\s+-[A-Za-z]+)*|set)${COMMAND_END}`
     ),
     shellOnly: true,
   },
@@ -133,7 +137,7 @@ export const RULES: readonly Rule[] = [
   {
     id: 'env-dump',
     pattern: new RegExp(
-      String.raw`${COMMAND_START}(?:declare|typeset)\s+-[A-Za-z]*p[A-Za-z]*(?:\s+--)?(?:\s+[A-Za-z_]\w*)+\s*(?:$|[|>;&])`
+      String.raw`${COMMAND_START}(?:declare|typeset)\s+-[A-Za-z]*p[A-Za-z]*(?:\s+--)?(?:\s+[A-Za-z_]\w*)+${COMMAND_END}`
     ),
     shellOnly: true,
   },
