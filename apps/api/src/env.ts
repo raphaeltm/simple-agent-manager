@@ -1375,7 +1375,6 @@ export interface Env
   AI_PROXY_RATE_LIMIT_WINDOW_SECONDS?: string; // Rate limit window in seconds (default: 60)
   // Cost Monitoring
   COST_MONITORING_ENABLED?: string; // Enable/disable cost monitoring endpoint (default: true)
-  COMPUTE_VCPU_HOUR_COST_USD?: string; // Estimated cost per vCPU-hour in USD (default: 0.003)
   /** Deployment environment name ("staging" | "production"), set by the deploy pipeline. */
   ENVIRONMENT?: string;
   // Cloudflare Artifacts (GitHub-optional project creation)

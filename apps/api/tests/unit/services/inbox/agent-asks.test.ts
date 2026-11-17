@@ -156,7 +156,7 @@ beforeEach(() => {
   sqlite = new Database(':memory:');
   createAllSchemaTables(sqlite, schema);
   sqlite.exec('DROP TABLE asks');
-  for (const file of ['0245_asks.sql', '0247_asks_questions.sql']) {
+  for (const file of ['0245_asks.sql', '0247_asks_questions.sql', '0248_asks_system_errors.sql']) {
     applySqliteMigration(sqlite, new URL(`../../../../src/db/migrations/${file}`, import.meta.url));
   }
   env = {

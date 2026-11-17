@@ -151,7 +151,8 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
   /** Browser: click "Sign in with GitHub", approve on GitHub, land back on the callback. */
   async function signInWithGitHub(
     code?: string,
-    onBeforeCallback?: (state: string, authorizeUrl: URL) => void
+    onBeforeCallback?: (state: string, authorizeUrl: URL) => void,
+    clientHeaders: Record<string, string> = {}
   ): Promise<Response> {
     const authorizeUrl = await startSocialSignIn(app, env, jar, {
       apiOrigin: API_ORIGIN,
@@ -170,7 +171,7 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
     callback.searchParams.set('iss', 'https://github.com/login/oauth');
     const response = await app.request(
       callback.toString(),
-      { headers: { cookie: jar.header() } },
+      { headers: { cookie: jar.header(), ...clientHeaders } },
       env
     );
     jar.store(response);
@@ -195,6 +196,40 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
     }>;
     return rows.map((row) => row.id);
   }
+
+  // BetterAuth retains its existing IPv6 /64 normalization and test-mode localhost fallback.
+  it.each([
+    [
+      'Cloudflare',
+      {
+        'CF-Connecting-IP': '203.0.113.7',
+        'X-Forwarded-For': '198.51.100.66',
+        'X-Real-IP': '198.51.100.67',
+      },
+      '203.0.113.7',
+    ],
+    [
+      'trusted proxy overwriting the ingress header',
+      { 'CF-Connecting-IP': '2001:db8::7', 'X-Forwarded-For': '198.51.100.66, 10.0.0.1' },
+      '2001:0db8:0000:0000:0000:0000:0000:0000',
+    ],
+    [
+      'missing trusted ingress',
+      { 'X-Forwarded-For': '198.51.100.66', 'X-Real-IP': '198.51.100.67' },
+      '127.0.0.1',
+    ],
+  ] as const)(
+    'stores the ingress IP for %s, ignoring spoofed forwarding headers',
+    async (_mode, headers, expectedIp) => {
+      const callback = await signInWithGitHub(undefined, undefined, headers);
+      expect(callback.status).toBe(302);
+      expect(callback.headers.get('location')).toBe(CALLBACK_URL);
+      expect((await currentUser()).status).toBe(200);
+      const sessions = sqlite.prepare('SELECT ip_address FROM sessions').all();
+      expect(sessions).toEqual([{ ip_address: expectedIp }]);
+      expect(githubAccounts()).toHaveLength(1);
+    }
+  );
 
   it('signs a first-time GitHub user in and starts a session', async () => {
     const callback = await signInWithGitHub();

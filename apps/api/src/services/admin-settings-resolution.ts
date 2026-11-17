@@ -11,6 +11,10 @@ import {
 } from './admin-settings-cache';
 import { DecryptedCredentialValues } from './admin-settings-credential-values';
 import {
+  InvalidStoredAdminSettingError,
+  invalidStoredSettingDetails,
+} from './admin-settings-invalid-stored';
+import {
   ADMIN_SETTINGS_REGISTRY,
   type AdminSettingDefinition,
   type AdminSettingName,
@@ -22,7 +26,6 @@ import { readAdminSettingsSnapshot } from './admin-settings-snapshot';
 import { DEFAULT_CONFIG_READ_TIMEOUT_MS } from './config-read-deadline';
 import { withDeadline } from './fetch-timeout';
 import { INTEGRATION_CREDENTIAL_TYPE } from './platform-config-store';
-
 export function requiredDefinition(name: string): AdminSettingDefinition {
   const def = findAdminSetting(name);
   if (!def) throw errors.badRequest('Unknown admin setting');
@@ -293,7 +296,7 @@ async function overrideDetails(
   const row = rows.find((row) => row.key === def.name);
   if (!row) return null;
   const value = parseValue(def, row.value);
-  if (!validStoredValue(def, value)) throw new AdminSettingsUnavailableError();
+  if (!validStoredValue(def, value)) throw new InvalidStoredAdminSettingError();
   if (value === true && (await hasEmergencyVeto(env, def, fresh, kvReads)))
     return kvDetails(env, def, false);
   observe(env, def.name, value as AdminSettingValue);
@@ -432,8 +435,7 @@ function outageValue(
   def: AdminSettingDefinition,
   name: AdminSettingName
 ): AdminSettingValue {
-  // This switch has inverse polarity: true is the safe state on a settings outage.
-  if (name === 'operations.samOperatorDisabled') return true;
+  if (def.unavailableValue !== undefined) return def.unavailableValue;
   if (
     def.legacyEnvironment &&
     typeof env[def.legacyEnvironment] === 'string' &&
@@ -441,13 +443,10 @@ function outageValue(
   )
     return false;
   if (def.type === 'boolean') {
-    if (name.startsWith('connector.')) return false;
     return disabled.get(resolveD1BindingIdentity(env.DATABASE))?.has(name)
       ? false
       : def.defaultValue;
   }
-  if (name === 'connector.clientRegistration') return 'allowlist';
-  if (name === 'connector.allowedRedirectHosts') return [];
   if (def.category === 'OAuth') return null;
   return def.defaultValue;
 }
@@ -474,10 +473,21 @@ export async function readAdminSettings(env: Env, options: { fresh?: boolean } =
     if (snapshot.revision === undefined) throw new AdminSettingsUnavailableError();
     const { rows, credentials } = snapshot;
     const settings = await Promise.all(
-      ADMIN_SETTINGS_REGISTRY.map(async (def) => ({
-        ...publicAdminSettingDefinition(def),
-        ...(await resolved(env, def, rows, false, credentials, options.fresh ?? true, kvReads)),
-      }))
+      ADMIN_SETTINGS_REGISTRY.map(async (def) => {
+        const definition = publicAdminSettingDefinition(def);
+        try {
+          return {
+            ...definition,
+            ...(await resolved(env, def, rows, false, credentials, options.fresh ?? true, kvReads)),
+          };
+        } catch (error) {
+          if (!(error instanceof InvalidStoredAdminSettingError)) throw error;
+          const fallback = (await hasEmergencyVeto(env, def, true, kvReads))
+            ? false
+            : outageValue(env, def, def.name);
+          return { ...definition, ...invalidStoredSettingDetails(primary, def, rows, fallback) };
+        }
+      })
     );
     return { revision: snapshot.revision, settings, history: snapshot.history };
   } catch {

@@ -73,6 +73,42 @@ export function credentialIdFromReference(reference: string): string | null {
   return id.length > 0 ? id : null;
 }
 
+const REFERENCE_DIGEST_PREFIX = 'sha256:';
+const referenceEncoder = new TextEncoder();
+
+/** Length of a digest key: `sha256:` plus 64 hex characters. */
+export const CREDENTIAL_REFERENCE_DIGEST_KEY_BYTES = REFERENCE_DIGEST_PREFIX.length + 64;
+
+/**
+ * Key that stands for a credential reference everywhere in the credential-limit
+ * pipeline: window rows (`credential_limit_windows.credential_reference`), a task's
+ * provider-limit wait (`credentialKey`), project-event subject ids and source-outbox
+ * guards. The outbox requires the window key and the event subject to be one string,
+ * so the key must fit both the window column (160 characters) and the deployment's
+ * project-event filter-string limit (`PROJECT_EVENT_FILTER_MAX_STRING_BYTES`).
+ * A reference no longer than a digest key is its own key; a longer one — ids from
+ * the 2026-06 composable-credentials backfill embed the legacy ciphertext —
+ * becomes its SHA-256 digest, which readers recompute from the full reference.
+ * Keys therefore never exceed 71 bytes whatever the configured limit, and unlike
+ * truncation they cannot collide or differ from what a reader looks up.
+ */
+export async function credentialLimitReferenceKey(
+  value: string | null | undefined
+): Promise<string | null> {
+  if (typeof value !== 'string') return null;
+  const reference = value.trim();
+  if (!reference) return null;
+  const bytes = referenceEncoder.encode(reference);
+  if (bytes.byteLength <= CREDENTIAL_REFERENCE_DIGEST_KEY_BYTES) return reference;
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  return `${REFERENCE_DIGEST_PREFIX}${Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** True when a stored credential reference is a digest key, not the reference itself. */
+export function isCredentialLimitReferenceDigest(key: string): boolean {
+  return key.startsWith(REFERENCE_DIGEST_PREFIX);
+}
+
 /** Human label for the window family encoded in the window type prefix. */
 export function credentialLimitFamilyLabel(windowType: string): string {
   const family = windowType.split('.')[0] ?? '';

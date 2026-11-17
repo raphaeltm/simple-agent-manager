@@ -38,7 +38,7 @@ import { authorizeProjectOperation } from './authorization';
 import { OperationError } from './errors';
 import { ideaItemsWithPullRequests } from './idea-list-core';
 import type { IdeaRow } from './idea-list-reads';
-import { getInsightsFlowLimits } from './insights-flow-settings';
+import { type InsightsRows, parseInsightsRows, runInsightsBatch } from './insights-batch';
 import {
   asksStatement,
   ciFirstTryStatement,
@@ -51,6 +51,7 @@ import {
   runsStatement,
   waitingIdeasStatement,
 } from './insights-flow-sql';
+import { getInsightsPageLimits } from './insights-page-settings';
 import type { OperationContext } from './types';
 
 const DAY_MS = 86_400_000;
@@ -63,7 +64,7 @@ export interface ProjectFlowInput {
   nowMs?: number;
 }
 
-type Rows = Record<string, unknown>[];
+type Rows = InsightsRows;
 type BatchKey = 'runs' | 'merged' | 'ci' | 'flaky' | 'asks' | 'waiting' | 'sample';
 const SECTION_OF: Record<BatchKey, FlowSection> = {
   runs: 'runs',
@@ -115,12 +116,13 @@ export async function projectFlow(
     throw new OperationError('invalid_input', 'range must be one of 7d, 30d, 90d');
   }
   await authorizeProjectOperation(ctx, projectId);
-  const limits = await getInsightsFlowLimits(ctx);
+  const limits = await getInsightsPageLimits(ctx);
   const w = flowWindow(projectId, range, input.nowMs ?? Date.now());
 
   const unavailable = new Set<FlowSection>();
-  const rows = await runBatch(
+  const rows = await runInsightsBatch(
     ctx,
+    'insights_flow',
     projectId,
     {
       runs: runsStatement(w),
@@ -130,8 +132,8 @@ export async function projectFlow(
       asks: asksStatement(w),
       waiting: waitingIdeasStatement(w, limits.waitingIdeasLimit),
       sample: ideaSampleStatement(w, limits.ideaSampleCap),
-    },
-    unavailable
+    } satisfies Record<BatchKey, FlowStatement>,
+    (key, error) => sectionFailed(projectId, SECTION_OF[key], error, unavailable)
   );
 
   // Ideas: the waiting list and the "idea to merged" sample share one evidence read.
@@ -207,43 +209,6 @@ export function flowWindow(projectId: string, range: InsightsRange, nowMs: numbe
   };
 }
 
-/** One `batch()` round trip; if it fails as a whole, each statement on its own, isolated. */
-async function runBatch(
-  ctx: OperationContext,
-  projectId: string,
-  statements: Record<BatchKey, FlowStatement>,
-  unavailable: Set<FlowSection>
-): Promise<Partial<Record<BatchKey, Rows>>> {
-  const keys = Object.keys(statements) as BatchKey[];
-  const prepared = keys.map((key) =>
-    ctx.env.DATABASE.prepare(statements[key].sql).bind(...statements[key].binds)
-  );
-  try {
-    const results = await ctx.env.DATABASE.batch(prepared);
-    return Object.fromEntries(keys.map((key, i) => [key, results[i]?.results ?? []]));
-  } catch (error) {
-    log.error('insights_flow.batch_failed', {
-      projectId,
-      error: error instanceof Error ? error.message : String(error),
-      action: 'retrying_statements_individually',
-    });
-  }
-  const settled = await Promise.all(
-    keys.map(async (key, i): Promise<[BatchKey, Rows | undefined]> => {
-      const statement = prepared[i];
-      if (!statement) return [key, undefined];
-      try {
-        const result = await statement.all();
-        return [key, result.results ?? []];
-      } catch (error) {
-        sectionFailed(projectId, SECTION_OF[key], error, unavailable);
-        return [key, undefined];
-      }
-    })
-  );
-  return Object.fromEntries(settled.filter(([, value]) => value !== undefined));
-}
-
 function sectionFailed(
   projectId: string,
   section: FlowSection,
@@ -259,26 +224,13 @@ function sectionFailed(
   unavailable.add(section);
 }
 
-/** A row read back out of D1 is a trust boundary; one malformed row costs that row (rule 50). */
 function parseRows<S extends v.GenericSchema>(
   rows: Rows | undefined,
   schema: S,
   context: string,
   projectId: string
 ): v.InferOutput<S>[] {
-  const out: v.InferOutput<S>[] = [];
-  for (const raw of rows ?? []) {
-    const parsed = v.safeParse(schema, raw);
-    if (parsed.success) out.push(parsed.output);
-    else
-      log.error('insights_flow.row_skipped', {
-        projectId,
-        context,
-        issue: parsed.issues[0]?.message ?? 'invalid row',
-        action: 'skipped',
-      });
-  }
-  return out;
+  return parseInsightsRows(rows, schema, 'insights_flow', context, projectId);
 }
 
 function numberOr0(value: unknown): number {

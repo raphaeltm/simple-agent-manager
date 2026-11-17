@@ -9,6 +9,7 @@
  *   GET  /api/projects/:projectId/inbox/count
  *   GET  /api/projects/:projectId/inbox/items/:ref?context=true  — one item (+ transcript context)
  *   POST /api/projects/:projectId/inbox/items/:ref/answer         — answer through the item's store
+ *     (a system error item takes `{action}`: retry, wake or resume, `inbox-error-core.ts`)
  *   POST /api/projects/:projectId/inbox/items/:ref/archive        — close; the agent is told
  *
  * Writes come only from the app's own pages (exact origin, JSON body), like the interaction and
@@ -25,13 +26,24 @@ import {
   listInbox,
   toOperationHttpError,
 } from '@simple-agent-manager/operations';
-import { INBOX_FILTERS, type InboxFilter } from '@simple-agent-manager/shared';
+import {
+  INBOX_ERROR_ACTIONS,
+  INBOX_FILTERS,
+  type InboxErrorAction,
+  type InboxFilter,
+  parseInboxRef,
+} from '@simple-agent-manager/shared';
 import { type Context, Hono } from 'hono';
 
 import type { Env } from '../env';
 import { readBoundedRequestBody, RequestBodyTooLargeError } from '../lib/bounded-request-body';
 import { requireRouteParam } from '../lib/route-helpers';
-import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
+import {
+  assertNotAgentSignInSession,
+  getUserId,
+  requireApproved,
+  requireAuth,
+} from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { webOperationContext } from '../operation-ports';
 import { getRuntimeLimits } from '../services/limits';
@@ -138,6 +150,14 @@ async function readAnswerBody(c: AppContext): Promise<Omit<InboxAnswerInput, 'pr
       throw errors.badRequest('decision must be approve or deny');
     out.decision = body.decision;
   }
+  if (body.action !== undefined) {
+    if (
+      typeof body.action !== 'string' ||
+      !(INBOX_ERROR_ACTIONS as readonly string[]).includes(body.action)
+    )
+      throw errors.badRequest(`action must be one of ${INBOX_ERROR_ACTIONS.join(', ')}`);
+    out.action = body.action as InboxErrorAction;
+  }
   if (body.formContent !== undefined) {
     if (
       !body.formContent ||
@@ -199,6 +219,9 @@ projectInboxRoutes.get('/items/:ref', ...session, async (c) => {
 projectInboxRoutes.post('/items/:ref/answer', ...session, async (c) => {
   assertBrowserJsonWrite(c, 'inbox');
   const body = await readAnswerBody(c);
+  // A system error's fix (retry, wake, resume) is a person's call: an agent's sign-in session may
+  // not run it, as the trigger PATCH route refuses an agent a resume (`onlyStandsDown`).
+  if (body.action !== undefined) assertNotAgentSignInSession(c);
   const ctx = webOperationContext(c, getUserId(c));
   return c.json(
     await run(() =>
@@ -213,13 +236,23 @@ projectInboxRoutes.post('/items/:ref/answer', ...session, async (c) => {
 
 projectInboxRoutes.post('/items/:ref/archive', ...session, async (c) => {
   assertBrowserJsonWrite(c, 'inbox');
+  const projectId = requireRouteParam(c, 'projectId');
+  const ref = requireRouteParam(c, 'ref');
+  // A system error item is SAM's alert to the person, and archiving it keeps later repeats quiet:
+  // an agent's sign-in session may not dismiss it. One read, for agent sign-in sessions only.
+  if (c.get('auth')?.session.agentSignIn && (await isErrorItemRef(c.env, projectId, ref)))
+    assertNotAgentSignInSession(c);
   const ctx = webOperationContext(c, getUserId(c));
-  return c.json(
-    await run(() =>
-      archiveInboxItem(ctx, {
-        projectId: requireRouteParam(c, 'projectId'),
-        ref: requireRouteParam(c, 'ref'),
-      })
-    )
-  );
+  return c.json(await run(() => archiveInboxItem(ctx, { projectId, ref })));
 });
+
+async function isErrorItemRef(env: Env, projectId: string, ref: string): Promise<boolean> {
+  const parsed = parseInboxRef(ref);
+  if (parsed?.store !== 'ask') return false;
+  const row = await env.DATABASE.prepare(
+    `SELECT 1 AS ok FROM asks WHERE id = ? AND project_id = ? AND kind = 'error'`
+  )
+    .bind(parsed.id, projectId)
+    .first();
+  return Boolean(row);
+}

@@ -115,15 +115,18 @@ export const InboxRow = memo(function InboxRow({
     : first.ref === selectedRef;
   return (
     <li className={`relative list-none ${stack ? 'pb-1.5' : ''}`} data-testid="inbox-row">
+      {/* The cards behind the first one. The front card is translucent, so each back card is
+          clipped to the 3px it shows below the card in front of it: unclipped, its outline and
+          fill showed through the front card. */}
       {stack && (
         <>
           <span
             aria-hidden="true"
-            className="absolute inset-x-5 bottom-0 h-3 rounded-b-xl border-x border-b border-[var(--sam-hairline)] bg-[var(--sam-glass-v2-fill-quiet)]"
+            className="absolute inset-x-5 bottom-0 h-3 rounded-b-xl border-x border-b border-[var(--sam-hairline)] bg-[var(--sam-glass-v2-fill-quiet)] [clip-path:inset(9px_0_0_0)]"
           />
           <span
             aria-hidden="true"
-            className="absolute inset-x-3 bottom-[3px] h-3 rounded-b-xl border-x border-b border-[var(--sam-hairline)] bg-[var(--sam-glass-v2-fill-quiet)]"
+            className="absolute inset-x-3 bottom-[3px] h-3 rounded-b-xl border-x border-b border-[var(--sam-hairline)] bg-[var(--sam-glass-v2-fill-quiet)] [clip-path:inset(9px_0_0_0)]"
           />
         </>
       )}

@@ -9,6 +9,7 @@ import type { BootstrapResponse } from '@simple-agent-manager/shared';
 import { Hono } from 'hono';
 
 import type { Env } from '../env';
+import { clientIpFromHeaders } from '../lib/client-ip';
 import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { rateLimit } from '../middleware/rate-limit';
@@ -61,7 +62,7 @@ function logBootstrapAttempt(
  */
 bootstrapRoutes.post('/:token', bootstrapRateLimit, async (c) => {
   const token = c.req.param('token');
-  const ip = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || 'unknown';
+  const ip = clientIpFromHeaders((name) => c.req.header(name)) ?? 'unknown';
   const requestTime = Date.now();
 
   // Attempt to redeem token (get + delete)

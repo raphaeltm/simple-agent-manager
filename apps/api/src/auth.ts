@@ -7,6 +7,7 @@ import * as v from 'valibot';
 
 import * as schema from './db/schema';
 import type { Env } from './env';
+import { CLIENT_IP_HEADER } from './lib/client-ip';
 import { createModuleLogger } from './lib/logger';
 import { readResponseJson } from './lib/runtime-validation';
 import { getBetterAuthSecret } from './lib/secrets';
@@ -330,7 +331,11 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
     },
     socialProviders,
     plugins: emailSignInPlugins(env),
-    ...(options.waitUntil ? { advanced: { backgroundTasks: { handler: options.waitUntil } } } : {}),
+    advanced: {
+      // Ingress owns this header. BetterAuth's X-Forwarded-For default is client-controlled.
+      ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] },
+      ...(options.waitUntil ? { backgroundTasks: { handler: options.waitUntil } } : {}),
+    },
     user: {
       additionalFields: {
         githubId: {

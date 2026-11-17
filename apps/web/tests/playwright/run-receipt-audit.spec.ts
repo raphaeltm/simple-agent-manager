@@ -93,7 +93,8 @@ function makeReceipt(overrides: Partial<RunReceipt> = {}): RunReceipt {
         mergedAt: new Date(START + 42 * MIN).toISOString(),
       },
       checks: 'success',
-      ciFirstTry: 'not_recorded',
+      // The first push failed and a later one passed: the line says both.
+      ciFirstTry: 'failed',
       terminalReason: null,
     },
     account: {
@@ -138,8 +139,46 @@ function makeReceipt(overrides: Partial<RunReceipt> = {}): RunReceipt {
   };
 }
 
+function modelUsage(model: string | null, input: number, output: number, cacheRead = 0) {
+  return {
+    model,
+    input,
+    output,
+    cacheRead,
+    cacheWrite: 0,
+    reasoning: null,
+    estimatedSpendUsd: null,
+  };
+}
+
+/** Measured tokens on an API-key account (slice U): one main model plus a helper. */
+const TOKENS_REPORTED: RunReceipt['tokens'] = {
+  state: 'reported',
+  source: 'harness',
+  limited: false,
+  total: { input: 312_000, output: 41_500, cacheRead: 2_140_000, cacheWrite: 86_000, reasoning: null },
+  spend: { state: 'estimate', usd: 4.12, unpricedModels: [] },
+  models: [
+    { ...modelUsage('claude-opus-5-5', 300_000, 40_000, 2_100_000), cacheWrite: 86_000, estimatedSpendUsd: 3.98 },
+    { ...modelUsage('claude-haiku-5-5', 12_000, 1_500, 40_000), estimatedSpendUsd: 0.14 },
+  ],
+};
+
 /** Everything long, special characters, a floor count, every slowdown kind. */
 const STRESS_RECEIPT = makeReceipt({
+  tokens: {
+    state: 'reported',
+    source: 'ai_proxy',
+    limited: true,
+    total: { input: 9_876_543_210, output: 123_456_789, cacheRead: 0, cacheWrite: 0, reasoning: 77 },
+    spend: { state: 'not_applicable' },
+    models: [
+      modelUsage(`openrouter/${'very-long-model-identifier-'.repeat(8)}v2`, 9_000_000_000, 100_000_000),
+      modelUsage('<script>alert(1)</script> — émoji 🚀 model', 800_000_000, 20_000_000),
+      modelUsage(null, 76_543_210, 3_456_789),
+      ...Array.from({ length: 12 }, (_, i) => modelUsage(`helper-model-${i}`, 1_000 * i, 100 * i)),
+    ],
+  },
   title: LONG_TITLE,
   outcome: {
     pullRequest: {
@@ -151,7 +190,7 @@ const STRESS_RECEIPT = makeReceipt({
       mergedAt: null,
     },
     checks: 'failure',
-    ciFirstTry: 'not_recorded',
+    ciFirstTry: 'failed',
     terminalReason: null,
   },
   account: {
@@ -548,7 +587,7 @@ test.describe('Run receipt — chat tool rail', () => {
     const drawer = await openReceipt(page);
     const view = drawer.getByTestId('run-receipt');
     await expect(view.getByText('Merged')).toBeVisible();
-    await expect(view.getByText('PR #2771 · CI passed · 42m')).toBeVisible();
+    await expect(view.getByText('PR #2771 · CI passed · first push failed · 42m')).toBeVisible();
     await expect(view.getByRole('link', { name: /opens in a new tab/ })).toHaveAttribute(
       'href',
       'https://github.com/acme/billing/pull/2771'
@@ -569,14 +608,36 @@ test.describe('Run receipt — chat tool rail', () => {
     await expect(page.getByTestId('session-receipt-drawer')).toHaveCount(0);
   });
 
+  test('shows measured tokens per model with an API-key spend estimate', async ({ page }) => {
+    const drawer = await openReceipt(page, { receipt: makeReceipt({ tokens: TOKENS_REPORTED }) });
+    await expect(drawer.getByText('2.6M')).toBeVisible();
+    await expect(drawer.getByText('Incl. 2.2M cache · Reported by the agent')).toBeVisible();
+    const models = drawer.getByTestId('receipt-token-models');
+    await expect(models.getByText('claude-opus-5-5')).toBeVisible();
+    await expect(models.locator('li').first()).toContainText('~$3.98');
+    await expect(drawer.getByTestId('receipt-token-spend')).toHaveText(
+      '~$4.12 estimated at SAM’s model prices'
+    );
+    await expect(drawer.getByText('Not reported')).toHaveCount(0);
+    await assertInViewport(page);
+    await capture(page, 'run-receipt-tokens');
+  });
+
   test('long text, special characters and a floor count wrap inside the panel', async ({
     page,
   }) => {
     const drawer = await openReceipt(page, { receipt: STRESS_RECEIPT });
     await expect(drawer.getByText('PR open')).toBeVisible();
     await expect(drawer.getByText('20000+')).toBeVisible();
+    await expect(drawer.getByText(/^PR #123456 · CI failing · first push failed · /)).toBeVisible();
     await expect(drawer.getByText('CI is failing on the latest commit')).toBeVisible();
-    await expect(drawer.getByText(/<script>alert\(1\)<\/script>/)).toBeVisible();
+    await expect(drawer.getByText(/<script>alert\(1\)<\/script>/)).toHaveCount(2);
+    await expect(drawer.getByText('10B+')).toBeVisible();
+    await expect(drawer.getByTestId('receipt-token-models').locator('li')).toHaveCount(15);
+    await expect(drawer.getByText('Model not reported')).toBeVisible();
+    // The middle of the long model list is seen too, not only the panel's top and end.
+    await drawer.getByText('Model not reported').scrollIntoViewIfNeeded();
+    await screenshot(page, 'run-receipt-long-text-models');
     await assertInViewport(page);
     await capture(page, 'run-receipt-long-text');
   });

@@ -10,18 +10,26 @@ const user = makeMockUser({
 });
 const makeSettings = () =>
   Array.from({ length: 32 }, (_, i) => ({
-    name: `connector.stressSetting${i}`,
+    name: i === 1 ? 'connector.invalidStoredSetting' : `connector.stressSetting${i}`,
     type: i === 0 ? 'boolean' : 'string',
     defaultValue: i === 0 ? true : '',
-    value: i === 0 ? true : '<script>alert("x")</script> & Unicode 🔒 ' + 'long-value-'.repeat(25),
+    value:
+      i === 0
+        ? true
+        : i === 1
+          ? ''
+          : '<script>alert("x")</script> & Unicode 🔒 ' + 'long-value-'.repeat(25),
     category: i < 16 ? 'Connector' : 'Operations',
     description: 'Long operator description with Unicode 🔒 & <script>inert text</script>. '.repeat(
       4
     ),
     secret: false,
     risky: true,
-    configured: true,
-    source: 'database',
+    configured: i !== 1,
+    source: i === 1 ? 'default' : 'database',
+    ...(i === 1
+      ? { storedValueInvalid: true, storedValue: '<script>invalid</script>' + 'x'.repeat(240) }
+      : {}),
     updatedAt: null,
     updatedBy: null,
   }));
@@ -81,8 +89,36 @@ test('settings real app stress, search, risky confirmation and error recovery', 
 
   await expect(page.getByRole('heading', { name: 'Runtime settings' })).toBeVisible();
   await expect(page.locator('article')).toHaveCount(32);
+  await expect(page.getByText('Default in effect, stored value invalid.')).toBeVisible();
+  const invalidCard = page
+    .locator('article')
+    .filter({ hasText: 'Default in effect, stored value invalid.' });
+  await expect(invalidCard.getByRole('button', { name: 'Reset override' })).toBeEnabled();
   await assertNoOverflow(page);
   await screenshot(page, 'admin-settings-stress');
+  await page.getByRole('searchbox').fill('invalidStoredSetting');
+  await expect(page.locator('article')).toHaveCount(1);
+  await invalidCard.scrollIntoViewIfNeeded();
+  await screenshot(page, 'admin-settings-invalid-stored');
+  await page.evaluate(() => document.documentElement.setAttribute('data-ui-theme', 'sam-light'));
+  await screenshot(page, 'admin-settings-invalid-stored-light');
+  await page.evaluate(() => document.documentElement.setAttribute('data-ui-theme', 'sam'));
+  const invalidReset = invalidCard.getByRole('button', { name: 'Reset override' });
+  await invalidReset.scrollIntoViewIfNeeded();
+  await expect(invalidReset).toBeInViewport();
+  await screenshot(page, 'admin-settings-invalid-reset-actions');
+  await invalidReset.click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await screenshot(page, 'admin-settings-invalid-reset-confirmation');
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  if (test.info().project.name.startsWith('iPhone SE')) {
+    await page.setViewportSize({ width: 320, height: 667 });
+    await assertNoOverflow(page);
+    await invalidReset.scrollIntoViewIfNeeded();
+    await expect(invalidReset).toBeInViewport();
+    await screenshot(page, 'admin-settings-invalid-reset-actions-narrow');
+    await page.setViewportSize({ width: 375, height: 667 });
+  }
   await page.getByRole('searchbox').fill('stressSetting0');
   await page.getByLabel('connector · stress Setting0').selectOption('false');
   await page.getByRole('button', { name: 'Save', exact: true }).click();

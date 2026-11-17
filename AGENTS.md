@@ -143,9 +143,10 @@ Per-project data (chat sessions, messages, activity events, and canonical `proje
 
 Codex does not load `.claude/rules/` by itself. Two steps before you edit:
 
-1. Open the `AGENTS.md` nearest the files you will change and read the rules its
-   "Rules for this directory" section lists. `.claude/rules/00-rule-routing.md` indexes
-   every path-scoped rule.
+1. Path-scoped rules: in a SAM session the hook `.codex/hooks/rule-context.mjs` adds the
+   rules for the files a command or patch touches. Elsewhere, or if none arrive, open the
+   `AGENTS.md` nearest the files you will change and read the rules its "Rules for this
+   directory" section lists. `.claude/rules/00-rule-routing.md` indexes every one.
 2. The rules below apply to all work. Claude Code has them in context at launch. Read
    the ones that bear on your task.
 

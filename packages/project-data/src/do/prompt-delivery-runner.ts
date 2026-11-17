@@ -295,8 +295,10 @@ export async function runPromptDeliveryClaim(
     );
   }
   if (applied && result.kind === 'failed' && result.reason === 'wake_refused') {
-    raiseSessionWakeFailure(
+    await raiseSessionWakeFailure(
       sql,
+      env,
+      hooks.projectId,
       {
         sessionId: claim.message.targetSessionId,
         taskId: claim.message.sourceTaskId,

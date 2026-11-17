@@ -5,12 +5,13 @@
  * `node_agent_ready` in `./node-agent-ready-step`; both are re-exported here so
  * the DO's step table keeps one import site. See rule 18.
  */
-import {
-  resolveEffectiveNodeHostMemoryReserveMb,
-} from '@simple-agent-manager/scheduler-core';
+import { resolveEffectiveNodeHostMemoryReserveMb } from '@simple-agent-manager/scheduler-core';
 
 import { log } from '../../lib/logger';
-import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
+import {
+  isNodeAgentVersionCompatible,
+  normalizeAgentVersion,
+} from '../../services/node-agent-compatibility';
 import {
   type CapacityAwareNodePlacementRow,
   capacityPoolNoCandidatesError,
@@ -18,9 +19,7 @@ import {
   resolveReusableNodeCapacitySnapshot,
 } from '../../services/placement-resolver';
 import { filterReusableNodesByCurrentAuthority } from '../../services/reusable-node-authority';
-import {
-  trustedWorkspaceNodeCapacityColumnsSql,
-} from '../../services/workspace-admission-sql';
+import { trustedWorkspaceNodeCapacityColumnsSql } from '../../services/workspace-admission-sql';
 import { shouldProvisionSpreadNode } from './capacity-pool-node-limit';
 import {
   findNodeWithCapacity,
@@ -108,7 +107,8 @@ export async function handleNodeSelection(
          placement_explanation_json AS placementExplanationJson,
          last_metrics AS lastMetrics,
          last_heartbeat_at AS lastHeartbeatAt,
-         agent_version AS agentVersion
+         agent_version AS agentVersion,
+         agent_ready_at AS agentReadyAt
        FROM nodes WHERE id = ? AND user_id = ?`
     )
       .bind(state.config.preferredNodeId, state.userId)
@@ -117,20 +117,63 @@ export async function handleNodeSelection(
             id: string;
             status: string;
             agentVersion: string | null;
+            agentReadyAt: string | null;
           })
         | null
       >();
 
-    if (!node || node.status !== 'running') {
+    if (!node || !['creating', 'running'].includes(node.status)) {
       throw Object.assign(new Error('Specified node is not available'), { permanent: true });
+    }
+    // Missing version is boot progress, not evidence of a different build. Keep
+    // the shared compatibility predicate strict for reuse, dispatch and cleanup.
+    const agentVersion = normalizeAgentVersion(node.agentVersion);
+    if (
+      agentVersion &&
+      !isNodeAgentVersionCompatible(agentVersion, rc.env.VM_AGENT_REQUIRED_VERSION)
+    ) {
+      throw Object.assign(
+        new Error('Specified node agent build differs from the required VM agent build'),
+        { permanent: true }
+      );
+    }
+    const waitingForVersion =
+      !agentVersion && !!normalizeAgentVersion(rc.env.VM_AGENT_REQUIRED_VERSION);
+    const awaitingReadiness = node.status === 'creating' || !node.agentReadyAt || waitingForVersion;
+    if (awaitingReadiness || state.agentReadyStartedAt !== null) {
+      // Stay in selection: each alarm must revalidate ownership, placement and
+      // reservation capacity before adopting a user-pinned node. Never replace it.
+      state.agentReadyStartedAt ??= Date.now();
+      const deadline = state.agentReadyStartedAt + rc.getAgentReadyTimeoutMs();
+      let reason = 'agent readiness deadline exceeded';
+      if (waitingForVersion) {
+        reason = 'agent has not reported a version yet';
+      } else if (awaitingReadiness) {
+        reason = 'agent has not become ready yet';
+      }
+      // The callback timestamp is server-assigned. A delayed alarm must not
+      // reject readiness that arrived on time; current version/admission checks still apply.
+      const readyAt = node.agentReadyAt ? Date.parse(node.agentReadyAt) : Number.NaN;
+      const readyByDeadline = !awaitingReadiness && Number.isFinite(readyAt) && readyAt <= deadline;
+      if (Date.now() >= deadline && !readyByDeadline) {
+        throw Object.assign(new Error(`Specified node not ready by deadline: ${reason}`), {
+          permanent: true,
+        });
+      }
+      if (awaitingReadiness) {
+        log.info('task_runner_do.preferred_node_waiting', {
+          taskId: state.taskId,
+          nodeId: node.id,
+          reason,
+          deadline,
+        });
+        await rc.ctx.storage.put('state', state);
+        await rc.ctx.storage.setAlarm(Math.min(deadline, Date.now() + rc.getAgentPollIntervalMs()));
+        return;
+      }
     }
     if (!nodeSatisfiesTaskResources(node, state)) {
       throw Object.assign(new Error('Specified node does not satisfy the requested resources'), {
-        permanent: true,
-      });
-    }
-    if (!isNodeAgentVersionCompatible(node.agentVersion, rc.env.VM_AGENT_REQUIRED_VERSION)) {
-      throw Object.assign(new Error('Specified node is running an incompatible VM agent build'), {
         permanent: true,
       });
     }
