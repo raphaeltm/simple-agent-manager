@@ -448,6 +448,23 @@ describe('server read-aloud through an OpenAI-compatible endpoint', () => {
     expect((await postSynthesize(env)).status).toBe(200);
   });
 
+  it('refuses raw PCM before calling the endpoint or storing mislabeled MP3 audio', async () => {
+    const { r2, stored } = createR2();
+    const { env } = boxEnv({ R2: r2, TTS_ENCODING: 'pcm' });
+    await configure(env, {
+      'speech.synthesis.baseUrl': 'https://tts.example.com/v1',
+      'speech.synthesis.model': 'kokoro',
+      'speech.synthesis.voice': 'af_heart',
+    });
+    fetchMock.mockResolvedValue(new Response(AUDIO_BYTES, {
+      headers: { 'Content-Type': 'application/octet-stream' },
+    }));
+    const response = await postSynthesize(env);
+    expect(response.status).toBe(503);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(stored.size).toBe(0);
+  });
+
   it.each(['wav', 'flac', 'opus'])('refuses chunked %s endpoint audio before fetching, but accepts a single chunk', async (encoding) => {
     const { r2, stored } = createR2();
     const { env } = boxEnv({ R2: r2, TTS_CHUNK_SIZE: '40', TTS_ENCODING: encoding });

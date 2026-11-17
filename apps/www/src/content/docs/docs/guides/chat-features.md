@@ -643,7 +643,7 @@ self-host build whose entry installs the speech backend (`installSpeechEndpoints
 `apps/api/src/selfhost/speech/`) can send them to OpenAI-compatible speech endpoints its admin
 configures; the Cloudflare Worker never installs it. Endpoint synthesis needs a base URL, model
 and voice. Chunked endpoint read-aloud requires `TTS_ENCODING=mp3`; single-chunk output
-can use other encodings. `speech.synthesis.maxAudioBytes` caps the combined audio across all chunks of a request
+can use other supported encodings; raw PCM is refused. `speech.synthesis.maxAudioBytes` caps the combined audio across all chunks of a request
 (8 MiB by default); declared formats that differ from the requested encoding are refused before caching. Endpoint retries regenerate partial audio so changed model
 or voice settings cannot mix chunks. `speech.transcription.maxResponseBytes` caps transcription
 JSON responses before parsing (1 MiB by default). Endpoint synthesis admission uses an atomic

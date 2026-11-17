@@ -180,6 +180,8 @@ export async function synthesizeWithEndpoint(
   format: string,
   maxBytes = endpoint.maxAudioBytes
 ): Promise<ArrayBuffer> {
+  // Raw PCM has no container/sample metadata for browser playback or our cached audio route.
+  if (format === 'pcm') throw new Error('Raw PCM endpoint output is not supported');
   const response = await send(endpoint, '/audio/speech', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

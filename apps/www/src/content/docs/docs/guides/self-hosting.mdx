@@ -90,7 +90,8 @@ Once your single-box build includes that integration:
    the provider there. Cloud metadata and link-local destinations remain refused after opt-in.
 4. Keep `TTS_ENCODING=mp3` in the runtime configuration for chunked read-aloud. Other supported
    encodings work only for a single chunk; SAM refuses multi-chunk container formats before
-   spending provider calls. Keep `TTS_ENABLED` enabled when using read-aloud.
+   spending provider calls. Raw `pcm` output is unsupported and refused before a provider call,
+   because the browser audio route cannot play it. Keep `TTS_ENABLED` enabled for read-aloud.
 5. Refresh the app after saving. Capability queries may remain fresh in the existing browser
    query cache for up to five minutes. Check `/api/config/platform-capabilities` for
    `speechToText` and `textToSpeech`, then record a short known sentence in project chat and

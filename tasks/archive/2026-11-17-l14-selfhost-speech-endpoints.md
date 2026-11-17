@@ -103,3 +103,5 @@ instead of introducing a new cache-identity contract. The existing final-audio c
 - [x] Tenth P2: refuse non-MP3 multi-chunk endpoint output before paid fetch, avoiding concatenated complete WAV/FLAC/container files and silently truncated playback. Single-chunk formats and Cloudflare binding preserved. Three real-route cases wav/flac/opus RED before guard; single-chunk successful controls added.
 
 - [x] Eleventh/twelfth findings: propagate synthesis RateLimitError Retry-After through the real Hono response (positive hourlydelay assertion REDbeforefix→GREEN); add concrete single-box speech setup walkthrough in self-hosting.mdx with build/install/migration preconditions, AdminSettings exactkeys, encryptedAPIkeys, privateendpointoptin, formats/budgets/verification. CF, doc-sync and completion delta PASS; focused8files178PASS.
+
+- [x] Thirteenth P2: raw PCM endpoint output refused before provider fetch because browser cache route has no PCM sample/container metadata. RealroutePCM+octetstream regression REDold200→GREEN503/0fetch/0R2; focused8files179PASS, CF/completion/doc-sync deltaPASS; bothguidesdocumentrestriction.
