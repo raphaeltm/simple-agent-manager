@@ -130,6 +130,7 @@ import * as sessionActivityProbe from './session-activity-probe';
 import * as sessionActivityReconciliation from './session-activity-reconciliation';
 import * as sessionReads from './session-reads';
 import { guardedSessionSleep, type SessionSleepRuntimeGuard } from './session-sleep-runtime-guard';
+import { countLegacyToolSockets } from './session-sockets';
 import {
   admitBrowserSocket,
   broadcastToBrowserSockets,
@@ -150,6 +151,7 @@ import { resolveTaskWaitConfig } from './task-wait-config';
 import { processTaskWaits } from './task-wait-supervisor';
 import * as taskWaits from './task-waits';
 import * as terminalSessionReconciliation from './terminal-session-reconciliation';
+import { readToolChanges, sealToolMerging } from './tool-call-changes';
 import * as toolPayloadArchive from './tool-payload-archive';
 import type {
   ProjectDataManualToolPayloadCleanupInput,
@@ -923,6 +925,7 @@ export class ProjectData extends DurableObject<Env> {
       // Informational only: project sockets get no transcript frames and never gate merging.
       metrics.legacyProjectSocketsMax = legacy.project;
       const legacyClient = legacy.session > 0;
+      const toolLegacyClient = countLegacyToolSockets(this.ctx, sessionId);
       if (!config.enabled) refuseMerge(metrics, 'setting_disabled');
       else if (legacyClient) refuseMerge(metrics, 'legacy_client');
       return messagePersistence.persistMessageBatchWithSideEffects(
@@ -931,7 +934,11 @@ export class ProjectData extends DurableObject<Env> {
         this.messagePersistenceHooks(),
         sessionId,
         batchMessages,
-        { source, config: { ...config, enabled: config.enabled && !legacyClient }, metrics }
+        {
+          source,
+          config: { ...config, enabled: config.enabled && !legacyClient, toolLegacyClient },
+          metrics,
+        }
       );
     });
   }
@@ -1076,6 +1083,7 @@ export class ProjectData extends DurableObject<Env> {
 
   private messagePersistenceHooks(): messagePersistence.MessagePersistenceHooks {
     return {
+      isLegacyToolClient: (sessionId) => countLegacyToolSockets(this.ctx, sessionId),
       recordMessageIngest: (metrics) => this.rowUsage.recordMessageIngest(metrics),
       transactionSync: (fn) => this.meteredStorage.transactionSync(fn),
       recalculateAlarm: () => this.recalculateAlarm(),
@@ -1151,6 +1159,18 @@ export class ProjectData extends DurableObject<Env> {
   async getSession(sessionId: string): Promise<Record<string, unknown> | null> {
     const result = sessionReads.getSession(this.sql, sessionId);
     return result ? this.addBaseDomain(result) : null;
+  }
+
+  async getToolChanges(sessionId: string, afterRevision?: number, legacyClient = false) {
+    if (legacyClient) {
+      const config = await projectDataPorts().operations.messageMergeConfig?.(this.env);
+      if (config?.toolUpdatesEnabled && sealToolMerging(this.sql, sessionId)) {
+        const metrics = emptyMessageIngestMetrics();
+        metrics.toolSealedSessions = 1;
+        this.rowUsage.recordMessageIngest(metrics);
+      }
+    }
+    return readToolChanges(this.sql, this.env, sessionId, afterRevision);
   }
 
   async getMessages(
@@ -3781,7 +3801,11 @@ export class ProjectData extends DurableObject<Env> {
       const upgradeHeader = request.headers.get('Upgrade');
       if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket')
         return new Response('Expected WebSocket upgrade', { status: 426 });
-      return admitBrowserSocket(this.ctx, this.sql, url);
+      return admitBrowserSocket(this.ctx, this.sql, url, () => {
+        const metrics = emptyMessageIngestMetrics();
+        metrics.toolSealedSessions = 1;
+        this.rowUsage.recordMessageIngest(metrics);
+      });
     }
     return new Response('Not found', { status: 404 });
   }

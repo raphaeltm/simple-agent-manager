@@ -39,6 +39,7 @@ export type AdminSettingName =
   | DeploymentPublishJobSettingName
   | 'deployments.publishCallbackMaxBodyBytes'
   | 'chat.messageMergingEnabled'
+  | 'chat.toolCallMergingEnabled'
   | 'chat.messageMergeMaxRowBytes'
   | 'chat.messageMergeRecentIds'
   | `workflow.${keyof typeof WORKFLOW_DEFAULTS}`
