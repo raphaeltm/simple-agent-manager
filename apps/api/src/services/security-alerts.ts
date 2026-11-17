@@ -127,12 +127,9 @@ export async function deliverSecurityAlert(
             .bind(alert.userId)
             .first<{ email: string }>()
         : null;
+    const linkedRecipients = linkedOwner?.email ? [linkedOwner.email] : [];
     const recipients =
-      alert.kind === 'account-linked'
-        ? linkedOwner?.email
-          ? [linkedOwner.email]
-          : []
-        : await ownerRecipients(env);
+      alert.kind === 'account-linked' ? linkedRecipients : await ownerRecipients(env);
     if (recipients.length === 0) {
       log.error('security_alert.no_recipients', { kind: alert.kind });
       return;

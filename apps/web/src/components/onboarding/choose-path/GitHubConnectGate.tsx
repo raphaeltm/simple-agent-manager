@@ -12,7 +12,7 @@ import { useOnboarding } from '../OnboardingContext';
  * installations through the user's own GitHub authorization, so connect GitHub first. Accounts
  * that already have GitHub (or whose status cannot be read) see the step unchanged.
  */
-export function GitHubConnectGate({ children }: { children: ReactNode }) {
+export function GitHubConnectGate({ children }: { readonly children: ReactNode }) {
   const { dismissOnboarding } = useOnboarding();
   const queryScope = useQueryScope();
   const connected = useQuery(connectedProvidersQueryOptions(queryScope));

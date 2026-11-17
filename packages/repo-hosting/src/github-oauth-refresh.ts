@@ -59,12 +59,11 @@ export async function refreshGitHubAccessToken(env: Env, refreshToken: string) {
   const body = await response.json().catch(() => null);
   if (!response.ok) {
     log.warn('github_oauth_refresh_failed', { status: response.status });
+    const unavailable = response.status >= 500 || response.status === 429;
     throw new AppError(
-      response.status >= 500 || response.status === 429 ? 503 : 401,
-      response.status >= 500 || response.status === 429
-        ? 'GITHUB_UNAVAILABLE'
-        : 'GITHUB_REAUTH_REQUIRED',
-      response.status >= 500 || response.status === 429
+      unavailable ? 503 : 401,
+      unavailable ? 'GITHUB_UNAVAILABLE' : 'GITHUB_REAUTH_REQUIRED',
+      unavailable
         ? 'GitHub is temporarily unavailable. Please try again later.'
         : 'Your GitHub authorization needs to be renewed. Sign out and back in.'
     );

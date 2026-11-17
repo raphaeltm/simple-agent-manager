@@ -144,6 +144,12 @@ export function ConnectedAccountsSection() {
           {offered.map((provider) => {
             const isConnected = connected.data?.includes(provider) ?? false;
             const label = PROVIDER_LABELS[provider];
+            let statusLabel = 'Status unavailable';
+            if (connected.isSuccess) statusLabel = isConnected ? 'Connected' : 'Not connected';
+            let connectLabel = `Connect ${label}`;
+            if (confirmation?.provider === provider)
+              connectLabel = `Confirm connection to ${label}`;
+            if (connecting === provider) connectLabel = 'Please wait…';
             return (
               <li
                 key={provider}
@@ -152,13 +158,7 @@ export function ConnectedAccountsSection() {
               >
                 <span className="text-sm text-fg-primary">
                   {label}
-                  <span className="ml-2 text-xs text-fg-muted">
-                    {connected.isSuccess
-                      ? isConnected
-                        ? 'Connected'
-                        : 'Not connected'
-                      : 'Status unavailable'}
-                  </span>
+                  <span className="ml-2 text-xs text-fg-muted">{statusLabel}</span>
                 </span>
                 {!isConnected ? (
                   <Button
@@ -170,11 +170,7 @@ export function ConnectedAccountsSection() {
                     disabled={connecting !== null || !connected.isSuccess}
                     onClick={() => void handleConnect(provider)}
                   >
-                    {connecting === provider
-                      ? 'Please wait…'
-                      : confirmation?.provider === provider
-                        ? `Confirm connection to ${label}`
-                        : `Connect ${label}`}
+                    {connectLabel}
                   </Button>
                 ) : (
                   <Button

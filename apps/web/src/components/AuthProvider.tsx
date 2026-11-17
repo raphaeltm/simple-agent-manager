@@ -91,7 +91,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const isPending = sessionRequestPending && !confirmedSignedOutRef.current;
   const [githubReauthMessage, setGitHubReauthMessage] = useState<string | null>(null);
   // True when the account has no GitHub link at all: signing out cannot fix that, connecting can.
-  const [githubNotConnected, setGitHubNotConnected] = useState(false);
+  const [githubNotConnected, setGithubNotConnected] = useState(false);
   const [activeCacheNamespace, setActiveCacheNamespace] = useState<string | null | undefined>(
     undefined
   );
@@ -206,7 +206,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         window.location.pathname === '/settings/github'
       )
         return;
-      setGitHubNotConnected(detail?.code === 'GITHUB_NOT_CONNECTED');
+      setGithubNotConnected(detail?.code === 'GITHUB_NOT_CONNECTED');
       setGitHubReauthMessage(
         typeof detail?.message === 'string' && detail.message.length > 0
           ? detail.message

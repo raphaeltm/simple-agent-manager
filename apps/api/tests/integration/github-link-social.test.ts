@@ -170,7 +170,7 @@ describe('Connect GitHub for an email-signed account (vertical slice)', () => {
       },
       env
     );
-    expect(response.status).toBe(200);
+    expect(response.status, response.status === 200 ? '' : await response.clone().text()).toBe(200);
     const message = sent.at(-1);
     expect(message?.to).toBe(SAM_EMAIL);
     const url = new URL(/https:\/\/[^\s]+/.exec(message?.text ?? '')?.[0] ?? '');

@@ -29,7 +29,7 @@ export function clearProjectMemberDerivedCaches(projectId: string): void {
   clearCredentialAttributionHealthCache(projectId);
 }
 export function parsePositiveEnvInt(value: string | undefined, fallback: number): number {
-  const parsed = parseInt(value ?? '', 10);
+  const parsed = Number.parseInt(value ?? '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 export function addDays(now: Date, days: number): Date {
@@ -41,7 +41,7 @@ export function generateInviteToken(tokenBytes: number): string {
   const bytes = new Uint8Array(tokenBytes);
   crypto.getRandomValues(bytes);
   let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i] ?? 0);
+  for (const byte of bytes) binary += String.fromCodePoint(byte);
   const base64url = btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
   return `${INVITE_TOKEN_PREFIX}${base64url}`;
 }
