@@ -23,13 +23,14 @@ import type {
 } from '@simple-agent-manager/shared';
 
 import { accountRows, mergeRows } from '../unit/components/accounts/fixtures';
+import { acmeBillingProject, acmeBillingUser } from './acme-billing-fixtures';
 import {
   assertNoClippedOverflow,
   assertNoOverflow,
-  makeMockUser,
   screenshot,
 } from './audit-helpers';
 import { RUNS, SCHEDULES, TRIGGERS } from './automation-fixtures';
+import { docsShot } from './docs-shot';
 import { KIND_ITEMS, MANY_ITEMS } from './inbox-fixtures';
 import { makeFlow } from './insights-fixtures';
 
@@ -44,34 +45,9 @@ const LONG_TITLE =
   'Migrate the invoicing pipeline from the legacy cron worker to durable queues, backfill three years of historical invoices, and verify every tax total against the accounting export before switching traffic';
 const LONG_TOKEN = `refactor-${'unbroken-identifier-'.repeat(8)}end`;
 
-const MOCK_USER = makeMockUser({
-  email: 'raph@example.com',
-  name: 'Raph',
-  sessionId: 'session-overview',
-  userId: USER_ID,
-});
+const MOCK_USER = acmeBillingUser(USER_ID, 'session-overview');
 
-const MOCK_PROJECT = {
-  id: PROJECT_ID,
-  name: 'Acme Billing',
-  repository: 'acme/billing',
-  repoProvider: 'github',
-  defaultBranch: 'main',
-  userId: USER_ID,
-  installationId: 'inst-1',
-  defaultWorkspaceProfile: 'full',
-  defaultDevcontainerConfigName: '',
-  createdAt: '2026-10-01T00:00:00Z',
-  updatedAt: '2026-11-15T00:00:00Z',
-  multiplayerActive: false,
-  summary: {
-    activeWorkspaceCount: 0,
-    activeSessionCount: 0,
-    lastActivityAt: null,
-    taskCountsByStatus: {},
-    linkedWorkspaces: 0,
-  },
-};
+const MOCK_PROJECT = acmeBillingProject(PROJECT_ID, USER_ID);
 
 function profile(id: string, name: string, agentType: string, model: string | null = null) {
   return {
@@ -509,8 +485,8 @@ async function setupScene(page: Page, options: SceneOptions) {
           members: [
             {
               userId: USER_ID,
-              name: 'Raph',
-              email: 'raph@example.com',
+              name: 'Dana Reyes',
+              email: 'dana@example.com',
               avatarUrl: null,
               role: 'owner',
               status: 'active',
@@ -591,7 +567,7 @@ async function expectTaskBoxPinned(page: Page) {
 }
 
 test.describe('Project Overview', () => {
-  test('normal project', async ({ page }) => {
+  test('normal project', async ({ page }, testInfo) => {
     await setupScene(page, {
       scene: 'normal',
       budget: 'normal',
@@ -620,6 +596,8 @@ test.describe('Project Overview', () => {
       `/projects/${PROJECT_ID}/insights/flow?range=7d`
     );
     await expectTaskBoxPinned(page);
+    // Docs image (project-overview.md): the first screen, before capture() grows the scrollers.
+    await docsShot(page, isPhone(testInfo) ? 'project-overview-mobile' : 'project-overview');
     await capture(page, 'overview-normal');
   });
 
@@ -855,7 +833,7 @@ test.describe('Project Overview as the landing page, with Needs you (slice F2)',
     });
     await page.goto(BASE);
     const rows = await needsYouRows(page);
-    await expect(rows.first()).toContainText('Couldn’t start');
+    await expect(rows.first()).toContainText('“Fix rounding in tax totals” couldn’t start');
     await expect(rows.first()).toContainText('never started');
     await capture(page, 'overview-f2-failed-start-item');
     await rows.first().getByRole('button').click();

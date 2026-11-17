@@ -318,7 +318,7 @@ test('docs: a new chat offers recent profiles as cards', async ({ page }) => {
   // The usage this image exists to show: a ring and words on the nearly-used-up account, and
   // the warning above the message box.
   const brainstormer = cards.getByRole('button', { name: /^Brainstormer/ });
-  await expect(brainstormer.getByText(/^6% left · resets/)).toBeVisible();
+  await expect(brainstormer.getByText(/5h 6% left · resets/)).toBeVisible();
   await expect(page.getByTestId('profile-usage-nudge')).toContainText('6% left on Personal Max');
   await page.mouse.move(2, 2);
   if (isMobile(page)) {

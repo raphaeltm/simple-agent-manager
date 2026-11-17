@@ -13,12 +13,13 @@
 import { expect, type Page, type Route, test, type TestInfo } from '@playwright/test';
 import { isInsightsRange } from '@simple-agent-manager/shared';
 
+import { acmeBillingProject, acmeBillingUser } from './acme-billing-fixtures';
 import {
   assertNoClippedOverflow,
   assertNoOverflow,
-  makeMockUser,
   screenshot,
 } from './audit-helpers';
+import { docsShot } from './docs-shot';
 import { type AccountsScene, makeAccounts } from './insights-accounts-fixtures';
 import { type FlowScene, makeFlow } from './insights-fixtures';
 import { makeSetups, type SetupsScene } from './insights-setups-fixtures';
@@ -27,34 +28,9 @@ const PROJECT_ID = 'proj-insights';
 const USER_ID = 'user-insights';
 const BASE = `/projects/${PROJECT_ID}/insights`;
 
-const MOCK_USER = makeMockUser({
-  email: 'raph@example.com',
-  name: 'Raph',
-  sessionId: 'session-insights',
-  userId: USER_ID,
-});
+const MOCK_USER = acmeBillingUser(USER_ID, 'session-insights');
 
-const MOCK_PROJECT = {
-  id: PROJECT_ID,
-  name: 'Acme Billing',
-  repository: 'acme/billing',
-  repoProvider: 'github',
-  defaultBranch: 'main',
-  userId: USER_ID,
-  installationId: 'inst-1',
-  defaultWorkspaceProfile: 'full',
-  defaultDevcontainerConfigName: '',
-  createdAt: '2026-10-01T00:00:00Z',
-  updatedAt: '2026-11-15T00:00:00Z',
-  multiplayerActive: false,
-  summary: {
-    activeWorkspaceCount: 0,
-    activeSessionCount: 0,
-    lastActivityAt: null,
-    taskCountsByStatus: {},
-    linkedWorkspaces: 0,
-  },
-};
+const MOCK_PROJECT = acmeBillingProject(PROJECT_ID, USER_ID);
 
 async function setupScene(
   page: Page,
@@ -155,6 +131,8 @@ function onlyOn(names: string[]) {
 }
 test.beforeEach(onlyOn(['iPhone SE (375x667)', 'Desktop (1280x800)']));
 
+const isPhoneViewport = (page: Page) => (page.viewportSize()?.width ?? 0) < 640;
+
 async function capture(page: Page, name: string) {
   await expect(page.getByText('Something went wrong')).toHaveCount(0);
   await assertNoOverflow(page);
@@ -200,6 +178,8 @@ test.describe('Insights', () => {
       page.getByTestId('insights-waiting-ideas').getByRole('link', { name: /Tax ID validation/ })
     ).toHaveAttribute('href', `/projects/${PROJECT_ID}/ideas/idea-c`);
     await expect(page.getByTestId('insights-waiting-ideas')).toContainText('PR open, CI red');
+    // Docs image (insights.md): the first screen, before capture() grows the scrollers.
+    await docsShot(page, isPhoneViewport(page) ? 'insights-flow-mobile' : 'insights-flow');
     await capture(page, 'insights-flow-realistic');
   });
 

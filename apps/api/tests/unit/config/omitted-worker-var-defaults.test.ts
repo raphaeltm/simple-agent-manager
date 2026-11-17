@@ -339,7 +339,7 @@ const READ_PATHS: readonly ReadPath[] = [
   },
   {
     label: 'resolveMaxMessageBytes',
-    sources: [`${API}/routes/workspaces/runtime.ts`],
+    sources: [`${API}/routes/workspaces/runtime-message-helpers.ts`],
     read: (env) => resolveMaxMessageBytes(asEnv(env)),
   },
   {
