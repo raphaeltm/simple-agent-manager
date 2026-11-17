@@ -127,6 +127,8 @@ function createDoContext() {
         row = { ...row, cleanup_pending: 1, cleanup_from_status: args[0], cleanup_attempts: 0 };
       } else if (normalized.includes('set cleanup_pending = 0') && row) {
         row = { ...row, cleanup_pending: 0 };
+      } else if (normalized.includes('set cleanup_sandbox_destroyed = 1') && row) {
+        row = { ...row, cleanup_sandbox_destroyed: 1 };
       } else if (normalized.includes('set cleanup_attempts = ?') && row) {
         row = { ...row, cleanup_attempts: args[0] };
       } else if (normalized.includes('update setup_session') && row) {
