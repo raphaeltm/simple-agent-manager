@@ -66,12 +66,6 @@ vi.mock('../../../src/services/file-library', () => ({
   validateDirectory: mockValidateDirectory,
 }));
 
-vi.mock('../../../src/services/admin-settings', () => ({
-  resolveAdminSettingDetailsMany: vi.fn(async () =>
-    [50 * 1024 * 1024, 64 * 1024, 16, 8192, 120_000].map((value) => ({ value }))
-  ),
-}));
-
 import { Hono } from 'hono';
 
 import type { Env } from '../../../src/env';
@@ -88,6 +82,12 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     ...overrides,
   } as Env;
 }
+
+vi.mock('../../../src/services/admin-settings', () => ({
+  resolveAdminSettingDetailsMany: vi.fn(async () =>
+    [50 * 1024 * 1024, 64 * 1024, 16, 8192, 120_000].map((value) => ({ value }))
+  ),
+}));
 
 // Hoisted by Vitest; declared below the fixtures to keep their line numbers stable.
 vi.mock('../../../src/lib/logger', async (importOriginal) => ({

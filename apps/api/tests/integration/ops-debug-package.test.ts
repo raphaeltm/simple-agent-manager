@@ -56,13 +56,17 @@ function memoryR2(): R2Bucket {
       value: ArrayBuffer,
       options?: { customMetadata?: Record<string, string> }
     ) => {
-      r2Objects.set(key, { data: value, customMetadata: options?.customMetadata });
+      // R2 consumes the bytes before put resolves; callers retain ownership of their input.
+      r2Objects.set(key, { data: value.slice(0), customMetadata: options?.customMetadata });
       return {};
     },
     get: async (key: string) => {
       const object = r2Objects.get(key);
       if (!object) return null;
-      return { customMetadata: object.customMetadata, arrayBuffer: async () => object.data };
+      return {
+        customMetadata: object.customMetadata,
+        arrayBuffer: async () => object.data.slice(0),
+      };
     },
     // R2's binding accepts one key or an array of keys.
     delete: async (keys: string | string[]) => {
