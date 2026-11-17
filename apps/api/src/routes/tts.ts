@@ -48,12 +48,10 @@ ttsRoutes.post('/synthesize', async (c) => {
     );
   }
   // A backend spends the admin's endpoint on every miss; it decides whether this user may.
-  try {
-    await backend?.admit(c.env, userId);
-  } catch (err) {
+  await backend?.admit(c.env, userId).catch((err: unknown) => {
     if (err instanceof RateLimitError) c.header('Retry-After', String(err.retryAfter));
     throw err;
-  }
+  });
 
   const body = await parseOptionalBody(c.req.raw, TtsRequestSchema, {});
   if (!body.text || !body.storageId) {
