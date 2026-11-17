@@ -33,7 +33,9 @@ const databases: Database.Database[] = [];
 beforeAll(() => {
   const sqlite = new Database(':memory:');
   const directory = join(process.cwd(), 'src/db/migrations');
-  for (const file of readdirSync(directory).filter((name) => name.endsWith('.sql')).sort()) {
+  for (const file of readdirSync(directory)
+    .filter((name) => name.endsWith('.sql'))
+    .sort()) {
     sqlite.exec(readFileSync(join(directory, file), 'utf8'));
   }
   template = sqlite.serialize();
@@ -51,7 +53,10 @@ afterEach(() => {
 });
 
 /** Real reconciliation writes the anchor; real pool editing, selection and node creation pin it. */
-async function fixture(scope: 'user' | 'project' = 'project', kind: 'composable' | 'legacy' | 'platform' = 'composable') {
+async function fixture(
+  scope: 'user' | 'project' = 'project',
+  kind: 'composable' | 'legacy' | 'platform' = 'composable'
+) {
   const sqlite = migratedDatabase();
   const env = { DATABASE: createSqliteD1WithBindLimit(sqlite, D1_MAX_BOUND_PARAMETERS) } as Env;
   const db = drizzle(env.DATABASE, { schema });
@@ -69,49 +74,96 @@ async function fixture(scope: 'user' | 'project' = 'project', kind: 'composable'
   `);
   if (kind === 'composable') {
     await db.insert(schema.ccCredentials).values({
-      id: 'credential-1', ownerId: 'user-1', name: 'Compute', kind: 'cloud-provider',
-      encryptedToken: 'fixture-ciphertext', iv: 'fixture-iv', isActive: true,
-      createdAt: TIMESTAMP, updatedAt: TIMESTAMP,
+      id: 'credential-1',
+      ownerId: 'user-1',
+      name: 'Compute',
+      kind: 'cloud-provider',
+      encryptedToken: 'fixture-ciphertext',
+      iv: 'fixture-iv',
+      isActive: true,
+      createdAt: TIMESTAMP,
+      updatedAt: TIMESTAMP,
     });
     await db.insert(schema.ccConfigurations).values({
-      id: 'configuration-1', ownerId: 'user-1', name: 'Compute', consumerKind: 'compute',
-      consumerTarget: 'hetzner', credentialId: 'credential-1', isActive: true,
-      createdAt: TIMESTAMP, updatedAt: TIMESTAMP,
+      id: 'configuration-1',
+      ownerId: 'user-1',
+      name: 'Compute',
+      consumerKind: 'compute',
+      consumerTarget: 'hetzner',
+      credentialId: 'credential-1',
+      isActive: true,
+      createdAt: TIMESTAMP,
+      updatedAt: TIMESTAMP,
     });
     await db.insert(schema.ccAttachments).values({
-      id: 'attachment-1', configurationId: 'configuration-1', consumerKind: 'compute',
-      consumerTarget: 'hetzner', userId: 'user-1', projectId: scope === 'project' ? 'project-1' : null,
-      isActive: true, createdAt: TIMESTAMP, updatedAt: TIMESTAMP,
+      id: 'attachment-1',
+      configurationId: 'configuration-1',
+      consumerKind: 'compute',
+      consumerTarget: 'hetzner',
+      userId: 'user-1',
+      projectId: scope === 'project' ? 'project-1' : null,
+      isActive: true,
+      createdAt: TIMESTAMP,
+      updatedAt: TIMESTAMP,
     });
   } else if (kind === 'legacy') {
     await db.insert(schema.credentials).values({
-      id: 'legacy-1', userId: 'user-1', projectId: scope === 'project' ? 'project-1' : null,
-      provider: 'hetzner', credentialType: 'cloud-provider', encryptedToken: 'fixture-ciphertext',
-      iv: 'fixture-iv', isActive: true, createdAt: TIMESTAMP, updatedAt: TIMESTAMP,
+      id: 'legacy-1',
+      userId: 'user-1',
+      projectId: scope === 'project' ? 'project-1' : null,
+      provider: 'hetzner',
+      credentialType: 'cloud-provider',
+      encryptedToken: 'fixture-ciphertext',
+      iv: 'fixture-iv',
+      isActive: true,
+      createdAt: TIMESTAMP,
+      updatedAt: TIMESTAMP,
     });
   } else {
     await db.insert(schema.platformCredentials).values({
-      id: 'platform-1', createdBy: 'user-1', label: 'Compute', provider: 'hetzner',
-      credentialType: 'cloud-provider', encryptedToken: 'fixture-ciphertext', iv: 'fixture-iv',
-      isEnabled: true, createdAt: TIMESTAMP, updatedAt: TIMESTAMP,
+      id: 'platform-1',
+      createdBy: 'user-1',
+      label: 'Compute',
+      provider: 'hetzner',
+      credentialType: 'cloud-provider',
+      encryptedToken: 'fixture-ciphertext',
+      iv: 'fixture-iv',
+      isEnabled: true,
+      createdAt: TIMESTAMP,
+      updatedAt: TIMESTAMP,
     });
   }
   await ensureDefaultCapacityPoolsForExistingCredentials(db, {
-    userId: 'user-1', projectId: 'project-1', includeInstallation: kind === 'platform',
+    userId: 'user-1',
+    projectId: 'project-1',
+    includeInstallation: kind === 'platform',
     offeringResolver: async () => [offering('hetzner', 'fsn1', 'cx23')],
   });
   await pickStarterMachines(db);
-  const selection = await resolveTaskStartCapacityPoolSelection(db, resolveTaskStartPlacement({
-    entryPoint: 'task-submit', taskId: 'task-1', userId: 'user-1', projectId: 'project-1',
-    project: { id: 'project-1', defaultVmSize: 'small' },
-    credentialProjectPolicy: 'current-project-unless-inherited', taskModeDefault: 'task',
-  }), { ensure: false, failOpen: false, env });
+  const selection = await resolveTaskStartCapacityPoolSelection(
+    db,
+    resolveTaskStartPlacement({
+      entryPoint: 'task-submit',
+      taskId: 'task-1',
+      userId: 'user-1',
+      projectId: 'project-1',
+      project: { id: 'project-1', defaultVmSize: 'small' },
+      credentialProjectPolicy: 'current-project-unless-inherited',
+      taskModeDefault: 'task',
+    }),
+    { ensure: false, failOpen: false, env }
+  );
   expect(selection?.candidates).toHaveLength(1);
   const snapshot = capacityPlacementSnapshotForTaskStart(selection);
   if (!snapshot) throw new Error('Expected reconciled capacity snapshot');
   const node = await createNodeRecord(env, {
-    userId: 'user-1', name: 'anchor-node', vmSize: 'small', vmLocation: 'fsn1',
-    cloudProvider: 'hetzner', heartbeatStaleAfterSeconds: 180, capacityPlacementSnapshot: snapshot,
+    userId: 'user-1',
+    name: 'anchor-node',
+    vmSize: 'small',
+    vmLocation: 'fsn1',
+    cloudProvider: 'hetzner',
+    heartbeatStaleAfterSeconds: 180,
+    capacityPlacementSnapshot: snapshot,
   });
   return { sqlite, env, snapshot, nodeId: node.id };
 }
@@ -123,52 +175,91 @@ async function validate(f: Fixture): Promise<void> {
 }
 
 function makeRunning(f: Fixture): void {
-  f.sqlite.prepare(`UPDATE nodes SET status = 'running', provider_instance_id = 'provider-vm',
+  f.sqlite
+    .prepare(
+      `UPDATE nodes SET status = 'running', provider_instance_id = 'provider-vm',
     observed_hardware_source = 'observed', observed_provider_instance_vcpu_count = 4,
     observed_provider_instance_memory_mb = 16384, observed_provider_instance_disk_gb = 50
-    WHERE id = ?`).run(f.nodeId);
+    WHERE id = ?`
+    )
+    .run(f.nodeId);
 }
 
 async function reusable(f: Fixture, count = 1): Promise<Set<string>> {
   return filterReusableNodesByCurrentAuthority(f.env.DATABASE, {
-    userId: 'user-1', projectId: 'project-1', selections: Array.from({ length: count }, () => ({
-      nodeId: f.nodeId, capacityPlacementSnapshot: f.snapshot,
+    userId: 'user-1',
+    projectId: 'project-1',
+    selections: Array.from({ length: count }, () => ({
+      nodeId: f.nodeId,
+      capacityPlacementSnapshot: f.snapshot,
     })),
   });
 }
 
 describe('composable allocation authority after real pool reconciliation (#2843)', () => {
-  it.each(['user', 'project'] as const)('accepts the exact secret-free %s anchor and final workspace reservation', async (scope) => {
-    const f = await fixture(scope);
-    expect(f.sqlite.prepare('SELECT credential_id FROM capacity_sources WHERE id = ?')
-      .get(f.snapshot.capacitySourceId)).toEqual({
+  it.each(['user', 'project'] as const)(
+    'accepts the exact secret-free %s anchor and final workspace reservation',
+    async (scope) => {
+      const f = await fixture(scope);
+      expect(
+        f.sqlite
+          .prepare('SELECT credential_id FROM capacity_sources WHERE id = ?')
+          .get(f.snapshot.capacitySourceId)
+      ).toEqual({
         credential_id: externalCapacitySourceCredentialId(EXTERNAL_REF, VERSION),
       });
-    expect(f.sqlite.prepare('SELECT credential_type, encrypted_token, iv FROM credentials WHERE id = ?')
-      .get(externalCapacitySourceCredentialId(EXTERNAL_REF, VERSION))).toEqual({
-        credential_type: 'capacity-source-external-ref', encrypted_token: '', iv: '',
+      expect(
+        f.sqlite
+          .prepare('SELECT credential_type, encrypted_token, iv FROM credentials WHERE id = ?')
+          .get(externalCapacitySourceCredentialId(EXTERNAL_REF, VERSION))
+      ).toEqual({
+        credential_type: 'capacity-source-external-ref',
+        encrypted_token: '',
+        iv: '',
       });
-    await validate(f);
-    makeRunning(f);
-    // Force reuse to split at the D1 bind ceiling even when snapshots are identical.
-    expect(await reusable(f, D1_MAX_BOUND_PARAMETERS + 1)).toEqual(new Set([f.nodeId]));
-    const result = await reserveWorkspacePlacement(f.env.DATABASE, {
-      id: 'workspace-1', nodeId: f.nodeId, projectId: 'project-1', userId: 'user-1',
-      installationId: 'installation-1', name: 'anchor', displayName: 'Anchor',
-      normalizedDisplayName: 'anchor', repository: 'acme/anchor', branch: 'main',
-      vmSize: 'small', vmLocation: 'fsn1', workspaceProfile: 'full',
-      devcontainerConfigName: null, agentProfileHint: null,
-      capacityPlacementSnapshot: f.snapshot,
-      resolvedReservation: resolveResourceReservation({}, { projectId: 'project-1', userId: 'user-1' }),
-      createdAt: new Date().toISOString(),
-    }, await resolvePlacementAdmissionPolicy(f.env));
-    expect(result).toBe(true);
-    expect(f.sqlite.prepare('SELECT node_id FROM workspaces WHERE id = ?').get('workspace-1'))
-      .toEqual({ node_id: f.nodeId });
-  });
+      await validate(f);
+      makeRunning(f);
+      // Force reuse to split at the D1 bind ceiling even when snapshots are identical.
+      expect(await reusable(f, D1_MAX_BOUND_PARAMETERS + 1)).toEqual(new Set([f.nodeId]));
+      const result = await reserveWorkspacePlacement(
+        f.env.DATABASE,
+        {
+          id: 'workspace-1',
+          nodeId: f.nodeId,
+          projectId: 'project-1',
+          userId: 'user-1',
+          installationId: 'installation-1',
+          name: 'anchor',
+          displayName: 'Anchor',
+          normalizedDisplayName: 'anchor',
+          repository: 'acme/anchor',
+          branch: 'main',
+          vmSize: 'small',
+          vmLocation: 'fsn1',
+          workspaceProfile: 'full',
+          devcontainerConfigName: null,
+          agentProfileHint: null,
+          capacityPlacementSnapshot: f.snapshot,
+          resolvedReservation: resolveResourceReservation(
+            {},
+            { projectId: 'project-1', userId: 'user-1' }
+          ),
+          createdAt: new Date().toISOString(),
+        },
+        await resolvePlacementAdmissionPolicy(f.env)
+      );
+      expect(result).toBe(true);
+      expect(
+        f.sqlite.prepare('SELECT node_id FROM workspaces WHERE id = ?').get('workspace-1')
+      ).toEqual({ node_id: f.nodeId });
+    }
+  );
 
   const mutations = [
-    ['unrelated legacy credential anchor', "UPDATE capacity_sources SET credential_id = 'unrelated'"],
+    [
+      'unrelated legacy credential anchor',
+      "UPDATE capacity_sources SET credential_id = 'unrelated'",
+    ],
     ['foreign attachment anchor', 'foreign-anchor'],
     ['stale anchor version', 'stale-anchor'],
     ['rotated credential', `UPDATE cc_credentials SET updated_at = '2024-01-01T00:00:00.000Z'`],
@@ -188,12 +279,27 @@ describe('composable allocation authority after real pool reconciliation (#2843)
     ['foreign pool project', "UPDATE capacity_pools SET owner_project_id = 'project-2'"],
     ['inactive pool', "UPDATE capacity_pools SET status = 'disabled'"],
     ['inactive source', "UPDATE capacity_sources SET status = 'disabled'"],
-    ['excluded source', "UPDATE capacity_pools SET excluded_source_ids_json = (SELECT json_array(id) FROM capacity_sources LIMIT 1)"],
+    [
+      'excluded source',
+      'UPDATE capacity_pools SET excluded_source_ids_json = (SELECT json_array(id) FROM capacity_sources LIMIT 1)',
+    ],
     ['inactive candidate', "UPDATE capacity_pool_candidates SET status = 'disabled'"],
-    ['unavailable candidate', "UPDATE capacity_pool_candidates SET catalog_availability = 'last-known-unavailable'"],
-    ['source version drift', 'UPDATE capacity_sources SET credential_version = credential_version + 1'],
-    ['source generation drift', 'UPDATE capacity_sources SET authority_generation = authority_generation + 1'],
-    ['candidate hardware drift', 'UPDATE capacity_pool_candidates SET provider_instance_memory_mb = 32768'],
+    [
+      'unavailable candidate',
+      "UPDATE capacity_pool_candidates SET catalog_availability = 'last-known-unavailable'",
+    ],
+    [
+      'source version drift',
+      'UPDATE capacity_sources SET credential_version = credential_version + 1',
+    ],
+    [
+      'source generation drift',
+      'UPDATE capacity_sources SET authority_generation = authority_generation + 1',
+    ],
+    [
+      'candidate hardware drift',
+      'UPDATE capacity_pool_candidates SET provider_instance_memory_mb = 32768',
+    ],
     ['configuration provider drift', "UPDATE cc_configurations SET consumer_target = 'vultr'"],
     ['attachment provider drift', "UPDATE cc_attachments SET consumer_target = 'vultr'"],
   ] as const;
@@ -205,14 +311,19 @@ describe('composable allocation authority after real pool reconciliation (#2843)
     makeRunning(f);
     expect(await reusable(f)).toEqual(new Set([f.nodeId]));
     if (mutation.endsWith('-anchor') || mutation.includes('unrelated')) {
-      const id = mutation === 'foreign-anchor'
-        ? externalCapacitySourceCredentialId('cc_attachments:foreign-attachment', VERSION)
-        : mutation === 'stale-anchor'
-          ? externalCapacitySourceCredentialId(EXTERNAL_REF, VERSION - 1)
-          : 'unrelated';
+      const id =
+        mutation === 'foreign-anchor'
+          ? externalCapacitySourceCredentialId('cc_attachments:foreign-attachment', VERSION)
+          : mutation === 'stale-anchor'
+            ? externalCapacitySourceCredentialId(EXTERNAL_REF, VERSION - 1)
+            : 'unrelated';
       await drizzle(f.env.DATABASE, { schema }).insert(schema.credentials).values({
-        id, userId: 'user-2', provider: 'hetzner', credentialType: 'capacity-source-external-ref',
-        encryptedToken: '', iv: '',
+        id,
+        userId: 'user-2',
+        provider: 'hetzner',
+        credentialType: 'capacity-source-external-ref',
+        encryptedToken: '',
+        iv: '',
       });
       f.sqlite.prepare('UPDATE capacity_sources SET credential_id = ?').run(id);
     } else {
@@ -236,7 +347,9 @@ describe('composable allocation authority after real pool reconciliation (#2843)
   it('preserves the older null-anchor shape without allowing it in the current schema', async () => {
     const f = await fixture();
     await validate(f);
-    expect(() => f.sqlite.exec('UPDATE capacity_sources SET credential_id = NULL')).toThrow(/CHECK/);
+    expect(() => f.sqlite.exec('UPDATE capacity_sources SET credential_id = NULL')).toThrow(
+      /CHECK/
+    );
     // Only this compatibility control bypasses the shipped CHECK. Every other test uses it.
     f.sqlite.pragma('ignore_check_constraints = ON');
     f.sqlite.exec('UPDATE capacity_sources SET credential_id = NULL');
@@ -260,21 +373,28 @@ describe('composable allocation authority after real pool reconciliation (#2843)
     expect(await reusable(f)).toEqual(new Set());
   });
 
-  it.each(['user', 'project'] as const)('does not grant %s credential authority to the anchor itself', async (scope) => {
-    const f = await fixture(scope);
-    await validate(f);
-    const ref = `credentials:${externalCapacitySourceCredentialId(EXTERNAL_REF, VERSION)}`;
-    f.sqlite.prepare('UPDATE capacity_sources SET credential_reference = ?').run(ref);
-    f.sqlite.prepare('UPDATE nodes SET placement_credential_reference = ?').run(ref);
-    await expect(validate(f)).rejects.toThrow('Node allocation plan is no longer current');
-  });
+  it.each(['user', 'project'] as const)(
+    'does not grant %s credential authority to the anchor itself',
+    async (scope) => {
+      const f = await fixture(scope);
+      await validate(f);
+      const ref = `credentials:${externalCapacitySourceCredentialId(EXTERNAL_REF, VERSION)}`;
+      f.sqlite.prepare('UPDATE capacity_sources SET credential_reference = ?').run(ref);
+      f.sqlite.prepare('UPDATE nodes SET placement_credential_reference = ?').run(ref);
+      await expect(validate(f)).rejects.toThrow('Node allocation plan is no longer current');
+    }
+  );
 
   it.each(['legacy', 'platform'] as const)('preserves %s credential controls', async (kind) => {
     const f = await fixture('user', kind);
     await validate(f);
     makeRunning(f);
     expect(await reusable(f)).toEqual(new Set([f.nodeId]));
-    f.sqlite.exec(kind === 'legacy' ? 'UPDATE credentials SET is_active = 0' : 'UPDATE platform_credentials SET is_enabled = 0');
+    f.sqlite.exec(
+      kind === 'legacy'
+        ? 'UPDATE credentials SET is_active = 0'
+        : 'UPDATE platform_credentials SET is_enabled = 0'
+    );
     await expect(validate(f)).rejects.toThrow('Node allocation plan is no longer current');
     expect(await reusable(f)).toEqual(new Set());
   });

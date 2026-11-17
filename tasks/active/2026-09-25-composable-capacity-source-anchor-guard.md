@@ -124,7 +124,10 @@ Regression coverage here must drive the real writer rather than hand-seed the an
   chunks at 74 node IDs plus 26 authority binds. No extra database round trips were added.
 - CodeRabbit requested once via trusted workflow `44054989276`; it responded rate-limited
   on 2026-11-17 at 09:23:52 UTC. No review; wait ended per policy, no retry.
-- Root test suite and manual full CI pending. Staging reservation run `44054221451`;
+- Full root tests passed: 39 Turbo tasks; API 16,620 passed / 4 skipped across 1,089 files
+  (1,086 passed / 3 skipped), web 5,366 passed. No failed suite summaries.
+  Format ratchet passed (2,118/2,180 baseline unformatted files); new test/task format checks pass.
+- Manual full CI finishing; quick CI passed. Staging reservation run `44054221451`;
   primary staging turn estimated 10:43:57 UTC. No staging deployment yet.
 - No production deployment, merge, or readiness action permitted.
 - Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/2853 (held in SAM).
