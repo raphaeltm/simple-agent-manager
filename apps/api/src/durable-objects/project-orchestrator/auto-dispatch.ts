@@ -250,7 +250,7 @@ export async function autoDispatchSchedulableTasks(
              ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS},
              updated_at = ?
          WHERE id = ? AND status='queued' AND (chat_session_id IS NULL OR chat_session_id = ?)
-           AND EXISTS (SELECT 1 FROM missions WHERE missions.id=tasks.mission_id AND missions.status='active')`
+           AND EXISTS (SELECT 1 FROM missions WHERE missions.id=tasks.mission_id AND missions.status IN ('planning','active'))`
       )
         .bind(
           sessionId,

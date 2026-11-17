@@ -335,13 +335,21 @@ describe('VM prompt delivery adapter', () => {
         if (failure === 'storage_failure') throw new Error('SQLite temporarily unavailable');
         return false;
       });
+      const externalSend = vi.fn();
+      mocks.sendPromptToAgentOnNode.mockImplementationOnce(async (...args: unknown[]) => {
+        // The transport owns this last pre-fetch hook; entering it is not a send.
+        const options = args[7] as { beforeExternalMutation: () => Promise<void> };
+        await options.beforeExternalMutation();
+        return externalSend();
+      });
       const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
       await expect(adapter.submit({ ...input(false), beforeSubmit })).resolves.toMatchObject({
         kind: 'retry',
         reason: 'not_ready',
       });
       expect(beforeSubmit).toHaveBeenCalledWith(promptProtocolCapabilities);
-      expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+      expect(mocks.sendPromptToAgentOnNode).toHaveBeenCalledTimes(1);
+      expect(externalSend).not.toHaveBeenCalled();
     }
   );
 

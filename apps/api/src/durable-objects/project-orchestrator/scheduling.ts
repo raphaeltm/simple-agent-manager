@@ -282,9 +282,24 @@ async function terminalizeMission(
   reason: string,
   now: number
 ): Promise<void> {
-  await env.DATABASE.prepare('UPDATE missions SET status = ?, updated_at = ? WHERE id = ?')
-    .bind(status, new Date(now).toISOString(), missionId)
+  const result = await env.DATABASE.prepare(
+    `UPDATE missions SET status = ?, updated_at = ? WHERE id = ?
+    AND project_id = ? AND status IN ('planning','active')
+    AND (? = 'max_mission_lifetime' OR NOT EXISTS (
+      SELECT 1 FROM tasks WHERE tasks.mission_id=missions.id
+        AND tasks.project_id=missions.project_id AND tasks.status NOT IN ('completed','failed','cancelled')
+    ))`
+  )
+    .bind(status, new Date(now).toISOString(), missionId, projectId, reason)
     .run();
+  if (!result.meta.changes) {
+    const current = await env.DATABASE.prepare(
+      'SELECT status FROM missions WHERE id=? AND project_id=?'
+    )
+      .bind(missionId, projectId)
+      .first<{ status: string }>();
+    if (current && !['completed', 'failed', 'cancelled'].includes(current.status)) return;
+  }
 
   // Cancellation can install its durable marker while the D1 write is suspended.
   // Only the cancellation owner may remove that tracking row.

@@ -26,7 +26,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import { mapRows, parseRowOrNull } from '../row-validation';
-import { cancelTrackedMission } from './cancel-mission';
+import { cancelTrackedMission, expireMissionCancellations } from './cancel-mission';
 import { continuationDelay } from './cancellation-config';
 import { logDecision, pruneDecisionLog } from './decision-log';
 import { runOrchestratorMigrations } from './migrations';
@@ -370,6 +370,15 @@ export class ProjectOrchestrator extends DurableObject<Env> {
   // =========================================================================
 
   override async alarm(): Promise<void> {
+    expireMissionCancellations(this.ctx.storage.sql);
+    if (
+      !this.ctx.storage.sql
+        .exec(
+          "SELECT 1 FROM orchestrator_missions WHERE status IN ('active', 'completing', 'cancelling') LIMIT 1"
+        )
+        .toArray().length
+    )
+      return;
     if (await deferAlarmWhenDisabled(this.env, this.ctx.storage, 'ProjectOrchestrator')) return;
 
     const config = resolveOrchestratorConfig(this.env);
@@ -404,7 +413,8 @@ export class ProjectOrchestrator extends DurableObject<Env> {
 
     if (activeMissions.length > 0) {
       await this.ctx.storage.setAlarm(
-        Date.now() + continuationDelay(this.ctx.storage.sql, this.env, config.schedulingIntervalMs)
+        Date.now() +
+          (await continuationDelay(this.ctx.storage.sql, this.env, config.schedulingIntervalMs))
       );
     }
   }

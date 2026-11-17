@@ -45,7 +45,6 @@ import {
 import { configFromEnv as storageReliefPreflightConfig } from '@simple-agent-manager/project-data/internal/scheduled/project-data-storage-relief-preflight';
 import { resolveOrchestratorConfig, resolveSamConfig } from '@simple-agent-manager/shared';
 
-import { cancellationConfig } from '../../../src/durable-objects/project-orchestrator/cancellation-config';
 import { resolveD1SessionMode } from '../../../src/lib/d1-session';
 import { resolveSearchQueryLimits } from '../../../src/lib/search-query-limits';
 import { getRateLimit } from '../../../src/middleware/rate-limit';
@@ -100,11 +99,6 @@ const asEnv = <T>(env: WorkerVars): T => env as unknown as T;
 const API = 'apps/api/src';
 
 export const READ_PATHS: readonly ReadPath[] = [
-  {
-    label: 'mission cancellation bounds',
-    sources: [`${API}/durable-objects/project-orchestrator/cancellation-config.ts`],
-    read: (env) => cancellationConfig(asEnv(env)),
-  },
   {
     label: 'SAM assistant model default',
     sources: ['packages/shared/src/constants/sam.ts'],

@@ -2,11 +2,16 @@
 import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import { acceptPromptDelivery } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
 import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { ProjectOrchestrator } from '../../src/durable-objects/project-orchestrator';
 import type { Env } from '../../src/env';
-import { cancelMission, startOrchestration } from '../../src/services/project-orchestrator';
+import { __resetAdminSettingsCacheForTest } from '../../src/services/admin-settings';
+import {
+  cancelMission,
+  getOrchestratorStatus,
+  startOrchestration,
+} from '../../src/services/project-orchestrator';
 import {
   seedInstallation,
   seedMission,
@@ -15,6 +20,24 @@ import {
   seedUser,
   seedWorkspace,
 } from './helpers/seed-d1';
+
+async function setCancellationSettings(values: Record<string, number>) {
+  await env.DATABASE.batch(
+    Object.entries(values).map(([name, value]) =>
+      env.DATABASE.prepare(
+        'INSERT INTO platform_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value'
+      ).bind(`orchestrator.cancellation${name}`, JSON.stringify(value))
+    )
+  );
+  __resetAdminSettingsCacheForTest();
+}
+
+beforeEach(async () => {
+  await env.DATABASE.prepare(
+    "DELETE FROM platform_settings WHERE key LIKE 'orchestrator.cancellation%'"
+  ).run();
+  __resetAdminSettingsCacheForTest();
+});
 
 describe('mission cancellation wake retirement', () => {
   it('retires old prompts and its wake claim while preserving completed tasks and fresh follow-ups', async () => {
@@ -154,6 +177,7 @@ describe('mission cancellation wake retirement', () => {
   });
 
   it('advances past a failing head, blocks after finite passes, and permits explicit retry', async () => {
+    await setCancellationSettings({ PageSize: 1, RetryPasses: 2 });
     const project = 'mission-retry-project',
       owner = 'mission-retry-owner',
       mission = 'mission-retry';
@@ -180,8 +204,6 @@ describe('mission cancellation wake retirement', () => {
       const original = target.env;
       target.env = {
         ...original,
-        ORCHESTRATOR_CANCELLATION_PAGE_SIZE: '1',
-        ORCHESTRATOR_CANCELLATION_RETRY_PASSES: '2',
         PROJECT_DATA: {
           idFromName: original.PROJECT_DATA.idFromName.bind(original.PROJECT_DATA),
           get() {
@@ -201,6 +223,17 @@ describe('mission cancellation wake retirement', () => {
             .one().status
         ).toBe('cancel_blocked');
         expect(await state.storage.getAlarm()).toBeNull();
+        const visible = await getOrchestratorStatus(env, project);
+        expect(visible.activeMissions).toContainEqual(
+          expect.objectContaining({ missionId: mission, status: 'cancel_blocked' })
+        );
+        expect(visible.recentDecisions).toContainEqual(
+          expect.objectContaining({
+            missionId: mission,
+            reason: 'Cancellation retries exhausted; explicit retry required',
+          })
+        );
+
         expect(
           await original.DATABASE.prepare(
             "SELECT status FROM tasks WHERE id='z-mission-good'"
@@ -224,6 +257,7 @@ describe('mission cancellation wake retirement', () => {
     ).toEqual({ status: 'cancelled' });
   });
   it('bounds an unresponsive retirement and stops expired cancellation episodes', async () => {
+    await setCancellationSettings({ TurnMs: 10, ResidenceMs: 1000 });
     const project = 'mission-timeout-project',
       owner = 'mission-timeout-owner',
       mission = 'mission-timeout';
@@ -247,8 +281,6 @@ describe('mission cancellation wake retirement', () => {
       const original = target.env;
       target.env = {
         ...original,
-        ORCHESTRATOR_CANCELLATION_TURN_MS: '10',
-        ORCHESTRATOR_CANCELLATION_RESIDENCE_MS: '1000',
         PROJECT_DATA: {
           idFromName: original.PROJECT_DATA.idFromName.bind(original.PROJECT_DATA),
           get() {
@@ -272,16 +304,19 @@ describe('mission cancellation wake retirement', () => {
           state.storage.sql.exec('SELECT status FROM orchestrator_missions').one().status
         ).toBe('cancelling');
         state.storage.sql.exec(
-          'UPDATE orchestrator_missions SET cancellation_started_at=? WHERE mission_id=?',
-          Date.now() - 1001,
+          'UPDATE orchestrator_missions SET cancellation_deadline_at=? WHERE mission_id=?',
+          Date.now() - 1,
           mission
         );
+        __resetAdminSettingsCacheForTest();
         (instance as unknown as { projectId: string | null }).projectId = null;
         expect(await state.storage.get('projectId')).toBe(project);
+        let outageReads = 0;
         target.env = {
           ...target.env,
           DATABASE: {
             prepare() {
+              outageReads++;
               throw new Error('D1 unavailable');
             },
           } as unknown as Env['DATABASE'],
@@ -292,6 +327,10 @@ describe('mission cancellation wake retirement', () => {
           state.storage.sql.exec('SELECT status FROM orchestrator_missions').one().status
         ).toBe('cancel_blocked');
         expect(await state.storage.getAlarm()).toBeNull();
+        expect(outageReads).toBe(0);
+        await instance.alarm();
+        expect(await state.storage.getAlarm()).toBeNull();
+        expect(outageReads).toBe(0);
       } finally {
         target.env = original;
       }

@@ -689,11 +689,16 @@ retain the KV procedure in `.claude/rules/55-runaway-cost-emergency-ops.md`.
 | `DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS` | `1000`                         | Minimum delayed re-arm for an already-completed diagnosis step                                                                                |
 | `ORCHESTRATOR_ZERO_TASK_GRACE_MS`       | `600000` (10 min)              | Grace period before an active orchestration with no tasks ends                                                                                |
 | `ORCHESTRATOR_MAX_MISSION_LIFETIME_MS`  | `86400000` (24 hr)             | Backstop that force-completes active or completing orchestrations                                                                             |
-| `ORCHESTRATOR_CANCELLATION_PAGE_SIZE` | `25` | Maximum tasks visited in one mission cancellation turn. |
-| `ORCHESTRATOR_CANCELLATION_TURN_MS` | `5000` | Elapsed turn budget checked between task operations. |
-| `ORCHESTRATOR_CANCELLATION_RETRY_PASSES` | `3` | Maximum passes before failed cancellation is blocked for explicit retry. |
-| `ORCHESTRATOR_CANCELLATION_RESIDENCE_MS` | `900000` | Maximum cancellation episode residence before blocking. |
-| `ORCHESTRATOR_CANCELLATION_INTERVAL_MS` | `1000` | Alarm delay between pending cancellation turns. |
+
+The five `orchestrator.cancellation*` controls are typed runtime settings editable in Admin Settings under Operations, rather than environment variables. The residence limit is captured as a durable deadline when cancellation starts or is explicitly retried; changing the setting does not extend an existing episode. Expired episodes block locally before any settings or D1 lookup.
+
+| Runtime setting | Default | Description |
+| --- | --- | --- |
+| `orchestrator.cancellationPageSize` | `25` | Maximum tasks visited in one mission cancellation turn. |
+| `orchestrator.cancellationTurnMs` | `5000` | Elapsed turn budget checked between task operations. |
+| `orchestrator.cancellationRetryPasses` | `3` | Maximum passes before failed cancellation is blocked for explicit retry. |
+| `orchestrator.cancellationResidenceMs` | `900000` | Maximum cancellation episode residence before blocking. |
+| `orchestrator.cancellationIntervalMs` | `1000` | Alarm delay between pending cancellation turns. |
 
 Mission cancellation uses the existing orchestrator tracking and alarm (`project-orchestrator/cancel-mission.ts`, `cancellation-config.ts`). The mission stays paused while its tasks are being cancelled; completion is recorded only after no nonterminal task remains. A blocked cancellation stops rearming and requires an explicit cancellation retry. Completed task cancellations remain complete across retries.
 

@@ -643,6 +643,49 @@ describe('mission dispatch has exactly one starter', () => {
     expect((await taskRow(dispatched.taskId))?.chat_session_id).toBe(claimedSessionId);
   });
 
+  it('MCP retry owns its mission task while session creation is suspended', async () => {
+    const fixture = await seedMissionFixture('mcp-retry-session-midpoint');
+    const retry = await admissionAction(fixture, 'mcp-retry', fixture.missionId);
+    const entered = deferred<{ taskId: string; sessionId: string }>();
+    const release = deferred<void>();
+    const createSession = projectDataService.createSession;
+    let firstCreation = true;
+    vi.spyOn(projectDataService, 'createSession').mockImplementation(async (...args) => {
+      if (!firstCreation) return createSession(...args);
+      firstCreation = false;
+      entered.resolve({ taskId: args[4]!, sessionId: args[6]! });
+      await release.promise;
+      return createSession(...args);
+    });
+    const pending = retry();
+    const claim = await entered.promise;
+    try {
+      expect(await sessionIdsForTask(fixture.projectId, claim.taskId)).toEqual([]);
+      // Exercise the competing production starter before inspecting the reservation.
+      const status = await runOrchestratorCycleOver(fixture.projectId, fixture.missionId);
+      expect(status.recentDecisions.filter((d) => d.taskId === claim.taskId)).toEqual([]);
+      expect(await taskRunnerStub(claim.taskId).getStatus()).toBeNull();
+      expect(await sessionIdsForTask(fixture.projectId, claim.taskId)).toEqual([]);
+      expect(await taskRow(claim.taskId)).toMatchObject({
+        status: 'queued',
+        chat_session_id: claim.sessionId,
+      });
+      expect(claim.sessionId).toEqual(expect.any(String));
+    } finally {
+      release.resolve();
+      await pending;
+    }
+    expect(((await pending) as { error?: unknown }).error).toBeUndefined();
+    expect(await sessionIdsForTask(fixture.projectId, claim.taskId)).toEqual([claim.sessionId]);
+    expect(await taskRunnerStub(claim.taskId).getStatus()).toMatchObject({
+      currentStep: 'node_selection',
+      stepResults: { chatSessionId: claim.sessionId },
+    });
+    const status = await runOrchestratorCycleOver(fixture.projectId, fixture.missionId);
+    expect(status.recentDecisions.filter((d) => d.taskId === claim.taskId)).toEqual([]);
+    expect(await sessionIdsForTask(fixture.projectId, claim.taskId)).toEqual([claim.sessionId]);
+  });
+
   it('the /sam dispatch_task and retry_subtask creators own their mission tasks from the insert', async () => {
     const fixture = await seedMissionFixture('mission-sam-creators');
     vi.spyOn(projectHelpers, 'requireRepositoryOwnerAccess').mockResolvedValue(undefined);

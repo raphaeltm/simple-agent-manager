@@ -367,12 +367,16 @@ export async function handleRetrySubtask(
   // default branch.
   const checkoutBranch = branchName;
 
+  // Reserve the session in the INSERT so the mission orchestrator cannot start it too.
+  const chatSessionId = crypto.randomUUID();
+
   // Insert replacement task
   const inserted = await insertMcpRetriedTask(db, {
     id: taskId,
     projectId: tokenData.projectId,
     userId: tokenData.userId,
     parentTaskId: tokenData.taskId,
+    chatSessionId,
     title: taskTitle,
     description: replacementDescription,
     status: 'queued',
@@ -425,7 +429,8 @@ export async function handleRetrySubtask(
       null,
       taskTitle,
       taskId,
-      tokenData.userId
+      tokenData.userId,
+      chatSessionId
     );
 
     await projectDataService.persistMessage(

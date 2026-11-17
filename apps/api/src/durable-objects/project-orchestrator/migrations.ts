@@ -52,6 +52,10 @@ export const ORCHESTRATOR_MIGRATIONS = [
       ALTER TABLE orchestrator_missions ADD COLUMN cancellation_cursor TEXT;
       ALTER TABLE orchestrator_missions ADD COLUMN cancellation_pass INTEGER NOT NULL DEFAULT 0;`,
   },
+  {
+    name: '004_cancellation_deadline',
+    sql: 'ALTER TABLE orchestrator_missions ADD COLUMN cancellation_deadline_at INTEGER;',
+  },
 ] as const;
 
 /**

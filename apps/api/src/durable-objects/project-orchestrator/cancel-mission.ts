@@ -25,6 +25,7 @@ export async function cancelTrackedMission(
       .first()
   )
     return false;
+  const config = await cancellationConfig(env);
   const sql = storage.sql;
   const tracked = sql
     .exec(
@@ -36,16 +37,17 @@ export async function cancelTrackedMission(
   if (!trackedMission) return false;
   if (trackedMission.status !== 'cancelling') {
     sql.exec(
-      `UPDATE orchestrator_missions SET status='cancelling', cancellation_started_at=?,
+      `UPDATE orchestrator_missions SET status='cancelling', cancellation_started_at=?, cancellation_deadline_at=?,
       cancellation_cursor=NULL, cancellation_pass=0 WHERE mission_id=?`,
       Math.max(Date.now(), Number(trackedMission.cancellation_started_at ?? 0) + 1),
+      Date.now() + config.residenceMs,
       missionId
     );
   }
   sql.exec('DELETE FROM scheduling_queue WHERE mission_id=?', missionId);
-  // Persist continuation BEFORE any cross-object work; a crash retains both intent and wakeup.
+  // Arm the accepted continuation before task-retirement work.
   await storage.put('projectId', projectId);
-  await storage.setAlarm(Date.now() + cancellationConfig(env).intervalMs);
+  await storage.setAlarm(Date.now() + config.intervalMs);
   await env.DATABASE.prepare(
     "UPDATE missions SET status='paused',updated_at=? WHERE id=? AND project_id=?"
   )
@@ -55,6 +57,21 @@ export async function cancelTrackedMission(
   return true;
 }
 
+/** Local safety expiry must not depend on settings, D1, or the alarm kill switch. */
+export function expireMissionCancellations(sql: SqlStorage): void {
+  const result = sql.exec(
+    `UPDATE orchestrator_missions SET status='cancel_blocked'
+     WHERE status='cancelling' AND (cancellation_deadline_at IS NULL OR cancellation_deadline_at<=?)`,
+    Date.now()
+  );
+  if (result.rowsWritten) {
+    log.error('orchestrator.mission_cancellation_deadlines_exceeded', {
+      blockedMissions: result.rowsWritten,
+      reason: 'Cancellation deadline exceeded; explicit retry required',
+    });
+  }
+}
+
 /** One deadline-bound turn; task status itself is durable successful progress. */
 export async function continueMissionCancellation(
   sql: SqlStorage,
@@ -62,10 +79,9 @@ export async function continueMissionCancellation(
   projectId: string,
   missionId: string
 ): Promise<void> {
-  const config = cancellationConfig(env);
   const state = sql
     .exec(
-      `SELECT cancellation_started_at, cancellation_cursor, cancellation_pass
+      `SELECT cancellation_started_at, cancellation_deadline_at, cancellation_cursor, cancellation_pass
     FROM orchestrator_missions WHERE mission_id=? AND status='cancelling'`,
       missionId
     )
@@ -80,7 +96,13 @@ export async function continueMissionCancellation(
     logDecision(sql, missionId, null, 'cancel', reason, Date.now());
     log.error('orchestrator.mission_cancellation_blocked', { projectId, missionId, reason });
   };
-  if (Date.now() - started >= config.residenceMs) {
+  const episodeDeadline = Number(state.cancellation_deadline_at);
+  if (!Number.isFinite(episodeDeadline) || episodeDeadline <= Date.now()) {
+    block('Cancellation deadline exceeded; explicit retry required');
+    return;
+  }
+  const config = await cancellationConfig(env);
+  if (Date.now() >= episodeDeadline) {
     block('Cancellation deadline exceeded; explicit retry required');
     return;
   }
@@ -90,7 +112,7 @@ export async function continueMissionCancellation(
   )
     .bind(new Date().toISOString(), missionId, projectId)
     .run();
-  const deadline = Math.min(Date.now() + config.turnMs, started + config.residenceMs);
+  const deadline = Math.min(Date.now() + config.turnMs, episodeDeadline);
   const db = drizzle(env.DATABASE, { schema });
   const eligible = and(
     eq(schema.tasks.missionId, missionId),

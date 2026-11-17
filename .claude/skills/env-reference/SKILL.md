@@ -267,12 +267,8 @@ Activity coalescing and binding caches are per Worker isolate. Delayed flushes c
 - `WORKSPACE_IDLE_BACKOFF_MAX_MS` — Maximum workspace-idle retry delay; the delay doubles from the base and resets on new activity or when the session wakes (default: `21600000`)
 - `DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS` — Minimum re-arm delay for completed diagnosis steps (default: `1000`)
 - `ORCHESTRATOR_ZERO_TASK_GRACE_MS` — Grace before a zero-task mission terminalizes (default: `600000`)
+- Mission cancellation bounds use `orchestrator.cancellation*` runtime settings under Admin Settings → Operations; they are not environment variables.
 - `ORCHESTRATOR_MAX_MISSION_LIFETIME_MS` — Mission lifetime backstop (default: `86400000`)
-- `ORCHESTRATOR_CANCELLATION_PAGE_SIZE` — Maximum tasks visited in one mission cancellation turn (default: `25`)
-- `ORCHESTRATOR_CANCELLATION_TURN_MS` — Elapsed turn budget checked between task operations (default: `5000`)
-- `ORCHESTRATOR_CANCELLATION_RETRY_PASSES` — Maximum passes before failed cancellation is blocked for explicit retry (default: `3`)
-- `ORCHESTRATOR_CANCELLATION_RESIDENCE_MS` — Maximum cancellation episode residence before blocking (default: `900000`)
-- `ORCHESTRATOR_CANCELLATION_INTERVAL_MS` — Alarm delay between pending cancellation turns (default: `1000`)
 - `ORCHESTRATOR_WAIT_RECONCILE_INTERVAL_MS` — ProjectData D1 reconciliation backstop interval for active parent waits (default: `30000`)
 - `ORCHESTRATOR_WAIT_MAX_CHILDREN` — Maximum same-project task IDs selected by one durable wait (default: `20`, hard ceiling: `90`)
 - `ORCHESTRATOR_WAIT_MAX_ACTIVE_PER_PROJECT` — Maximum active durable parent waits per project (default: `100`)
