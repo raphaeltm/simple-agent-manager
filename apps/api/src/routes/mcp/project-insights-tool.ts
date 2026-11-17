@@ -9,7 +9,10 @@
  * Rate limit: per chat session (the token's chat, else its agent session, else its workspace),
  * `insights.agentToolCallsPerWindow` calls per `insights.agentToolWindowSeconds` (admin runtime
  * settings). The counter is the `McpRateCounter` Durable Object, which admits or refuses inside one
- * storage transaction, so parallel calls cannot overspend it. One RPC per call.
+ * storage transaction, so parallel calls cannot overspend it. One RPC per call. The ceiling is per
+ * chat on purpose: new chats come only from dispatch and triggers, which have their own limits, and
+ * every call also spends the task-keyed /mcp HTTP limit. The Connector path has no chat; it spends
+ * the per-user `connector.readRateLimitPerMinute` budget instead (`routes/connector-mcp.ts`).
  */
 import {
   getInsightsAgentRateLimit,
@@ -72,7 +75,10 @@ export async function handleProjectInsights(
   if (mismatch) {
     log.warn('mcp.project_insights.project_mismatch', {
       tokenProjectId: token.projectId,
-      requestedProjectId: typeof params.projectId === 'string' ? params.projectId : null,
+      requestedProjectId:
+        typeof params.projectId === 'string'
+          ? params.projectId.slice(0, 64)
+          : typeof params.projectId,
       taskId: token.taskId,
       workspaceId: token.workspaceId,
       action: 'rejected',
@@ -118,6 +124,12 @@ export async function handleProjectInsights(
     });
   } catch (error) {
     if (error instanceof OperationError) return operationErrorToWorkspaceJsonRpc(requestId, error);
-    throw error;
+    // Never pass a storage or runtime error's text to the agent.
+    log.error('mcp.project_insights.read_failed', {
+      projectId: token.projectId,
+      method: parsed.output.method,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return jsonRpcError(requestId, INTERNAL_ERROR, 'project_insights is temporarily unavailable');
   }
 }

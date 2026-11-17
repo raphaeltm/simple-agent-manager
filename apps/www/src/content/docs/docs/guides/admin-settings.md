@@ -361,6 +361,8 @@ Listed under **Operations**. The per-chat rate limit of the sam-mcp `project_ins
 | `insights.agentToolCallsPerWindow` | 30      | 1–1,000   | Calls one agent chat may make to `project_insights` per window         |
 | `insights.agentToolWindowSeconds`  | 600     | 10–86,400 | Length of that window in seconds; later calls wait for the next window |
 
+## Node provisioning
+
 This **Operations** setting bounds one durable node-provisioning attempt
 (`resolveNodeProvisioningAttemptDeadlineMs()`, armed by `NodeLifecycleProvisioning.run()`). It cuts
 the work before the provider create starts and the node's DNS record afterwards. A create that has

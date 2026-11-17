@@ -5,7 +5,11 @@
  * a liveness assertion proves the numbers still came through (rule 62).
  */
 import type { OperationContext } from '@simple-agent-manager/operations';
-import { OperationError, projectInsights } from '@simple-agent-manager/operations';
+import {
+  OperationError,
+  PROJECT_INSIGHTS_METHODS,
+  projectInsights,
+} from '@simple-agent-manager/operations';
 import {
   agentAccounts,
   agentFlow,
@@ -16,6 +20,7 @@ import {
   getInsightsAgentRateLimit,
   INSIGHTS_AGENT_SETTINGS,
 } from '@simple-agent-manager/operations/internal/insights-agent-settings';
+import { receiptSpendVisible } from '@simple-agent-manager/operations/internal/insights-receipt';
 import type {
   ProjectAccountsResponse,
   ProjectFlowResponse,
@@ -137,7 +142,13 @@ describe('agentFlow', () => {
       merged: { count: 1, previous: 0 },
       runs: { bucket: 'week', buckets: [], other: { stopped: 0, prOpen: 0, noPullRequest: 0 } },
       stopReasons: [],
-      flakyChecks: { items: [{ name: 'Lint', flips: 2, commits: 1 }], total: 1 },
+      flakyChecks: {
+        items: [
+          { name: 'Lint', flips: 2, commits: 1 },
+          { name: 'x'.repeat(500), flips: 1, commits: 1 },
+        ],
+        total: 2,
+      },
       waitingIdeas: {
         items: [
           {
@@ -161,12 +172,14 @@ describe('agentFlow', () => {
     expect(view.tiles.ciFirstTry.rate).toBe(0.75);
     expect(view.flakyChecks.items[0]).toEqual({ name: 'Lint', flips: 2, commits: 1 });
     expect(view.waitingIdeas.items[0]?.ideaId).toBe('idea-1');
+    expect(view.flakyChecks.items[1]?.name.length).toBe(101);
   });
 });
 
 describe('agentSetups', () => {
   it('hides teammate profile names and suggestion names, keeps resources', () => {
     const group = {
+      extraText: `${SECRET} field added later`,
       key: 'prof-t',
       label: `${SECRET} teammate profile`,
       owner: 'teammate',
@@ -229,6 +242,24 @@ describe('agentSetups', () => {
     const view = agentSetups(setups);
     expect(leaks(view)).toBe(false);
     expect(view.groups.map((g) => g.label)).toEqual([null, 'Shared profile']);
+    expect(Object.keys(view.groups[0] ?? {}).sort()).toEqual(
+      [
+        'agentType',
+        'finished',
+        'key',
+        'label',
+        'medianToPullRequestMs',
+        'memory',
+        'merged',
+        'mergedClean',
+        'mergedCleanRate',
+        'nudges',
+        'owner',
+        'pullRequests',
+        'runs',
+        'tokens',
+      ].sort()
+    );
     expect(view.groups[0]?.memory).toMatchObject({ p90Bytes: 3_000_000_000, requestedMb: 4096 });
     expect(view.suggestions[1]).toMatchObject({ skillId: 'sk', suggestedGb: 6, oomKills: 1 });
     expect(view.suggestions[0]).toMatchObject({ profile: { id: 'pa', mergedCleanRate: 0.8 } });
@@ -303,6 +334,7 @@ describe('agentAccounts', () => {
       stallEpisodes: {
         items: [
           {
+            extraText: `${SECRET} field added later`,
             accountKey: `cred:${SECRET}-id`,
             window: 'claude.five_hour',
             startedAt: 's',
@@ -315,6 +347,7 @@ describe('agentAccounts', () => {
         total: 1,
         listed: 1,
         truncated: false,
+        extraText: `${SECRET} field added later`,
       },
       totals: { runs: 6, merged: 3 },
       unavailable: [],
@@ -351,6 +384,56 @@ describe('projectInsights input rules', () => {
     await expect(projectInsights(ctx, { projectId: 'p', method: 'phases' })).rejects.toMatchObject({
       code: 'invalid_input',
     });
+  });
+});
+
+describe('projectInsights refuses every argument a method does not read', () => {
+  const ctx = {} as OperationContext;
+  const ALLOWED: Record<string, string[]> = {
+    receipt: ['taskId'],
+    flow: ['range'],
+    setups: ['range', 'groupBy'],
+    phases: ['skillId', 'agentProfileId', 'operation', 'windowDays'],
+    accounts: ['range'],
+  };
+  const VALUES: Record<string, unknown> = {
+    taskId: 't',
+    range: '7d',
+    groupBy: 'skill',
+    skillId: 's',
+    agentProfileId: 'a',
+    operation: 'workspace',
+    windowDays: 7,
+  };
+  const cases = PROJECT_INSIGHTS_METHODS.flatMap((method) =>
+    Object.keys(VALUES)
+      .filter((key) => !ALLOWED[method]?.includes(key))
+      .map((key) => [method, key] as const)
+  );
+  it('covers every method', () => {
+    expect(cases.length).toBe(5 * 7 - 9);
+  });
+  it.each(cases)('%s refuses %s', async (method, key) => {
+    await expect(
+      projectInsights(ctx, { projectId: 'p', method, [key]: VALUES[key] } as never)
+    ).rejects.toMatchObject({
+      code: 'invalid_input',
+      message: `method ${method} does not take ${key}`,
+    });
+  });
+});
+
+describe('receiptSpendVisible', () => {
+  it('shows spend only for the viewer own run or a project or platform account', () => {
+    expect(receiptSpendVisible({ isOwnSession: true, credentialSource: 'user' })).toBe(true);
+    expect(receiptSpendVisible({ isOwnSession: false, credentialSource: 'project' })).toBe(true);
+    expect(receiptSpendVisible({ isOwnSession: false, credentialSource: 'platform' })).toBe(true);
+    expect(receiptSpendVisible({ isOwnSession: false, credentialSource: 'user' })).toBe(false);
+  });
+
+  it('fails closed when the account or its source was not recorded', () => {
+    expect(receiptSpendVisible(null)).toBe(false);
+    expect(receiptSpendVisible({ isOwnSession: false, credentialSource: null })).toBe(false);
   });
 });
 

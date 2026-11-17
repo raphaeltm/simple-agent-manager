@@ -4,6 +4,8 @@
  * listed under "Operations" in Admin → Settings. The definitions carry no imports so the admin
  * settings registry can depend on them.
  */
+import { log } from '@simple-agent-manager/worker-core';
+
 import type { OperationContext } from './types';
 
 export const INSIGHTS_AGENT_SETTINGS = [
@@ -17,7 +19,8 @@ export const INSIGHTS_AGENT_SETTINGS = [
   {
     name: 'insights.agentToolWindowSeconds',
     defaultValue: 600,
-    description: 'Length in seconds of the project_insights per-chat rate-limit window.',
+    description:
+      'Length in seconds of the project_insights per-chat rate-limit window. A change applies within about a minute and can briefly admit one extra window of calls.',
     range: { min: 10, max: 86_400 },
   },
 ] as const;
@@ -38,7 +41,11 @@ export async function getInsightsAgentRateLimit(
     values = (
       await ctx.ports.settings.resolveDetailsMany(INSIGHTS_AGENT_SETTINGS.map((s) => s.name))
     ).map((row) => row.value);
-  } catch {
+  } catch (error) {
+    log.warn('insights_agent.settings_fallback', {
+      error: error instanceof Error ? error.message : String(error),
+      action: 'used_defaults',
+    });
     values = INSIGHTS_AGENT_SETTINGS.map((s) => s.defaultValue);
   }
   const [calls, window] = INSIGHTS_AGENT_SETTINGS.map((setting, index) => {

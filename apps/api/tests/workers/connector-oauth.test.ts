@@ -717,6 +717,23 @@ describe('Connector OAuth real Workers/KV conformance', () => {
     expect(await decode(read)).toMatchObject({
       result: { structuredContent: { data: { id: task.taskId } } },
     });
+    // Insights for agents through the Connector: same operation as sam-mcp project_insights.
+    const insights = await decode(
+      await invoke('sam_project_insights', { projectId, method: 'receipt', taskId: task.taskId })
+    );
+    expect(insights).toMatchObject({
+      result: {
+        structuredContent: {
+          data: { method: 'receipt', projectId, receipt: { taskId: task.taskId } },
+        },
+      },
+    });
+    expect(JSON.stringify(insights)).not.toContain('Inspect the project and report findings');
+    const foreign = await decode(
+      await invoke('sam_project_insights', { projectId: crypto.randomUUID(), method: 'flow' })
+    );
+    expect(foreign.result.isError).toBe(true);
+    expect(foreign.result.structuredContent).toBeUndefined();
     await revokeConnectorConnection(bindings, result.connectionId, userId);
     expect((await invoke('sam_task_get', { projectId, taskId: task.taskId })).status).toBe(401);
   });

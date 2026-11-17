@@ -4,12 +4,14 @@
  * (SAM Connector) and the sam-mcp tool `project_insights`. Each method calls the same shared read
  * the web page and REST route call (policy 5cb362e8), then projects it to numbers: no task or pull
  * request titles, no idea titles or notes, no agent questions, no account names or credential
- * references, and no names of other members' profiles (slice A's privacy rule).
+ * references, and no names of other members' profiles (slice A's privacy rule). CI check names
+ * are kept (capped): they are what identifies a flaky check.
  *
  * Round trips are the underlying read's (rule 60): receipt at most 7 here, because the account
  * name it would read is never shown (`runReceipt` option `accountName: false`); flow at most 10;
  * setups at most 5; accounts at most 4; phases 2 (authorization, one query). sam-mcp adds one
- * rate-limit RPC per call (`routes/mcp/project-insights-tool.ts`).
+ * rate-limit RPC per call (`routes/mcp/project-insights-tool.ts`); its settings come from the
+ * per-isolate admin-settings cache the reads already use.
  */
 import {
   INSIGHTS_RANGES,
@@ -62,6 +64,12 @@ export type ProjectInsightsInput = v.InferOutput<typeof ProjectInsightsInputSche
 
 /** A stored code (`terminal_reason`) passes; anything that could be free text does not. */
 const CODE = /^[a-z0-9_.:-]{1,64}$/;
+/** CI check names are third-party text; a long one is cut rather than passed whole. */
+const CHECK_NAME_MAX = 100;
+
+function capName(name: string): string {
+  return name.length > CHECK_NAME_MAX ? `${name.slice(0, CHECK_NAME_MAX)}…` : name;
+}
 
 export function agentReceipt(receipt: RunReceipt) {
   const pr = receipt.outcome.pullRequest;
@@ -105,7 +113,15 @@ export function agentFlow(flow: ProjectFlowResponse) {
     merged: flow.merged,
     runs: flow.runs,
     stopReasons: flow.stopReasons,
-    flakyChecks: flow.flakyChecks,
+    // Check names come from CI as reported; they identify the flaky check, so they stay, capped.
+    flakyChecks: {
+      total: flow.flakyChecks.total,
+      items: flow.flakyChecks.items.map((check) => ({
+        name: capName(check.name),
+        flips: check.flips,
+        commits: check.commits,
+      })),
+    },
     waitingIdeas: {
       total: flow.waitingIdeas.total,
       items: flow.waitingIdeas.items.map((idea) => ({
@@ -116,7 +132,10 @@ export function agentFlow(flow: ProjectFlowResponse) {
         pullRequest: idea.pullRequest,
       })),
     },
-    topBlocker: flow.topBlocker,
+    topBlocker:
+      flow.topBlocker?.kind === 'flaky_check'
+        ? { ...flow.topBlocker, name: capName(flow.topBlocker.name) }
+        : flow.topBlocker,
     unavailable: flow.unavailable,
   };
 }
@@ -129,10 +148,23 @@ export function agentSetups(setups: ProjectSetupsResponse) {
     until: setups.until,
     rework: setups.rework,
     sample: setups.sample,
-    groups: setups.groups.map(({ usedFor: _usedFor, ...group }) => ({
-      ...group,
+    // Field by field, so a text field added to the page response later is not passed on.
+    groups: setups.groups.map((group) => ({
+      key: group.key,
       // A teammate's profile name can name the teammate; its id is enough to look it up.
       label: group.owner === 'teammate' ? null : group.label,
+      owner: group.owner,
+      agentType: group.agentType,
+      runs: group.runs,
+      finished: group.finished,
+      mergedClean: group.mergedClean,
+      mergedCleanRate: group.mergedCleanRate,
+      merged: group.merged,
+      medianToPullRequestMs: group.medianToPullRequestMs,
+      pullRequests: group.pullRequests,
+      nudges: group.nudges,
+      tokens: group.tokens,
+      memory: group.memory,
     })),
     // Ids only: a compared profile may be a teammate's, and `apply` is the page's action payload.
     suggestions: setups.suggestions.map((s) =>
@@ -204,10 +236,17 @@ export function agentAccounts(accounts: ProjectAccountsResponse) {
       spend: account.spend,
     })),
     stallEpisodes: {
-      ...accounts.stallEpisodes,
+      total: accounts.stallEpisodes.total,
+      listed: accounts.stallEpisodes.listed,
+      truncated: accounts.stallEpisodes.truncated,
       items: accounts.stallEpisodes.items.map((episode) => ({
-        ...episode,
         accountKey: alias.get(episode.accountKey) ?? null,
+        window: episode.window,
+        startedAt: episode.startedAt,
+        endedAt: episode.endedAt,
+        durationMs: episode.durationMs,
+        runs: episode.runs,
+        outcome: episode.outcome,
       })),
     },
     totals: accounts.totals,
