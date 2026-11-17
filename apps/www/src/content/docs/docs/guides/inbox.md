@@ -116,16 +116,20 @@ team"_. The teammate gets a **Task** row in their Inbox and a push.
 ### If you were given a task
 
 The task opens in your Inbox like any item: its title, why a person is needed, its steps and links,
-and the chat it came from. In the app today a task is read-only:
+and the chat it came from. In the app today a task is read-only, so finishing it takes a message:
 
 1. Do the work.
-2. Tell the agent: **Open chat** (the speech bubble at the top) and reply in its chat, for example
-   _"done, the key is in the production environment"_.
-3. **Archive** the task. That closes it and wakes the agent that assigned it.
+2. Tell the agent it's done. If you can write in the chat the task came from (you started it, or it
+   was [shared with you](/docs/guides/collaboration/#share-a-chat)), select **Open chat** (the
+   speech bubble at the top) and say so, for example _"done, the key is in the production
+   environment"_. Otherwise tell the person who started that chat, or comment on the task through
+   the [API](/docs/reference/api/#inbox): a comment from the assignee wakes the agent.
+3. Leave the task open until the agent has picked it up. **Archive** it only once the agent knows,
+   or if you won't do it: archiving tells the agent you will not act on it.
 
-Controls for ticking steps, commenting on the task, marking it **done**, handing it on and
-**I'll take it** come with the task view in the next release; until then they are available through
-the [API](/docs/reference/api/#inbox).
+Controls for ticking steps, commenting, marking it **done**, handing it on and **I'll take it** come
+with the task view in the next release; until then they are available through the
+[API](/docs/reference/api/#inbox).
 
 ### How tasks work
 
@@ -176,7 +180,7 @@ button (`packages/operations/src/inbox-error-core.ts`, `apps/api/src/services/in
 
 ![A Problem open in the Inbox on a desktop. The list on the left ends with "“Fix rounding in tax totals” couldn't start", never started. The open item reads Problem · Never started, the same title, "The workspace or VM did not finish starting up.", a collapsed Context line, and Retry and Open chat buttons pinned at the bottom.](/images/docs/inbox-problem.png)
 
-**Retry** starts the task again from its original request, in a new chat and workspace; it does
+**Retry** starts the task again from its original request right away, in a new chat and workspace; it does
 not continue the failed chat. To keep the work the chat already did, use **Open chat** and reply
 there (see [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails)). **Retry**
 is offered only when the failure can be retried and you own the project, and **Wake the chat** only

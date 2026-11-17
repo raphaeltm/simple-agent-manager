@@ -568,8 +568,8 @@ the failure card showing: wait for it to go to sleep rather than using **Retry**
 
 SAM also files a **Problem** in your Inbox within about five minutes: **"…" couldn't start** or
 **"…" stopped before it finished**. Its **Retry** (offered to the project's owner when the failure
-can be retried) is the same as the tool rail's: it starts the task again from its original request,
-in a new chat and workspace. To continue the work this chat already did, use **Open chat** and reply
+can be retried) starts a new task with the original request right away, in a new chat and
+workspace; the tool rail's **Retry** pre-fills a new chat for you to check and send instead. To continue the work this chat already did, use **Open chat** and reply
 there once it is asleep, as below.
 
 SAM's stalled-turn check respects unanswered permission requests and questions until their
