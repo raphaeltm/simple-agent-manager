@@ -12,6 +12,7 @@ The reference covers:
 - Node Management (`/api/nodes/*`)
 - Workspace Management (`/api/workspaces/*`)
 - Project Management (`/api/projects/*`)
+- Project Insights (`/api/projects/:projectId/insights/{flow,accounts,people}`)
 - Default Capacity Pools (`/api/projects/:id/capacity-pools/defaults*`, `/api/capacity-pools/defaults*`, `/api/admin/capacity-pools/defaults*`)
 - Provider Catalog (`/api/providers/catalog`)
 - Task Management (`/api/projects/:projectId/tasks/*`)
