@@ -235,16 +235,22 @@ export function summarizeRunTokens(
   };
 }
 
+const SQL_IDENTIFIER = /^[A-Za-z_]\w*$/;
+
 /**
- * The usage rows that count, for a query that aliases `agent_run_usage` as `r`: a proxied run (one
- * with any AI proxy row) is read from its AI proxy rows only, because the proxy measured every call
- * the harness also reports. The probe seeks the unique key's prefix (project, chat session,
- * source). Shared with any per-run aggregate over `agent_run_usage` so no reader counts twice.
+ * The usage rows that count, for a query that aliases `agent_run_usage` as `alias`: a proxied run
+ * (one with any AI proxy row) is read from its AI proxy rows only, because the proxy measured every
+ * call the harness also reports. The probe seeks the unique key's prefix (project, chat session,
+ * source) and binds the row's own project. The one implementation of this rule for every aggregate
+ * over `agent_run_usage` (Accounts, Agent setups), so no reader counts a run twice.
  */
-export const COUNTED_RUN_USAGE_SQL = `(r.source = 'ai_proxy' OR NOT EXISTS (
+export function countedRunUsageSql(alias: string): string {
+  if (!SQL_IDENTIFIER.test(alias) || alias === 'p') throw new Error('Invalid SQL alias');
+  return `(${alias}.source = 'ai_proxy' OR NOT EXISTS (
     SELECT 1 FROM agent_run_usage p
-     WHERE p.project_id = r.project_id AND p.chat_session_id = r.chat_session_id
+     WHERE p.project_id = ${alias}.project_id AND p.chat_session_id = ${alias}.chat_session_id
        AND p.source = 'ai_proxy'))`;
+}
 
 /**
  * Whether the viewer may see a row's credential key: a shared (project or platform) account, the
@@ -266,7 +272,7 @@ const KEY_VISIBLE_SQL = `COALESCE(r.credential_source IN ('project', 'platform')
  * the Accounts tab groups their runs. Largest first, so the row cap drops the smallest usage.
  *
  * Every predicate binds the project: the usage rows (seeking `idx_agent_run_usage_project_updated`
- * by project and `updated_at`), the proxied-run probe (`COUNTED_RUN_USAGE_SQL`), and the session
+ * by project and `updated_at`), the proxied-run probe (`countedRunUsageSql`), and the session
  * and workspace joins, which must belong to this project. The credential columns read are `kind`
  * and `owner_id`; never the name or the token. A long legacy reference is stored as its digest,
  * which names no credential row: its kind (only the kind, never the owner, which decides
@@ -300,7 +306,7 @@ export function accountUsageStatement(input: {
           ON r.credential_key LIKE '${DIGEST_KEY_PREFIX}%'
          AND s.agent_credential_reference LIKE '${CC_CREDENTIAL_KEY_PREFIX}%'
          AND sc.id = substr(s.agent_credential_reference, ${CC_CREDENTIAL_KEY_PREFIX.length + 1})
-       WHERE r.project_id = ? AND r.updated_at >= ? AND ${COUNTED_RUN_USAGE_SQL}
+       WHERE r.project_id = ? AND r.updated_at >= ? AND ${countedRunUsageSql('r')}
     )
     SELECT CASE WHEN visible = 1 THEN key END AS ref,
            CASE WHEN visible = 0 THEN 1 ELSE 0 END AS redacted,
@@ -456,4 +462,27 @@ export function summarizeAccountUsage(
 
 function roundUsd(usd: number): number {
   return Math.round(usd * 1_000_000) / 1_000_000;
+}
+
+/**
+ * Measured tokens (input, output, cache read and write) per run, for a set of runs at once
+ * (Insights · Agent setups). `runsTable` is a table or CTE with `id` and `sessionColumn`; one
+ * bind, the project id. The same source rule as `readRunUsage`: when the AI proxy measured a chat
+ * its rows are the only ones counted, because the proxied harness reports the same calls. A run
+ * with no rows is absent from the result (not reported, never zero). Sums with TOTAL(), which
+ * cannot overflow. `CROSS JOIN` keeps `runsTable` the outer loop (SQLite never reorders it), so
+ * each run is an index search on `idx_agent_run_usage_key` `(project_id, chat_session_id, …)`, not a
+ * pass over the project's whole usage history.
+ */
+export function runTokenTotalsSql(runsTable: string, sessionColumn: string): string {
+  if (!SQL_IDENTIFIER.test(runsTable) || !SQL_IDENTIFIER.test(sessionColumn)) {
+    throw new Error('Invalid SQL identifier');
+  }
+  return `SELECT k.id,
+           TOTAL(u.input_tokens) + TOTAL(u.output_tokens) + TOTAL(u.cache_read_tokens)
+             + TOTAL(u.cache_write_tokens) AS tokens
+      FROM ${runsTable} k
+      CROSS JOIN agent_run_usage u ON u.project_id = ? AND u.chat_session_id = k.${sessionColumn}
+     WHERE ${countedRunUsageSql('u')}
+     GROUP BY k.id`;
 }

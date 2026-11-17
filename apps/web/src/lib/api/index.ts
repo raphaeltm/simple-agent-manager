@@ -94,7 +94,7 @@ export {
   updatePlatformCredential,
   updateSignupApprovalConfig,
 } from './admin';
-export { getInstallationHealth } from './admin-health-cost';
+export { getInstallationHealth, refreshCloudflareCost } from './admin-health-cost';
 export {
   decideOperationsApproval,
   fetchOperationsApproval,
@@ -376,7 +376,7 @@ export {
   setProjectIdeaStatus,
 } from './ideas';
 export { answerInboxItem, archiveInboxItem, getInboxCount, getInboxItem, listInbox } from './inbox';
-export { getProjectAccounts, getProjectFlow } from './insights';
+export { getProjectAccounts, getProjectFlow, getProjectSetups } from './insights';
 export { getRunReceipt } from './insights-receipt';
 export {
   addObservation,
