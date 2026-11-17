@@ -95,10 +95,17 @@ function usedFor(runs: SetupRun[], groupBy: InsightsSetupGrouping, limit = 2): s
 
 function median(values: number[]): number | null {
   if (values.length === 0) return null;
-  return nearestRankPercentile([...values].sort((a, b) => a - b), 0.5);
+  return nearestRankPercentile(
+    [...values].sort((a, b) => a - b),
+    0.5
+  );
 }
 
-export function summarizeGroup(identity: GroupIdentity, runs: SetupRun[], groupBy: InsightsSetupGrouping): InsightsSetupGroup {
+export function summarizeGroup(
+  identity: GroupIdentity,
+  runs: SetupRun[],
+  groupBy: InsightsSetupGrouping
+): InsightsSetupGroup {
   const finished = runs.filter((run) => run.finished);
   const mergedClean = finished.filter((run) => run.mergedClean).length;
   const toPr = runs.flatMap((run) => (run.toPullRequestMs === null ? [] : [run.toPullRequestMs]));
@@ -139,14 +146,20 @@ export function summarizeGroup(identity: GroupIdentity, runs: SetupRun[], groupB
     pullRequests: toPr.length,
     nudges:
       nudged.length > 0
-        ? { state: 'measured', perRun: nudgeTotal / nudged.length, total: nudgeTotal, runs: nudged.length }
+        ? {
+            state: 'measured',
+            perRun: nudgeTotal / nudged.length,
+            total: nudgeTotal,
+            runs: nudged.length,
+          }
         : { state: 'not_recorded' },
     tokens:
       reporting.length > 0
         ? {
             state: 'reported',
             total: Math.round(tokenTotal),
-            perMergedPullRequest: reportingMerged > 0 ? Math.round(tokenTotal / reportingMerged) : null,
+            perMergedPullRequest:
+              reportingMerged > 0 ? Math.round(tokenTotal / reportingMerged) : null,
             reportedRuns: reporting.length,
             merged: reportingMerged,
           }
@@ -159,7 +172,10 @@ export function summarizeGroup(identity: GroupIdentity, runs: SetupRun[], groupB
             maxBytes: sortedPeaks[sortedPeaks.length - 1] ?? 0,
             requestedMb: median(requested),
             runs: sortedPeaks.length,
-            oomKills: runs.reduce((sum, run) => sum + (run.memoryPeakBytes === null ? 0 : run.oomKills), 0),
+            oomKills: runs.reduce(
+              (sum, run) => sum + (run.memoryPeakBytes === null ? 0 : run.oomKills),
+              0
+            ),
           }
         : { state: 'not_recorded' },
   };
@@ -174,7 +190,8 @@ export function groupRuns(runs: SetupRun[], groupBy: InsightsSetupGrouping): Ins
     bucket.runs.push(run);
     buckets.set(identity.key, bucket);
   }
-  const fallback = (owner: InsightsSetupOwner) => (owner === 'none' || owner === 'not_recorded' ? 1 : 0);
+  const fallback = (owner: InsightsSetupOwner) =>
+    owner === 'none' || owner === 'not_recorded' ? 1 : 0;
   return [...buckets.values()]
     .map(({ identity, runs: groupRunsList }) => summarizeGroup(identity, groupRunsList, groupBy))
     .sort(

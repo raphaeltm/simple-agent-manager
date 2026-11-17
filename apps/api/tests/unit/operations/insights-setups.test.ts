@@ -17,7 +17,6 @@ import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const NOW = Date.parse('2026-11-16T12:00:00.000Z');
 const DAY = 86_400_000;
-const HOUR = 3_600_000;
 const GIB = 1024 ** 3;
 const iso = (msAgo: number) => new Date(NOW - msAgo).toISOString();
 const reservation = (memoryMb: number) =>
@@ -374,9 +373,12 @@ describe('projectSetups', () => {
     skill('fix', 'fix', { default_profile_id: 'slow' });
     const add = (prefix: string, profileId: string, total: number, clean: number) => {
       for (let i = 0; i < total; i += 1) {
-        const url =
-          i < clean ? pullRequest({ state: 'merged', merged_at: iso(5 * DAY) }) : null;
-        run(`${prefix}${i}`, { skill_id: 'fix', agent_profile_hint: profileId, output_pr_url: url });
+        const url = i < clean ? pullRequest({ state: 'merged', merged_at: iso(5 * DAY) }) : null;
+        run(`${prefix}${i}`, {
+          skill_id: 'fix',
+          agent_profile_hint: profileId,
+          output_pr_url: url,
+        });
       }
     };
     add('f', 'fast', 10, 8);
@@ -414,7 +416,9 @@ describe('projectSetups', () => {
   });
 
   it('suggests a smaller memory request from the p90 peak, and never shrinks after an OOM kill', async () => {
-    skill('do', 'do', { resource_requirements_json: JSON.stringify({ minMemoryGb: 8, minVcpu: 2 }) });
+    skill('do', 'do', {
+      resource_requirements_json: JSON.stringify({ minMemoryGb: 8, minVcpu: 2 }),
+    });
     for (let i = 0; i < 10; i += 1) {
       run(`r${i}`, { skill_id: 'do' });
       memory(`r${i}`, i === 9 ? 3.9 : 2 + i * 0.15);
@@ -429,12 +433,16 @@ describe('projectSetups', () => {
       runs: 10,
       oomKills: 0,
     });
-    expect(size?.kind === 'request_size' && JSON.parse(size.apply.patch.resourceRequirementsJson)).toEqual({
+    expect(
+      size?.kind === 'request_size' && JSON.parse(size.apply.patch.resourceRequirementsJson)
+    ).toEqual({
       minVcpu: 2,
       minMemoryGb: 4,
     });
 
-    sqlite.prepare("UPDATE workspace_resource_summaries SET oom_count = 1 WHERE task_id = 'r0'").run();
+    sqlite
+      .prepare("UPDATE workspace_resource_summaries SET oom_count = 1 WHERE task_id = 'r0'")
+      .run();
     const oom = await projectSetups(ctx(), { projectId: 'p', groupBy: 'skill', nowMs: NOW });
     expect(oom.suggestions.filter((s) => s.kind === 'request_size')).toEqual([]);
   });

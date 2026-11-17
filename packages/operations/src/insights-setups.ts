@@ -24,9 +24,9 @@
 import {
   DEFAULT_INSIGHTS_RANGE,
   DEFAULT_INSIGHTS_SETUP_GROUPING,
+  type InsightsSetupsSection,
   isInsightsRange,
   isInsightsSetupGrouping,
-  type InsightsSetupsSection,
   type ProjectSetupsResponse,
   type RunNudgeWindow,
 } from '@simple-agent-manager/shared';
@@ -91,7 +91,11 @@ const RunRowSchema = v.object({
 });
 type RunRow = v.InferOutput<typeof RunRowSchema>;
 
-function ref(id: string | null | undefined, name: string | null | undefined, owner: RunRow['profile_owner']): SetupRef {
+function ref(
+  id: string | null | undefined,
+  name: string | null | undefined,
+  owner: RunRow['profile_owner']
+): SetupRef {
   if (!id) return { id: null, name: null, owner: 'none' };
   // Joined by id but no row came back: deleted, or a profile this project cannot see.
   if (!owner) return { id, name: null, owner: 'not_recorded' };
@@ -131,7 +135,10 @@ function toRun(row: RunRow, nudges: number | null): SetupRun {
 }
 
 /** One nudge window per run that has a chat: from the run being asked for to its end, or now. */
-function nudgeWindows(rows: RunRow[], nowMs: number): Array<{ index: number; window: RunNudgeWindow }> {
+function nudgeWindows(
+  rows: RunRow[],
+  nowMs: number
+): Array<{ index: number; window: RunNudgeWindow }> {
   return rows.flatMap((row, index) => {
     const from = julianDayMs(row.created_jd);
     if (!row.chat_session_id || from === null) return [];

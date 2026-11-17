@@ -15,11 +15,14 @@
  * edited elsewhere), and only profiles the skill can point at: project profiles and the viewer's
  * own (`requireProjectProfile` in `apps/api/src/services/skills.ts` accepts exactly those).
  */
-import { normalizeResourceRequirements, type InsightsSetupSuggestion } from '@simple-agent-manager/shared';
+import {
+  type InsightsSetupSuggestion,
+  normalizeResourceRequirements,
+} from '@simple-agent-manager/shared';
 import { log } from '@simple-agent-manager/worker-core';
 
-import type { SetupRun } from './insights-setups-compute';
 import { nearestRankPercentile } from './insights-phase-timings';
+import type { SetupRun } from './insights-setups-compute';
 
 export interface SuggestionLimits {
   minRuns: number;
@@ -123,7 +126,10 @@ function skillRequirements(run: SetupRun, projectId: string): Record<string, unk
 
 function medianOf(values: number[]): number | null {
   if (values.length === 0) return null;
-  return nearestRankPercentile([...values].sort((a, b) => a - b), 0.5);
+  return nearestRankPercentile(
+    [...values].sort((a, b) => a - b),
+    0.5
+  );
 }
 
 function requestSizeSuggestion(
@@ -157,7 +163,8 @@ function requestSizeSuggestion(
 
   const shrink = suggestedGb <= currentGb - MIN_CHANGE_GB && oomKills === 0;
   // Out-of-memory kills always justify asking for more, whatever the percentile says.
-  const grow = suggestedGb >= currentGb + MIN_CHANGE_GB || (oomKills > 0 && suggestedGb > currentGb);
+  const grow =
+    suggestedGb >= currentGb + MIN_CHANGE_GB || (oomKills > 0 && suggestedGb > currentGb);
   if (!shrink && !grow) return null;
 
   let resourceRequirementsJson: string;

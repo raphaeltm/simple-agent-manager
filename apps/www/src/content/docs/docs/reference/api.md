@@ -1099,6 +1099,29 @@ names and limit windows. Returns `ProjectAccountsResponse`
   (`insights.accountsStallScanCap`) left older limit waits out.
 - `unavailable`: sections whose read failed this time (`runs`, `stalls`, `usage`).
 
+### `GET /api/projects/:projectId/insights/setups`
+
+Insights · Agent setups for one project (`projectSetups`, `packages/operations/src/insights-setups.ts`).
+Query `range` is `7d`, `30d` or `90d` (default `30d`) and `groupBy` is `profile`, `skill` or
+`model` (default `profile`); anything else is `400`. Requires project membership. Sent with
+`Cache-Control: private, no-store`: the body names the caller's own personal profiles and skills.
+Returns `ProjectSetupsResponse` (`packages/shared/src/types/insights-setups.ts`):
+`{ projectId, range, groupBy, since, until, rework, sample, groups, suggestions, suggestionMinRuns, unavailable, generatedAt }`.
+
+- `groups`: most runs first, with the rows for no profile/skill and an unrecorded model last. Each
+  is `{ key, label, owner, agentType, usedFor, runs, finished, mergedClean, mergedCleanRate, merged, medianToPullRequestMs, pullRequests, nudges, tokens, memory }`.
+  `owner` is `project`, `you`, `teammate`, `none` or `not_recorded`; a teammate's personal profile
+  or skill has `label: null`. `nudges` is `{ state: 'measured', perRun, total, runs }` or
+  `not_recorded`; `tokens` is `{ state: 'reported', total, perMergedPullRequest, reportedRuns, merged }`
+  or `not_reported`; `memory` is `{ state: 'measured', p90Bytes, maxBytes, requestedMb, runs, oomKills }`
+  or `not_recorded`.
+- `rework`: `{ windowDays, rule: 'same_branch' }`. `sample`: `{ runs, cap, truncated }`, where
+  `truncated` means `insights.setupsRunScanCap` left older runs out.
+- `suggestions`: each is `default_profile` (`{ skill, profile, compared, currentDefault, apply }`) or
+  `request_size` (`{ skill, currentGb, suggestedGb, runs, p90Bytes, maxBytes, oomKills, apply }`).
+  `apply` is `{ skillId, patch }`, the body to send to `PATCH /api/projects/:projectId/skills/:skillId`.
+- `unavailable`: sections whose read failed this time (`runs`, `nudges`).
+
 ### `POST /api/projects/:id/tasks`
 
 Create a task record.
