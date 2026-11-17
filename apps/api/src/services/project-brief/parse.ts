@@ -123,6 +123,8 @@ function proseIsAllowed(words: string): boolean {
 
 /** Punctuation that attaches to the word before it, so no space goes in front of it. */
 const ATTACHES_LEFT = /^[,.;:!?)'’]/;
+/** How a sentence's last text part must end: terminal punctuation, then optional space. */
+const SENTENCE_END = /[.!?]\s*$/;
 
 /**
  * Models often write the text around a ref without the spaces ("Deciding on the" + ref +
@@ -175,6 +177,10 @@ function toSentence(
     else if (text) parts.push({ text });
   }
   if (cited.length === 0 || !proseIsAllowed(words)) return null;
+  // A sentence must end in its own words with a full stop: a reply that stops at a link
+  // ("The process for <chat>") is a fragment, and the page shows nothing rather than one.
+  const end = parts.at(-1);
+  if (!end || !('text' in end) || !SENTENCE_END.test(end.text)) return null;
   spaceAroundRefs(parts);
   // Trim the sentence's outer whitespace; inner spacing between text and refs is kept.
   const first = parts.at(0);

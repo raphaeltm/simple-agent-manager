@@ -99,21 +99,30 @@ describe('parseBriefReply', () => {
     ['a non-Latin digit', sentence({ ref: 'a1' }, { text: ' has waited ٣ hours.' })],
     ['a number word', sentence({ ref: 'a1' }, { text: ' is one of several asks.' })],
     ['a count word', sentence({ ref: 'a1' }, { text: ' was asked twice.' })],
-    ['a URL', sentence({ ref: 'a1' }, { text: ' see https://evil.example' })],
-    ['a bare domain', sentence({ ref: 'a1' }, { text: ' see evil.com for details' })],
-    ['markup', sentence({ ref: 'a1' }, { text: ' <b>now</b>' })],
-    ['a markdown link', sentence({ text: '[open](javascript:x) ' }, { ref: 'a1' })],
+    ['a URL', sentence({ ref: 'a1' }, { text: ' see https://evil.example now.' })],
+    ['a bare domain', sentence({ ref: 'a1' }, { text: ' see evil.com for details.' })],
+    ['markup', sentence({ ref: 'a1' }, { text: ' <b>now</b>.' })],
+    [
+      'a markdown link',
+      sentence({ text: '[open](javascript:x) ' }, { ref: 'a1' }, { text: ' waits.' }),
+    ],
+    // The reply staging's model wrote on 2026-11-17: the sentence stops at the link.
+    ['a fragment ending at a link', sentence({ text: 'The process for ' }, { ref: 'f1' })],
+    [
+      'a fragment without a full stop',
+      sentence({ text: 'A person must resolve ' }, { ref: 'a1' }, { text: ' soon' }),
+    ],
     [
       'a zero-width character',
-      sentence({ ref: 'a1' }, { text: ` wait${String.fromCodePoint(0x200b)}ing` }),
+      sentence({ ref: 'a1' }, { text: ` wait${String.fromCodePoint(0x200b)}ing.` }),
     ],
     [
       'a bidi override',
-      sentence({ ref: 'a1' }, { text: ` ${String.fromCodePoint(0x202e)}gnitiaw` }),
+      sentence({ ref: 'a1' }, { text: ` ${String.fromCodePoint(0x202e)}gnitiaw.` }),
     ],
     [
       'overlong prose',
-      sentence({ ref: 'a1' }, { text: ` ${'is waiting for an answer and '.repeat(12)}` }),
+      sentence({ ref: 'a1' }, { text: ` ${'is waiting for an answer and '.repeat(12)}done.` }),
     ],
   ])('drops a sentence with %s and keeps the good ones', (_label, bad) => {
     const good = sentence({ ref: 'c1' }, { text: ' is working.' });

@@ -35,6 +35,7 @@ Rules:
 - At most three sentences. The most important thing first: what needs the person (blocking items before others), then what is failing or stuck, then what is moving.
 - Each sentence stands on its own: no "it", "this" or "that" pointing at another sentence, because a sentence may be shown alone or removed.
 - Every sentence names at least one item with {"ref":"<handle>"}. Use only handles from the facts. The page shows the item's name where the ref is, so do not repeat the name in the text.
+- Each sentence is complete: a subject and a verb, saying what is happening to the item or what the person should do. Treat a ref as a noun inside the sentence. The last part is always text ending with a full stop, e.g. {"ref":"a1"},{"text":" is waiting for your answer."}
 - No numbers or counts at all: no digits and no number words. Never say how many; name the items instead.
 - Plain words only: no links, no URLs, no markdown, no quotes around names, no emoji.
 - Short and specific. Do not restate every item; pick what matters.

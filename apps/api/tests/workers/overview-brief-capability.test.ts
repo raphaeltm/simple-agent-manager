@@ -407,9 +407,15 @@ describe('Overview brief through the real entry points', () => {
     modelReplies.push(
       reply([
         { parts: [{ text: 'Open ' }, { ref: 'x1' }, { text: ' now.' }] },
-        { parts: [{ ref: 'a1' }, { text: ' see https://evil.example/phish' }] },
-        { parts: [{ ref: 'a1' }, { text: ' <img src=x onerror=alert(1)>' }] },
-        { parts: [{ text: '[click here](javascript:alert(1)) ' }, { ref: 'a1' }] },
+        { parts: [{ ref: 'a1' }, { text: ' see https://evil.example/phish now.' }] },
+        { parts: [{ ref: 'a1' }, { text: ' <img src=x onerror=alert(1)> waits.' }] },
+        {
+          parts: [
+            { text: '[click here](javascript:alert(1)) ' },
+            { ref: 'a1' },
+            { text: ' waits.' },
+          ],
+        },
         { parts: [{ ref: 'a1' }, { text: ' is waiting on your answer.' }] },
       ])
     );
