@@ -1,4 +1,8 @@
-import { getMultipartBoundary, MultipartParser } from '@remix-run/multipart-parser';
+import {
+  getMultipartBoundary,
+  MultipartParser,
+  type MultipartPart,
+} from '@remix-run/multipart-parser';
 
 import type { Env } from '../env';
 import { releaseArrayBuffer } from '../lib/release-array-buffer';
@@ -75,8 +79,7 @@ interface MultipartLimits {
   readTimeoutMs: number;
 }
 
-/** Parse incrementally without Hono's full-body cache or native formData materialization. */
-async function parseUpload(request: Request, limits: MultipartLimits): Promise<MultipartUpload> {
+function createMultipartParser(request: Request, limits: MultipartLimits) {
   const declared = request.headers.get('content-length');
   if (declared !== null && (!/^\d+$/.test(declared) || !Number.isSafeInteger(Number(declared)))) {
     throw errors.badRequest('Invalid Content-Length');
@@ -107,23 +110,61 @@ async function parseUpload(request: Request, limits: MultipartLimits): Promise<M
     void request.body?.cancel().catch(() => {});
     throw errors.badRequest('Failed to parse multipart form data');
   }
-  if (!request.body) throw errors.badRequest('Missing multipart body');
-  // Workers incoming bodies support BYOB: limit each ingress allocation as well as
-  // parser allocations. Non-byte-stream adapters must supply equally bounded chunks.
-  const parserChunkBytes = 64 * 1024;
-  let reader: ReadableStreamBYOBReader | ReadableStreamDefaultReader<Uint8Array>;
-  let read: () => Promise<ReadableStreamReadResult<Uint8Array>>;
-  let ownsIngress = false;
+  return { declared, parser };
+}
+
+function createUploadReader(body: ReadableStream<Uint8Array>, parserChunkBytes: number) {
   try {
-    const byob = request.body.getReader({ mode: 'byob' });
-    reader = byob;
-    ownsIngress = true;
-    read = () => byob.read(new Uint8Array(parserChunkBytes));
+    const reader = body.getReader({ mode: 'byob' });
+    return { reader, ownsIngress: true, read: () => reader.read(new Uint8Array(parserChunkBytes)) };
   } catch {
-    const standard = request.body.getReader();
-    reader = standard;
-    read = () => standard.read();
+    const reader = body.getReader();
+    return { reader, ownsIngress: false, read: () => reader.read() };
   }
+}
+
+function consumeMetadataPart(
+  part: MultipartPart,
+  fields: Record<string, string>,
+  metadataBytes: number,
+  maxTextBytes: number
+): number {
+  metadataBytes += part.size;
+  if (metadataBytes > maxTextBytes) throw errors.badRequest('Multipart metadata is too large');
+  if (part.name && TEXT_FIELDS.has(part.name)) {
+    if (!part.isText) throw errors.badRequest('Multipart metadata must be text');
+    fields[part.name] = part.text;
+  }
+  return metadataBytes;
+}
+
+async function readMultipartChunks(
+  read: () => Promise<ReadableStreamReadResult<Uint8Array>>,
+  ownsIngress: boolean,
+  isTimedOut: () => boolean,
+  write: (bytes: Uint8Array) => void
+): Promise<void> {
+  for (;;) {
+    const chunk = await read();
+    try {
+      if (isTimedOut()) throw errors.badRequest('Multipart upload timed out');
+      if (chunk.done) break;
+      write(chunk.value);
+    } finally {
+      // BYOB transfers the allocation to us; release it only after copying or rejection.
+      if (ownsIngress && chunk.value) releaseArrayBuffer(chunk.value.buffer);
+    }
+  }
+}
+
+/** Parse incrementally without Hono's full-body cache or native formData materialization. */
+async function parseUpload(request: Request, limits: MultipartLimits): Promise<MultipartUpload> {
+  const { declared, parser } = createMultipartParser(request, limits);
+  if (!request.body) throw errors.badRequest('Missing multipart body');
+  // Workers incoming bodies support BYOB: bound ingress and parser allocations.
+  // Non-byte-stream adapters must supply equally bounded chunks.
+  const parserChunkBytes = 64 * 1024;
+  const { reader, read, ownsIngress } = createUploadReader(request.body, parserChunkBytes);
   const fields: Record<string, string> = Object.create(null);
   let file: { data: ArrayBuffer; filename: string; mimeType: string } | undefined;
   let received = 0;
@@ -149,52 +190,38 @@ async function parseUpload(request: Request, limits: MultipartLimits): Promise<M
           mimeType: part.mediaType || 'application/octet-stream',
         };
       } else {
-        metadataBytes += part.size;
-        if (metadataBytes > limits.maxTextBytes)
-          throw errors.badRequest('Multipart metadata is too large');
-        if (part.name && TEXT_FIELDS.has(part.name)) {
-          if (!part.isText) throw errors.badRequest('Multipart metadata must be text');
-          fields[part.name] = part.text;
-        }
+        metadataBytes = consumeMetadataPart(part, fields, metadataBytes, limits.maxTextBytes);
       }
       // Release parser chunks before crypto allocates ciphertext alongside plaintext.
       part.content.length = 0;
     }
   };
-  try {
-    for (;;) {
-      const chunk = await read();
-      try {
-        if (timedOut) throw errors.badRequest('Multipart upload timed out');
-        if (chunk.done) break;
-        if (chunk.value.byteLength > parserChunkBytes) {
-          throw errors.badRequest('Multipart input requires bounded byte-stream reads');
-        }
-        received += chunk.value.byteLength;
-        if (received > limits.maxBodyBytes) {
-          throw errors.badRequest(
-            `Multipart request exceeds maximum size of ${limits.maxBodyBytes} bytes`
-          );
-        }
-        let offset = 0;
-        while (offset < chunk.value.byteLength) {
-          const count = Math.min(pending.length - pendingBytes, chunk.value.byteLength - offset);
-          pending.set(chunk.value.subarray(offset, offset + count), pendingBytes);
-          pendingBytes += count;
-          offset += count;
-          if (pendingBytes === pending.length) {
-            consume(pending);
-            pending = new Uint8Array(parserChunkBytes);
-            parserBuffers.push(pending.buffer);
-            pendingBytes = 0;
-          }
-        }
-      } finally {
-        // A BYOB read transfers the provided allocation to us. Free it once copied;
-        // tiny ingress reads must not accumulate stale backing storage until GC.
-        if (ownsIngress && chunk.value) releaseArrayBuffer(chunk.value.buffer);
+  const writeChunk = (bytes: Uint8Array) => {
+    if (bytes.byteLength > parserChunkBytes) {
+      throw errors.badRequest('Multipart input requires bounded byte-stream reads');
+    }
+    received += bytes.byteLength;
+    if (received > limits.maxBodyBytes) {
+      throw errors.badRequest(
+        `Multipart request exceeds maximum size of ${limits.maxBodyBytes} bytes`
+      );
+    }
+    let offset = 0;
+    while (offset < bytes.byteLength) {
+      const count = Math.min(pending.length - pendingBytes, bytes.byteLength - offset);
+      pending.set(bytes.subarray(offset, offset + count), pendingBytes);
+      pendingBytes += count;
+      offset += count;
+      if (pendingBytes === pending.length) {
+        consume(pending);
+        pending = new Uint8Array(parserChunkBytes);
+        parserBuffers.push(pending.buffer);
+        pendingBytes = 0;
       }
     }
+  };
+  try {
+    await readMultipartChunks(read, ownsIngress, () => timedOut, writeChunk);
     if (pendingBytes > 0) consume(pending.subarray(0, pendingBytes));
     parser.finish();
     if (declared !== null && received !== Number(declared)) {

@@ -13,9 +13,11 @@ function multipartBody(data: ArrayBuffer, filename: string, destination: string)
   const boundary = `sam-${crypto.randomUUID()}`;
   const encoder = new TextEncoder();
   // WHATWG multipart escaping prevents a filename from creating another header or part.
-  const escapedFilename = filename.replace(/[\r\n"]/g, (char) =>
-    char === '\r' ? '%0D' : char === '\n' ? '%0A' : '%22'
-  );
+  const escapedFilename = filename.replace(/[\r\n"]/g, (char) => {
+    if (char === '\r') return '%0D';
+    if (char === '\n') return '%0A';
+    return '%22';
+  });
   const normalizedDestination = destination.replace(/\r\n|\r|\n/g, '\r\n');
   const segments = [
     encoder.encode(

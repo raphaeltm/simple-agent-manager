@@ -161,7 +161,7 @@ describe('Library multipart outer-limit compatibility', () => {
       );
       expect(response.status).toBe(200);
       const bytes = new Uint8Array(await response.arrayBuffer());
-      expect(bytes.length).toBe(MAX_FILE_BYTES);
+      expect(bytes).toHaveLength(MAX_FILE_BYTES);
       expect(bytes.every((byte) => byte === value)).toBe(true);
     }
     // One attempt at the configured outer limit, comfortably inside the 120s ingress budget.

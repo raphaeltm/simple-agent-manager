@@ -99,7 +99,7 @@ it('bounds full-metadata upload/replacement to twelve D1 plus one R2 operation',
       settingsSnapshotReads: queries.filter((sql) => /FROM platform_settings\s*$/i.test(sql))
         .length,
     });
-    expect(queries.filter((sql) => /FROM platform_settings\s*$/i.test(sql)).length).toBe(
+    expect(queries.filter((sql) => /FROM platform_settings\s*$/i.test(sql))).toHaveLength(
       mode === 'cold-upload' ? 1 : 0
     );
     await waitOnExecutionContext(ctx);
