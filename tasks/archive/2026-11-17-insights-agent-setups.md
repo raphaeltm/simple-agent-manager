@@ -55,7 +55,7 @@ existing skill update API.
       applied via `updateSkill`; remove agent-setups from ComingSoonTab
 - [x] Playwright visual audit 375/1280 realistic/empty/stress
 - [x] Docs: Insights section of the project guide
-- [ ] Staging (Phase 6, pending): real runs across ≥2 profiles or skills; one suggestion end to end if data allows
+- [x] Staging: real runs across ≥2 profiles or skills; one suggestion end to end if data allows
 
 ## Acceptance criteria
 
@@ -79,3 +79,10 @@ existing skill update API.
 - Discrimination proofs: deleting each project predicate (memory, usage, later PRs, profile join,
   skill join) reddens exactly the attack tests; the key-hiding branch reddens both leak tests;
   reverting `CROSS JOIN` reddens the plan test.
+- Staging (2026-11-17 03:44–04:36Z, primary staging, deploy run 44012259223): attempt 1 hit Cloudflare
+  10021 (startup CPU, known near-limit, idea 01M7KC60HV5F91246WSDVQPHMY; local startup 327 ms active,
+  within the 315–348 ms noise siblings measured); attempt 2 deployed, smoke green. Live: three real
+  projects, all ranges × groupings 200 private/no-store, bad range/grouping 400, foreign project 404;
+  Test Project 1 (61 runs) → 6 profiles incl. name hints, nudges and memory measured, tokens not
+  reported; UI 1280/375 × 3 groupings: no overflow, 0 console errors, 0 failed requests. No staging
+  task uses a skill, so no suggestion could be exercised live (covered by real-SQL + Playwright tests).
