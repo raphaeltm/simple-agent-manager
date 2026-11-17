@@ -76,4 +76,5 @@ working exactly as today.
 - Codex comment 4598971932 addressed: cleanup-only backend resolution preserves disabled-feature deletion without widening serving, creation or token access. Surgical revert: disabled/absent DELETE cases fail, 13 controls pass; restored suite passes.
 - Consolidated copied Artifacts creation test setup (Sonar); tests still enter the real production route/schema.
 - Focused Cloudflare/security/completion reviews PASS; Go implementation unchanged, prior review retained.
-- Staging fresh VM/clone/push and GitHub clone remain pending; production merge hold remains until coordinator lifts it.
+- Coordinator lifted the #2841 production hold at 21:31 UTC after production deploy 44174587033 succeeded. Staging fresh VM/clone/push, GitHub clone and current-head CI remain pending.
+- Main #2840 introduced a speech import-graph test that exceeded Vitest’s default 5-second budget under shared CI load (5695 ms; API shard 1 otherwise 5406 passed / 1 skipped). Added a 30-second budget only to that graph walk; assertions and positive control are unchanged. Focused 2/2 tests and ESLint PASS; Cloudflare delta review PASS. This is an unrelated test-only CI fix, not an L16 runtime change.
