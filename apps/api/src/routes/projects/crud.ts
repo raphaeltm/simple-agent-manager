@@ -17,6 +17,7 @@ import {
   deleteProjectLibraryObjects,
   getProjectDeleteCleanupBatchSize,
 } from '../../services/file-library';
+import { resolveArtifactsBackend } from '../../services/hosted-git/backend';
 import { getRuntimeLimits } from '../../services/limits';
 import { deleteWorkspaceResourceHistoryObjectsForProject } from '../../services/workspace-resource-history';
 import { registerProjectCreateRoute } from './project-create';
@@ -42,13 +43,16 @@ async function cleanupArtifactsRepoOnProjectDelete(
     action: 'orphaned_artifacts_repo_on_delete',
   };
 
-  if (!env.ARTIFACTS || typeof env.ARTIFACTS.delete !== 'function') {
+  // The Cloudflare binding even when ARTIFACTS_ENABLED was turned off after creation (unchanged),
+  // else the backend the self-host build registered.
+  const artifacts = env.ARTIFACTS ?? resolveArtifactsBackend(env);
+  if (!artifacts || typeof artifacts.delete !== 'function') {
     log.warn('project_delete.artifacts_delete_unavailable', orphanDetails);
     return;
   }
 
   try {
-    const deleted = await env.ARTIFACTS.delete(project.artifactsRepoId);
+    const deleted = await artifacts.delete(project.artifactsRepoId);
     if (!deleted) {
       log.warn('project_delete.artifacts_delete_returned_false', orphanDetails);
     }

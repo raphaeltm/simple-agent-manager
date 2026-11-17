@@ -19,6 +19,7 @@ import {
   requireGitLabUserAccessTokenResultForOwner,
   verifyGitLabProjectAccess,
 } from '../../services/gitlab';
+import { resolveArtifactsBackend } from '../../services/hosted-git/backend';
 import { assertRepositoryAccess } from '../projects/_helpers';
 import {
   assertWorkspaceAcceptsCallback,
@@ -221,7 +222,8 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     if (c.env.ARTIFACTS_ENABLED !== 'true') {
       throw errors.forbidden('Artifacts provider is not enabled');
     }
-    if (!c.env.ARTIFACTS || !artifactsRepoId) {
+    const artifacts = resolveArtifactsBackend(c.env);
+    if (!artifacts || !artifactsRepoId) {
       throw errors.internal('Artifacts binding or repo ID missing');
     }
 
@@ -232,7 +234,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     const ttl = Number.isFinite(rawTtl) && rawTtl > 0 && rawTtl <= 86400 ? rawTtl : 3600;
     // Use requested scope or default to 'write' (agents need push access)
     const requestedScope = c.req.query('scope') === 'read' ? ('read' as const) : ('write' as const);
-    const repo = await c.env.ARTIFACTS.get(artifactsRepoId);
+    const repo = await artifacts.get(artifactsRepoId);
     await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'git_token');
     const tokenResult = await repo.createToken(requestedScope, ttl);
 

@@ -3384,14 +3384,15 @@ func withGitToken(repoURL, token string, cfg *config.Config) (string, error) {
 	isGitLabHost := cfg != nil &&
 		strings.EqualFold(strings.TrimSpace(cfg.RepoProvider), "gitlab") &&
 		strings.EqualFold(strings.TrimSpace(cfg.RepositoryHost), host)
-	if !gitrepo.IsKnownGitHost(host) && !isGitLabHost {
+	hostedArtifactsHost := isBoundHostedArtifactsHost(cfg, host)
+	if !gitrepo.IsKnownGitHost(host) && !isGitLabHost && !hostedArtifactsHost {
 		return repoURL, nil
 	}
 
-	// For GitHub repos use "x-access-token"; for Artifacts use "x"; for
-	// GitLab OAuth use the conventional "oauth2" username.
+	// For GitHub repos use "x-access-token"; for Artifacts (Cloudflare or a
+	// self-hosted SAM git server) use "x"; for GitLab OAuth use "oauth2".
 	username := "x-access-token"
-	if gitrepo.IsArtifactsHost(host) {
+	if gitrepo.IsArtifactsHost(host) || hostedArtifactsHost {
 		username = "x"
 	} else if isGitLabHost {
 		username = "oauth2"
@@ -3429,6 +3430,9 @@ func needsCredentialHelperForConfig(cfg *config.Config) bool {
 		return false
 	}
 	if strings.TrimSpace(cfg.RepositoryHost) != "" && strings.EqualFold(strings.TrimSpace(cfg.RepoProvider), "gitlab") {
+		return true
+	}
+	if isBoundHostedArtifactsHost(cfg, cfg.RepositoryHost) {
 		return true
 	}
 	return needsCredentialHelper(firstNonEmptyString(cfg.CloneURL, cfg.Repository))

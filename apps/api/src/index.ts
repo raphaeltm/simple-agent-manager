@@ -186,6 +186,7 @@ import { scheduled } from './scheduled/handler';
 import { handleInboundAgentEmail } from './services/agent-email/inbound';
 import { agentEmailConfig } from './services/agent-email/setup-state';
 import { isAgentSignInEnabled } from './services/agent-sign-in/config';
+import { isArtifactsAvailable } from './services/hosted-git/backend';
 import { isInstantRuntimeAvailable } from './services/vm-agent-container';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -274,7 +275,7 @@ app.get('/health', (c) => {
 // Public config — exposes feature flags the UI needs before auth
 app.get('/api/config/artifacts-enabled', (c) => {
   applyCacheHeaders(c, 'public-config');
-  return c.json({ enabled: c.env.ARTIFACTS_ENABLED === 'true' && !!c.env.ARTIFACTS });
+  return c.json({ enabled: isArtifactsAvailable(c.env) });
 });
 
 app.route('/api/config', platformCapabilitiesRoutes);

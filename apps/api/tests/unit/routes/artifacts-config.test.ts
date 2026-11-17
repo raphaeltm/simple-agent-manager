@@ -8,16 +8,20 @@
  * See: docs/notes/2026-04-25-artifacts-broken-merge-postmortem.md
  */
 import { Hono } from 'hono';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+
+import type { Env } from '../../../src/env';
+import {
+  isArtifactsAvailable,
+  registerArtifactsBackendFallback,
+} from '../../../src/services/hosted-git/backend';
 
 describe('/api/config/artifacts-enabled', () => {
   function createApp(env: Record<string, unknown>) {
     const app = new Hono<{ Bindings: Record<string, unknown> }>();
-    // Replicate the exact logic from src/index.ts
+    // src/index.ts answers with exactly this call.
     app.get('/api/config/artifacts-enabled', (c) => {
-      return c.json({
-        enabled: c.env.ARTIFACTS_ENABLED === 'true' && !!c.env.ARTIFACTS,
-      });
+      return c.json({ enabled: isArtifactsAvailable(c.env as unknown as Env) });
     });
     return { app, env };
   }
@@ -85,5 +89,27 @@ describe('/api/config/artifacts-enabled', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.enabled).toBe(false);
+  });
+
+  describe('with a self-host fallback backend registered', () => {
+    afterEach(() => registerArtifactsBackendFallback(null));
+
+    it('returns enabled: true with the flag and no binding', async () => {
+      registerArtifactsBackendFallback(() => ({}) as never);
+      const { app } = createApp({});
+      const res = await app.request(
+        '/api/config/artifacts-enabled',
+        {},
+        { ARTIFACTS_ENABLED: 'true' }
+      );
+      expect((await res.json()).enabled).toBe(true);
+    });
+
+    it('still returns enabled: false without the flag', async () => {
+      registerArtifactsBackendFallback(() => ({}) as never);
+      const { app } = createApp({});
+      const res = await app.request('/api/config/artifacts-enabled', {}, {});
+      expect((await res.json()).enabled).toBe(false);
+    });
   });
 });

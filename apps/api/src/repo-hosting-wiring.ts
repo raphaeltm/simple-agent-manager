@@ -5,7 +5,12 @@
  */
 import { configureRepoHostingPorts } from '@simple-agent-manager/repo-hosting/ports';
 
+import { artifactsPort } from './repo-hosting-ports/artifacts';
 import { authPort } from './repo-hosting-ports/auth';
 import { platformConfigPort } from './repo-hosting-ports/platform-config';
 
-configureRepoHostingPorts({ platformConfig: platformConfigPort, auth: authPort });
+configureRepoHostingPorts({
+  platformConfig: platformConfigPort,
+  auth: authPort,
+  artifacts: artifactsPort,
+});

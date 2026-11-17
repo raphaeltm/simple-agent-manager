@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { projectsRoutes } from '../../../src/routes/projects';
+import { registerArtifactsBackendFallback } from '../../../src/services/hosted-git/backend';
 
 const mocks = vi.hoisted(() => ({
   requireProjectCapability: vi.fn(),
@@ -58,7 +59,10 @@ describe('DELETE /api/projects/:id', () => {
         });
         // When awaited directly (without .limit()), resolve to data
         selectChain.then = (resolve: any, reject: any) => {
-          return Promise.resolve(reservationQuery ? [] : (selectResults.shift() ?? [])).then(resolve, reject);
+          return Promise.resolve(reservationQuery ? [] : (selectResults.shift() ?? [])).then(
+            resolve,
+            reject
+          );
         };
         return selectChain;
       }),
@@ -344,6 +348,38 @@ describe('DELETE /api/projects/:id', () => {
     expect(artifactsDelete).toHaveBeenCalledWith('artifacts-repo-1');
     expect(artifactsDelete).toHaveBeenCalledTimes(1);
     expect(consoleWarnSpy).not.toHaveBeenCalled();
+  });
+
+  it('deletes the repository through a registered self-host backend when no binding exists', async () => {
+    const hostedDelete = vi.fn().mockResolvedValue(true);
+    registerArtifactsBackendFallback(
+      () => ({ delete: hostedDelete, create: vi.fn(), get: vi.fn() }) as never
+    );
+    try {
+      mocks.requireProjectCapability.mockResolvedValueOnce({
+        id: 'proj-1',
+        userId: 'user-1',
+        name: 'Hosted Project',
+        installationId: 'system_anonymous_trials_installation',
+        repository: 'https://api.sam.example/git/artifacts-repo-1.git',
+        defaultBranch: 'main',
+        repoProvider: 'artifacts',
+        artifactsRepoId: 'artifacts-repo-1',
+      });
+      selectResults.push([]);
+
+      const response = await app.request(
+        '/api/projects/proj-1',
+        { method: 'DELETE' },
+        { ...env, ARTIFACTS_ENABLED: 'true' }
+      );
+
+      expect(response.status).toBe(200);
+      expect(hostedDelete).toHaveBeenCalledWith('artifacts-repo-1');
+      expect(consoleWarnSpy).not.toHaveBeenCalled();
+    } finally {
+      registerArtifactsBackendFallback(null);
+    }
   });
 
   it('logs an orphan and still deletes the project when the Artifacts binding is unavailable', async () => {
