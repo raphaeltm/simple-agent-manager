@@ -1,3 +1,4 @@
+import { hasLocalAiCostMetering } from '@simple-agent-manager/ai-proxy';
 import { guardedFetch } from '@simple-agent-manager/worker-core';
 /**
  * AI proxy passthrough routes — URL-path-based workspace auth.
@@ -207,6 +208,8 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
       fallbackInputTokens: estimateInputTokensFromMessages(body.messages),
       provider: upstream.provider,
       costModelId: platformCostModelId(upstream, modelId),
+      estimateMissingUsage:
+        upstream.credentialSource === 'platform' && hasLocalAiCostMetering(c.env),
       onMeasuredUsage: prepared.value.recordRunUsage,
       executionCtx: optionalExecutionContext(() => c.executionCtx),
       headers: responseHeaders,
@@ -392,6 +395,8 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
       fallbackInputTokens: estimateInputTokensFromMessages(body.messages),
       provider: upstream.provider,
       costModelId: platformCostModelId(upstream, modelId),
+      estimateMissingUsage:
+        upstream.credentialSource === 'platform' && hasLocalAiCostMetering(c.env),
       onMeasuredUsage: prepared.value.recordRunUsage,
       executionCtx: optionalExecutionContext(() => c.executionCtx),
       headers: responseHeaders,

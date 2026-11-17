@@ -29,7 +29,7 @@ closed by L12 must be closed here.
 
 ## Checklist
 
-- [x] `aiProxy.monthlyCostCeilingUsd` admin setting (integer USD, 0 = none, superadmin only)
+- [x] `aiProxy.perUserMonthlyCostCeilingUsd` admin setting (integer USD, 0 = none, superadmin only)
 - [x] `AiProxyPorts.monthlyCostCeilingUsd`, worker binding in `aiProxyPorts`
 - [x] `effectiveMonthlyCostCapUsd`: one cap predicate for gate, budget GET, validation
 - [x] Ceiling read only on the no-gateway path; gateway path I/O unchanged (tested)
@@ -48,5 +48,6 @@ closed by L12 must be closed here.
 - [x] A user cap above the ceiling is enforced at the ceiling; PUT refuses it
 - [x] Gateway installs: same 4 KV reads in the gate, ceiling never read
 - [x] Malformed stored budget row does not fail AI calls
-- [ ] Staging: budget page + cap unchanged on gateway path; direct-upstream metering + ceiling
-      block; SAM-mode chat end to end; settings reset
+- [x] Takeover: verify/fix platform passthrough pricing, missing output, own-funding scope and ceiling recovery advice
+- [ ] Staging2: gateway budget/cap unchanged; superadmin ceiling edit and ordinary user refused; ceiling inert with gateway; SAM-mode chat; settings/resources reset
+- [ ] Live no-gateway metering/ceiling block on self-host box with L22 (explicit coordinator acceptance channel165; unreachable on Cloudflare staging)

@@ -63,7 +63,7 @@ export async function accountTokenUsageFromJson(
 ): Promise<void> {
   const usage = extractJsonTokenUsage(payload, options.format);
   if (options.estimateMissingUsage && usage.outputTokens === undefined)
-    usage.outputBytes = jsonOutputByteLength(payload);
+    usage.outputBytes = jsonOutputByteLength(payload, options.format);
   await incrementExtractedUsage(usage, options);
 }
 
@@ -362,6 +362,13 @@ function applyStreamUsage(
     usage.cacheWriteTokens =
       numberValue(startUsage?.cache_creation_input_tokens) ?? usage.cacheWriteTokens;
     usage.outputTokens = numberValue(deltaUsage?.output_tokens) ?? usage.outputTokens;
+    if (usage.outputBytes !== undefined) {
+      const delta = maybeJsonRecord(record.delta);
+      for (const key of ['text', 'thinking', 'partial_json'] as const) {
+        if (typeof delta?.[key] === 'string') usage.outputBytes += utf8ByteLength(delta[key]);
+      }
+      usage.outputBytes += anthropicOutputByteLength([record.content_block]);
+    }
     return;
   }
 
@@ -404,8 +411,27 @@ function choicesOutputByteLength(choices: unknown, field: 'message' | 'delta'): 
   return bytes;
 }
 
-function jsonOutputByteLength(payload: unknown): number {
-  return choicesOutputByteLength(maybeJsonRecord(payload)?.choices, 'message');
+function anthropicOutputByteLength(content: unknown): number {
+  if (!Array.isArray(content)) return 0;
+  let bytes = 0;
+  for (const block of content) {
+    const part = maybeJsonRecord(block);
+    if (!part) continue;
+    for (const key of ['text', 'thinking'] as const) {
+      if (typeof part[key] === 'string') bytes += utf8ByteLength(part[key]);
+    }
+    if (part.type === 'tool_use' && part.input !== undefined) {
+      bytes += utf8ByteLength(JSON.stringify(part.input));
+    }
+  }
+  return bytes;
+}
+
+function jsonOutputByteLength(payload: unknown, format: TokenUsageFormat): number {
+  const record = maybeJsonRecord(payload);
+  return format === 'anthropic'
+    ? anthropicOutputByteLength(record?.content)
+    : choicesOutputByteLength(record?.choices, 'message');
 }
 
 function isStreamingResponse(response: Response): boolean {

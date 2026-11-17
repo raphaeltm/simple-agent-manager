@@ -9,6 +9,7 @@ import { getUserBudgetSettings } from '../../src/ai-budget-settings';
 import {
   effectiveMonthlyCostCapUsd,
   getLocalMonthlyAiCostUsd,
+  monthlyCostCapMessage,
   resolveMonthlyCostCeilingUsd,
 } from '../../src/ai-monthly-cost-cap';
 import {
@@ -211,5 +212,48 @@ describe('validateBudgetUpdate against the ceiling', () => {
     expect(
       validateBudgetUpdate({ monthlyCostCapUsd: null }, unpriced, null, null).monthlyCostCapUsd
     ).toBeNull();
+  });
+});
+
+describe('billing ownership and denial recovery', () => {
+  it('keeps locally funded platform spend blocked and permits own funding', async () => {
+    const { kv, env } = fixture();
+    const cost = await spend(env, 'user', 2);
+    const ports = ceiling(Math.floor(cost));
+    expect(await checkAiUsageGate(kv, 'user', env, ports)).toMatchObject({ allowed: false });
+    expect(await checkAiUsageGate(kv, 'user', env, ports, { platformBilled: false })).toEqual({
+      allowed: true,
+    });
+  });
+
+  it('still enforces daily budgets for own funding', async () => {
+    const { rows, kv, env } = fixture();
+    await spend(env, 'user', 1);
+    rows.set(buildBudgetSettingsKey('user'), JSON.stringify({ dailyInputTokenLimit: 1 }));
+    expect(
+      await checkAiUsageGate(kv, 'user', env, ceiling(50), { platformBilled: false })
+    ).toMatchObject({ allowed: false, reason: 'daily-token-budget' });
+  });
+
+  it('does not bypass gateway monthly caps for own funding', async () => {
+    const { rows, kv, env } = fixture(GATEWAY);
+    rows.set(buildBudgetSettingsKey('user'), JSON.stringify({ monthlyCostCapUsd: 1 }));
+    rows.set(buildMonthlyCostCacheKey('user'), '2');
+    expect(
+      await checkAiUsageGate(kv, 'user', env, ceiling(50), { platformBilled: false })
+    ).toMatchObject({ allowed: false, reason: 'monthly-cost-cap' });
+  });
+
+  it('names the administrator when the ceiling binds, retaining user cap recovery otherwise', async () => {
+    const { rows, kv, env } = fixture();
+    await spend(env, 'user', 2);
+    const result = await checkMonthlyCostCap(kv, 'user', env, ceiling(1));
+    expect(result).toMatchObject({ allowed: false, limitSource: 'administrator' });
+    expect(monthlyCostCapMessage(result)).toContain('Contact your administrator');
+    rows.set(buildBudgetSettingsKey('user'), JSON.stringify({ monthlyCostCapUsd: 0.01 }));
+    const personal = await checkMonthlyCostCap(kv, 'user', env, ceiling(50));
+    expect(personal).toMatchObject({ allowed: false });
+    expect(personal.limitSource).toBeUndefined();
+    expect(monthlyCostCapMessage(personal)).toContain('Settings > Usage');
   });
 });

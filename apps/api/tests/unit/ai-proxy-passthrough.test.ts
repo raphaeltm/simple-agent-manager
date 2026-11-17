@@ -1110,40 +1110,123 @@ describe('L13: platform-owned passthrough credentials count toward the monthly c
     };
   });
 
-  async function callWithSource(source: string) {
-    mockWorkspaceAuth('openai-codex');
+  async function callWithSource(
+    source: string,
+    options: {
+      model?: string;
+      anthropic?: boolean;
+      stream?: boolean;
+      missingUsage?: boolean;
+      gateway?: boolean;
+    } = {}
+  ) {
+    const model = options.model ?? PRICED.id;
+    mockWorkspaceAuth(options.anthropic ? 'claude-code' : 'openai-codex');
     mockAllowedRateLimit();
     mockCheckTokenBudget.mockResolvedValue({ allowed: true });
     mockResolveForConsumer.mockImplementation((_db, _userId, _key, consumer) =>
       Promise.resolve({
         consumer,
-        configuration: { settings: { providerId: 'openai', providerName: 'OpenAI' } },
+        configuration: {
+          settings: options.anthropic
+            ? { baseUrl: 'https://anthropic-alt.example', dialect: 'anthropic' }
+            : { providerId: 'openai', providerName: 'OpenAI' },
+        },
         credential: {
-          id: 'cred-openai',
-          secret: {
-            kind: 'openai-compatible',
-            apiKey: 'sk-openai',
-            baseUrl: 'https://custom-openai.example/v1',
-          },
+          id: 'cred-test',
+          secret: options.anthropic
+            ? { kind: 'api-key', apiKey: 'sk-test' }
+            : {
+                kind: 'openai-compatible',
+                apiKey: 'sk-test',
+                baseUrl: 'https://custom-openai.example/v1',
+              },
         },
         source,
       })
     );
+    const text = 'This generated output must be counted even without provider usage.';
+    const payload = options.anthropic
+      ? { content: [{ type: 'text', text }] }
+      : { choices: [{ message: { content: text } }] };
+    const usage = options.anthropic
+      ? { input_tokens: 1000, output_tokens: 1000 }
+      : { prompt_tokens: 1000, completion_tokens: 1000 };
+    const responseBody = options.stream
+      ? options.anthropic
+        ? `event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text } })}\n\n`
+        : `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\ndata: [DONE]\n\n`
+      : JSON.stringify(options.missingUsage ? payload : { ...payload, usage });
     mockFetch.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({ id: 'c', usage: { prompt_tokens: 1_000, completion_tokens: 1_000 } }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
-      )
+      new Response(responseBody, {
+        status: 200,
+        headers: { 'Content-Type': options.stream ? 'text/event-stream' : 'application/json' },
+      })
     );
     const res = await postJson(
-      OPENAI_CHAT_COMPLETIONS_PATH,
-      openaiChatBody(PRICED.id),
+      options.anthropic ? ANTHROPIC_MESSAGES_PATH : OPENAI_CHAT_COMPLETIONS_PATH,
+      {
+        ...(options.anthropic ? anthropicMessagesBody(model) : openaiChatBody(model)),
+        stream: options.stream ?? false,
+      },
       {},
-      NO_GATEWAY
+      options.gateway ? {} : NO_GATEWAY
     );
-    expect(res.status).toBe(200);
+    const copy = res.clone();
     await res.text();
+    return copy;
   }
+
+  it.each(['user-attachment', 'project-attachment', 'platform'])(
+    'passes resolved billing ownership to the gate: %s',
+    async (source) => {
+      const res = await callWithSource(source);
+      expect(res.status).toBe(200);
+      expect(mockCheckAiUsageGate.mock.calls[0]?.[4]).toEqual({
+        platformBilled: source === 'platform',
+      });
+    }
+  );
+
+  it('refuses an unpriced locally funded model before upstream fetch', async () => {
+    const res = await callWithSource('platform', { model: 'custom-unpriced-model' });
+    expect(res.status).toBe(400);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it.each(['user-attachment', 'project-attachment'])(
+    'keeps custom models for own-funded %s',
+    async (source) => {
+      expect((await callWithSource(source, { model: 'custom-unpriced-model' })).status).toBe(200);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('keeps the gateway platform path unchanged for custom models', async () => {
+    expect(
+      (await callWithSource('platform', { model: 'custom-unpriced-model', gateway: true })).status
+    ).toBe(200);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ])('estimates missing platform output, anthropic=%s stream=%s', async (anthropic, stream) => {
+    const model = anthropic
+      ? PLATFORM_AI_MODELS.find((m) => m.provider === 'anthropic')!.id
+      : PRICED.id;
+    expect(
+      (await callWithSource('platform', { model, anthropic, stream, missingUsage: true })).status
+    ).toBe(200);
+    expect(mockIncrementProviderUsage).toHaveBeenCalledTimes(1);
+    const args = mockIncrementProviderUsage.mock.calls[0]!;
+    expect(args[3]).toBeGreaterThan(0);
+    expect(args[4]).toBeGreaterThan(0);
+    expect(args[6]).toBeGreaterThan(0);
+  });
 
   it('prices a call served by a platform credential, with its catalog model', async () => {
     await callWithSource('platform');
@@ -1157,5 +1240,26 @@ describe('L13: platform-owned passthrough credentials count toward the monthly c
     await callWithSource('user-attachment');
     expect(mockIncrementProviderUsage).toHaveBeenCalledTimes(1);
     expect(mockIncrementProviderUsage.mock.calls[0]).toHaveLength(6);
+  });
+});
+
+describe('installation ceiling denial recovery through passthrough routes', () => {
+  it.each([
+    [ANTHROPIC_MESSAGES_PATH, 'claude-code', anthropicMessagesBody()],
+    [OPENAI_CHAT_COMPLETIONS_PATH, 'openai-codex', openaiChatBody()],
+  ])('names administrator recovery for %s', async (path, agentType, body) => {
+    mockWorkspaceAuth(agentType as string);
+    mockAllowedRateLimit();
+    mockCheckAiUsageGate.mockResolvedValue({
+      allowed: false,
+      reason: 'monthly-cost-cap',
+      monthlyCap: { allowed: false, costUsd: 50, capUsd: 50, limitSource: 'administrator' },
+    });
+    const response = await postJson(path as string, body as Record<string, unknown>);
+    expect(response.status).toBe(429);
+    const text = await response.text();
+    expect(text).toContain('Contact your administrator');
+    expect(text).not.toContain('Adjust your cap');
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });

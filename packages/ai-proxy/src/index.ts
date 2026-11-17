@@ -35,7 +35,11 @@ export {
 } from './ai-gateway-logs';
 export { checkModelTierAllowance, describeModelTierDenial } from './ai-model-tier-gate';
 export { getLocalUsageBreakdown } from './ai-model-usage';
-export { getLocalMonthlyAiCostUsd } from './ai-monthly-cost-cap';
+export {
+  getLocalMonthlyAiCostUsd,
+  type MonthlyCostCapCheck,
+  monthlyCostCapMessage,
+} from './ai-monthly-cost-cap';
 export { type MonthlyCostCronResult, runMonthlyCostAggregation } from './ai-monthly-cost-cron';
 export type { WorkersAIChatCompletionOptions, WorkersAIChatMessage } from './ai-proxy-shared';
 export {

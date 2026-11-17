@@ -2,7 +2,7 @@ import { PLATFORM_AI_MODELS, resolveSamConfig } from '@simple-agent-manager/shar
 
 import type { Env } from '../../../env';
 import { getTrustedApiOrigin } from '../../../lib/trusted-origins';
-import { checkAiUsageGate } from '../../../services/ai-token-budget';
+import { checkAiUsageGate,monthlyCostCapMessage } from '../../../services/ai-token-budget';
 import { projectOperatorContext } from './context';
 import {
   assertGroundedOperatorResponse,
@@ -158,7 +158,12 @@ export async function runOperatorAgent(options: {
         await assertOperatorExecution(env, userId);
         assertCurrent();
         const gate = await checkAiUsageGate(env.KV, userId, env);
-        if (!gate.allowed) throw new Error('SAM usage budget exhausted');
+        if (!gate.allowed)
+          throw new Error(
+            gate.reason === 'monthly-cost-cap'
+              ? monthlyCostCapMessage(gate.monthlyCap)
+              : 'SAM usage budget exhausted'
+          );
         assertCurrent();
         startedSteps++;
         return {

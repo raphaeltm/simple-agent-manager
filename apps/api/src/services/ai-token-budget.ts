@@ -21,6 +21,7 @@ export {
   getUserBudgetSettings,
   incrementProviderUsage,
   incrementTokenUsage,
+  monthlyCostCapMessage,
   releaseFeatureTokenBudget,
   resolveEffectiveLimits,
   resolvePlatformDailyTokenLimits,
@@ -33,8 +34,13 @@ export {
  * worker's admin settings. Every worker caller goes through here, so none can leave the ceiling
  * out (rule 61); the ceiling is read only where SAM meters spend itself.
  */
-export function checkAiUsageGate(kv: KVNamespace, userId: string, env: Env) {
-  return checkAiUsageGateWithPorts(kv, userId, env, aiProxyPorts(env));
+export function checkAiUsageGate(
+  kv: KVNamespace,
+  userId: string,
+  env: Env,
+  options?: { platformBilled?: boolean }
+) {
+  return checkAiUsageGateWithPorts(kv, userId, env, aiProxyPorts(env), options);
 }
 
 /** The installation ceiling where it applies (null with an AI Gateway, or when unset). */

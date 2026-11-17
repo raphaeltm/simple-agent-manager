@@ -14,7 +14,12 @@
  * workspaceId, and projectId. Upstream provider credentials are never accepted
  * from, or returned to, tenant workspaces.
  */
-import type { MeasuredTokenUsage } from '@simple-agent-manager/ai-proxy';
+import {
+  findPricedModel,
+  hasLocalAiCostMetering,
+  type MeasuredTokenUsage,
+  type MonthlyCostCapCheck,
+} from '@simple-agent-manager/ai-proxy';
 import {
   DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
   DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
@@ -85,7 +90,10 @@ interface PrepareProxyOptions {
   requestTooLargeResponse: (maxBytes: number) => Response;
   invalidBodyResponse?: (body: Record<string, unknown>) => Response | null;
   missingModelResponse: () => Response;
-  usageGateResponse: (reason: 'daily-token-budget' | 'monthly-cost-cap') => Response;
+  usageGateResponse: (
+    reason: 'daily-token-budget' | 'monthly-cost-cap',
+    cap?: MonthlyCostCapCheck
+  ) => Response;
   missingUpstreamResponse: () => Response;
 }
 
@@ -226,11 +234,6 @@ export async function prepareProxyRequest(
     return { ok: false, response: options.missingModelResponse() };
   }
 
-  const usageGate = await checkAiUsageGate(c.env.KV, auth.userId, c.env);
-  if (!usageGate.allowed) {
-    return { ok: false, response: options.usageGateResponse(usageGate.reason) };
-  }
-
   const upstream = await resolveProxyUpstream({
     env: c.env,
     userId: auth.userId,
@@ -243,6 +246,28 @@ export async function prepareProxyRequest(
   });
   if (!upstream) {
     return { ok: false, response: options.missingUpstreamResponse() };
+  }
+
+  const platformBilled = upstream.credentialSource === 'platform';
+  if (platformBilled && hasLocalAiCostMetering(c.env) && !findPricedModel(modelId)) {
+    const message = 'Model has no catalog price and cannot use an installation-funded credential.';
+    return {
+      ok: false,
+      response:
+        options.dialect === 'anthropic'
+          ? anthropicError(message, 'invalid_request_error', 400)
+          : openaiError(message, 'invalid_request_error', 400),
+    };
+  }
+  const usageGate = await checkAiUsageGate(c.env.KV, auth.userId, c.env, { platformBilled });
+  if (!usageGate.allowed) {
+    return {
+      ok: false,
+      response: options.usageGateResponse(
+        usageGate.reason,
+        usageGate.reason === 'monthly-cost-cap' ? usageGate.monthlyCap : undefined
+      ),
+    };
   }
 
   // Insights run usage: the measured tokens go to this workspace's run, keyed by the credential

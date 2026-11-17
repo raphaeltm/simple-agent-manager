@@ -2185,3 +2185,9 @@ stored per-user settings row that cannot be parsed is ignored (platform defaults
 `ai_proxy.budget_settings_row_skipped`) rather than failing the call. Priced calls also record a
 per-model, per-day row in the same counter transaction, which the usage page shows as model and
 day breakdowns on installations without a gateway (`packages/ai-proxy/src/ai-model-usage.ts`).
+
+Locally metered passthrough calls using an installation-owned credential must use a model in
+SAM's pricing catalog; unknown models are refused before forwarding. Missing provider usage is
+estimated, including generated output. User- and project-owned credentials remain usable after
+platform-funded monthly spend reaches its limit; daily token budgets still apply to all calls.
+An administrator ceiling denial directs the user to their administrator or the next month.

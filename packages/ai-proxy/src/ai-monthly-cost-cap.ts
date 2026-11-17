@@ -43,6 +43,15 @@ export interface MonthlyCostCapCheck {
   allowed: boolean;
   costUsd: number;
   capUsd: number | null;
+  /** Present when the administrator ceiling is the binding limit (including ties). */
+  limitSource?: 'administrator';
+}
+
+/** Recovery advice for the limit that actually denied admission. */
+export function monthlyCostCapMessage(cap?: MonthlyCostCapCheck): string {
+  return cap?.limitSource === 'administrator'
+    ? 'Administrator monthly AI spending limit reached. Contact your administrator or wait until next month.'
+    : 'Monthly cost cap exceeded. Adjust your cap in Settings > Usage.';
 }
 
 /**
@@ -144,18 +153,18 @@ export async function checkMonthlyCostCap(
   const userCapUsd = userSettings?.monthlyCostCapUsd ?? null;
 
   if (hasLocalAiCostMetering(env)) {
-    const capUsd = effectiveMonthlyCostCapUsd(
-      userCapUsd,
-      await resolveMonthlyCostCeilingUsd(env, ports)
-    );
+    const ceilingUsd = await resolveMonthlyCostCeilingUsd(env, ports);
+    const capUsd = effectiveMonthlyCostCapUsd(userCapUsd, ceilingUsd);
+    const source =
+      ceilingUsd !== null && capUsd === ceilingUsd ? { limitSource: 'administrator' as const } : {};
     if (capUsd === null) return { allowed: true, costUsd: 0, capUsd };
     let costUsd: number;
     try {
       costUsd = await getLocalMonthlyAiCostUsd(kv, userId, env);
     } catch {
-      return { allowed: false, costUsd: 0, capUsd };
+      return { allowed: false, costUsd: 0, capUsd, ...source };
     }
-    return { allowed: costUsd < capUsd, costUsd, capUsd };
+    return { allowed: costUsd < capUsd, costUsd, capUsd, ...source };
   }
 
   const capUsd = effectiveMonthlyCostCapUsd(userCapUsd, null);

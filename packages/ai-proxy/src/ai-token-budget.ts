@@ -461,13 +461,17 @@ export async function checkAiUsageGate(
   kv: KVNamespace,
   userId: string,
   env: AiProxyEnv,
-  ports: MonthlyCostCeilingPort
+  ports: MonthlyCostCeilingPort,
+  options?: { platformBilled?: boolean }
 ): Promise<AiUsageGateResult> {
   const budget = await checkTokenBudget(kv, userId, env);
   if (!budget.allowed) {
     return { allowed: false, reason: 'daily-token-budget', budget };
   }
 
+  // Local dollar totals contain only platform-funded spend. Daily budgets still cover all calls.
+  // Omission means platform billing; only the resolved passthrough credential opts out.
+  if (options?.platformBilled === false && hasLocalAiCostMetering(env)) return { allowed: true };
   const monthlyCap = await checkMonthlyCostCap(kv, userId, env, ports);
   if (!monthlyCap.allowed) {
     return { allowed: false, reason: 'monthly-cost-cap', monthlyCap };

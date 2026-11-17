@@ -156,3 +156,65 @@ describe('direct-upstream metering, without forced include_usage', () => {
     ).toBe(true);
   });
 });
+
+describe('Anthropic missing usage estimation', () => {
+  const text = 'twelve bytes';
+  it.each([
+    { type: 'text', text },
+    { type: 'thinking', thinking: text },
+    { type: 'tool_use', input: { key: text } },
+  ])('prices JSON $type output without measured usage', async (block) => {
+    const { kv, env } = fixture();
+    const model = PLATFORM_AI_MODELS.find((m) => m.provider === 'anthropic')!;
+    const measured = vi.fn();
+    await accountTokenUsageFromJson(
+      { content: [block] },
+      {
+        env,
+        userId: 'user',
+        format: 'anthropic',
+        costModelId: model.id,
+        estimateMissingUsage: true,
+        onMeasuredUsage: measured,
+      }
+    );
+    expect(await getLocalMonthlyAiCostUsd(kv, 'user', env)).toBeGreaterThan(0);
+    expect(measured).not.toHaveBeenCalled();
+  });
+  it.each([
+    { type: 'text_delta', text },
+    { type: 'thinking_delta', thinking: text },
+    { type: 'input_json_delta', partial_json: text },
+  ])('prices streaming $type output without measured usage', async (delta) => {
+    const { kv, env } = fixture();
+    const pending: Promise<unknown>[] = [];
+    const measured = vi.fn();
+    const model = PLATFORM_AI_MODELS.find((m) => m.provider === 'anthropic')!;
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(
+          new TextEncoder().encode(
+            `data: ${JSON.stringify({ type: 'content_block_delta', delta })}\n\n`
+          )
+        );
+        c.close();
+      },
+    });
+    accountTokenUsageFromStream(stream, {
+      env,
+      userId: 'user',
+      format: 'anthropic',
+      costModelId: model.id,
+      estimateMissingUsage: true,
+      onMeasuredUsage: measured,
+      executionCtx: {
+        waitUntil(p) {
+          pending.push(p);
+        },
+      },
+    });
+    await Promise.all(pending);
+    expect(await getLocalMonthlyAiCostUsd(kv, 'user', env)).toBeGreaterThan(0);
+    expect(measured).not.toHaveBeenCalled();
+  });
+});
