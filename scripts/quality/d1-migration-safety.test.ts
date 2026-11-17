@@ -4,6 +4,7 @@ import {
   type D1MigrationSafetyRunner,
   type D1TableCount,
   DEFAULT_D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT,
+  DEFAULT_D1_MIGRATION_CHURNING_TABLES,
   discoverProtectedTables,
   parseAllowlist,
   parseChurningTableMaxDecreasePercent,
@@ -717,8 +718,30 @@ describe('D1 migration safety gates', () => {
         environment: 'production',
         databases: [{ binding: 'DATABASE', name: 'main' }],
         runner,
+        churningTableSelectors: [...DEFAULT_D1_MIGRATION_CHURNING_TABLES],
       })
     ).not.toThrow();
+  });
+
+  it('still blocks a pull request checks decrease above the churning limit', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const runner = new FakeRunner(
+      { main: ['d1_migrations', 'pull_request_checks'] },
+      { 'main:pull_request_checks': [28243, 10000] }
+    );
+
+    try {
+      expect(() =>
+        runSafeRemoteMigrations({
+          environment: 'production',
+          databases: [{ binding: 'DATABASE', name: 'main' }],
+          runner,
+          churningTableSelectors: [...DEFAULT_D1_MIGRATION_CHURNING_TABLES],
+        })
+      ).toThrow(/DATABASE\.pull_request_checks: 28243 -> 10000/);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it('blocks protected-business-table loss and prints recovery timestamp and commands', () => {

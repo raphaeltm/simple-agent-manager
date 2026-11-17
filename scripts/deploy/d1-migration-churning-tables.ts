@@ -6,7 +6,9 @@
  * observations are pruned by ordinary GitHub webhook traffic when a head commit is replaced
  * or no tracked pull request matches it (`apps/api/src/services/github-pull-request-events.ts`,
  * `packages/operations/src/pull-request-core.ts`); a deploy that applied migration 0254
- * failed on that churn (production run 44010648016, 28243 -> 28201).
+ * failed on that churn (production run 44010648016, 28243 -> 28201). Its `first_failed_at`
+ * column is Insights evidence (first-try CI, flaky checks) that webhooks cannot rebuild, so
+ * the bounded decrease here costs Insights history, not correctness.
  * Every other business table keeps zero decrease tolerance. Split out of
  * `d1-migration-safety.ts` (`.claude/rules/18-file-size-limits.md`).
  */
