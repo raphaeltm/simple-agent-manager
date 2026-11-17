@@ -69,7 +69,8 @@ export async function runSetupSessionCleanup(
   const d1Repaired = await repairTerminalD1(env, row, resumed, execTimeoutMs);
   row = readCleanupRow(sql, row.id) ?? row;
   if (await context.deferPending(row)) return;
-  if (resumed && !(await context.claimAttempt(row))) return;
+  const metadataOnly = row.cleanup_sandbox_destroyed === 1;
+  if (resumed && !metadataOnly && !(await context.claimAttempt(row))) return;
   if (skipsScrub(row, resumed)) {
     log.info('credential_setup.scrub_skipped', { sessionId: row.id, reason: scrubSkipReason(row) });
   } else {
@@ -81,6 +82,9 @@ export async function runSetupSessionCleanup(
   const released = await releaseSetupPool(env, row, resumed, execTimeoutMs);
   // Failed/unfinished steps preserve both the obligation and a future recovery alarm.
   if (!destroyed || !released || !d1Repaired) {
+    // A successful final D1/pool reconciliation completes before the budget gate.
+    // Failed metadata-only passes still spend the bounded recovery budget.
+    if (resumed && metadataOnly && !(await context.claimAttempt(row))) return;
     await context.rearmAlarm();
     return;
   }
@@ -209,7 +213,8 @@ async function destroySetupSandbox(
               `UPDATE setup_session SET cleanup_sandbox_destroyed = 1,
                cleanup_settlement_credit = CASE WHEN ? = 1 THEN 1 ELSE cleanup_settlement_credit END
                WHERE id = ?`,
-              awaitingDestruction ? 0 : 1,
+              // The one destruction proof also permits final D1/pool bookkeeping.
+              1,
               row.id
             );
           } catch {

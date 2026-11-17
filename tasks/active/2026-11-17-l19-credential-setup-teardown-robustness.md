@@ -152,3 +152,9 @@ Final latest delta evidence: teardown56/56 +existing30/native12 +recoveryconfig1
 - [x] Independent source/CF/security review PASS. Existing/native42/42 pass; final teardown race suites remain pending.
 
 Latest final delta local verification: teardown66/66 +existing30/native12 +config10=118/118 PASS. Requiredinitialarm surgical mutation was RED (cancel improperly resolved), restored targeted test GREEN. Realcapture saving-race and concurrentarming joins covered. All latest source/CF/security/doc reviewers PASS; TypeScript/lint/format/migration/secret guards PASS. NewheadCI/live gates remain mandatory.
+
+## Final D1 reconciliation follow-up
+
+A new P2 reproduced false quarantine when D1 repair succeeded after the last sandbox attempt. Successful original destruction now grants its one metadata completion credit even when timely. Proven-destroyed sessions reconcile bounded D1/pool work before the failure-budget gate, clearing pending on success; failed metadata passes consume the same bounded budget, with no new SDK work or quarantine revival. This also covers D1 failing once more on the credited pass. Two initial tests were RED before the fix; final tests pending. Conservative recovery remote-wait ceiling110s default/500s maximum includes the final two-step metadata assessment.
+
+Final D1 delta validation: teardown69/69 +existing/native42/42 +unchangedconfig10=121/121 PASS. New real-D1 cases cover immediate recovery, delayed recovery after a failed credited pass, and permanent failure ending in one quarantine. TypeScript/scopedlint/format/secretguard/diff checks PASS; independent CF/security/constitution/doc reviews PASS.

@@ -1161,9 +1161,11 @@ when recovery first begins; changing it affects future cleanups. Legacy cleanup 
 progress keeps its original cap of three. Waiting for an
 already-issued SDK operation does not consume an attempt. Remote waits total
 at most 20 seconds per attempt by default (40 seconds at the maximum), plus the existing
-bounded settings read. Late successful scrubbing and destruction may each continue once without spending
+bounded settings read. A late successful scrub and a successful destruction may each continue once without spending
 another attempt. Including these two bounded continuation passes, the maximum configured
-cap allows 480 seconds of remote waits; the default allows 100 seconds. Only recovery reads these settings; inline cancellation keeps the
+cap allows 480 seconds of remote waits; the default allows 100 seconds. A final bounded
+D1/pool reconciliation after proven destruction adds at most 20 seconds (10 seconds by
+default), making the conservative episode limits 500 and 110 seconds respectively. Only recovery reads these settings; inline cancellation keeps the
 interactive sandbox timeout.
 
 A deadline stops waiting; it does not cancel an SDK operation. Cleanup cannot record
@@ -1182,5 +1184,7 @@ still owed, it fails so Cloudflare can apply its bounded alarm retry policy.
 Initial cancellation establishes its recovery alarm before committing a terminal state. If
 arming fails, cancellation fails with the session still active and eligible for the existing
 sweep. Recovery scrubs a provisioning sandbox after its SDK flight settles because a
-background login driver may already have started. A late successful scrub or destruction
-can finish its current attempt once; it never reopens quarantined cleanup.
+background login driver may already have started. A late successful scrub or a successful destruction
+can finish its current attempt once; it never reopens quarantined cleanup. Once destruction
+is proven, successful D1/pool bookkeeping clears pending cleanup before the failure budget
+is checked; failed bookkeeping still spends the bounded budget.

@@ -657,7 +657,7 @@ describe('CredentialSetupSession teardown — recovery alarm', () => {
     expect(fixture.sandbox.exec).not.toHaveBeenCalled();
     expect(destroySandboxInstance).not.toHaveBeenCalled();
     expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), LEASE_ID);
-    expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0, cleanup_attempts: 1 });
+    expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0, cleanup_attempts: 0 });
     expect(restarted.storage.deleteAlarm).toHaveBeenCalledTimes(1);
   });
 
@@ -897,7 +897,10 @@ describe('CredentialSetupSession teardown — recovery alarm', () => {
       fixture.env.DATABASE = realDb;
       const restarted = createInstance(fixture.doDb, fixture.env);
       await restarted.instance.alarm();
-      expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0, cleanup_attempts: 1 });
+      expect(doRow(fixture.doDb)).toMatchObject({
+        cleanup_pending: 0,
+        cleanup_attempts: step === 'destroy' ? 1 : 0,
+      });
       expect(d1Status(fixture.d1)).toBe('cancelled');
       expect(restarted.storage.deleteAlarm).toHaveBeenCalledTimes(1);
     }
@@ -1092,6 +1095,81 @@ describe('CredentialSetupSession teardown — never-started container', () => {
 });
 
 describe('CredentialSetupSession teardown — unresolved asynchronous operations', () => {
+  it.each(['recovered', 'delayed_recovery', 'still_failing'])(
+    'uses completed destruction once to finish final-attempt D1 cleanup when metadata is %s',
+    async (outcome) => {
+      const fixture = createFixture();
+      fixture.env.OBSERVABILITY_DATABASE = {} as D1Database;
+      const first = await startSession(fixture, true);
+      const realDb = fixture.env.DATABASE;
+      fixture.env.DATABASE = {
+        ...realDb,
+        prepare(query: string) {
+          const statement = realDb.prepare(query);
+          return {
+            ...statement,
+            bind: (...args: unknown[]) => {
+              const bound = statement.bind(...args);
+              if (args[0] !== 'cancelled') return bound;
+              return {
+                ...bound,
+                run: async () => {
+                  throw new Error('D1 terminal repair unavailable');
+                },
+              };
+            },
+          };
+        },
+      } as Env['DATABASE'];
+      vi.mocked(destroySandboxInstance).mockRejectedValue(new Error('destroy unavailable'));
+      await first.instance.cancel();
+      await first.instance.alarm();
+      await first.instance.alarm();
+      expect(doRow(fixture.doDb).cleanup_attempts).toBe(2);
+      vi.mocked(destroySandboxInstance).mockReset().mockResolvedValue(undefined);
+      vi.mocked(releaseSetupSlot).mockClear();
+      if (outcome === 'still_failing')
+        vi.mocked(releaseSetupSlot).mockRejectedValue(new Error('pool unavailable'));
+      await first.instance.alarm();
+      expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1, cleanup_attempts: 3 });
+      expect(d1Status(fixture.d1)).toBe('waiting_for_user');
+      expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+      expect(
+        fixture.doDb.prepare('SELECT cleanup_sandbox_destroyed FROM setup_session').get()
+      ).toEqual({ cleanup_sandbox_destroyed: 1 });
+      if (outcome === 'recovered') fixture.env.DATABASE = realDb;
+      await first.instance.alarm();
+      expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+      if (outcome === 'delayed_recovery') {
+        expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1, cleanup_attempts: 3 });
+        expect(releaseSetupSlot).toHaveBeenCalledTimes(2);
+        fixture.env.DATABASE = realDb;
+        await first.instance.alarm();
+        expect(d1Status(fixture.d1)).toBe('cancelled');
+        expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0, cleanup_attempts: 3 });
+        expect(persistError).not.toHaveBeenCalled();
+        expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+        return;
+      }
+      if (outcome === 'recovered') {
+        expect(d1Status(fixture.d1)).toBe('cancelled');
+        expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0, cleanup_attempts: 3 });
+        expect(persistError).not.toHaveBeenCalled();
+      } else {
+        expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1, cleanup_attempts: 3 });
+        expect(releaseSetupSlot).toHaveBeenCalledTimes(2);
+        await first.instance.alarm();
+        expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1, cleanup_attempts: 4 });
+        expect(persistError).toHaveBeenCalledTimes(1);
+        expect(releaseSetupSlot).toHaveBeenCalledTimes(3);
+        await first.instance.alarm();
+        expect(persistError).toHaveBeenCalledTimes(1);
+        expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+        expect(releaseSetupSlot).toHaveBeenCalledTimes(3);
+      }
+    }
+  );
+
   it('scrubs after a cancelled provisioning driver settles even when destruction fails', async () => {
     const fixture = createFixture();
     const first = await startSession(fixture, false);
@@ -1205,7 +1283,13 @@ describe('CredentialSetupSession teardown — unresolved asynchronous operations
           expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1, cleanup_attempts: 3 });
           expect(releaseSetupSlot).toHaveBeenCalledTimes(1);
           await createInstance(fixture.doDb, fixture.env).instance.alarm();
-          expect(releaseSetupSlot).toHaveBeenCalledTimes(1);
+          if (phase === 'scrub') {
+            // The completed destruction is a second distinct proof, not a renewed work budget.
+            expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1, cleanup_attempts: 3 });
+            expect(releaseSetupSlot).toHaveBeenCalledTimes(2);
+            await createInstance(fixture.doDb, fixture.env).instance.alarm();
+          }
+          expect(releaseSetupSlot).toHaveBeenCalledTimes(phase === 'scrub' ? 3 : 2);
         }
         expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1, cleanup_attempts: 4 });
         expect(persistError).toHaveBeenCalledTimes(1);

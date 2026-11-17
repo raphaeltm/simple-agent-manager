@@ -36,7 +36,7 @@ export type SetupSessionRow = {
   cleanup_attempts: number | null;
   /** Immutable per-cleanup retry policy; NULL legacy retains the original cap. */
   cleanup_recovery_max_attempts: number | null;
-  /** One late successful scrub/destroy may continue its existing work attempt. */
+  /** One late scrub or successful destroy may continue its existing work attempt. */
   cleanup_settlement_credit: number | null;
   /** 1 only after sandbox.destroy() succeeds; recovery must not restart that sandbox. */
   cleanup_sandbox_destroyed: number | null;
