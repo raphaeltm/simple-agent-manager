@@ -828,6 +828,8 @@ export const asks = sqliteTable(
     escalationCount: integer('escalation_count').notNull().default(0),
     /** Hard limit on how long an undelivered ask may be extended. */
     maxExpiresAt: integer('max_expires_at'),
+    /** Human tasks: JSON array of ticked step indexes (0254); NULL when none is ticked. */
+    stepsCheckedJson: text('steps_checked_json'),
     /** Kind 'error' (slice E, migration 0248): times the thing failed while the item was open. */
     failureCount: integer('failure_count').notNull().default(1),
   },
@@ -897,6 +899,27 @@ export const projectBriefs = sqliteTable('project_briefs', {
 });
 
 export type AskRow = typeof asks.$inferSelect;
+
+/** Lifecycle of an ask, one row per change (human tasks, migration 0254). No discussion text. */
+export const askActivity = sqliteTable(
+  'ask_activity',
+  {
+    id: text('id').primaryKey(),
+    askId: text('ask_id')
+      .notNull()
+      .references(() => asks.id, { onDelete: 'cascade' }),
+    projectId: text('project_id').notNull(),
+    /** 'user' | 'agent' | 'system' */
+    actorKind: text('actor_kind').notNull(),
+    actorId: text('actor_id'),
+    kind: text('kind').notNull(),
+    detailJson: text('detail_json'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => ({
+    askCreatedIdx: index('idx_ask_activity_ask_created').on(table.askId, table.createdAt, table.id),
+  })
+);
 
 export const projectRuntimeEnvVars = sqliteTable(
   'project_runtime_env_vars',
@@ -6072,3 +6095,37 @@ export const agentRunUsage = sqliteTable(
     ),
   })
 );
+
+/**
+ * Daily usage-derived Cloudflare cost estimate, one row per UTC day per product line (Insights
+ * slice CF, migration 0256). Written by `runCloudflareCostSnapshot`
+ * (apps/api/src/services/cloudflare-cost-snapshot.ts), read by `packages/operations`
+ * `insights-installation-cloudflare`. `fetchedAt` is epoch ms; costs are USD estimates.
+ */
+export const installationCostDaily = sqliteTable(
+  'installation_cost_daily',
+  {
+    source: text('source').notNull(),
+    day: text('day').notNull(),
+    productLine: text('product_line').notNull(),
+    usageQuantity: real('usage_quantity').notNull(),
+    usageUnit: text('usage_unit').notNull(),
+    estimatedCostUsd: real('estimated_cost_usd').notNull(),
+    fetchedAt: integer('fetched_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.source, table.day, table.productLine] }),
+  })
+);
+
+/** The latest cost snapshot attempt per source (migration 0256), so the card can explain itself. */
+export const installationCostSync = sqliteTable('installation_cost_sync', {
+  source: text('source').primaryKey(),
+  status: text('status').notNull(),
+  lastAttemptAt: integer('last_attempt_at').notNull(),
+  lastSuccessAt: integer('last_success_at'),
+  errorMessage: text('error_message'),
+  firstDay: text('first_day'),
+  lastDay: text('last_day'),
+  rowsWritten: integer('rows_written').notNull().default(0),
+});

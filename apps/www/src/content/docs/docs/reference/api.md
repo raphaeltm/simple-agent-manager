@@ -313,6 +313,23 @@ Limited per IP address. Other `/api/auth/email-otp/*` routes return `404`.
 Public. `{ "github": bool, "google": bool, "gitlab": bool, "email": bool }`: which sign-in options
 the login page offers.
 
+### `GET /api/config/platform-capabilities`
+
+Public. `{ "speechToText": bool, "textToSpeech": bool, "agentModelCalls": bool }`: which platform
+services this installation has, so the app hides controls that cannot work here. Computed from the
+Worker's bindings and settings with no D1 or KV read (`publicPlatformCapabilities()` in
+`apps/api/src/services/platform-capabilities.ts`). On Cloudflare, with the Workers AI binding
+present, every field is true; `textToSpeech` is also false when `TTS_ENABLED` is `"false"`. The
+web app treats a missing field, a failed request or a pending answer as "available", so controls
+never flicker away while it loads.
+
+Routes that need a missing service answer `404` with
+`{ "error": "FEATURE_UNAVAILABLE", "message": "…", "details": { "feature": "<capability>" } }`
+(`errors.featureUnavailable()` in `apps/api/src/middleware/error.ts`): `POST /api/transcribe`,
+`POST /api/tts/synthesize` and `GET /api/agent-models/catalog` without the Workers AI binding.
+Agent-facing model calls (`list_ai_models`, `run_ai_model`) answer with the non-retryable
+`not_available` code in that case.
+
 ### `GET /api/config/instant-runtime`
 
 Public. `{ "enabled": bool }`: whether agents can run on Instant (Cloudflare Containers) here
@@ -535,12 +552,31 @@ approvals. Nothing is copied.
 | POST   | `/api/projects/:projectId/inbox/items/:ref/answer`  | Answer it through the path its store uses      |
 | POST   | `/api/projects/:projectId/inbox/items/:ref/archive` | Close it; the agent is told you will not act   |
 
+A human task (`ask:<id>` of kind `task`) adds its own routes beside these
+(`apps/api/src/routes/inbox-tasks.ts`, operations in `packages/operations/src/inbox-task-core.ts`).
+`GET …/items/:ref` returns it with `task`: steps, assignee, who took it, activity and discussion.
+Each write wakes the chats watching the task, with these exceptions
+([Tasks for people](/docs/guides/inbox/#tasks-for-people)): step ticks wake only a chat that asked
+for them (`wakeOnSteps`); a comment wakes only the chat that assigned the task, and only when its
+author is the assignee, the member who took it, or a writer of that chat; a chat that attached to the
+task is woken by lifecycle changes, not comments.
+
+| Method | Endpoint                                                 | Purpose                                            |
+| ------ | -------------------------------------------------------- | -------------------------------------------------- |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/steps/:index` | `{ done }`: tick or untick a step                  |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/comments`     | `{ body, threadId?, mentions? }`: comment or reply |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/claim`        | Take a team task                                   |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/reassign`     | `{ assigneeUserId }` or `{ team: true }`           |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/done`         | `{ note? }`: mark it done                          |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/reopen`       | Reopen a done or archived task                     |
+
 The list takes `filter` (`needs_you` by default: open items you can act on; `blocking`, `tasks`,
 `reviews`, or `archived`), `limit` (default `inbox.listPageSize`, at most `inbox.listPageMax`) and
 `cursor`, and returns `{ items, nextCursor, skipped }`. Items with a live deadline (permission
 requests, asks with a due time) come first, then the ones an agent is stopped on, then the rest,
 oldest first; one chat's items stay together (`stackKey`). `skipped` counts stored rows on the page
-that could not be read. You see an ask assigned to you (or an unclaimed team ask), questions in
+that could not be read. You see an ask assigned to you (or a team ask; one another member took
+is listed but is not counted as needing you), questions in
 chats you created, secret requests your agents made (and, when the member whose agent asked
 cannot supply secrets, the requests of members who cannot, if you can), and, as an active
 superadmin, Operations approvals in projects you belong to. Opening, answering or archiving an
@@ -1072,6 +1108,29 @@ names and limit windows. Returns `ProjectAccountsResponse`
   (`insights.accountsStallScanCap`) left older limit waits out.
 - `unavailable`: sections whose read failed this time (`runs`, `stalls`, `usage`).
 
+### `GET /api/projects/:projectId/insights/setups`
+
+Insights · Agent setups for one project (`projectSetups`, `packages/operations/src/insights-setups.ts`).
+Query `range` is `7d`, `30d` or `90d` (default `30d`) and `groupBy` is `profile`, `skill` or
+`model` (default `profile`); anything else is `400`. Requires project membership. Sent with
+`Cache-Control: private, no-store`: the body names the caller's own personal profiles and skills.
+Returns `ProjectSetupsResponse` (`packages/shared/src/types/insights-setups.ts`):
+`{ projectId, range, groupBy, since, until, rework, sample, groups, suggestions, suggestionMinRuns, unavailable, generatedAt }`.
+
+- `groups`: most runs first, with the rows for no profile/skill and an unrecorded model last. Each
+  is `{ key, label, owner, agentType, usedFor, runs, finished, mergedClean, mergedCleanRate, merged, medianToPullRequestMs, pullRequests, nudges, tokens, memory }`.
+  `owner` is `project`, `you`, `teammate`, `none` or `not_recorded`; a teammate's personal profile
+  or skill has `label: null`. `nudges` is `{ state: 'measured', perRun, total, runs }` or
+  `not_recorded`; `tokens` is `{ state: 'reported', total, perMergedPullRequest, reportedRuns, merged }`
+  or `not_reported`; `memory` is `{ state: 'measured', p90Bytes, maxBytes, requestedMb, runs, oomKills }`
+  or `not_recorded`.
+- `rework`: `{ windowDays, rule: 'same_branch' }`. `sample`: `{ runs, cap, truncated }`, where
+  `truncated` means `insights.setupsRunScanCap` left older runs out.
+- `suggestions`: each is `default_profile` (`{ skill, profile, compared, currentDefault, apply }`) or
+  `request_size` (`{ skill, currentGb, suggestedGb, runs, p90Bytes, maxBytes, oomKills, apply }`).
+  `apply` is `{ skillId, patch }`, the body to send to `PATCH /api/projects/:projectId/skills/:skillId`.
+- `unavailable`: sections whose read failed this time (`runs`, `nudges`).
+
 ### `POST /api/projects/:id/tasks`
 
 Create a task record.
@@ -1298,9 +1357,19 @@ Superadmin only. Backs **Admin → Health & cost**. Optional `range`: `7d`, `30d
 (the default, the calendar month so far in UTC); any other value returns `400`. Returns
 `InstallationHealthResponse` (`packages/shared/src/types/insights-installation.ts`): `window`,
 `compute` (spend per provider and per week at each machine's recorded price), `reuse`, `density`
-(agents per busy machine), `newMachines` (reasons) and `latency` (p95 against budget per watched
-state, with open incidents). A section that fails to read is `null` and named in `unavailable`.
-See [Health & cost](/docs/guides/admin-settings/#health--cost).
+(agents per busy machine), `newMachines` (reasons), `latency` (p95 against budget per watched
+state, with open incidents) and `cloudflare` (the Cloudflare account's estimated USD cost this
+month from the daily snapshot, with the snapshot's status). A section that fails to read is
+`null` and named in `unavailable`. See [Health & cost](/docs/guides/admin-settings/#health--cost).
+
+### `POST /api/admin/health-cost/cloudflare/refresh`
+
+Superadmin only. Runs the daily Cloudflare cost snapshot now (the card's **Refresh now**) and
+returns `InstallationCloudflareRefreshResponse`: `status` (`ok`, `not_configured`,
+`permission_denied` or `error`), the stored window (`firstDay`, `lastDay`), `rowsWritten` and
+`error`. A Cloudflare failure is a `200` with that status, recorded for the card. A second refresh
+within `insights.cloudflareCostRefreshMinSeconds` (60 by default) of the last attempt returns `429`
+without calling Cloudflare.
 
 ## Operations Approvals
 

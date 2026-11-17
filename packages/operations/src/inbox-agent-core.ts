@@ -31,6 +31,7 @@ import { createAsk } from './inbox-ask-create-core';
 import { questionSchedule } from './inbox-question-schedule';
 import { inboxTitle } from './inbox-rows';
 import { getInboxLimits, type InboxLimits } from './inbox-settings';
+import { recordActivity } from './inbox-task-rows';
 import { sanitizeUserInput } from './sanitize-user-input';
 import type { OperationContext } from './types';
 
@@ -108,7 +109,7 @@ const isUrlKind = (kind: InboxAgentLinkKind) => INBOX_AGENT_URL_LINK_KINDS.inclu
  * Links as stored references, each checked as this project's. A URL kind keeps its URL in `id`,
  * which is what the inbox's link chips read (`linkTarget`, `apps/web`).
  */
-async function checkedLinks(
+export async function checkedLinks(
   ctx: OperationContext,
   projectId: string,
   raw: AgentLinkInput[],
@@ -302,7 +303,7 @@ export async function fileAgentReview(
 }
 
 /** The kinds an agent files; it may only edit or cancel these (never a SAM `error` item). */
-const AGENT_KINDS_SQL = `kind IN ('question', 'review')`;
+const AGENT_KINDS_SQL = `kind IN ('question', 'review', 'task')`;
 
 /** Report why an update or cancel matched nothing: missing (or not this chat's) vs. closed. */
 async function explainNoMatch(
@@ -408,6 +409,23 @@ export async function cancelAgentAsk(
     )
     .first<{ kind: string; blocking: number }>();
   if (!closed) return explainNoMatch(ctx, source, askId);
+  if (closed.kind === 'task') {
+    // A moot human task leaves the person's list; its history says why, and its watches wind
+    // down like a closed task's.
+    await ctx.ports.inboxTasks.closeWatches(
+      source.projectId,
+      askId,
+      (await getInboxLimits(ctx)).closedTaskWatchHours
+    );
+    await recordActivity(ctx, {
+      projectId: source.projectId,
+      askId,
+      kind: 'cancelled',
+      actorKind: 'agent',
+      actorId: source.sessionId,
+      at: now,
+    });
+  }
   if (closed.kind === 'question' && closed.blocking === 1) {
     await ctx.ports.inbox.withdrawQuestion({
       projectId: source.projectId,

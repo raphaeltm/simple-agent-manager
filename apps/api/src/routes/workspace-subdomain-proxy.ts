@@ -252,7 +252,7 @@ export async function workspaceSubdomainProxy(
     );
 
     const containerRequest = new Request(containerUrl.toString(), {
-      redirect: targetPort !== null ? 'manual' : c.req.raw.redirect,
+      redirect: 'manual',
       method: c.req.raw.method,
       headers,
       body: c.req.raw.body,
@@ -290,6 +290,9 @@ export async function workspaceSubdomainProxy(
         202
       );
     }
+
+    const redirectFailure = refuseNodeRedirect(response, targetPort, containerUrl);
+    if (redirectFailure) return redirectFailure;
 
     if (targetPort !== null) {
       const responseHeaders = new Headers(response.headers);
@@ -374,8 +377,9 @@ export async function workspaceSubdomainProxy(
 
   let response: Response;
   try {
+    // eslint-disable-next-line sam/no-unguarded-outbound-fetch -- SAM builds the node URL from its routing metadata; node redirects are never followed
     response = await fetch(vmUrl.toString(), {
-      redirect: targetPort !== null ? 'manual' : c.req.raw.redirect,
+      redirect: 'manual',
       method: c.req.raw.method,
       headers,
       body: c.req.raw.body,
@@ -411,6 +415,9 @@ export async function workspaceSubdomainProxy(
     );
   }
 
+  const redirectFailure = refuseNodeRedirect(response, targetPort, vmUrl);
+  if (redirectFailure) return redirectFailure;
+
   // 5e: Strip Set-Cookie headers from container responses on port-proxy path.
   // Prevents a malicious container app from overwriting the sam_port_access cookie.
   if (targetPort !== null) {
@@ -426,4 +433,24 @@ export async function workspaceSubdomainProxy(
   }
 
   return response;
+}
+
+/** Node control redirects fail; application redirects may pass without the injected SAM JWT.
+ * This Worker check also protects requests to older, still-running VM/Instant agents.
+ */
+function refuseNodeRedirect(
+  response: Response,
+  targetPort: number | null,
+  upstream: URL
+): Response | null {
+  // Cache revalidation cannot trigger a follow and must preserve its response headers.
+  if (response.status === 304 || response.status < 300 || response.status >= 400) return null;
+  const location = response.headers.get('location') ?? '';
+  const token = upstream.searchParams.get('token');
+  if (targetPort !== null && !(token && location.includes(token))) return null;
+  void response.body?.cancel().catch(() => undefined);
+  return Response.json(
+    { error: 'NODE_REDIRECT_REFUSED', message: 'Node returned a redirect' },
+    { status: 502 }
+  );
 }

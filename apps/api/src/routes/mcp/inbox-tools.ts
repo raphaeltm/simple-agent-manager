@@ -1,16 +1,21 @@
 /**
- * MCP adapters for the agent inbox tools (slice D): `inbox_write` (ask, review, update, cancel)
+ * MCP adapters for the agent inbox tools (slices D and H1): `inbox_write` (ask, review, assign,
+ * comment, attach, update, cancel)
  * and `inbox_read` (list, get). Each one resolves where the call came from (project, chat, task,
  * person) from the verified token, runs the shared operation (`fileAgentAsk`, ...), and formats
  * the result. No inbox rule lives here.
  */
 import {
+  type AgentAssignResult,
   type AgentFileResult,
   type AgentInboxSource,
+  assignAgentTask,
+  attachAgentTask,
   cancelAgentAsk,
+  commentAgentTask,
   fileAgentAsk,
   fileAgentReview,
-  getAgentAsk,
+  getAgentItem,
   listAgentAsks,
   type OperationContext,
   OperationError,
@@ -208,5 +213,49 @@ export const handleInboxListItems: Handler = (requestId, params, tokenData, env)
 
 export const handleInboxGetItem: Handler = (requestId, params, tokenData, env) =>
   run(requestId, 'inbox_read get', tokenData, env, async (ctx, source) => ({
-    item: await getAgentAsk(ctx, source, { ref: typeof params.ref === 'string' ? params.ref : '' }),
+    item: await getAgentItem(ctx, source, {
+      ref: typeof params.ref === 'string' ? params.ref : '',
+    }),
   }));
+
+/** The assign result: `inboxItem` is what the chat card reads, as for an ask or a review. */
+function assigned(result: AgentAssignResult) {
+  const next = !result.created
+    ? `This task was already assigned as ${result.ref}; nothing new was filed.`
+    : 'Assigned. It does not block you: keep working. You will be woken in this chat when the person comments, takes it, hands it on, finishes, reopens or archives it.';
+  const watch = result.watching
+    ? ''
+    : ' This chat could not be subscribed to the task yet; repeat this assign call with the same idempotencyKey (or title) to subscribe it.';
+  const duplicateHint =
+    result.similar.length > 0
+      ? ' Similar open items exist (see `similar`): if one already covers this, cancel yours with inbox_write method cancel.'
+      : '';
+  return {
+    message: next + watch + duplicateHint,
+    inboxItem: {
+      ref: result.ref,
+      id: result.id,
+      sessionId: result.sessionId,
+      kind: result.kind,
+      blocking: result.blocking,
+    },
+    created: result.created,
+    watching: result.watching,
+    similar: result.similar,
+  };
+}
+
+export const handleInboxAssign: Handler = (requestId, params, tokenData, env) =>
+  run(requestId, 'inbox_write assign', tokenData, env, async (ctx, source) =>
+    assigned(await assignAgentTask(ctx, source, params as Parameters<typeof assignAgentTask>[2]))
+  );
+
+export const handleInboxComment: Handler = (requestId, params, tokenData, env) =>
+  run(requestId, 'inbox_write comment', tokenData, env, (ctx, source) =>
+    commentAgentTask(ctx, source, params as Parameters<typeof commentAgentTask>[2])
+  );
+
+export const handleInboxAttach: Handler = (requestId, params, tokenData, env) =>
+  run(requestId, 'inbox_write attach', tokenData, env, (ctx, source) =>
+    attachAgentTask(ctx, source, params as Parameters<typeof attachAgentTask>[2])
+  );

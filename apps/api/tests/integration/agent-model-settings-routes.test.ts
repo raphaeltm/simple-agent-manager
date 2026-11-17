@@ -120,6 +120,17 @@ describe('agent model settings routes', () => {
     expect(res.status).toBe(503);
   });
 
+  it('answers 404 FEATURE_UNAVAILABLE, not 503, on an installation without Workers AI', async () => {
+    env = { ...env, AI: undefined } as unknown as Env;
+    const res = await get('/api/agent-models/catalog');
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({
+      error: 'FEATURE_UNAVAILABLE',
+      details: { feature: 'workersAi' },
+    });
+    expect(models).not.toHaveBeenCalled();
+  });
+
   it('shows members the settings read-only and lets only owners and admins change them', async () => {
     auth.userId = 'viewer';
     const read = await get(`/api/projects/${PROJECT}/agent-models`);

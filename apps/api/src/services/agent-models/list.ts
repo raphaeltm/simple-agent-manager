@@ -12,7 +12,7 @@ import * as v from 'valibot';
 import type { Env } from '../../env';
 import { effectiveAgentModelAccess, loadAgentModelCallContext } from './access';
 import { microUsdToUsd, readAgentModelUsage, usageMonth } from './budget';
-import { getAgentModelCatalog } from './catalog';
+import { getAgentModelCatalog, WorkersAiUnavailableError } from './catalog';
 import { AgentModelCallError } from './errors';
 import { DEFAULT_AGENT_MODEL_OUTPUT_DIR } from './files';
 import { describePrices, describeSource, listEntry } from './presentation';
@@ -61,7 +61,10 @@ export async function listAgentModelsForAgent(
     };
   }
   const [catalog, context] = await Promise.all([
-    getAgentModelCatalog(env, settings.catalogCacheSeconds).catch(() => {
+    getAgentModelCatalog(env, settings.catalogCacheSeconds).catch((err: unknown) => {
+      if (err instanceof WorkersAiUnavailableError) {
+        throw new AgentModelCallError('not_available', err.message);
+      }
       throw new AgentModelCallError(
         'catalog_unavailable',
         'The Cloudflare model catalog is unavailable right now. Retry shortly.'

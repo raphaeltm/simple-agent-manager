@@ -8,7 +8,7 @@
  * See: specs/018-project-first-architecture/research.md
  * See: specs/018-project-first-architecture/data-model.md
  */
-import type { RunReceiptFactsInput } from '@simple-agent-manager/shared';
+import type { RunNudgeWindow, RunReceiptFactsInput } from '@simple-agent-manager/shared';
 import {
   type AcpSessionEventActorType,
   type AcpSessionStatus,
@@ -65,6 +65,8 @@ import * as groupedFtsWallRecovery from './grouped-fts-wall-recovery';
 import * as ideaUpdates from './idea-updates';
 import * as ideaWork from './idea-work';
 import * as idleCleanup from './idle-cleanup';
+import { countInboxItemWatchers, renewInboxItemWatches } from './inbox-event-wake';
+import * as inboxItemComments from './inbox-item-comments';
 import * as knowledge from './knowledge';
 import * as libraryFileComments from './library-file-comments';
 import * as links from './links';
@@ -119,6 +121,7 @@ import * as reconciliation from './reconciliation';
 import { releaseQuestionHold } from './reconciliation-candidate-state';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import { instrumentRowUsage, RowUsage } from './row-usage';
+import { countRunNudges } from './run-nudges';
 import { getRunReceiptFacts } from './run-receipt-facts';
 import { checkRuntimeHeartbeatTimeouts } from './runtime-heartbeat-policy';
 import { withoutSamNotice } from './sam-notice-metadata';
@@ -2611,6 +2614,41 @@ export class ProjectData extends DurableObject<Env> {
     return { thread: result.thread, idempotent: result.idempotent };
   }
 
+  // --- Inbox item comments (inbox slice H1) -----------------------------------
+  // Discussion on a human task, scoped to its asks id (DO migration 081). Callers must have
+  // already verified the item belongs to this project and the reader may see it; the DO has no D1.
+
+  listInboxItemCommentThreads(
+    input: inboxItemComments.ListInboxItemCommentThreadsInput
+  ): ReturnType<typeof inboxItemComments.listInboxItemCommentThreads> {
+    return inboxItemComments.listInboxItemCommentThreads(this.sql, this.env, input);
+  }
+
+  countInboxItemWatchers(projectId: string, itemId: string): number {
+    return countInboxItemWatchers(this.sql, projectId, itemId);
+  }
+
+  renewInboxItemWatches(input: {
+    projectId: string;
+    itemId: string;
+    open: boolean;
+    closedGraceMs: number;
+  }): number {
+    return renewInboxItemWatches(this.sql, {
+      ...input,
+      now: Date.now(),
+      lifetimeMs: resolveProjectEventLimits(this.env).wakeSubscriptionLifetimeMs,
+    });
+  }
+
+  createInboxItemComment(
+    input: inboxItemComments.CreateInboxItemCommentInput
+  ): inboxItemComments.InboxItemCommentMutationResult {
+    return this.meteredStorage.transactionSync(() =>
+      inboxItemComments.createInboxItemComment(this.sql, this.env, input)
+    );
+  }
+
   materializeSession(sessionId: string): void {
     materialization.materializeSession(
       this.sql,
@@ -3084,6 +3122,11 @@ export class ProjectData extends DurableObject<Env> {
   /** One chat's run-receipt facts: tool calls, questions, last agent message (`run-receipt-facts.ts`). */
   getRunReceiptFacts(input: RunReceiptFactsInput) {
     return getRunReceiptFacts(this.sql, input);
+  }
+
+  /** Human follow-ups per run window, for Insights · Agent setups (`run-nudges.ts`). */
+  countRunNudges(windows: RunNudgeWindow[], maxWindows: number) {
+    return countRunNudges(this.sql, windows, maxWindows);
   }
 
   async createAcpSession(opts: {

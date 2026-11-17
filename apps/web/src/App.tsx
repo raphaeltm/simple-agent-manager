@@ -24,6 +24,7 @@ import { ToastProvider } from './hooks/useToast';
 import { lazyNamed, memoizeRouteImport } from './lib/lazy-with-retry';
 import { prefetchProjectRoute } from './lib/project-route-prefetch';
 import { queryClient } from './lib/query-client';
+import { platformCapabilitiesQueryOptions } from './lib/query-options';
 import { isProjectChatRoute, isProjectOverviewRoute } from './lib/shell-routes';
 // Initial landing set — statically imported per .claude/rules/60-request-io-and-bundle-budgets.md.
 // Every other page below is code-split via lazyNamed(). Do NOT add static page imports here.
@@ -132,6 +133,10 @@ const ProjectActivity = lazyNamed(() => import('./pages/ProjectActivity'), 'Proj
 const ProjectOverview = lazyNamed(loadProjectOverview, 'ProjectOverview');
 const ProjectInsights = lazyNamed(() => import('./pages/insights'), 'ProjectInsights');
 const InsightsFlowTab = lazyNamed(() => import('./pages/insights/FlowTab'), 'FlowTab');
+const InsightsAgentSetupsTab = lazyNamed(
+  () => import('./pages/insights/AgentSetupsTab'),
+  'AgentSetupsTab'
+);
 const InsightsAccountsTab = lazyNamed(() => import('./pages/insights/AccountsTab'), 'AccountsTab');
 const InsightsComingSoonTab = lazyNamed(
   () => import('./pages/insights/ComingSoonTab'),
@@ -292,6 +297,12 @@ export function devOnlyRoutesEnabled() {
 
 export default function App() {
   const showDevOnlyRoutes = devOnlyRoutesEnabled();
+  // Which platform services this installation has (public, cached for minutes). Fetched once at
+  // start so composers and model settings rarely wait on it; until it answers every service is
+  // assumed present (hooks/usePlatformCapabilities.ts).
+  useEffect(() => {
+    void queryClient.prefetchQuery(platformCapabilitiesQueryOptions());
+  }, []);
 
   return (
     <ErrorBoundary>
@@ -340,7 +351,7 @@ export default function App() {
                         <Route path="insights" element={page(<ProjectInsights />)}>
                           <Route index element={<Navigate to="flow" replace />} />
                           <Route path="flow" element={page(<InsightsFlowTab />)} />
-                          <Route path="agent-setups" element={page(<InsightsComingSoonTab />)} />
+                          <Route path="agent-setups" element={page(<InsightsAgentSetupsTab />)} />
                           <Route path="accounts" element={page(<InsightsAccountsTab />)} />
                           <Route path="people" element={page(<InsightsComingSoonTab />)} />
                         </Route>

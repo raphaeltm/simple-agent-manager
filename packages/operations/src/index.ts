@@ -85,6 +85,15 @@ export {
   listAgentAsks,
   titleSimilarity,
 } from './inbox-agent-reads';
+export {
+  type AgentAssignInput,
+  type AgentAssignResult,
+  agentTaskDetail,
+  assignAgentTask,
+  attachAgentTask,
+  commentAgentTask,
+  getAgentItem,
+} from './inbox-agent-tasks';
 export { createAsk, type CreateAskInput } from './inbox-ask-create-core';
 export {
   fileSystemError,
@@ -118,6 +127,27 @@ export { inboxTitle } from './inbox-rows';
 export { defaultInboxLimits, getInboxLimits, type InboxLimits } from './inbox-settings';
 export { INBOX_SETTINGS, type InboxSettingName } from './inbox-settings-definition';
 export {
+  archiveTask,
+  claimTask,
+  commentOnTask,
+  completeTask,
+  getTaskDetailForPerson,
+  reassignTask,
+  reopenTask,
+  setTaskStep,
+  TASK_NOT_FOUND,
+} from './inbox-task-core';
+export type {
+  InboxTaskCommentNotice,
+  InboxTaskCommentWakeDecision,
+  InboxTaskCommentWakeInput,
+  InboxTaskEventActor,
+  InboxTaskEventInput,
+  InboxTaskWatchInput,
+  OperationInboxTaskPort,
+} from './inbox-task-ports';
+export { canWriteTask, TASK_READABLE_SQL } from './inbox-task-rows';
+export {
   answerInboxItem,
   archiveInboxItem,
   type InboxAnswerInput,
@@ -125,6 +155,10 @@ export {
   notifyClosedAsk,
 } from './inbox-write-core';
 export { projectAccounts, type ProjectAccountsInput } from './insights-accounts';
+export {
+  INSIGHTS_CLOUDFLARE_COST_SETTINGS,
+  type InsightsCloudflareCostSettingName,
+} from './insights-cloudflare-cost-settings-definition';
 export { projectFlow, type ProjectFlowInput } from './insights-flow';
 export {
   installationHealth,
@@ -132,6 +166,10 @@ export {
   type InstallationHealthInput,
   utcWeekStart,
 } from './insights-installation';
+export {
+  readCloudflareCost,
+  summarizeCloudflareCost,
+} from './insights-installation-cloudflare';
 export {
   densityFromRuns,
   newMachineReasonsFor,
@@ -177,6 +215,7 @@ export {
   type RunUsageRead,
   summarizeRunTokens,
 } from './insights-run-usage';
+export { projectSetups, type ProjectSetupsInput } from './insights-setups';
 export { getPlatformOperationLimits } from './limits';
 export {
   getFileContext,
