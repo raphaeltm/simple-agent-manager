@@ -54,9 +54,17 @@ export function useSoleAgentQuickStart({
   }, [containerRef, inputDisabled]);
   const create =
     onCreate &&
-    (() => {
+    (async () => {
       focusPending.current = true;
-      return onCreate();
+      try {
+        const created = await onCreate();
+        if (!created) focusPending.current = false;
+        return created;
+      } catch (err) {
+        // A failed create leaves the gate up; a later unlock by another route keeps its focus.
+        focusPending.current = false;
+        throw err;
+      }
     });
   return soleAgentQuickStart(agents, suggestProfileName, create, instantAvailable);
 }
