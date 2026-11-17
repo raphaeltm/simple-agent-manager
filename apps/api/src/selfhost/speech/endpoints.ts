@@ -197,6 +197,7 @@ export async function synthesizeWithEndpoint(
     'audio/mp3': 'audio/mpeg',
     'audio/x-wav': 'audio/wav',
     'audio/x-flac': 'audio/flac',
+    'audio/opus': 'audio/ogg',
   };
   const declared = contentType ? (aliases[contentType] ?? contentType) : null;
   if (

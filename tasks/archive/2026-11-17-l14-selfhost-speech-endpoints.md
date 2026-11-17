@@ -105,3 +105,5 @@ instead of introducing a new cache-identity contract. The existing final-audio c
 - [x] Eleventh/twelfth findings: propagate synthesis RateLimitError Retry-After through the real Hono response (positive hourlydelay assertion REDbeforefix→GREEN); add concrete single-box speech setup walkthrough in self-hosting.mdx with build/install/migration preconditions, AdminSettings exactkeys, encryptedAPIkeys, privateendpointoptin, formats/budgets/verification. CF, doc-sync and completion delta PASS; focused8files178PASS.
 
 - [x] Thirteenth P2: raw PCM endpoint output refused before provider fetch because browser cache route has no PCM sample/container metadata. RealroutePCM+octetstream regression REDold200→GREEN503/0fetch/0R2; focused8files179PASS, CF/completion/doc-sync deltaPASS; bothguidesdocumentrestriction.
+
+- [x] Fourteenth P2: OggOpus uses audio/ogg per RFC7845§9 (verifiedsource). Shared mapping fixes cachemetadata; endpoint accepts standard audio/ogg;codecs=opus plus legacy audio/opus alias. Route OggcaseRED503beforefix; R2fixture nowretains actual storedmetadata and test asserts provideracceptance+cachemetadata+GETservedMIME, wav/flac+aliascontrols.

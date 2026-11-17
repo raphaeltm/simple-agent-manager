@@ -51,6 +51,7 @@ const fetchMock = vi.fn();
 
 function createR2() {
   const stored = new Map<string, ArrayBuffer>();
+  const contentTypes = new Map<string, string>();
   const r2 = {
     get: vi.fn(async (key: string) => {
       const value = stored.get(key);
@@ -58,12 +59,13 @@ function createR2() {
       return {
         body: new Response(value).body,
         size: value.byteLength,
-        httpMetadata: { contentType: 'audio/mpeg' },
+        httpMetadata: { contentType: contentTypes.get(key) ?? 'audio/mpeg' },
         arrayBuffer: async () => value,
       };
     }),
-    put: vi.fn(async (key: string, value: ArrayBuffer) => {
+    put: vi.fn(async (key: string, value: ArrayBuffer, options?: { httpMetadata?: { contentType?: string } }) => {
       stored.set(key, value);
+      contentTypes.set(key, options?.httpMetadata?.contentType ?? 'audio/mpeg');
     }),
     delete: vi.fn().mockResolvedValue(undefined),
   } as unknown as R2Bucket;
@@ -465,7 +467,7 @@ describe('server read-aloud through an OpenAI-compatible endpoint', () => {
     expect(stored.size).toBe(0);
   });
 
-  it.each(['wav', 'flac', 'opus'])('refuses chunked %s endpoint audio before fetching, but accepts a single chunk', async (encoding) => {
+  it.each([['wav', 'audio/wav', 'audio/wav'], ['flac', 'audio/flac', 'audio/flac'], ['opus', 'audio/ogg; codecs=opus', 'audio/ogg'], ['opus', 'audio/opus', 'audio/ogg']])('refuses chunked %s endpoint audio before fetching, but accepts a single chunk', async (encoding, contentType, storedContentType) => {
     const { r2, stored } = createR2();
     const { env } = boxEnv({ R2: r2, TTS_CHUNK_SIZE: '40', TTS_ENCODING: encoding });
     await configure(env, {
@@ -474,7 +476,7 @@ describe('server read-aloud through an OpenAI-compatible endpoint', () => {
       'speech.synthesis.voice': 'af_heart',
     });
     fetchMock.mockImplementation(async () => new Response(AUDIO_BYTES, {
-      headers: { 'Content-Type': `audio/${encoding}` },
+      headers: { 'Content-Type': contentType },
     }));
     const request = (text: string, storageId: string) => app().request('/api/tts/synthesize', {
       method: 'POST',
@@ -489,6 +491,12 @@ describe('server read-aloud through an OpenAI-compatible endpoint', () => {
     expect(single.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(stored.size).toBe(1);
+    const audio = await app().request('/api/tts/audio/single-container', {}, env);
+    expect(audio.status).toBe(200);
+    expect(audio.headers.get('Content-Type')).toBe(storedContentType);
+    expect(r2.put).toHaveBeenLastCalledWith(expect.any(String), expect.any(ArrayBuffer), {
+      httpMetadata: { contentType: storedContentType },
+    });
   });
 
   it('bounds the combined audio from all chunks and resets the budget for a new request', async () => {

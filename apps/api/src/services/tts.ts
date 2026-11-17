@@ -333,7 +333,7 @@ export function audioContentType(encoding: string): string {
     ogg: 'audio/ogg',
     flac: 'audio/flac',
     aac: 'audio/aac',
-    opus: 'audio/opus',
+    opus: 'audio/ogg', // Ogg Opus files (RFC 7845 section 9).
   };
   return types[encoding] ?? 'audio/mpeg';
 }
