@@ -1,10 +1,4 @@
 /** Real Workers restoration fixture; only external VM HTTP is doubled. */
-import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
-import {
-  claimDuePromptDeliveries,
-  type PromptDeliveryResult,
-} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
-import { runPromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-runner';
 import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -12,7 +6,6 @@ import { expect, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { TaskRunner } from '../../../src/durable-objects/task-runner';
-import type { Env } from '../../../src/env';
 import { getSelectedAgentCredentialReference } from '../../../src/routes/credentials';
 import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
@@ -22,7 +15,6 @@ import { encrypt } from '../../../src/services/encryption';
 import { signCallbackToken } from '../../../src/services/jwt';
 import { resolveTaskStartPlacementCredentialAttribution } from '../../../src/services/placement-resolver';
 import { resolveSessionRuntimeContract } from '../../../src/services/session-runtime-contract';
-import { DefaultVmPromptDeliveryAdapter } from '../../../src/services/vm-prompt-delivery-adapter';
 import { ensurePoolsWithStarterMachines } from '../../helpers/capacity-pool-picks';
 import { projectStub, sqlRows, testEnv } from './agent-message-channels';
 import { pauseAlarms, pauseNodeAlarms, type StateWriteHook } from './durable-alarm-control';
@@ -35,7 +27,6 @@ import {
   seedUser,
   seedWorkspace,
 } from './seed-d1';
-const config = resolveDurableExecutionConfig({});
 export function taskRunner(taskId: string): DurableObjectStub<TaskRunner> {
   return env.TASK_RUNNER.get(env.TASK_RUNNER.idFromName(taskId)) as DurableObjectStub<TaskRunner>;
 }
@@ -208,33 +199,6 @@ export async function agentOnVm(taskMode: TaskMode, agentType = 'claude-code') {
   };
 }
 
-/** Claim one due prompt delivery and run it through the real delivery runner. */
-export async function runDueDelivery(
-  f: Fixture,
-  now = Date.now()
-): Promise<PromptDeliveryResult | null> {
-  return runInDurableObject(f.stub, async (instance, state) => {
-    const [claim] = claimDuePromptDeliveries(state.storage.sql, config, now);
-    if (!claim) return null;
-    // Bindings must come from the object's own context, as in its production alarm.
-    const objectEnv = (instance as unknown as { env: Env }).env;
-    return runPromptDeliveryClaim(
-      state.storage.sql,
-      objectEnv,
-      config,
-      claim,
-      new DefaultVmPromptDeliveryAdapter(objectEnv),
-      {
-        projectId: f.projectId,
-        recalculateAlarm: async () => undefined,
-        broadcastEvent: () => undefined,
-        armIdleCleanup: () => undefined,
-        nudgeDeliveries: () => 0,
-        scheduleSummarySync: () => undefined,
-      }
-    );
-  });
-}
 export async function taskRow(taskId: string) {
   return env.DATABASE.prepare('SELECT status, execution_step FROM tasks WHERE id = ?')
     .bind(taskId)
@@ -364,3 +328,5 @@ export async function deleteSleptWorkspace(nodeId: string, taskId: string): Prom
     runtime_deletion_proof: 'vm_agent_confirmed',
   });
 }
+
+export { runDueDelivery } from './vm-prompt-delivery';

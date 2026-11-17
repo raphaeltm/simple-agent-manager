@@ -1,24 +1,18 @@
 /** #2847: a follow-up before first placement is not a request to recover a slept VM. */
 import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
-import {
-  claimDuePromptDeliveries,
-  expireDuePromptDeliveries,
-} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
-import { runPromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-runner';
+import { expireDuePromptDeliveries } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
 import { buildVmPromptDeliveryCapabilitiesPath } from '@simple-agent-manager/shared';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import type { Env } from '../../src/env';
 import { getNodeBackendBaseUrl } from '../../src/services/node-agent-readiness';
 import * as placement from '../../src/services/placement-resolver';
 import * as projectData from '../../src/services/project-data';
 import * as recovery from '../../src/services/session-recovery';
 import type { SubmitVmTaskInput } from '../../src/services/submit-vm-task';
 import { persistVmTaskSession } from '../../src/services/submit-vm-task-effects';
-import { DefaultVmPromptDeliveryAdapter } from '../../src/services/vm-prompt-delivery-adapter';
 import { resolveVmPromptDeliveryTarget } from '../../src/services/vm-prompt-delivery-target';
 import {
   acceptedPromptResponse,
@@ -34,6 +28,7 @@ import {
   seedUser,
   seedWorkspace,
 } from './helpers/seed-d1';
+import { runDueDelivery } from './helpers/vm-prompt-delivery';
 
 const config = resolveDurableExecutionConfig({});
 afterEach(() => vi.restoreAllMocks());
@@ -107,28 +102,6 @@ async function inbox(f: Fixture) {
   );
   return row!;
 }
-async function runDue(f: Fixture, now = Date.now()) {
-  return runInDurableObject(f.stub, async (instance, state) => {
-    const [claim] = claimDuePromptDeliveries(state.storage.sql, config, now);
-    if (!claim) return null;
-    const objectEnv = (instance as unknown as { env: Env }).env;
-    return runPromptDeliveryClaim(
-      state.storage.sql,
-      objectEnv,
-      config,
-      claim,
-      new DefaultVmPromptDeliveryAdapter(objectEnv),
-      {
-        projectId: f.projectId,
-        recalculateAlarm: async () => undefined,
-        broadcastEvent: () => undefined,
-        armIdleCleanup: () => undefined,
-        nudgeDeliveries: () => 0,
-        scheduleSummarySync: () => undefined,
-      }
-    );
-  });
-}
 
 async function readyRuntime(f: Fixture) {
   const nodeId = `node-${f.id}`;
@@ -188,7 +161,7 @@ describe('follow-ups before first VM placement', () => {
       const f = await startingConversation(status);
       const wake = vi.spyOn(recovery, 'ensureSessionRecovery');
       await queueFollowup(f);
-      expect(await runDue(f)).toMatchObject({
+      expect(await runDueDelivery(f)).toMatchObject({
         kind: 'retry',
         reason: 'not_ready',
         error: 'Task is still starting; no workspace yet',
@@ -204,22 +177,26 @@ describe('follow-ups before first VM placement', () => {
     await queueFollowup(f);
     const expiry = (await inbox(f)).expires_at;
     for (let attempt = 0; attempt < config.maxAttempts + 2; attempt++) {
-      expect(await runDue(f, (await inbox(f)).next_attempt_at ?? Date.now())).toMatchObject({
-        kind: 'retry',
-        reason: 'not_ready',
-      });
+      expect(await runDueDelivery(f, (await inbox(f)).next_attempt_at ?? Date.now())).toMatchObject(
+        {
+          kind: 'retry',
+          reason: 'not_ready',
+        }
+      );
       expect(await inbox(f)).toMatchObject({ delivery_state: 'retry_wait', expires_at: expiry });
       expect((await inbox(f)).delivery_attempts).toBeLessThan(config.maxAttempts);
     }
     const vm = await readyRuntime(f);
-    expect(await runDue(f, (await inbox(f)).next_attempt_at)).toMatchObject({
+    expect(await runDueDelivery(f, (await inbox(f)).next_attempt_at)).toMatchObject({
       kind: 'retry',
       reason: 'busy',
     });
     expect(vm.prompts).toEqual([]);
     vm.finishFirstTurn();
     // The next backoff attempt reaches the newly idle VM without a second human message.
-    expect(await runDue(f, (await inbox(f)).next_attempt_at)).toMatchObject({ kind: 'accepted' });
+    expect(await runDueDelivery(f, (await inbox(f)).next_attempt_at)).toMatchObject({
+      kind: 'accepted',
+    });
     expect(vm.prompts).toHaveLength(1);
     expect(await inbox(f)).toMatchObject({ delivery_state: 'acked', expires_at: expiry });
   });
@@ -227,14 +204,14 @@ describe('follow-ups before first VM placement', () => {
   it('expires a follow-up that is still waiting for its first VM', async () => {
     const f = await startingConversation();
     await queueFollowup(f);
-    await runDue(f);
+    await runDueDelivery(f);
     const expiry = (await inbox(f)).expires_at;
     const expired = await runInDurableObject(f.stub, (_instance, state) =>
       expireDuePromptDeliveries(state.storage.sql, config, expiry)
     );
     expect(expired.expired).toBeGreaterThan(0);
     expect(await inbox(f)).toMatchObject({ delivery_state: 'expired', expires_at: expiry });
-    expect(await runDue(f, expiry + 1)).toBeNull();
+    expect(await runDueDelivery(f, expiry + 1)).toBeNull();
   });
 
   it.each(['in_progress', 'awaiting_followup', 'completed', 'failed', 'cancelled', 'sleeping'])(
