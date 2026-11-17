@@ -15,7 +15,7 @@ import { flowWindow } from '@simple-agent-manager/operations/internal/insights-f
 import { newProviderLimitWait, PROVIDER_LIMIT_POLICY } from '@simple-agent-manager/scheduler-core';
 import { credentialLimitReferenceKey } from '@simple-agent-manager/shared';
 import type Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
@@ -137,6 +137,8 @@ describe('projectAccounts', () => {
   }
 
   beforeEach(() => {
+    // The real account port also reads Date.now() when projecting expired limit windows.
+    vi.spyOn(Date, 'now').mockReturnValue(NOW);
     ({ sqlite, env } = createAccountsTestDb());
     credential('cc-max', 'owner', 'Personal Max', 'oauth-token');
     credential('cc-key', 'owner', 'Work API key', 'api-key');
@@ -145,7 +147,10 @@ describe('projectAccounts', () => {
     credential(LONG_ID, 'owner', 'Legacy Max', 'oauth-token');
     credential('cc-out', 'outsider', 'Outsider Name', 'oauth-token');
   });
-  afterEach(() => sqlite.close());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    sqlite.close();
+  });
 
   it('attributes runs to accounts: yours by name, teammates grouped by kind, never another project', async () => {
     run('a1', 'cc-max');
