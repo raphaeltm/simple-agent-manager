@@ -7,18 +7,12 @@ import {
   type AnalyticsEventsResponse,
   type AnalyticsFeatureAdoptionResponse,
   type AnalyticsForwardStatusResponse,
-  type AnalyticsFunnelResponse,
-  type AnalyticsGeoResponse,
-  type AnalyticsRetentionResponse,
   type AnalyticsWebsiteTrafficResponse,
   fetchAnalyticsAiUsage,
   fetchAnalyticsDau,
   fetchAnalyticsEvents,
   fetchAnalyticsFeatureAdoption,
   fetchAnalyticsForwardStatus,
-  fetchAnalyticsFunnel,
-  fetchAnalyticsGeo,
-  fetchAnalyticsRetention,
   fetchAnalyticsWebsiteTraffic,
 } from '../lib/api';
 import { PROJECT_CREATE_CONFIG_STALE_TIME_MS } from '../lib/query-stale-times';
@@ -27,10 +21,7 @@ import { useQueryScope } from './useQueryScope';
 export interface UseAdminAnalyticsReturn {
   dau: AnalyticsDauResponse | null;
   events: AnalyticsEventsResponse | null;
-  funnel: AnalyticsFunnelResponse | null;
   featureAdoption: AnalyticsFeatureAdoptionResponse | null;
-  geo: AnalyticsGeoResponse | null;
-  retention: AnalyticsRetentionResponse | null;
   forwardStatus: AnalyticsForwardStatusResponse | null;
   websiteTraffic: AnalyticsWebsiteTrafficResponse | null;
   aiUsage: AnalyticsAiUsageResponse | null;
@@ -70,21 +61,10 @@ export function useAdminAnalytics(
         queryKey: key('events', eventPeriod),
         queryFn: ({ signal }) => fetchAnalyticsEvents(eventPeriod, signal),
       },
-      { ...base, queryKey: key('funnel'), queryFn: ({ signal }) => fetchAnalyticsFunnel(signal) },
       {
         ...base,
         queryKey: key('adoption', eventPeriod),
         queryFn: ({ signal }) => fetchAnalyticsFeatureAdoption(eventPeriod, signal),
-      },
-      {
-        ...base,
-        queryKey: key('geo', eventPeriod),
-        queryFn: ({ signal }) => fetchAnalyticsGeo(eventPeriod, signal),
-      },
-      {
-        ...base,
-        queryKey: key('retention'),
-        queryFn: ({ signal }) => fetchAnalyticsRetention(undefined, signal),
       },
       {
         ...base,
@@ -108,24 +88,11 @@ export function useAdminAnalytics(
       },
     ],
   });
-  const [
-    dau,
-    events,
-    funnel,
-    featureAdoption,
-    geo,
-    retention,
-    forwardStatus,
-    websiteTraffic,
-    aiUsage,
-  ] = queries;
+  const [dau, events, featureAdoption, forwardStatus, websiteTraffic, aiUsage] = queries;
   return {
     dau: dau.data ?? null,
     events: events.data ?? null,
-    funnel: funnel.data ?? null,
     featureAdoption: featureAdoption.data ?? null,
-    geo: geo.data ?? null,
-    retention: retention.data ?? null,
     forwardStatus: forwardStatus.data ?? null,
     websiteTraffic: websiteTraffic.data ?? null,
     aiUsage: aiUsage.data ?? null,
