@@ -64,7 +64,9 @@ it.each([
       );
       totalWrites.push(
         samples
-          .filter((sample) => sample.owner === 'callback-ingest')
+          .filter(
+            (sample) => sample.owner === 'callback-ingest' && sample.phase === 'persistMessageBatch'
+          )
           .reduce((sum, sample) => sum + sample.rowsWritten, 0)
       );
       expect(rawWrites.at(-1)).toBe(enabled ? statuses.length + 2 : 3 * statuses.length);
@@ -76,7 +78,9 @@ it.each([
       collect();
       expect(
         samples
-          .filter((sample) => sample.owner === 'callback-ingest')
+          .filter(
+            (sample) => sample.owner === 'callback-ingest' && sample.phase === 'persistMessageBatch'
+          )
           .reduce((sum, sample) => sum + sample.rowsWritten, 0)
       ).toBe(0);
       expect(

@@ -119,10 +119,21 @@ describe('canonical tool snapshots through real ProjectData ingest', () => {
     );
     const stored = await rows(stub, session);
     expect(stored).toHaveLength(4);
-    const identities = stored.map((row) => row.toolMetadata!._samToolCanonicalId);
-    expect(identities[0]).toBe(identities[2]);
-    expect(identities[1]).toBe(identities[3]);
-    expect(identities[0]).not.toBe(identities[1]);
+    // Starts share a timestamp; their canonical hash IDs define the read order.
+    const identityA = await canonicalToolRowId(session, source, 'call-a');
+    const identityB = await canonicalToolRowId(session, next, 'call-a');
+    expect(stored.find((row) => row.id === 'report-2')?.toolMetadata?._samToolCanonicalId).toBe(
+      identityA
+    );
+    expect(stored.find((row) => row.id === 'next-end')?.toolMetadata?._samToolCanonicalId).toBe(
+      identityB
+    );
+    expect(
+      stored.filter((row) => row.toolMetadata?._samToolCanonicalId === identityA)
+    ).toHaveLength(2);
+    expect(
+      stored.filter((row) => row.toolMetadata?._samToolCanonicalId === identityB)
+    ).toHaveLength(2);
     expect(await stub.persistMessageBatch(session, [late], source)).toMatchObject({
       persisted: 0,
       duplicates: 1,
