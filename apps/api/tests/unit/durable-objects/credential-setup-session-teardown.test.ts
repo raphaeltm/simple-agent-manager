@@ -354,6 +354,33 @@ describe('CredentialSetupSession teardown — recovery alarm', () => {
     expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0, cleanup_attempts: 1 });
   });
 
+  it('does not recreate a destroyed sandbox when recovery resumes at the pool release', async () => {
+    const fixture = createFixture();
+    const first = await startSession(fixture, true);
+    vi.mocked(releaseSetupSlot).mockImplementationOnce(() => new Promise(() => {}));
+    void first.instance.cancel();
+    await vi.waitFor(() => expect(releaseSetupSlot).toHaveBeenCalledTimes(1));
+    expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+    expect(
+      fixture.doDb.prepare('SELECT cleanup_sandbox_destroyed FROM setup_session').get()
+    ).toEqual({ cleanup_sandbox_destroyed: 1 });
+    expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1 });
+
+    vi.mocked(getSandboxInstance).mockClear();
+    vi.mocked(destroySandboxInstance).mockClear();
+    vi.mocked(releaseSetupSlot).mockReset().mockResolvedValue(undefined);
+    fixture.sandbox.exec.mockClear();
+    const restarted = createInstance(fixture.doDb, fixture.env);
+    await restarted.instance.alarm();
+
+    expect(getSandboxInstance).not.toHaveBeenCalled();
+    expect(fixture.sandbox.exec).not.toHaveBeenCalled();
+    expect(destroySandboxInstance).not.toHaveBeenCalled();
+    expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), LEASE_ID);
+    expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0, cleanup_attempts: 1 });
+    expect(restarted.storage.deleteAlarm).toHaveBeenCalledTimes(1);
+  });
+
   it('a restarted instance finishes the interrupted cleanup on its alarm, and the next alarm is a no-op', async () => {
     const fixture = createFixture();
     await interruptTeardown(fixture);
@@ -574,6 +601,11 @@ describe('CredentialSetupSession teardown — recovery alarm', () => {
       await handle.instance.cancel();
       expect(doRow(fixture.doDb)).toMatchObject({ status: 'cancelled', cleanup_pending: 1 });
       expect(handle.storage.deleteAlarm).not.toHaveBeenCalled();
+      expect(
+        fixture.doDb.prepare('SELECT cleanup_sandbox_destroyed FROM setup_session').get()
+      ).toEqual({
+        cleanup_sandbox_destroyed: step === 'destroy' ? null : 1,
+      });
       fixture.env.DATABASE = realDb;
       const restarted = createInstance(fixture.doDb, fixture.env);
       await restarted.instance.alarm();
@@ -812,6 +844,9 @@ describe('CredentialSetupSession — cleanup columns on an existing object', () 
     createInstance(fixture.doDb, fixture.env);
     const { instance } = createInstance(fixture.doDb, fixture.env); // second constructor run
 
+    expect(
+      fixture.doDb.prepare('SELECT cleanup_sandbox_destroyed FROM setup_session').get()
+    ).toEqual({ cleanup_sandbox_destroyed: null });
     expect(doRow(fixture.doDb)).toEqual({
       status: 'waiting_for_user',
       cleanup_pending: null,

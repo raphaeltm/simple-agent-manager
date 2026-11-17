@@ -139,6 +139,7 @@ interface FakeRow {
   cleanup_pending: number | null;
   cleanup_from_status: string | null;
   cleanup_attempts: number | null;
+  cleanup_sandbox_destroyed: number | null;
 }
 
 function createFakeSql() {
@@ -188,6 +189,7 @@ function createFakeSql() {
         cleanup_pending: null,
         cleanup_from_status: null,
         cleanup_attempts: null,
+        cleanup_sandbox_destroyed: null,
       };
       return { toArray: () => [] };
     }
@@ -220,6 +222,10 @@ function createFakeSql() {
     }
     if (q.includes('update setup_session set cleanup_pending = 0')) {
       if (row) row = { ...row, cleanup_pending: 0 };
+      return { toArray: () => [] };
+    }
+    if (q.includes('update setup_session set cleanup_sandbox_destroyed = 1')) {
+      if (row) row = { ...row, cleanup_sandbox_destroyed: 1 };
       return { toArray: () => [] };
     }
     if (q.includes('update setup_session set cleanup_attempts = ?')) {

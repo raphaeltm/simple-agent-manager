@@ -34,6 +34,8 @@ export type SetupSessionRow = {
   cleanup_from_status: string | null;
   /** Number of alarm-driven recoveries of an interrupted cleanup. */
   cleanup_attempts: number | null;
+  /** 1 only after sandbox.destroy() succeeds; recovery must not restart that sandbox. */
+  cleanup_sandbox_destroyed: number | null;
 };
 
 export type DeviceAuthDetailsRow = {
@@ -44,12 +46,18 @@ export type DeviceAuthDetailsRow = {
 /**
  * Teardown-recovery columns, added after the table first shipped. Each carries its full
  * literal statement (DDL cannot take placeholders, and a literal is what the safety check
- * scans). Nullable with no default, so existing rows read as "no cleanup owed".
+ * scans). Nullable with no default: legacy rows owe no cleanup unless marked pending, and
+ * NULL sandbox-destroyed means no destruction proof, so interrupted legacy cleanup
+ * still scrubs and destroys before releasing its obligation.
  */
 const CLEANUP_COLUMNS: ReadonlyArray<readonly [name: string, ddl: string]> = [
   ['cleanup_pending', 'ALTER TABLE setup_session ADD COLUMN cleanup_pending INTEGER'],
   ['cleanup_from_status', 'ALTER TABLE setup_session ADD COLUMN cleanup_from_status TEXT'],
   ['cleanup_attempts', 'ALTER TABLE setup_session ADD COLUMN cleanup_attempts INTEGER'],
+  [
+    'cleanup_sandbox_destroyed',
+    'ALTER TABLE setup_session ADD COLUMN cleanup_sandbox_destroyed INTEGER',
+  ],
 ];
 
 /**

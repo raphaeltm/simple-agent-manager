@@ -58,7 +58,7 @@ COLUMN` would ship unscanned. Fix: move all DO-SQLite DDL into
 - [x] Add `schema.ts` to `DO_MIGRATION_FILES`; scanner test asserts it is scanned and passes
 - [x] Additive cleanup columns via PRAGMA + literal guarded `ALTER TABLE ADD COLUMN` in `schema.ts`
 - [x] Teardown: claim + `cleanup_pending` + alarm + D1 terminal before any sandbox I/O
-- [x] `cleanup.ts`: scrub (skipped only on initial `provisioning` cleanup; resumed cleanup always scrubs; bounded), destroy, release, D1 repair (`onlyIfActive`), clear marker + alarm
+- [x] `cleanup.ts`: scrub (skipped only on initial `provisioning` cleanup; resumed cleanup scrubs unless destruction was durably confirmed; bounded), destroy, release, D1 repair (`onlyIfActive`), clear marker + alarm
 - [x] Alarm: terminal row with `cleanup_pending = 1` resumes cleanup; joins inline flight; capped attempts
 - [x] `withTimeout` exported from `services/sandbox.ts`
 - [x] `sandbox_runtime_unavailable` for the SDK permanent start message (constant in `credential-setup-config.ts`)
@@ -102,3 +102,5 @@ COLUMN` would ship unscanned. Fix: move all DO-SQLite DDL into
 - [ ] Complete fresh delta specialist reviews, final local checks and current-head CI.
 - [ ] Complete agreed live checks, clean fixtures and release staging lease.
 - [ ] Observe coordinator's production #2841 merge-hold-lifted message before normal merge.
+
+- [x] Later Codex P2: persist successful sandbox destruction before pool/D1 I/O; recovery skips scrub and destroy once proven, so it cannot recreate a destroyed container. Nullable additive `cleanup_sandbox_destroyed` column is migration-scanned; interrupted-release regression was red before fix. Legacy NULL retains conservative scrub/destroy behavior.

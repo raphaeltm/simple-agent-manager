@@ -30,15 +30,18 @@ export interface SetupSessionCleanupContext {
 
 /**
  * The initial scrub is skipped when teardown started from `provisioning`: an exec
- * could start a
- * container that never started and wait out the SDK's start retries before the destroy.
- * A resumed cleanup still scrubs: on Cloudflare the Sandbox container outlives the DO
- * isolate that died, so the captured credential may still be on it, and the destroy
+ * could start a container that never started and wait out the SDK's start retries
+ * before the destroy.
+ * A resumed cleanup scrubs unless destruction was durably confirmed: the Sandbox
+ * container outlives the dead DO isolate, so the captured credential may still be
+ * on it, and the destroy
  * after the scrub is best-effort. (The integration branch also skipped it on resume,
  * because on celld the exec starts a fresh container; that is self-host only.)
  */
 function skipsScrub(row: SetupSessionRow, resumed: boolean): boolean {
-  return !resumed && row.cleanup_from_status === 'provisioning';
+  return (
+    row.cleanup_sandbox_destroyed === 1 || (!resumed && row.cleanup_from_status === 'provisioning')
+  );
 }
 
 export async function runSetupSessionCleanup(
@@ -53,7 +56,10 @@ export async function runSetupSessionCleanup(
   if (skipsScrub(row, resumed)) {
     log.info('credential_setup.scrub_skipped', {
       sessionId: row.id,
-      reason: 'never_left_provisioning',
+      reason:
+        row.cleanup_sandbox_destroyed === 1
+          ? 'sandbox_already_destroyed'
+          : 'never_left_provisioning',
     });
   } else {
     try {
@@ -76,14 +82,19 @@ export async function runSetupSessionCleanup(
   }
   let cleanupSucceeded = true;
   // 2. Destroy the sandbox container (bounded inside destroySandboxInstance).
-  try {
-    await destroySandboxInstance(env, row.id, { sandboxId: row.id });
-  } catch (err) {
-    cleanupSucceeded = false;
-    log.warn('credential_setup.sandbox_destroy_failed', {
-      sessionId: row.id,
-      error: err instanceof Error ? err.message : String(err),
-    });
+  if (row.cleanup_sandbox_destroyed !== 1) {
+    try {
+      await destroySandboxInstance(env, row.id, { sandboxId: row.id });
+      // Commit proof before the next await: a death during pool/D1 cleanup must
+      // never make recovery exec against (and recreate) the destroyed sandbox.
+      sql.exec(`UPDATE setup_session SET cleanup_sandbox_destroyed = 1 WHERE id = ?`, row.id);
+    } catch (err) {
+      cleanupSucceeded = false;
+      log.warn('credential_setup.sandbox_destroy_failed', {
+        sessionId: row.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
   // 3. Release the concurrency slot (idempotent in the pool DO).
   try {
