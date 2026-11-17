@@ -323,6 +323,61 @@ describe('findAnomalies', () => {
     expect(report.thresholds.wakingMinutes).toBe(FLEET_OPS_DEFAULTS.wakingMinutes);
   });
 
+  it('omits a wake held by a provider usage limit until the hold deadline, then reports it', async () => {
+    // Production 2026-11-17: six chats held until a weekly reset showed as "waking for 700 min".
+    const claimed = iso(700 * MIN);
+    const held = (id: string, deadlineAt: number, phase = 'waiting') => {
+      task(`task-${id}`, {
+        status: 'queued',
+        admission_state: 'provider_limit_waiting',
+        provider_limit_wait_json: JSON.stringify({
+          version: 1,
+          phase,
+          nextRetryAt: deadlineAt - 30 * MIN,
+          deadlineAt,
+        }),
+      });
+      insert(main, 'session_snapshots', {
+        id,
+        user_id: 'user-a',
+        project_id: 'proj-1',
+        chat_session_id: `chat-${id}`,
+        runtime: 'vm',
+        status: 'available',
+        recovery_status: 'waking',
+        recovery_task_id: `task-${id}`,
+        recovery_claimed_at: claimed,
+        updated_at: iso(MIN),
+      });
+    };
+    held('s-held', NOW + 3 * 24 * 60 * MIN);
+    held('s-held-overdue', NOW - MIN);
+    // Control: the same long wake with no hold is still a stalled wake.
+    task('task-plain', { status: 'queued' });
+    insert(main, 'session_snapshots', {
+      id: 's-plain',
+      user_id: 'user-a',
+      project_id: 'proj-1',
+      chat_session_id: 'chat-plain',
+      runtime: 'vm',
+      status: 'available',
+      recovery_status: 'waking',
+      recovery_task_id: 'task-plain',
+      recovery_claimed_at: claimed,
+      updated_at: iso(MIN),
+    });
+
+    const entry = findingIds(
+      await findAnomalies(env, FLEET_OPS_DEFAULTS, { now: NOW }),
+      'session_wake_stalled'
+    );
+    expect(entry.findings.map((f) => f.ids.snapshotId).sort()).toEqual([
+      's-held-overdue',
+      's-plain',
+    ]);
+    expect(entry.total).toBe(2);
+  });
+
   it('reports a waking row with an unreadable timestamp first instead of dropping it', async () => {
     insert(main, 'session_snapshots', {
       id: 's-garbled',

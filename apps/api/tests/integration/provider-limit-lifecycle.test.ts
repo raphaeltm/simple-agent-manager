@@ -16,6 +16,7 @@ import {
   resolveAttentionMarkers,
 } from '@simple-agent-manager/project-data/internal/do/attention';
 import {
+  acceptPromptDelivery,
   type DurabilityFoundationHooks,
   processPromptDeliveryAlarm,
 } from '@simple-agent-manager/project-data/internal/do/durability-foundation';
@@ -1296,4 +1297,181 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
       expect(getSchedule(sql, PROJECT, scheduleId)?.state).toBe('cancelled');
     }
   );
+  describe('a person writes to a chat held by a provider limit (idea 01M7MMRHF3VZRKREC2XBMSC7HF)', () => {
+    const HOUR = 60 * MINUTE;
+    const DAY = 24 * HOUR;
+
+    function followUp(text: string) {
+      // The person owns the chat: delivery re-checks the sender at submit time.
+      sql.exec('UPDATE chat_sessions SET created_by_user_id = ? WHERE id = ?', USER, CHAT);
+      return acceptPromptDelivery(sql, env as never, hooks, {
+        targetSessionId: CHAT,
+        displayContent: text,
+        senderType: 'human',
+        senderId: USER,
+        sourceKind: 'user_followup',
+      });
+    }
+
+    function delivery(id: string) {
+      return doDb
+        .prepare(
+          `SELECT delivery_state AS state, terminal_reason AS terminal, expires_at AS expiresAt,
+                  next_attempt_at AS nextAttemptAt
+             FROM session_inbox WHERE id = ?`
+        )
+        .get(id) as {
+        state: string;
+        terminal: string | null;
+        expiresAt: number;
+        nextAttemptAt: number | null;
+      };
+    }
+
+    const wakeAsks = () =>
+      d1
+        .prepare("SELECT status FROM asks WHERE kind = 'error' AND dedupe_key = ?")
+        .all(`error:wake:${CHAT}`);
+    const wakeMessages = () =>
+      sql
+        .exec(
+          "SELECT content FROM chat_messages WHERE role = 'system' AND content LIKE 'Wake failed:%'"
+        )
+        .toArray();
+    const waitRow = () =>
+      JSON.parse(
+        (
+          d1
+            .prepare('SELECT provider_limit_wait_json AS value FROM tasks WHERE id=?')
+            .get(TASK) as {
+            value: string;
+          }
+        ).value
+      ) as { phase: string; nextRetryAt: number; deadlineAt: number };
+
+    it('keeps the message past its TTL, parks it until the reset and files no wake error', async () => {
+      const notified = seedInboxOwner();
+      // A weekly-style window: the reset is three days out, far beyond the 1 h delivery TTL.
+      const response = await callback({
+        ...producedCallbacks[0].callback,
+        providerLimitResetsAt: Date.now() + 3 * DAY,
+      });
+      expect(response.status).toBe(200);
+      const wait = waitRow();
+      expect(wait.phase).toBe('waiting');
+      await sleepTheTask();
+
+      const accepted = await followUp('Also update the changelog, please');
+      const ttl = resolveDurableExecutionConfig(env as never).ttlMs;
+      expect(delivery(accepted.message.id).expiresAt).toBe(Date.now() + ttl);
+
+      // The real delivery alarm: the wake reports "waking" (the TaskRunner holds it at admission).
+      await runDeliveryAlarm();
+      expect(recovery.ensure).toHaveBeenCalledOnce();
+      expect(delivery(accepted.message.id)).toEqual({
+        state: 'retry_wait',
+        terminal: null,
+        expiresAt: wait.nextRetryAt + ttl,
+        nextAttemptAt: wait.nextRetryAt,
+      });
+
+      // Well past the original TTL, through the real alarm: nothing expires, nothing retries,
+      // nothing is filed.
+      vi.setSystemTime(Date.now() + 2 * HOUR);
+      await runDeliveryAlarm();
+      vi.setSystemTime(Date.now() + DAY);
+      await runDeliveryAlarm();
+      expect(delivery(accepted.message.id).state).toBe('retry_wait');
+      expect(recovery.ensure).toHaveBeenCalledOnce();
+      expect(wakeAsks()).toEqual([]);
+      expect(wakeMessages()).toEqual([]);
+      expect(
+        notified.mock.calls.filter(([, n]) => (n as { type?: string }).type === 'error')
+      ).toEqual([]);
+
+      // At the reset the person's message is attempted again (the wake it rides is the one the
+      // hold released), still alive.
+      vi.setSystemTime(wait.nextRetryAt);
+      await runDeliveryAlarm();
+      expect(recovery.ensure).toHaveBeenCalledTimes(2);
+      expect(delivery(accepted.message.id).state).toBe('retry_wait');
+      expect(wakeAsks()).toEqual([]);
+    });
+
+    it('closes an open failed-wake item when the delivery finds the chat held', async () => {
+      seedInboxOwner();
+      const earlier = await inboxErrorsPort.fileWakeFailure(env as never, {
+        projectId: PROJECT,
+        sessionId: CHAT,
+        createdByUserId: USER,
+        topic: 'Ship it',
+      });
+      expect(earlier?.created).toBe(true);
+      await callback({
+        ...producedCallbacks[0].callback,
+        providerLimitResetsAt: Date.now() + 3 * DAY,
+      });
+      await sleepTheTask();
+      await followUp('Any news?');
+      await runDeliveryAlarm();
+      expect(
+        d1.prepare('SELECT status, answer_json AS answer FROM asks WHERE id = ?').get(earlier?.id)
+      ).toEqual({ status: 'done', answer: '{"resolution":"superseded"}' });
+      expect(hooks.scheduleSummarySync).toHaveBeenCalled();
+    });
+
+    it('control: an ordinary stalled wake with no hold still expires and files one wake error', async () => {
+      seedInboxOwner();
+      await sleepWorkspaceSession(env, {
+        workspaceId: 'workspace-1',
+        userId: USER,
+        reason: 'explicit sleep',
+      });
+      const accepted = await followUp('Still there?');
+      await runDeliveryAlarm();
+      expect(recovery.ensure).toHaveBeenCalledOnce();
+      expect(delivery(accepted.message.id).expiresAt).toBe(
+        accepted.message.createdAt + resolveDurableExecutionConfig(env as never).ttlMs
+      );
+      vi.setSystemTime(Date.now() + 2 * HOUR);
+      await runDeliveryAlarm();
+      expect(delivery(accepted.message.id)).toMatchObject({
+        state: 'expired',
+        terminal: 'ttl_expired',
+      });
+      expect(wakeAsks()).toEqual([{ status: 'open' }]);
+      expect(wakeMessages()).toHaveLength(1);
+    });
+
+    it('a blocked hold parks the message until its own expiry and files no wake error', async () => {
+      seedInboxOwner();
+      await rejectDistinctIncidents('limit-agent');
+      expect(waitRow().phase).toBe('blocked');
+      await sleepTheTask();
+      const accepted = await followUp('Can you continue?');
+      const original = delivery(accepted.message.id).expiresAt;
+      await runDeliveryAlarm();
+      // Not extended (no automatic wake will come), and not retried before it expires.
+      expect(delivery(accepted.message.id)).toEqual({
+        state: 'retry_wait',
+        terminal: null,
+        expiresAt: original,
+        nextAttemptAt: original,
+      });
+      vi.setSystemTime(original + 1);
+      await runDeliveryAlarm();
+      expect(recovery.ensure).toHaveBeenCalledOnce();
+      // Liveness: the alarm did run the expiry.
+      expect(delivery(accepted.message.id)).toMatchObject({
+        state: 'expired',
+        terminal: 'ttl_expired',
+      });
+      expect(wakeAsks()).toEqual([]);
+      expect(wakeMessages()).toEqual([]);
+      // The chat shows the hold instead: its banner reads the task's provider-limit admission.
+      expect(d1.prepare('SELECT admission_state AS state FROM tasks WHERE id=?').get(TASK)).toEqual(
+        { state: 'provider_limit_blocked' }
+      );
+    });
+  });
 });

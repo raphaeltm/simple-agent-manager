@@ -66,14 +66,27 @@ export async function snapshotFailures(ctx: SweepContext): Promise<AnomalyClassR
 }
 
 /**
+ * Binds the current time in epoch ms. Reads the `provider_limit_wait_json` TaskRunner admission
+ * writes. NULL-safe at the call site: a wake with no task (LEFT JOIN) must still be reported.
+ */
+const HELD_BY_PROVIDER_LIMIT_SQL = `t.admission_state = 'provider_limit_waiting'
+  AND json_valid(t.provider_limit_wait_json)
+  AND json_extract(t.provider_limit_wait_json, '$.phase') = 'waiting'
+  AND json_extract(t.provider_limit_wait_json, '$.deadlineAt') > ?`;
+
+/**
  * Wakes still `waking` past `operations.opsAnomalyWakingMinutes`, oldest first, with no
  * lookback bound: a stuck wake can be weeks old, and that is what this class is for. Age
  * counts from the claim (`recovery_claimed_at`), which a renewal moves forward; a legacy row
  * without one falls back to the snapshot's `created_at`, which no other writer moves. A row
  * whose timestamp is unreadable is reported first rather than dropped. A row whose
  * recovery task is no longer waking is a dead claim that `dead_wake_claim_reconciliation`
- * ends once the claim lease passes. A live task means a slow wake (for example a
- * provider-limit wait).
+ * ends once the claim lease passes. A live task means a slow wake.
+ *
+ * A wake held by an AI-provider usage limit is not stalled: its task waits at admission until
+ * the provider's reset (days, for a weekly window) and the chat shows the hold. It is omitted
+ * while its `waiting` hold is inside the hold's own deadline and reported again past it
+ * (idea 01M7MMRHF3VZRKREC2XBMSC7HF).
  */
 export async function stalledWakes(ctx: SweepContext): Promise<AnomalyClassResult> {
   const rows = await ctx.env.DATABASE.prepare(
@@ -85,13 +98,14 @@ export async function stalledWakes(ctx: SweepContext): Promise<AnomalyClassResul
      FROM session_snapshots s
      LEFT JOIN tasks t ON t.id = s.recovery_task_id
      WHERE s.recovery_status = 'waking'
+       AND NOT COALESCE((${HELD_BY_PROVIDER_LIMIT_SQL}), 0)
        AND (julianday(COALESCE(s.recovery_claimed_at, s.created_at)) < julianday(?)
          OR julianday(COALESCE(s.recovery_claimed_at, s.created_at)) IS NULL)
      ORDER BY julianday(COALESCE(s.recovery_claimed_at, s.created_at)) IS NOT NULL,
        julianday(COALESCE(s.recovery_claimed_at, s.created_at)) ASC, s.id ASC
      LIMIT ?`
   )
-    .bind(isoMinus(ctx.now, ctx.settings.wakingMinutes * 60_000), ctx.cap)
+    .bind(ctx.now, isoMinus(ctx.now, ctx.settings.wakingMinutes * 60_000), ctx.cap)
     .all<Row>();
   return result('session_wake_stalled', rows.results ?? [], (row) => {
     const since = text(row.waking_since);

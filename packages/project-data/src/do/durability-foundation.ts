@@ -13,6 +13,7 @@ import * as mailbox from './mailbox';
 import { projectDataPorts } from './ports';
 import * as delivery from './prompt-delivery';
 import { runPromptDeliveryClaim } from './prompt-delivery-runner';
+import { isProviderLimitHoldExpiry } from './provider-limit-delivery-hold';
 import { releaseQuestionHold } from './reconciliation-candidate-state';
 import { resetReconciliationEpisode } from './reconciliation-episode';
 import { promptDeliveryToolMetadata } from './sam-notice-metadata';
@@ -364,6 +365,24 @@ export function processPromptDeliveryAlarm(
             if (seen.has(wakeFailure.targetSessionId)) continue;
             seen.add(wakeFailure.targetSessionId);
             try {
+              // A chat held by a provider usage limit cannot wake until the hold ends: the expiry
+              // is the hold, which the chat already shows, not a failed wake. A person's message
+              // was kept for the hold (`provider-limit-delivery-hold.ts`); what expires here
+              // carried its own deadline. A failed lookup still files the failure.
+              if (
+                await isProviderLimitHoldExpiry(
+                  env.DATABASE,
+                  hooks.getProjectId(),
+                  wakeFailure.targetSessionId
+                )
+              ) {
+                log.info('alarm.wake_failure_suppressed_provider_limit_hold', {
+                  sessionId: wakeFailure.targetSessionId,
+                  deliveryId: wakeFailure.deliveryId,
+                  reason: wakeFailure.terminalReason,
+                });
+                continue;
+              }
               await raiseSessionWakeFailure(
                 sql,
                 env,
