@@ -555,7 +555,7 @@ approvals. Nothing is copied.
 | GET    | `/api/projects/:projectId/inbox/count`              | One project's counts                           |
 | GET    | `/api/projects/:projectId/inbox/items/:ref`         | One item; `?context=true` adds the transcript  |
 | POST   | `/api/projects/:projectId/inbox/items/:ref/answer`  | Answer it through the path its store uses      |
-| POST   | `/api/projects/:projectId/inbox/items/:ref/archive` | Close it (see below for what the agent hears)  |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/archive` | Close it; no agent is told                     |
 
 A human task (`ask:<id>` of kind `task`) adds its own routes beside these
 (`apps/api/src/routes/inbox-tasks.ts`, operations in `packages/operations/src/inbox-task-core.ts`).
@@ -613,13 +613,14 @@ Archive closes an item for every kind and tells no agent (`agentNotified` is alw
 question, review, result or task becomes `archived` (a question asked before questions moved to
 inbox asks is resolved with reason `archived`); a secret request becomes `declined` and an approval
 `denied`; a pending permission, form or link request leaves the inbox without an answer and stays
-answerable in its chat. Archiving a question also holds SAM's automatic check-ins off that chat
-until someone writes in it, for at most `inbox.archiveCheckinHoldHours`. Both writes return
-`{ ref, outcome, agentNotified }`; for an answer, `agentNotified: false` means the notice was not
-queued yet, and SAM retries it for `inbox.noticeRetryMinutes`. The exception is **Got it** on a
-result (an empty `acknowledge` answer): it closes the item without telling the agent, by design,
-so nothing is retried. A non-empty reply to a review or result whose agent has finished returns
-`400`, because it could not be delivered. Writes must come from the app's own origin with
+answerable in its chat (SAM's check-ins still treat that chat as waiting on a person). Archiving a
+question also holds SAM's automatic check-ins off that chat until someone writes in it, for at most
+`inbox.archiveCheckinHoldHours`. Both writes return `{ ref, outcome, agentNotified }`; for an
+answer, `agentNotified: false` means the notice was not queued yet, and SAM retries it for
+`inbox.noticeRetryMinutes`. The exception is **Got it** on a result (an empty `acknowledge`
+answer): it closes the item without telling the agent, by design, so nothing is retried. A
+non-empty reply to a review or result whose agent has finished returns `400`, because it could not
+be delivered. Writes must come from the app's own origin with
 `Content-Type: application/json`, like the other answer routes. A missing item and one in another
 project both return `404`; an item that is already closed returns `409`, and one you cannot act
 on returns `403`. The transcript context is returned only to a member who can read the source chat.

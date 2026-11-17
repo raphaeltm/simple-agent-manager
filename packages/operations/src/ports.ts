@@ -433,6 +433,8 @@ export interface InboxAttentionMarker {
   createdAt: number;
   expiresAt: number | null;
   resolvedAt: number | null;
+  /** Archived from the inbox while still pending in its chat (ACP interactions). */
+  inboxArchivedAt: number | null;
   topic: string | null;
   /** The reader may read the chat (owner or an active grantee). */
   canRead: boolean;

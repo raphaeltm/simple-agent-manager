@@ -407,11 +407,12 @@ export async function archiveAttention(
 }
 
 /**
- * Archive a pending ACP interaction (a permission, form or link request) from the inbox: its
- * inbox marker resolves with reason `archived` and nothing is answered, so the agent is told
- * nothing and stays where it is (Raphaël, 2026-11-17: every inbox kind archives silently). The
- * interaction stays pending in its chat, where the person can still answer it, until the runtime
- * gives up on it. The marker is projected once per interaction
+ * Archive a pending ACP interaction (a permission, form or link request) from the inbox: nothing
+ * is answered, so the agent is told nothing and stays where it is (Raphaël, 2026-11-17: every
+ * inbox kind archives silently). Its marker is flagged `inbox_archived_at`, not resolved: it
+ * leaves the inbox, while SAM's silent-agent reconciliation still sees the chat as waiting on a
+ * person and does not cancel the prompt. The interaction stays pending in its chat, where the
+ * person can still answer it. The marker is projected once per interaction
  * (`projectInteractionAttention`), so it does not come back.
  */
 export async function archiveInteractionAttention(
@@ -431,10 +432,15 @@ export async function archiveInteractionAttention(
   const { marker } = await loadAttentionForViewer(env, projectId, sessionId, markerId, userId);
   if (!marker || marker.source !== ACP_INTERACTION_ATTENTION_SOURCE)
     throw markRejectedBeforeEffects(errors.notFound('Attention request'));
-  if (marker.resolvedAt !== null)
+  if (marker.resolvedAt !== null || marker.inboxArchivedAt !== null)
     throw markRejectedBeforeEffects(errors.conflict('Attention request is already resolved'));
-  const resolved = await projectDataService.archiveInteractionMarker(env, projectId, markerId);
-  if (resolved === 0) throw errors.conflict('Attention request is already resolved');
+  const archived = await projectDataService.archiveInteractionMarker(
+    env,
+    projectId,
+    sessionId,
+    markerId
+  );
+  if (archived === 0) throw errors.conflict('Attention request is already resolved');
   // A grantee's archive is recorded like their answers and question archives.
   await recordSharedSessionAnswer(env, writer, { markerId, archived: true });
 }

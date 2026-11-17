@@ -180,7 +180,7 @@ describe('ProjectData session summary sync', () => {
 
       const plan = source.db
         .prepare(`EXPLAIN QUERY PLAN ${SESSION_SUMMARY_DELTA_SQL}`)
-        .all(490, 490, 490, 100)
+        .all(490, 490, 490, 490, 100)
         .map((row) => (row as { detail: string }).detail);
 
       expect(plan.some((step) => step.startsWith('SCAN chat_sessions'))).toBe(false);
@@ -190,6 +190,7 @@ describe('ProjectData session summary sync', () => {
           expect.stringContaining('USING INDEX idx_chat_sessions_updated_at'),
           expect.stringContaining('USING INDEX idx_attention_created_at'),
           expect.stringContaining('USING INDEX idx_attention_resolved_at'),
+          expect.stringContaining('USING INDEX idx_attention_inbox_archived_at'),
         ])
       );
     } finally {

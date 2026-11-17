@@ -209,7 +209,10 @@ describe('ACP interaction notifications and undelivered answers (slice E)', () =
       markerId,
       userId
     );
-    expect(marker).toMatchObject({ resolvedReason: 'archived' });
+    // Out of the inbox but not resolved: the chat still reads as waiting on the person, so SAM's
+    // silent-agent check does not cancel the prompt behind it.
+    expect(marker).toMatchObject({ resolvedAt: null });
+    expect(marker?.inboxArchivedAt).toEqual(expect.any(Number));
     // It leaves the inbox and a re-run of the projection job does not bring it back.
     await drain(store);
     await syncSummaries();

@@ -43,9 +43,10 @@ const SUMMARY_COLUMNS = `id, workspace_id, task_id, created_by_user_id, topic, s
   ), 0) as last_message_at`;
 
 /**
- * Sessions changed since the last sync (binds: since, since, since, limit). Attention markers
- * change without touching `chat_sessions.updated_at` (which also feeds workspace idle timeouts),
- * so sessions whose markers were created or resolved since then are due too. Two complete row
+ * Sessions changed since the last sync (binds: since, since, since, since, limit). Attention
+ * markers change without touching `chat_sessions.updated_at` (which also feeds workspace idle
+ * timeouts), so sessions whose markers were created, resolved or archived from the inbox since
+ * then are due too. Two complete row
  * sets joined by UNION keep each lookup on its index; an OR across the two would scan every
  * session on every sync.
  */
@@ -54,7 +55,7 @@ export const SESSION_SUMMARY_DELTA_SQL = `SELECT ${SUMMARY_COLUMNS} FROM chat_se
   UNION
   SELECT ${SUMMARY_COLUMNS} FROM chat_sessions
   WHERE id IN (SELECT session_id FROM session_attention_markers
-               WHERE created_at >= ? OR resolved_at >= ?)
+               WHERE created_at >= ? OR resolved_at >= ? OR inbox_archived_at >= ?)
   ORDER BY updated_at DESC
   LIMIT ?`;
 
@@ -115,6 +116,7 @@ export async function syncSessionSummariesToD1(
     ? sql
         .exec(
           SESSION_SUMMARY_DELTA_SQL,
+          coverage.synced_at,
           coverage.synced_at,
           coverage.synced_at,
           coverage.synced_at,

@@ -95,6 +95,7 @@ export function createInboxPort(env: Env): OperationInboxPort {
         createdAt: marker.createdAt,
         expiresAt: marker.expiresAt,
         resolvedAt: marker.resolvedAt,
+        inboxArchivedAt: marker.inboxArchivedAt,
         topic: typeof viewer.session.topic === 'string' ? viewer.session.topic : null,
         canRead: viewer.canRead,
         canWrite: viewer.writer && viewer.canRead,

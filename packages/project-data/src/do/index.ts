@@ -3019,6 +3019,23 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   /**
+   * The person archived a pending ACP interaction from their inbox (`attention.ts`,
+   * `archiveInteractionMarkerFromInbox`): the marker stays unresolved. Returns rows changed.
+   */
+  archiveInteractionMarkerFromInbox(sessionId: string, markerId: string): number {
+    const changed = attention.archiveInteractionMarkerFromInbox(this.sql, sessionId, markerId);
+    if (changed > 0) {
+      this.scheduleSummarySync();
+      this.broadcastEvent(
+        'attention.resolved',
+        { sessionId, markerId, reason: 'archived' },
+        sessionId
+      );
+    }
+    return changed;
+  }
+
+  /**
    * The person archived a question in this chat: open chat views stop showing it, and SAM's
    * check-ins stay off the chat until `holdCheckinsUntil` or until the person writes in it
    * (`holdReconciliationAfterArchive`), so archiving does not nudge the agent (archive tells the

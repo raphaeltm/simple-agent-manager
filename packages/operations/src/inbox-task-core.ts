@@ -453,7 +453,15 @@ async function closeTask(
     actorId: me,
     at: now,
   });
-  if (silent) return { ref: `ask:${row.id}`, status, agentNotified: false };
+  if (silent) {
+    // No event, so the watches wind down here, as a moot task's do (`inbox-agent-core.ts`).
+    await ctx.ports.inboxTasks.closeWatches(
+      row.projectId,
+      row.id,
+      (await getInboxLimits(ctx)).closedTaskWatchHours
+    );
+    return { ref: `ask:${row.id}`, status, agentNotified: false };
+  }
   const agentNotified = await admit(ctx, row, `inbox.task.${status}`);
   if (agentNotified) {
     // The event is the agent's notice. Marked only once it is committed to the outbox: if that

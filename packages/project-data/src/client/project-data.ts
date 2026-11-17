@@ -3562,19 +3562,20 @@ export async function recordQuestionAsked(
 
 /**
  * The person archived a pending ACP interaction (a permission, form or link request) from their
- * inbox: its inbox marker resolves with reason `archived`; the interaction itself stays pending
- * and answerable in the chat. Returns how many markers resolved (0 when already resolved).
+ * inbox: it leaves the inbox, its marker stays unresolved, and the interaction stays pending and
+ * answerable in the chat. Returns rows changed (0 when already archived or resolved).
  */
 export async function archiveInteractionMarker(
   env: Env,
   projectId: string,
+  sessionId: string,
   markerId: string
 ): Promise<number> {
   return callProjectDataWithRetry(
     env,
     projectId,
-    'resolveAttentionMarkerById',
-    (stub) => stub.resolveAttentionMarkerById(markerId, 'human', 'archived'),
+    'archiveInteractionMarkerFromInbox',
+    (stub) => stub.archiveInteractionMarkerFromInbox(sessionId, markerId),
     'mutation'
   );
 }
