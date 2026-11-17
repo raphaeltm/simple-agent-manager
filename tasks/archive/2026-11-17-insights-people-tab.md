@@ -98,7 +98,7 @@ people, no per-person output counts**):
 - [x] First-person share is correct for never-reassigned, reassigned and team-origin asks
 - [x] No per-person output counts anywhere; other people's private items show no titles
 - [x] ≤ 4 round trips; project predicate in every statement, attack tests on real SQL
-- [ ] Staging: real asks/tasks, reassign end to end, real PR review request via webhook (or stated
+- [x] Staging: real asks/tasks, reassign end to end, real PR review request via webhook (or stated
       plainly if the staging App cannot)
 
 ## Implementation notes
@@ -110,3 +110,8 @@ people, no per-person output counts**):
 - staging2 has no GitHub App, so the webhook-delivered review request cannot be exercised there;
   the real ingest is covered by unit tests with production-shaped payloads, and production D1 is
   checked after deploy.
+- Staging (2026-11-17): staging2 read-side check on real data (first person 3/3), and primary staging
+  with a real Claude Code agent filing 3 tasks + 1 question, reassign end to end from the People tab,
+  the second member seeing the owner's question as age-only, first person 1 of 2 after completion.
+  Webhook review requests cannot be produced on any staging (staging2 has no GitHub App; primary's
+  App is pull-requests read-only), stated plainly in the PR; production D1 is checked after deploy.
