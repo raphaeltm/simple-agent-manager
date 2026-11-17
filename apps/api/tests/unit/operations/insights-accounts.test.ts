@@ -137,6 +137,8 @@ describe('projectAccounts', () => {
   }
 
   beforeEach(() => {
+    // Credential meters read the wall clock independently of Insights range inputs.
+    vi.spyOn(Date, 'now').mockReturnValue(NOW);
     ({ sqlite, env } = createAccountsTestDb());
     credential('cc-max', 'owner', 'Personal Max', 'oauth-token');
     credential('cc-key', 'owner', 'Work API key', 'api-key');
@@ -527,8 +529,8 @@ describe('projectAccounts', () => {
   });
 
   it('attaches the last-reported limit windows to your own accounts only', async () => {
-    // The account limit reader uses the current clock independently of the Insights range.
-    const clock = vi.spyOn(Date, 'now').mockReturnValue(NOW);
+    // The account usage port also reads wall time when expiring limit windows.
+    vi.spyOn(Date, 'now').mockReturnValue(NOW);
     run('a1', 'cc-max');
     run('m1', 'cc-mate', {}, { user_id: 'mate' });
     insert('credential_limit_windows', {
@@ -560,7 +562,7 @@ describe('projectAccounts', () => {
     expect(own?.stalls).toEqual({ episodes: 0, totalMs: 0, ongoing: false });
     expect(result.stallEpisodes.total).toBe(0);
 
-    clock.mockReturnValue(NOW + 2 * DAY);
+    vi.mocked(Date.now).mockReturnValue(NOW + 2 * DAY);
     const expired = await projectAccounts(ctx(), { projectId: 'p', range: '30d', nowMs: NOW });
     expect(expired.accounts.find((a) => a.key === 'cred:cc-max')?.usage?.windows[0]).toMatchObject({
       windowType: 'claude.seven_day',
