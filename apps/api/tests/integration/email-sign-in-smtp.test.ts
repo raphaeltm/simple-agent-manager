@@ -283,12 +283,94 @@ describe('email sign-in over SMTP (vertical slice)', () => {
     await expect(activeAgentEmailSender(env)).resolves.toBeNull();
   });
 
-  it('decides readiness without calling Cloudflare', async () => {
+  it('decides readiness by probing the relay, without calling Cloudflare or sending mail', async () => {
     // Cloudflare API credentials present, so only the transport check can keep the call away.
     env = makeEnv({ CF_API_TOKEN: 'cf-token', CF_ACCOUNT_ID: 'cf-account', CF_ZONE_ID: 'zone' });
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('no network'));
     expect(await emailSignInReadiness(env)).toBe('ready');
     expect(fetchSpy).not.toHaveBeenCalled();
+    expect(smtp.commands).toEqual([
+      'EHLO api.example.com',
+      `MAIL FROM:<${FROM}>`,
+      `RCPT TO:<${OWNER}>`,
+      'RSET',
+      'QUIT',
+    ]);
+    expect(smtp.messages).toHaveLength(0);
+  });
+
+  it('reports email sign-up unavailable, with a logged reason, when the relay will not take mail for the owner', async () => {
+    await smtp.close();
+    smtp = await startFakeSmtpServer({ mode: 'plain', rcptCode: 554 });
+    env = makeEnv();
+    const logs = await errorLogs(async () => {
+      expect(await emailSignInReadiness(env)).toBe('unavailable');
+    });
+    expect(logs.find((entry) => entry.includes('email_sign_in.smtp_relay_unusable'))).toContain(
+      'SMTP RCPT TO refused with 554'
+    );
+    // Sign-in itself stays offered: an existing account may still get codes once the relay works.
+    expect(emailSignInAvailable(env)).toBe(true);
+  });
+
+  it('answers a code request before the SMTP send finishes, the same way for every address (F13)', async () => {
+    // A relay that accepts the connection and never answers: the send hangs until its deadline.
+    await smtp.close();
+    smtp = await startFakeSmtpServer({ mode: 'plain', silent: true });
+    env = makeEnv();
+    sqlite
+      .prepare(
+        `INSERT INTO users (id, email, email_verified, name, role, status, created_at, updated_at)
+         VALUES ('member', 'member@example.com', 1, 'Member', 'user', 'active', 1, 1),
+                ('admin-user', 'admin@example.com', 1, 'Admin', 'superadmin', 'active', 1, 1)`
+      )
+      .run();
+    sqlite.exec(
+      readFileSync(
+        new URL('../../src/db/migrations/0196_admin_settings.sql', import.meta.url),
+        'utf8'
+      )
+    );
+    await updateAdminSettings(env, {
+      changes: [{ name: 'agentEmail.smtpTimeoutMs', value: 1000 }],
+      actorUserId: 'admin-user',
+    });
+    __resetAdminSettingsCacheForTest();
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const answers: Array<{ status: number; body: string; sendSettled: boolean }> = [];
+    for (const email of [OWNER, 'member@example.com', 'stranger@example.com']) {
+      const background: Promise<unknown>[] = [];
+      let settled = false;
+      const executionCtx = {
+        waitUntil: (promise: Promise<unknown>) =>
+          background.push(promise.finally(() => (settled = true))),
+        passThroughOnException: () => undefined,
+        props: {},
+      } as unknown as ExecutionContext;
+      const response = await app.request(
+        `${API_ORIGIN}/api/auth/email-otp/send-verification-otp`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            origin: APP_ORIGIN,
+            'CF-Connecting-IP': '203.0.113.9',
+          },
+          body: JSON.stringify({ email, type: 'sign-in' }),
+        },
+        env,
+        executionCtx
+      );
+      answers.push({ status: response.status, body: await response.text(), sendSettled: settled });
+      // Liveness: the delivery was really handed to waitUntil, and it is still waiting on SMTP.
+      expect(background).toHaveLength(1);
+      await Promise.all(background);
+    }
+    // The owner and the member get a code: both sends were still in flight when the answer came.
+    // (The stranger gets nothing, so there is no send to outlast.)
+    expect(answers.slice(0, 2).map((answer) => answer.sendSettled)).toEqual([false, false]);
+    expect(new Set(answers.map((answer) => `${answer.status} ${answer.body}`)).size).toBe(1);
+    expect(answers[0]?.status).toBe(200);
   });
 
   it('offers email sign-in and sign-up with SMTP', () => {

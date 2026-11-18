@@ -6,6 +6,7 @@
 import {
   buildSmtpMessage,
   createSmtpAgentEmailSender,
+  probeSmtpRelay,
   sendSmtpMessage,
   type SmtpConfig,
   SmtpError,
@@ -307,5 +308,66 @@ describe('createSmtpAgentEmailSender', () => {
     });
     expect(providerMessageId).toMatch(/^[0-9a-f]{32}@example\.com$/);
     expect(smtp.messages[0]?.data).toContain(`Message-ID: <${providerMessageId}>`);
+  });
+});
+
+describe('probeSmtpRelay (first-run setup readiness, F13)', () => {
+  const envelope = { envelopeFrom: 'sign-in@example.com', envelopeTo: 'owner@example.com' };
+  const probe = (smtp: SmtpConfig, timeoutMs = 5_000) =>
+    probeSmtpRelay(smtp, envelope, { timeoutMs, heloName: 'api.example.com' });
+
+  it('walks the whole transaction except DATA, then abandons it: nothing is sent', async () => {
+    const smtp = await start({
+      mode: 'starttls',
+      credentials: { username: 'relay-user', password: 'relay-pass' },
+    });
+    __setTestTlsCa(certs.ca);
+    await probe(
+      config(smtp.port, {
+        host: 'localhost',
+        tls: 'starttls',
+        credentials: { username: 'relay-user', password: 'relay-pass' },
+      })
+    );
+    expect(smtp.commands).toEqual([
+      'EHLO api.example.com',
+      'STARTTLS',
+      'EHLO api.example.com',
+      'AUTH PLAIN <redacted>',
+      'MAIL FROM:<sign-in@example.com>',
+      'RCPT TO:<owner@example.com>',
+      'RSET',
+      'QUIT',
+    ]);
+    expect(smtp.messages).toHaveLength(0);
+  });
+
+  it.each([
+    ['refused credentials', { credentials: { username: 'relay-user', password: 'other' } }, 'AUTH'],
+    ['refused sender', { mailCode: 553 }, 'MAIL FROM'],
+    ['refused recipient (relay access denied)', { rcptCode: 554 }, 'RCPT TO'],
+  ] as const)('fails on %s, naming the step', async (_name, options, step) => {
+    const smtp = await start({ mode: 'plain', ...options });
+    const credentials = 'credentials' in options ? { username: 'relay-user', password: 'p' } : null;
+    const failure = await probe(config(smtp.port, { credentials })).catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(SmtpError);
+    expect((failure as SmtpError).message).toMatch(
+      new RegExp(`^SMTP ${step} refused with \\d{3}$`)
+    );
+    expect(smtp.commands).not.toContain('DATA');
+    expect(smtp.messages).toHaveLength(0);
+  });
+
+  it('fails at the deadline when the relay never answers', async () => {
+    const smtp = await start({ mode: 'plain', silent: true });
+    await expect(probe(config(smtp.port), 200)).rejects.toThrow('timed out after 200 ms');
+  });
+
+  it('control: an unreachable relay fails instead of hanging', async () => {
+    const smtp = await start({ mode: 'plain' });
+    const port = smtp.port;
+    await smtp.close();
+    server = undefined;
+    await expect(probe(config(port))).rejects.toBeInstanceOf(SmtpError);
   });
 });
