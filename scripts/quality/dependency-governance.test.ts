@@ -133,12 +133,14 @@ describe('dependency governance', () => {
       'apps/api/Dockerfile.compose-builder',
       'apps/api/Dockerfile.sandbox',
       'apps/api/Dockerfile.vm-agent-container',
+      'deploy/selfhost/sam-mx/Dockerfile',
       'scripts/e2e/workspace-mock/Dockerfile',
     ]);
     expect(refs.length).toBeGreaterThanOrEqual(dockerfiles.length);
     expect(refs.every((ref) => /@sha256:[a-f0-9]{64}$/.test(ref))).toBe(true);
     expect([...extractDependabotDirectories('docker')].sort()).toEqual([
       '/apps/api',
+      '/deploy/selfhost/sam-mx',
       '/scripts/e2e/workspace-mock',
     ]);
   });

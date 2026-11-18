@@ -69,6 +69,19 @@ export interface Env
   AI: Ai;
   // Agent email (preview): AGENT_EMAIL and AGENT_EMAIL_WORKER_NAME are declared in
   // @simple-agent-manager/agent-email's AgentEmailEnv.
+  // SMTP relay for SAM's own email (sign-in codes, owner security alerts) where AGENT_EMAIL is
+  // absent, e.g. a self-hosted celld box. Ignored when AGENT_EMAIL exists. Parsed and validated by
+  // @simple-agent-manager/agent-email's smtp-config.ts; invalid settings disable it.
+  SMTP_HOST?: string;
+  SMTP_PORT?: string; // default by SMTP_TLS: 587 (starttls), 465 (tls); required for none
+  SMTP_TLS?: string; // 'starttls' (default) | 'tls' | 'none' (loopback hosts only)
+  SMTP_USERNAME?: string;
+  SMTP_PASSWORD?: string; // secret
+  SMTP_FROM?: string; // address SAM's own email comes from, e.g. sign-in@<BASE_DOMAIN>
+  // 'true' when the self-host deploy installed the sam-mx SMTP receiver: agent email then runs
+  // without AGENT_EMAIL, inbound through the loopback gateway route and replies over SMTP
+  // (services/agent-email/self-host-inbound.ts). Ignored when AGENT_EMAIL exists.
+  AGENT_EMAIL_INBOUND_SMTP?: string;
   // Cloudflare Artifacts for SAM-native Git repos (optional — absent when ARTIFACTS_ENABLED is falsy)
   ARTIFACTS?: ArtifactsBinding;
   // Analytics Engine for usage tracking (optional — binding absent in local dev / Miniflare)
