@@ -36,6 +36,7 @@ import type { ConnectorAnswerChoice } from './connector-answer-input';
 import type { ConnectorReadSettingName } from './connector-read-settings-definition';
 import type { InboxSettingName } from './inbox-settings-definition';
 import type { OperationInboxTaskPort } from './inbox-task-ports';
+import type { InsightsAgentSettingName } from './insights-agent-settings';
 import type { InsightsInstallationSettingName } from './insights-installation-settings-definition';
 import type { InsightsPageSettingName } from './insights-page-settings';
 import type { InsightsReceiptSettingName } from './insights-receipt-settings-definition';
@@ -52,6 +53,7 @@ import type {
   TokenBudget,
   TriggerStatusUpdates,
 } from './port-types';
+import type { ProjectBriefSettingName } from './project-brief-settings-definition';
 import type { OperationProjectDataPort } from './project-data-port';
 import type { OperationContext } from './types';
 
@@ -91,7 +93,9 @@ export type OperationSettingName =
   | InboxSettingName
   | InsightsReceiptSettingName
   | InsightsPageSettingName
-  | InsightsInstallationSettingName;
+  | InsightsInstallationSettingName
+  | ProjectBriefSettingName
+  | InsightsAgentSettingName;
 
 export type OperationSettingValue = boolean | number | string | readonly string[] | null;
 
@@ -535,10 +539,10 @@ export interface InboxAskAnnouncement {
   sessionId: string;
   taskId: string;
   askId: string;
-  kind: 'question' | 'review';
+  kind: 'question' | 'review' | 'result';
   blocking: boolean;
   title: string;
-  /** The agent's full text: the question, or the reason for a review. */
+  /** The agent's full text: the question, the reason for a review, or a result's details. */
   body: string;
   options: string[];
   category: string | null;

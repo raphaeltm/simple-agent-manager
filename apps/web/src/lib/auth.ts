@@ -1,5 +1,6 @@
 import { createAuthClient } from 'better-auth/react';
 
+import { request } from './api/client';
 import { unsubscribeWebPush } from './api/notifications';
 import { clearLegacyLibraryCache, clearLibraryCache } from './library-cache';
 import {
@@ -50,6 +51,61 @@ export async function signInWithGitLab() {
     provider: 'gitlab',
     callbackURL: window.location.origin + '/dashboard',
   });
+}
+
+/** A sign-in provider an existing account can connect ("Connect GitHub"). */
+export type LinkableProvider = 'github' | 'gitlab';
+
+/**
+ * Connect a provider to the signed-in account through BetterAuth's own `/link-social` flow:
+ * the provider's consent screen, then back to `returnTo`. The API allows the provider account's
+ * email to differ from the SAM one only on this explicit, signed-in path.
+ */
+export async function connectProvider(
+  provider: LinkableProvider,
+  returnTo: string = window.location.origin + '/settings/github',
+  linkToken?: string
+): Promise<void> {
+  // Errors come back to the same page too, not to the API's bare error page.
+  const { error } = await authClient.linkSocial({
+    provider,
+    callbackURL: returnTo,
+    errorCallbackURL: returnTo,
+    additionalData: { samLinkToken: linkToken },
+  });
+  if (error) throw new Error(error.message || `Could not connect ${provider}`);
+}
+
+export class SessionNotFreshError extends Error {
+  constructor() {
+    super('Sign out and sign in again before disconnecting this account.');
+    this.name = 'SessionNotFreshError';
+  }
+}
+
+/** Request a one-time email sign-in check for this particular connection. */
+export async function requestProviderConnection(provider: LinkableProvider): Promise<void> {
+  await request('/api/auth/account-link/request', {
+    method: 'POST',
+    body: JSON.stringify({ provider }),
+  });
+}
+
+export async function disconnectProvider(provider: LinkableProvider): Promise<void> {
+  const { data, error } = await authClient.listAccounts();
+  if (error) throw new Error(error.message || 'Could not read accounts');
+  const account = data?.find((entry) => entry.providerId === provider);
+  if (!account) throw new Error('Account is no longer connected');
+  const result = await authClient.unlinkAccount({ accountId: account.id });
+  if (result.error?.code === 'SESSION_NOT_FRESH') throw new SessionNotFreshError();
+  if (result.error) throw new Error(result.error.message || 'Could not disconnect account');
+}
+
+/** The providers already connected to the signed-in account (BetterAuth `/list-accounts`). */
+export async function listConnectedProviders(): Promise<string[]> {
+  const { data, error } = await authClient.listAccounts();
+  if (error) throw new Error(error.message || 'Could not list connected accounts');
+  return (data ?? []).map((account) => account.providerId);
 }
 
 /**

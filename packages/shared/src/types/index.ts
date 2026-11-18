@@ -815,6 +815,11 @@ export {
 
 // Project Overview (Inbox slice F1)
 export type {
+  OverviewBrief,
+  OverviewBriefPart,
+  OverviewBriefRef,
+  OverviewBriefRefKind,
+  OverviewBriefSentence,
   OverviewMergedPullRequest,
   OverviewRunningChat,
   OverviewRunningState,
@@ -825,6 +830,7 @@ export {
   DEFAULT_PROJECT_OVERVIEW_RECENT_LIMIT,
   DEFAULT_PROJECT_OVERVIEW_RUNNING_LIMIT,
   MAX_PROJECT_OVERVIEW_LIMIT,
+  OVERVIEW_BRIEF_REF_KINDS,
 } from './project-overview';
 
 // Run receipt (Insights slice R)
@@ -880,6 +886,13 @@ export {
   isInsightsRange,
 } from './insights-flow';
 
+// Lifecycle phase timings (Insights slice T): the operations a stored phase can name
+export type { LifecyclePhaseOperation } from './lifecycle-phase-operations';
+export {
+  LIFECYCLE_PHASE_OPERATIONS,
+  PROJECT_LIFECYCLE_PHASE_OPERATIONS,
+} from './lifecycle-phase-operations';
+
 // Insights · Accounts (Insights slice A)
 export type {
   InsightsAccount,
@@ -888,10 +901,22 @@ export type {
   InsightsAccountSpend,
   InsightsAccountsSection,
   InsightsAccountStalls,
+  InsightsAccountTokens,
   InsightsStallEpisode,
   InsightsStallOutcome,
   ProjectAccountsResponse,
 } from './insights-accounts';
+export type {
+  InsightsFirstPerson,
+  InsightsPeopleAskKind,
+  InsightsPeopleSection,
+  InsightsReviewPickup,
+  InsightsWaiting,
+  InsightsWaitingGroup,
+  InsightsWaitingItem,
+  ProjectPeopleResponse,
+} from './insights-people';
+export { INSIGHTS_PEOPLE_ASK_KINDS } from './insights-people';
 
 // Insights · Agent setups (Insights slice S)
 export type {

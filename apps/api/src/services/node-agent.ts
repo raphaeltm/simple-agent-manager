@@ -21,6 +21,7 @@ import {
   getNodeBackendBaseUrl,
   waitForNodeAgentReadyWith,
 } from './node-agent-readiness';
+import { resolveNodeAgentRoute, retargetNodeAgentUrl } from './node-agent-route';
 import { recordNodeRoutingMetric } from './telemetry';
 import {
   fetchVmAgentContainer,
@@ -312,15 +313,17 @@ export async function fetchNodeAgent(
 
   const db = drizzle(env.DATABASE, { schema });
   const node = await db
-    .select({ runtime: schema.nodes.runtime })
+    .select({ runtime: schema.nodes.runtime, transport: schema.nodes.transport })
     .from(schema.nodes)
     .where(eq(schema.nodes.id, nodeId))
     .get();
 
-  if (node?.runtime !== 'cf-container') {
+  // Same single node read as before; only an installed build transport adds its own lookup.
+  const route = await resolveNodeAgentRoute(env, nodeId, node);
+  if (route.kind !== 'container') {
     await beforeExternalMutation?.();
     return nodeResponse(
-      await fetchWithTimeout(url, options, requestTimeoutMs),
+      await fetchWithTimeout(retargetNodeAgentUrl(url, route), options, requestTimeoutMs),
       allowApplicationRedirects
     );
   }

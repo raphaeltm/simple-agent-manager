@@ -32,7 +32,10 @@ const {
 } = await import('../../src/ai-monthly-cost-cron');
 
 /** The worker binds these from admin settings; the cron passes them through to log reads. */
-const TEST_PORTS = { externalReadTimeoutMs: async () => 15_000 };
+const TEST_PORTS = {
+  externalReadTimeoutMs: async () => 15_000,
+  monthlyCostCeilingUsd: async () => 0,
+};
 const runMonthlyCostAggregation = (env: Env) => runMonthlyCostAggregationWithPorts(env, TEST_PORTS);
 
 function makeGatewayEntry(overrides: Partial<AIGatewayLogEntry> = {}): AIGatewayLogEntry {

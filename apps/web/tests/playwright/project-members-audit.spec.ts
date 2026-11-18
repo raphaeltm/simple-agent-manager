@@ -1,6 +1,12 @@
 import { expect, type Page, test } from '@playwright/test';
 
-import { assertNoOverflow, makeMockUser, screenshot, setupAuditRoutes } from './audit-helpers';
+import {
+  assertNoClippedOverflow,
+  assertNoOverflow,
+  makeMockUser,
+  screenshot,
+  setupAuditRoutes,
+} from './audit-helpers';
 
 const MOCK_USER = makeMockUser({
   userId: 'owner-user',
@@ -257,7 +263,11 @@ const manyOffboardingPreview = {
   resources: Array.from({ length: 18 }, (_, index) => {
     const kinds = ['trigger', 'task_tree', 'node', 'deployment_environment'];
     const kind = kinds[index % kinds.length]!;
-    return offboardingResource(kind, `${kind}-${index + 1}`, `${kind.replace('_', ' ')} ${index + 1}`);
+    return offboardingResource(
+      kind,
+      `${kind}-${index + 1}`,
+      `${kind.replace('_', ' ')} ${index + 1}`
+    );
   }),
 };
 
@@ -283,7 +293,8 @@ async function setupMocks(
     if (path === '/api/agents') return respond(200, { agents: [] });
     if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
     if (path === '/api/providers/catalog') return respond(200, { catalogs: [] });
-    if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
+    if (path.startsWith('/api/notifications'))
+      return respond(200, { notifications: [], unreadCount: 0 });
     if (path.startsWith('/api/github')) return respond(200, []);
     if (path === '/api/credentials/resolution-status') return respond(200, { consumers: [] });
     if (path === '/api/credentials/agent') return respond(200, { credentials: [] });
@@ -457,3 +468,24 @@ test.describe('Project members settings — visual audit', () => {
     await assertNoOverflow(page);
   });
 });
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`account linking missing-token member warning ${theme}`, async ({ page }) => {
+    await page.addInitScript((value) => localStorage.setItem('sam-theme', value), theme);
+    await setupMocks(page, {
+      members: { ...normalMembers, accessRequests: [accessRequest('long', 'missing-token')] },
+    });
+    await page.route('**/src/**', (route) => route.continue());
+    await page.goto('/projects/proj-members-1/settings/access');
+    await expect(
+      page.getByText('they connect GitHub to their SAM account', { exact: false })
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeEnabled();
+    await page
+      .getByText('they connect GitHub to their SAM account', { exact: false })
+      .scrollIntoViewIfNeeded();
+    await screenshot(page, `account-linking-member-warning-${theme}`);
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+  });
+}

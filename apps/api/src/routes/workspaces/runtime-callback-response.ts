@@ -13,7 +13,8 @@ export async function callbackJsonWithJit<T extends Record<string, unknown>>(
   c: RuntimeContext,
   expected: WorkspaceCallbackIdentitySnapshot,
   callback: WorkspaceDeletionCallbackKind,
-  body: T
+  body: T,
+  agentSessionId?: string | null
 ) {
   await assertWorkspaceCallbackIdentityCurrent(c.env, expected, callback);
   if (
@@ -25,7 +26,13 @@ export async function callbackJsonWithJit<T extends Record<string, unknown>>(
       c.env,
       expected.workspaceId,
       body.credentialReference,
-      expected
+      expected,
+      undefined,
+      agentSessionId,
+      {
+        credentialGeneration:
+          typeof body.credentialGeneration === 'number' ? body.credentialGeneration : undefined,
+      }
     );
   return c.json(body);
 }

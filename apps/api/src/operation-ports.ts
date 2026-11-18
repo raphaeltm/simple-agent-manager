@@ -5,6 +5,7 @@
  * method closes over the request's `env`, so operations never pass the full worker `Env`.
  * Construction is a handful of closures per request; there is no I/O here.
  */
+import { cronToHumanReadable } from '@simple-agent-manager/cron';
 import type { OperationPorts, ProjectEventErrorKind } from '@simple-agent-manager/operations';
 import type { OperationContext, OperationDeps } from '@simple-agent-manager/operations';
 import { drizzle } from 'drizzle-orm/d1';
@@ -56,7 +57,6 @@ import {
   listOwnCredentialLimitsByReferences,
   listProjectCredentialLimits,
 } from './services/credential-limit-events/read';
-import { cronToHumanReadable } from './services/cron-utils';
 import { getInstallationToken } from './services/github-app';
 import { createInboxPort } from './services/inbox/port';
 import { createInboxTaskPort } from './services/inbox/task-port';

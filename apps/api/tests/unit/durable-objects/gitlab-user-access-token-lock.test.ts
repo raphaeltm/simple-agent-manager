@@ -101,7 +101,7 @@ describe('GitLabUserAccessTokenLock', () => {
     expectBetterAuthTokenLookup(getAccessToken, 'gitlab-account-row');
   });
 
-  it('returns 401 token_unavailable when BetterAuth cannot produce a token', async () => {
+  it('returns 503 token_unavailable when BetterAuth fails without evidence of expiry', async () => {
     const getAccessToken = vi.fn(async () => {
       throw new Error('FAILED_TO_GET_ACCESS_TOKEN');
     });
@@ -113,7 +113,7 @@ describe('GitLabUserAccessTokenLock', () => {
       makeAccessTokenLockRequest('https://gitlab-user-access-token-lock/token')
     );
 
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ error: 'token_unavailable' });
     expect(logWarnMock).toHaveBeenCalledWith(
       'gitlab.user_access_token_lock.unavailable',

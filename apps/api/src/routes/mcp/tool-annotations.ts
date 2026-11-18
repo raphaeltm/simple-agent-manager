@@ -55,6 +55,7 @@ const READ_ONLY_TOOLS = new Set([
   'ops_timeline',
   'ops_why_is_node_alive',
   'ops_workspace_agent_sessions',
+  'project_insights',
 ]);
 
 const DESTRUCTIVE_TOOLS = new Set([

@@ -59,7 +59,8 @@ type Rule = {
 // Frozen module SQL fragments that may be interpolated into sql.exec() text, mapped to the
 // number of `?` placeholders each one adds. All live in
 // packages/project-data/src/do/project-events-wake-config.ts, links.ts,
-// anchored-comment-scope.ts or anchored-comment-store.ts and are static strings built at
+// anchored-comment-scope.ts, anchored-comment-store.ts or prompt-delivery-cancellation.ts,
+// and are static strings built at
 // module load, so no caller value reaches the SQL text. When a
 // fragment's placeholder count changes, update it here or parameterized-sql flags its callers.
 const SAFE_SQL_FRAGMENT_PLACEHOLDERS: ReadonlyMap<string, number> = new Map([
@@ -72,6 +73,7 @@ const SAFE_SQL_FRAGMENT_PLACEHOLDERS: ReadonlyMap<string, number> = new Map([
   ['STRONG_SQL', 0],
   ['ANCHOR_SCOPE_PREDICATE', 2],
   ['THREAD_SELECT_COLUMNS', 0],
+  ['UNISSUED_PROMPT_DELIVERY_SQL', 0],
 ]);
 
 // --- Rules ---
@@ -386,6 +388,7 @@ function main() {
       resolve(ROOT, 'packages/app-deployment/src/**/*.ts'),
       resolve(ROOT, 'packages/operations/src/**/*.ts'),
       resolve(ROOT, 'packages/repo-hosting/src/**/*.ts'),
+      resolve(ROOT, 'packages/cron/src/**/*.ts'),
     ]);
   }
 

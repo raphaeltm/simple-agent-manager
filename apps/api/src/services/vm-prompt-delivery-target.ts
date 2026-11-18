@@ -332,7 +332,9 @@ export async function resolveVmPromptDeliveryTarget(
     }
     const guarded = await runSideEffectGuard();
     if (guarded) return { kind: 'guarded', result: guarded };
-    const recovery = await ensureSessionRecovery(env, projectId, chatSessionId, sourceTaskGuard);
+    const recovery = await ensureSessionRecovery(env, projectId, chatSessionId, sourceTaskGuard, {
+      isDeliveryStillAuthorized: async () => (await runSideEffectGuard()) === null,
+    });
     return recoveryResolution(recovery, 'Target workspace no longer exists');
   }
   if (
@@ -351,7 +353,9 @@ export async function resolveVmPromptDeliveryTarget(
     if (!allowWake) return notAwake;
     const guarded = await runSideEffectGuard();
     if (guarded) return { kind: 'guarded', result: guarded };
-    const recovery = await ensureSessionRecovery(env, projectId, chatSessionId, sourceTaskGuard);
+    const recovery = await ensureSessionRecovery(env, projectId, chatSessionId, sourceTaskGuard, {
+      isDeliveryStillAuthorized: async () => (await runSideEffectGuard()) === null,
+    });
     return recoveryResolution(recovery, `Target workspace is ${row.workspace_status}`);
   }
   if (isSleepingContainer(row.snapshot_runtime ?? row.node_runtime, row.snapshot_sleep_status)) {

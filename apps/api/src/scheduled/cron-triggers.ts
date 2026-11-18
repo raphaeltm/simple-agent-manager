@@ -1,4 +1,5 @@
 /** Cron source adapter. Scheduling stays here; execution policy lives in trigger-admission. */
+import { cronToNextFire } from '@simple-agent-manager/cron';
 import { DEFAULT_CRON_MAX_FIRE_PER_SWEEP } from '@simple-agent-manager/shared';
 import { and, asc, eq, gt, isNotNull, lte } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -9,7 +10,6 @@ import { databaseFailureCategory } from '../lib/database-failure-category';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { expectJsonRecord } from '../lib/runtime-validation';
-import { cronToNextFire } from '../services/cron-utils';
 import { admitAndSubmitTriggerExecution } from '../services/trigger-admission';
 import { buildCronContext, renderTemplate } from '../services/trigger-template';
 

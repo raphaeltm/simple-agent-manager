@@ -13,7 +13,7 @@ import type {
   ProjectAccountsResponse,
 } from '@simple-agent-manager/shared';
 
-export type AccountsScene = 'realistic' | 'stress' | 'empty' | 'partial';
+export type AccountsScene = 'realistic' | 'stress' | 'empty' | 'partial' | 'tokens-failed';
 
 const DAY = 86_400_000;
 const MIN = 60_000;
@@ -85,6 +85,7 @@ function account(
     runsByBucket: Array.from({ length: buckets }, () => 0),
     stalls: { episodes: 0, totalMs: 0, ongoing: false },
     usage: null,
+    tokens: null,
     spend: null,
     ...fields,
   };
@@ -133,6 +134,7 @@ export function makeAccounts(
     until: new Date(now).toISOString(),
     bucket: range === '7d' ? ('day' as const) : ('week' as const),
     buckets: starts,
+    usageLimited: false,
     unavailable: [],
     generatedAt: new Date(now).toISOString(),
   };
@@ -147,6 +149,15 @@ export function makeAccounts(
       })),
       stallEpisodes: { items: [], total: 0, listed: 10, truncated: false },
       unavailable: ['stalls'],
+    };
+  }
+  if (scene === 'tokens-failed') {
+    // The token usage read failed this time: runs and stalls still show, the rows say "Not loaded".
+    const realistic = makeAccounts(projectId, range, 'realistic', now);
+    return {
+      ...realistic,
+      accounts: realistic.accounts.map((a) => ({ ...a, tokens: null, spend: null })),
+      unavailable: ['tokens'],
     };
   }
   if (scene === 'empty') {
@@ -170,6 +181,7 @@ export function makeAccounts(
           runsByBucket: spread(64, n, 1),
           stalls: { episodes: 3, totalMs: 112 * MIN, ongoing: true },
           usage: usage('Personal Max', now, 86, 71),
+          tokens: { total: 48_200_000, perMergedPullRequest: 1_175_610 },
         },
         n
       ),
@@ -183,6 +195,7 @@ export function makeAccounts(
           merged: 15,
           runsByBucket: spread(23, n, 2),
           stalls: { episodes: 1, totalMs: 14 * MIN, ongoing: false },
+          tokens: { total: 9_400_000, perMergedPullRequest: 626_667 },
         },
         n
       ),
@@ -194,7 +207,13 @@ export function makeAccounts(
           runs: 18,
           merged: 12,
           runsByBucket: spread(18, n, 3),
-          spend: { state: 'not_reported' },
+          tokens: { total: 21_600_000, perMergedPullRequest: 1_800_000 },
+          spend: {
+            state: 'reported',
+            costUsd: 41.27,
+            perMergedPullRequestUsd: 3.44,
+            unpricedModels: [],
+          },
           stalls: { episodes: 1, totalMs: 9 * 60 * MIN, ongoing: false },
         },
         n
@@ -207,6 +226,31 @@ export function makeAccounts(
           runs: 4,
           merged: 1,
           runsByBucket: spread(4, n, 4),
+          tokens: { total: 640_000, perMergedPullRequest: 640_000 },
+        },
+        n
+      ),
+      account(
+        {
+          key: 'teammate:claude-code:api_key',
+          owner: 'teammate',
+          kind: 'api_key',
+          runs: 3,
+          merged: 2,
+          runsByBucket: spread(3, n, 6),
+          tokens: { total: 2_300_000, perMergedPullRequest: 1_150_000 },
+          spend: { state: 'private' },
+        },
+        n
+      ),
+      account(
+        {
+          key: 'cred:cc-key2',
+          name: 'Spare API key',
+          kind: 'api_key',
+          runs: 1,
+          runsByBucket: spread(1, n, 7),
+          spend: { state: 'not_reported' },
         },
         n
       ),
@@ -243,6 +287,7 @@ export function makeAccounts(
           merged: 300,
           runsByBucket: spread(412, n, 1),
           stalls: { episodes: 31, totalMs: 41 * 60 * MIN, ongoing: true },
+          tokens: { total: 987_654_321_000, perMergedPullRequest: 3_292_181_070 },
           usage: usage(long, now, 100, 97),
         },
         n
@@ -255,7 +300,16 @@ export function makeAccounts(
           runs: 120,
           merged: 80,
           runsByBucket: spread(120, n, 2),
-          spend: { state: 'not_reported' },
+          tokens: { total: 412_000_000, perMergedPullRequest: 5_150_000 },
+          spend: {
+            state: 'reported',
+            costUsd: 12345.678,
+            perMergedPullRequestUsd: 154.32,
+            unpricedModels: [
+              'gpt-5.5-codex-max-preview-2026-11-01-experimental-long-context-build',
+              'mystery-model-with-an-extremely-long-name-that-has-no-catalog-price-at-all',
+            ],
+          },
         },
         n
       ),
@@ -280,7 +334,13 @@ export function makeAccounts(
           credentials: 3,
           runs: 40,
           runsByBucket: spread(40, n, 5),
-          spend: { state: 'not_reported' },
+          tokens: { total: 31_000_000, perMergedPullRequest: null },
+          spend: {
+            state: 'reported',
+            costUsd: null,
+            perMergedPullRequestUsd: null,
+            unpricedModels: ['llama-4-405b-instruct'],
+          },
         },
         n
       ),
@@ -330,5 +390,6 @@ export function makeAccounts(
       runs: accounts.reduce((s, a) => s + a.runs, 0),
       merged: accounts.reduce((s, a) => s + a.merged, 0),
     },
+    usageLimited: scene === 'stress',
   };
 }
