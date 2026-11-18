@@ -103,8 +103,8 @@ export function createInboxPort(env: Env): OperationInboxPort {
       return readAskContext(env, { projectId, sessionId, askedAt });
     },
 
-    archiveAttention: (userId, projectId, sessionId, markerId) =>
-      archiveAttention(env, userId, projectId, sessionId, markerId),
+    archiveAttention: (userId, projectId, sessionId, markerId, holdCheckinsUntil) =>
+      archiveAttention(env, userId, projectId, sessionId, markerId, holdCheckinsUntil),
 
     async fulfilSecret(userId, projectId, requestId, secret) {
       const database = db();

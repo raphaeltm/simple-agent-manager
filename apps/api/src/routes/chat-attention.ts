@@ -27,6 +27,7 @@ import {
 } from '../middleware/project-auth';
 import { parseOptionalBody, ResolveAttentionAnswerSchema } from '../schemas';
 import { authorizeAgentWake } from '../services/agent-wake-authorization';
+import { announceQuestionArchived } from '../services/inbox/agent-asks';
 import { readAskContext } from '../services/inbox/ask-context';
 import {
   answerQuestionAsk,
@@ -353,7 +354,8 @@ export async function archiveAttention(
   userId: string,
   projectId: string,
   sessionId: string,
-  markerId: string
+  markerId: string,
+  holdCheckinsUntil: number
 ): Promise<{ agentNotified: boolean }> {
   const db = drizzle(env.DATABASE, { schema });
   await requireProjectCapability(db, projectId, userId, 'task:write');
@@ -386,6 +388,9 @@ export async function archiveAttention(
     await projectDataService.releaseAttentionArchive(env, projectId, sessionId, markerId);
     throw cause;
   }
+  // The resolved marker no longer keeps SAM's check-ins off this chat; hold them until the
+  // person writes in it, so archiving does not nudge the agent.
+  await announceQuestionArchived(env, { projectId, sessionId, askId: markerId, holdCheckinsUntil });
   await recordSharedSessionAnswer(env, writer, { markerId, archived: true });
   return { agentNotified: false };
 }

@@ -471,12 +471,16 @@ export interface OperationInboxPort {
     askedAt: number;
     userId: string;
   }): Promise<InboxItemContext | null>;
-  /** Resolve a question with reason `archived`; the agent is not told. */
+  /**
+   * Resolve a question with reason `archived`; the agent is not told, and SAM's check-ins stay
+   * off the chat until `holdCheckinsUntil` or until the person writes in it.
+   */
   archiveAttention(
     userId: string,
     projectId: string,
     sessionId: string,
-    markerId: string
+    markerId: string,
+    holdCheckinsUntil: number
   ): Promise<{ agentNotified: boolean }>;
   fulfilSecret(
     userId: string,
@@ -527,10 +531,16 @@ export interface OperationInboxPort {
   /** The agent cancelled a blocking question: its chat stops showing it as paused. Never throws. */
   withdrawQuestion(input: { projectId: string; sessionId: string; askId: string }): Promise<void>;
   /**
-   * The person archived a question: open chat views stop showing it. Tells the agent nothing and
-   * keeps SAM's check-in hold. Never throws.
+   * The person archived a question: open chat views stop showing it, and SAM's check-ins stay off
+   * the chat until `holdCheckinsUntil` or until the person writes in it. Tells the agent nothing.
+   * Never throws.
    */
-  questionArchived(input: { projectId: string; sessionId: string; askId: string }): Promise<void>;
+  questionArchived(input: {
+    projectId: string;
+    sessionId: string;
+    askId: string;
+    holdCheckinsUntil: number;
+  }): Promise<void>;
   /**
    * Whether each link names a thing of this project, in input order: null when it does, else
    * a short reason the agent can act on. Read with the platform's access; nothing is copied.

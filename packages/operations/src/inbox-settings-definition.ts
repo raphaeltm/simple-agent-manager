@@ -159,6 +159,13 @@ export const INBOX_SETTINGS = [
     range: { min: 10, max: 500 },
   },
   {
+    name: 'inbox.archiveCheckinHoldHours',
+    defaultValue: 168,
+    description:
+      'Hours SAM holds its automatic check-ins off a chat after a person archives its question, unless the person writes in that chat first. Archive tells the agent nothing, and this keeps a check-in from nudging it instead.',
+    range: { min: 1, max: 2_160 },
+  },
+  {
     name: 'inbox.closedTaskWatchHours',
     defaultValue: 168,
     description:

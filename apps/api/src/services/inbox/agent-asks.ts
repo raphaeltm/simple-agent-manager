@@ -110,18 +110,23 @@ export async function withdrawAgentQuestion(
   }
 }
 
-/** The person archived a question: open chat views stop showing it. Never throws. */
+/**
+ * The person archived a question: open chat views stop showing it, and SAM's check-ins stay off
+ * the chat until `holdCheckinsUntil` or until the person writes in it. Never throws.
+ */
 export async function announceQuestionArchived(
   env: Env,
-  input: { projectId: string; sessionId: string; askId: string }
+  input: { projectId: string; sessionId: string; askId: string; holdCheckinsUntil: number }
 ): Promise<void> {
   try {
     await projectDataService.recordQuestionArchived(env, input.projectId, {
       sessionId: input.sessionId,
       askId: input.askId,
+      holdCheckinsUntil: input.holdCheckinsUntil,
     });
   } catch (error) {
-    // The row is closed; any fresh read of the chat shows it closed. Only an open view lags.
+    // The row is closed; any fresh read of the chat shows it closed. An open view lags, and SAM
+    // may check in on the chat before the person writes in it.
     log.warn('inbox.question_archived_live_update_failed', {
       askId: input.askId,
       projectId: input.projectId,

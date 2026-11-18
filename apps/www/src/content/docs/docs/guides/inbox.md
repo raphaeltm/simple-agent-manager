@@ -212,7 +212,8 @@ item closes by itself. An item you archived stays archived while the thing keeps
 
 **Archive** (the box at the top) means you will not act on the item: it closes. Archiving a
 question or review does not tell the agent; it stays where it is until you answer something or
-write in its chat. A permission is denied, a secret declined and an approval denied, and the agent
+write in its chat. SAM's automatic check-ins also stay off that chat until you write in it (for up
+to `inbox.archiveCheckinHoldHours`, a week by default), so nothing nudges the agent. A permission is denied, a secret declined and an approval denied, and the agent
 hears that. Archiving a task tells the chats watching it. A Problem has no agent, so archiving it
 tells no one. For a few seconds the
 receipt offers **Undo**; nothing is sent until that time is up. If you leave the page or close the

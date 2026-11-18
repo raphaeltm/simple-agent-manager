@@ -457,10 +457,14 @@ describe('answering a question', () => {
     expect(askRow(id).notified_at).not.toBeNull();
     expect(edges.acceptPromptDelivery).not.toHaveBeenCalled();
     // Open chat views are told it closed (a live update, not a message to the agent).
+    // ...and SAM's check-ins stay off the chat for the configured hold (168 hours by default).
     expect(edges.recordQuestionArchived).toHaveBeenCalledWith(env, P1, {
       sessionId: 'chat-1',
       askId: id,
+      holdCheckinsUntil: expect.any(Number),
     });
+    const [, , archivedInput] = edges.recordQuestionArchived.mock.calls[0]!;
+    expect(archivedInput.holdCheckinsUntil).toBeGreaterThan(Date.now() + 167 * 3_600_000);
     // A late answer from the chat card meets the archived row.
     await expect(answer(id, 'eu')).rejects.toMatchObject({ statusCode: 409 });
   });

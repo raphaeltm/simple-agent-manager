@@ -401,6 +401,11 @@ export async function answerInboxItem(
   }
 }
 
+/** When SAM's check-ins may resume on a chat whose question was archived (`inbox.archiveCheckinHoldHours`). */
+async function archiveCheckinHoldUntil(ctx: OperationContext): Promise<number> {
+  return Date.now() + (await getInboxLimits(ctx)).archiveCheckinHoldHours * 3_600_000;
+}
+
 /**
  * Archive means closed. A question or review closes without telling the agent; a permission,
  * approval or secret request is denied or declined through its own answer path.
@@ -429,6 +434,7 @@ export async function archiveInboxItem(
           projectId: item.projectId,
           sessionId: item.sessionId,
           askId: ref.id,
+          holdCheckinsUntil: await archiveCheckinHoldUntil(ctx),
         });
       return { ref: item.ref, outcome: 'archived', agentNotified: false };
     }
@@ -441,7 +447,8 @@ export async function archiveInboxItem(
         me,
         item.projectId,
         ref.sessionId,
-        ref.markerId
+        ref.markerId,
+        await archiveCheckinHoldUntil(ctx)
       );
       return { ref: item.ref, outcome: 'archived', agentNotified: result.agentNotified };
     }

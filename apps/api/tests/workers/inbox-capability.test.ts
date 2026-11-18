@@ -31,6 +31,18 @@ async function syncSummaries(project: DurableObjectStub<ProjectData>) {
   });
 }
 
+/** The chat's reconciliation check-in gate in ProjectData, or null. */
+async function checkinGate(project: DurableObjectStub<ProjectData>, sessionId: string) {
+  return runInDurableObject(project, async (_instance, state) => {
+    const row = state.storage.sql
+      .exec('SELECT value FROM do_meta WHERE key = ?', `taskReconciliationGate:${sessionId}`)
+      .toArray()[0];
+    return row
+      ? (JSON.parse(String(row.value)) as { nextAttemptAt: number; questionHold?: boolean })
+      : null;
+  });
+}
+
 type ListBody = { items: { ref: string; kind: string; canAct: boolean; projectId: string }[] };
 
 describe('inbox capability through the real entry points', () => {
@@ -123,6 +135,11 @@ describe('inbox capability through the real entry points', () => {
         message.content.includes('archived your question')
       )
     ).toHaveLength(0);
+    // SAM's check-ins stay off the chat (the closed question no longer holds them) until the
+    // person writes in it, so a check-in cannot nudge the agent instead (default 168 hours).
+    const held = await checkinGate(s.project, s.chatSessionId);
+    expect(held?.questionHold).toBe(true);
+    expect(held!.nextAttemptAt).toBeGreaterThan(Date.now() + 167 * 3_600_000);
     // The item leaves the inbox; a late answer loses.
     const after = await get<ListBody>('/api/inbox', s.ownerCookie);
     expect(after.body.items.map((entry) => entry.ref)).not.toContain(ref);
@@ -132,6 +149,11 @@ describe('inbox capability through the real entry points', () => {
       { answer: 'Staging first' }
     );
     expect(late.status).toBe(409);
+    // The person writes in the chat: the hold is released and check-ins may resume.
+    await s.project.persistMessage(s.chatSessionId, 'user', 'Back to this: carry on.', null);
+    expect((await checkinGate(s.project, s.chatSessionId))!.nextAttemptAt).toBeLessThanOrEqual(
+      Date.now()
+    );
   });
 
   it('answering an asks question of a sleeping chat queues the answer once as a wake', async () => {
@@ -304,6 +326,8 @@ describe('inbox capability through the real entry points', () => {
     const { marker } = await s.project.getAttentionRequest(s.chatSessionId, markerId, s.ownerId);
     expect(marker).toMatchObject({ resolvedReason: 'archived', resolvedAnswer: null });
     expect(marker?.resolvedAt).not.toBeNull();
+    // The resolved marker no longer keeps check-ins off the chat; the archive holds them instead.
+    expect(await checkinGate(s.project, s.chatSessionId)).toMatchObject({ questionHold: true });
     // The item leaves the inbox once the index catches up.
     await syncSummaries(s.project);
     const after = await get<ListBody>('/api/inbox', s.ownerCookie);
@@ -389,7 +413,12 @@ describe('inbox capability through the real entry points', () => {
       });
 
     await seedHold();
-    await s.project.recordQuestionArchived({ sessionId: s.chatSessionId, askId: 'ask-1' });
+    await s.project.recordQuestionArchived({
+      sessionId: s.chatSessionId,
+      askId: 'ask-1',
+      // Shorter than the question's own hold: the archive never shortens it.
+      holdCheckinsUntil: Date.now() + 60_000,
+    });
     expect((await readGate())?.nextAttemptAt).toBe(until);
 
     await seedHold();

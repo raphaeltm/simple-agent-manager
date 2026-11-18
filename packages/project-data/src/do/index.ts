@@ -119,7 +119,10 @@ import {
 } from './provider-limit-attention';
 import * as questionAsks from './question-asks';
 import * as reconciliation from './reconciliation';
-import { releaseQuestionHold } from './reconciliation-candidate-state';
+import {
+  holdReconciliationAfterArchive,
+  releaseQuestionHold,
+} from './reconciliation-candidate-state';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import { instrumentRowUsage, RowUsage } from './row-usage';
 import { countRunNudges } from './run-nudges';
@@ -1087,7 +1090,9 @@ export class ProjectData extends DurableObject<Env> {
         sessionId,
       }),
     ]);
-    if (closed > 0 && releaseQuestionHold(this.sql, sessionId)) await this.recalculateAlarm();
+    // Any person's message releases a question hold, including the one an archive leaves when
+    // no question is open any more (`holdReconciliationAfterArchive`).
+    if (releaseQuestionHold(this.sql, sessionId)) await this.recalculateAlarm();
     return closed;
   }
 
@@ -3016,11 +3021,18 @@ export class ProjectData extends DurableObject<Env> {
    * stored here; the row is already closed.
    */
   /**
-   * The person archived a question held in D1 `asks`: open chat views stop showing it. Unlike a
-   * withdrawal, SAM's check-in hold is kept until the question's original deadline, so archiving
-   * does not nudge the agent (archive tells the agent nothing; Raphaël, 2026-11-17).
+   * The person archived a question in this chat: open chat views stop showing it, and SAM's
+   * check-ins stay off the chat until `holdCheckinsUntil` or until the person writes in it
+   * (`holdReconciliationAfterArchive`), so archiving does not nudge the agent (archive tells the
+   * agent nothing; Raphaël, 2026-11-17).
    */
-  recordQuestionArchived(input: { sessionId: string; askId: string }): void {
+  async recordQuestionArchived(input: {
+    sessionId: string;
+    askId: string;
+    holdCheckinsUntil: number;
+  }): Promise<void> {
+    holdReconciliationAfterArchive(this.sql, input.sessionId, input.holdCheckinsUntil);
+    await this.recalculateAlarm();
     this.broadcastEvent(
       'attention.resolved',
       { sessionId: input.sessionId, markerId: input.askId, reason: 'archived' },
