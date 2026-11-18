@@ -77,9 +77,18 @@ function makeSqlStorage(tables: Record<string, unknown[]> = {}) {
 
       // Handle SELECT on orchestrator_missions
       if (q.includes('ORCHESTRATOR_MISSIONS') && q.includes('SELECT')) {
-        return {
-          toArray: () => data['orchestrator_missions'] ?? [],
-        };
+        let rows = data['orchestrator_missions'] ?? [];
+        if (/mission_id\s*=\s*\?/i.test(query))
+          rows = rows.filter((row) => (row as { mission_id: string }).mission_id === params[0]);
+        const statuses = query
+          .match(/status\s+IN\s*\(([^)]+)\)/i)?.[1]
+          ?.match(/'([^']+)'/g)
+          ?.map((value) => value.slice(1, -1));
+        const status = query.match(/status\s*=\s*'([^']+)'/i)?.[1];
+        if (statuses)
+          rows = rows.filter((row) => statuses.includes((row as { status: string }).status));
+        if (status) rows = rows.filter((row) => (row as { status: string }).status === status);
+        return { toArray: () => rows };
       }
 
       // Handle SELECT on decision_log (handoff idempotency check)

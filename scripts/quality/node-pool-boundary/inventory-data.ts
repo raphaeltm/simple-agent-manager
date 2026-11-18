@@ -42,20 +42,26 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
     requiredEvidence: CANONICAL_TASK_START,
   },
   {
-    filePath: 'apps/api/src/routes/mcp/dispatch-tool.ts',
+    filePath: 'apps/api/src/routes/mcp/dispatch-task-storage.ts',
     table: 'tasks',
-    owner: 'handleDispatchTask',
-    role: 'MCP dispatch route adapter',
-    canonicalService: 'resolveTaskStartPlacement -> startTaskRunnerDO',
-    requiredEvidence: CANONICAL_TASK_START,
+    owner: 'insertDispatchedTask',
+    role: 'atomic task persistence; callers inventoried as allocation entrypoints',
+    canonicalService: 'canonical placement -> insertDispatchedTask -> startTaskRunnerDO',
+    requiredEvidence: [
+      { kind: 'export', name: 'insertDispatchedTask' },
+      { kind: 'call', name: 'prepare' },
+    ],
   },
   {
-    filePath: 'apps/api/src/routes/mcp/orchestration-tools.ts',
+    filePath: 'apps/api/src/routes/mcp/orchestration-retry-storage.ts',
     table: 'tasks',
-    owner: 'handleRetrySubtask',
-    role: 'MCP orchestration retry adapter',
-    canonicalService: 'resolveTaskStartPlacement -> startTaskRunnerDO',
-    requiredEvidence: CANONICAL_TASK_START,
+    owner: 'insertMcpRetriedTask',
+    role: 'atomic task persistence; callers inventoried as allocation entrypoints',
+    canonicalService: 'canonical placement -> insertMcpRetriedTask -> startTaskRunnerDO',
+    requiredEvidence: [
+      { kind: 'export', name: 'insertMcpRetriedTask' },
+      { kind: 'call', name: 'run' },
+    ],
   },
   {
     filePath: 'apps/api/src/services/reserved-task-submission-storage.ts',
@@ -70,12 +76,15 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
     ],
   },
   {
-    filePath: 'apps/api/src/durable-objects/sam-session/tools/dispatch-task.ts',
+    filePath: 'apps/api/src/durable-objects/sam-session/tools/dispatch-task-storage.ts',
     table: 'tasks',
-    owner: 'dispatchTask',
-    role: 'SAM session dispatch tool adapter',
-    canonicalService: 'resolveTaskStartPlacement -> startTaskRunnerDO',
-    requiredEvidence: CANONICAL_TASK_START,
+    owner: 'insertSamDispatchedTask',
+    role: 'atomic task persistence; callers inventoried as allocation entrypoints',
+    canonicalService: 'canonical placement -> insertSamDispatchedTask -> startTaskRunnerDO',
+    requiredEvidence: [
+      { kind: 'export', name: 'insertSamDispatchedTask' },
+      { kind: 'call', name: 'prepare' },
+    ],
   },
   {
     filePath: 'apps/api/src/durable-objects/sam-session/tools/retry-subtask.ts',
@@ -214,6 +223,39 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
 ] as const;
 
 export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInventoryEntry[] = [
+  {
+    filePath: 'apps/api/src/routes/mcp/dispatch-tool.ts',
+    owner: 'handleDispatchTask',
+    entrypoint: 'insertDispatchedTask',
+    scope: 'route',
+    role: 'task dispatch',
+    admission:
+      'canonical placement and credential attribution precede atomic task persistence and runtime start',
+    status: 'role-adapter',
+    requiredEvidence: CANONICAL_TASK_START,
+  },
+  {
+    filePath: 'apps/api/src/routes/mcp/orchestration-tools.ts',
+    owner: 'handleRetrySubtask',
+    entrypoint: 'insertMcpRetriedTask',
+    scope: 'route',
+    role: 'task dispatch',
+    admission:
+      'canonical placement and credential attribution precede atomic task persistence and runtime start',
+    status: 'role-adapter',
+    requiredEvidence: CANONICAL_TASK_START,
+  },
+  {
+    filePath: 'apps/api/src/durable-objects/sam-session/tools/dispatch-task.ts',
+    owner: 'dispatchTask',
+    entrypoint: 'insertSamDispatchedTask',
+    scope: 'service',
+    role: 'task dispatch',
+    admission:
+      'canonical placement and credential attribution precede atomic task persistence and runtime start',
+    status: 'role-adapter',
+    requiredEvidence: CANONICAL_TASK_START,
+  },
   {
     filePath: 'apps/api/src/services/node-provisioning.ts',
     owner: 'provisionNode',

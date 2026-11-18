@@ -821,6 +821,10 @@ context is valid. Reads use existing archive-owner routing. Missing session/requ
 Answers continue through the existing `POST .../attention/:markerId/resolve`; fixed choices
 must match the saved options exactly, and a request without options accepts a typed answer.
 
+### Start or resume despite a recorded provider limit
+
+`POST /api/projects/:projectId/tasks/:taskId/provider-limit/start-anyway` requires an approved authenticated task owner with project `task:write`. No body is required. Existing waiting admission holds return `202 { status: "starting", taskId }`. Waiting callback-origin holds on sleeping VM sessions return `202 { status: "waking", taskId }` after recording a bounded override for the same credential, profile and skill. Saved recovery requires current session-owner authority, an unexpired restorable sleeping snapshot and matching source credential generation. An existing waking claim is retained and its runner nudged; an unclaimed snapshot uses normal recovery. The operation does not re-post the original prompt or change accounts. A fresh provider rejection removes the override and parks normally. Changed, terminal or already-approved waits return `409`; another member returns `403`. An uncertain runner response retains the accepted override and claim and returns `409` asking the owner to refresh. Chat task embeds expose `providerLimitCanResumeAnyway` for the owner-facing **Resume anyway** control; the endpoint revalidates authority and snapshot eligibility.
+
 ### Resume a blocked provider-limit task
 
 `POST /api/projects/:projectId/tasks/:taskId/provider-limit/resume` requires an approved, authenticated task owner with project `task:write`. No body is required. Returns `202 { status: "waking", taskId }` after accepting the current credential selection and starting recovery from the retained sleeping snapshot (or nudging a first-dispatch admission wait). Returns `403` for another member and `409` when the wait is no longer blocked, sleep is incomplete, or a snapshot cannot be restored. Repeated approval is fenced against the current wait; retained WIP is never discarded.

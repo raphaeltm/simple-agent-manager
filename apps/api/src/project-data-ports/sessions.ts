@@ -1,4 +1,5 @@
-import type { SessionLifecyclePort } from '../durable-objects/project-data/ports';
+import type { SessionLifecyclePort } from '@simple-agent-manager/project-data';
+
 import {
   classifySessionIdleness,
   getFreshHarnessWorkLeaseExpiry,

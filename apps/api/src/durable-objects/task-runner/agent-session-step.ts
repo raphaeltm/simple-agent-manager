@@ -4,6 +4,8 @@
  * Handles the agent_session step: creating the session, generating MCP token,
  * and starting the agent with the initial prompt.
  */
+import { parseProviderLimitWait } from '@simple-agent-manager/scheduler-core';
+
 import { log } from '../../lib/logger';
 import {
   buildSamBootstrapInstructions,
@@ -115,6 +117,13 @@ export async function handleAgentSession(
       agentSessionId: sessionId,
       // Dispatch resolves the profile hint to its ID before persisting runner state.
       agentProfileId: state.config.agentProfileHint,
+      // A previously claimed runner predates this config field. Its newly
+      // approved receipt carries the same skill checked at every authority fence.
+      skillId:
+        state.config.skillId ??
+        parseProviderLimitWait(state.config.providerLimitRecoveryApproval?.receipt)?.ownerOverride
+          ?.skillId ??
+        null,
       label: buildTaskAgentSessionLabel(state.config.taskTitle),
       agentType,
       visibleInitialPrompt: buildVisibleTaskInitialPrompt(state),

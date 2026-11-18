@@ -26,6 +26,8 @@ import {
   applyPromptDeliveryResult,
   markPromptDeliverySubmitting,
   type PromptDeliveryClaim,
+  promptDeliveryClaimIsCurrent,
+  promptDeliveryClaimSubmissionCheckpoint,
   type PromptDeliveryResult,
 } from './prompt-delivery';
 import {
@@ -185,12 +187,53 @@ export async function runPromptDeliveryClaim(
         );
       }
     };
-    const validateDeliveryTarget = async (): Promise<PromptDeliveryResult | null> =>
-      invalidSessionWriterSenderResult(sql, claim) ??
-      (await validateParentWakeTarget()) ??
-      (await validateProjectEventWakeTarget()) ??
-      (await invalidScheduledDeliveryTarget(sql, env, hooks.projectId, claim)) ??
-      (await invalidCheckpointContinuationTarget(sql, env, hooks.projectId, claim));
+    const validateClaim = (): PromptDeliveryResult | null => {
+      if (promptDeliveryClaimIsCurrent(sql, claim)) return null;
+      return claim.mode === 'reconcile'
+        ? {
+            kind: 'ambiguous',
+            reason: 'runtime_changed',
+            error: 'Prompt reconciliation claim is no longer current',
+            runtimeIdentity: claim.message.runtimeIdentity,
+            capabilities: null,
+            receipt: null,
+          }
+        : {
+            kind: 'failed',
+            reason: 'terminal_target',
+            error: 'Prompt preparation claim is no longer current',
+            runtimeIdentity: claim.message.runtimeIdentity,
+            capabilities: null,
+          };
+    };
+    const validateDeliveryTarget = async (): Promise<PromptDeliveryResult | null> => {
+      const denied =
+        validateClaim() ??
+        invalidSessionWriterSenderResult(sql, claim) ??
+        (await validateParentWakeTarget()) ??
+        (await validateProjectEventWakeTarget()) ??
+        (await invalidScheduledDeliveryTarget(sql, env, hooks.projectId, claim)) ??
+        (await invalidCheckpointContinuationTarget(sql, env, hooks.projectId, claim));
+      // Source checks await D1. Cancellation can retire this exact preparation
+      // while they run, so re-read the local claim immediately before returning.
+      const stale = validateClaim();
+      if (stale) return stale;
+      const submission =
+        denied && (denied.kind === 'retry' || denied.kind === 'failed')
+          ? promptDeliveryClaimSubmissionCheckpoint(sql, claim)
+          : null;
+      if (denied && (denied.kind === 'retry' || denied.kind === 'failed') && submission) {
+        return {
+          kind: 'ambiguous',
+          reason: 'receipt_unavailable',
+          error: `Authority check denied or unavailable after possible prompt submission: ${denied.error}`,
+          runtimeIdentity: denied.runtimeIdentity ?? submission.runtimeIdentity,
+          capabilities: denied.capabilities,
+          receipt: null,
+        };
+      }
+      return denied;
+    };
     // Stop-and-deliver: an urgent class rejected because the target is
     // mid-turn may cancel that turn so this delivery becomes the next
     // prompt. Informational classes never stop anything — for them the

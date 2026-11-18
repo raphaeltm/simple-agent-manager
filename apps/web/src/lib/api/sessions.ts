@@ -26,7 +26,6 @@ import { request } from './client';
 // Chat Sessions (Project DO)
 // =============================================================================
 
-/** Task embed shape — populated in the detail response, added via enrichment for list items. */
 export async function listChatSessions(
   projectId: string,
   params: {
