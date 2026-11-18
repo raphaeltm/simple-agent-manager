@@ -136,6 +136,51 @@ hits and failed requests; database-counter failures refuse synthesis. A 429 resp
 `Retry-After` seconds until the next window. Provider billing, models, voices, availability and
 quotas remain the endpoint operator's responsibility.
 
+## Email on a single-box build
+
+A Cloudflare deployment sends SAM's email through Cloudflare Email Sending (the `AGENT_EMAIL`
+binding) and receives agent email through Email Routing; nothing below changes that. The
+transport is chosen in one place, `emailTransportKind()` in
+`packages/agent-email/src/provider.ts`, and the binding wins whenever it exists.
+
+A single-box build has no binding. It can send sign-in codes, owner security alerts and
+account-link confirmations through an SMTP relay instead. These are bootstrap settings in the
+box configuration, because the first account may sign up by email before any administrator
+exists. The Cloudflare pipeline does not forward them.
+
+| Setting         | Default                               | Description                                                                                                                     |
+| --------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `SMTP_HOST`     | _(unset)_                             | Relay host. Unset means no SMTP transport.                                                                                      |
+| `SMTP_TLS`      | `starttls`                            | `starttls`, `tls` (implicit TLS) or `none`. `none` is accepted only for a loopback host (a mail collector on the same machine). |
+| `SMTP_PORT`     | `587` for `starttls`, `465` for `tls` | Required with `none`.                                                                                                           |
+| `SMTP_USERNAME` | _(unset)_                             | Sent with `AUTH PLAIN`, only after TLS (or over loopback). Set with `SMTP_PASSWORD` (a secret) or not at all.                   |
+| `SMTP_FROM`     | _(required)_                          | The address SAM's email comes from. It must be one the relay accepts.                                                           |
+
+`resolveSmtpConfig()` (`packages/agent-email/src/smtp-config.ts`) refuses an invalid set as a
+whole and logs the reason once; email sign-in is then not offered. A server that does not offer
+STARTTLS in `starttls` mode is refused rather than used in plaintext, and the certificate chain is
+verified by the runtime. The whole exchange is bounded by the `agentEmail.smtpTimeoutMs` admin
+setting (15 seconds by default). Every other email sign-in rule (codes only for existing accounts
+or the installer's owner, identical responses, rate limits) is the same as on Cloudflare.
+
+Before first-run setup can finish on email alone, SAM checks the relay
+(`emailSignInReadiness()` in `apps/api/src/services/email-sign-in.ts`): it connects, starts TLS,
+authenticates, and offers `SMTP_FROM` as sender and the owner email as recipient, then abandons the
+transaction so nothing is sent. If the relay refuses any step or does not answer, setup asks for a
+sign-in provider instead, and the reason is logged as `email_sign_in.smtp_relay_unusable`. The check
+cannot prove the mailbox receives mail, only that the relay would accept it.
+
+**Inbound agent email.** The box can also run `sam-mx` (`deploy/selfhost/sam-mx`), an SMTP
+receiver for `agent+<key>@agents.<BASE_DOMAIN>`. It requires the From domain to be authenticated
+(aligned SPF or DKIM) and hands each message, during the SMTP session, to the loopback-only route
+`POST /api/self-host/gateway/inbound-email` (`apps/api/src/selfhost/reverse-tunnel/inbound-email.ts`),
+which runs the same inbound handler as Cloudflare Email Routing. Replies from `reply_to_email` go
+through the SMTP relay above, from `SMTP_FROM` with `Reply-To` set to the trigger's address
+(`selfHostAgentEmailSender()` in `apps/api/src/services/agent-email/self-host-inbound.ts`). Agent
+email is on only when `AGENT_EMAIL_INBOUND_SMTP=true` (the receiver is installed), the gateway
+secret is set and an SMTP relay works. The admin loopback test needs Email Routing and is refused
+on a box; send a test email from an allowed sender instead.
+
 ## Prerequisites
 
 | Requirement              | Purpose                   | Tier                 |
@@ -263,7 +308,7 @@ When the deployment can send email (see the optional email permissions above), S
 - first-run setup completes;
 - a GitHub, Google or GitLab sign-in is linked to an admin or superadmin account.
 
-The emails come from `security@agents.yourdomain.com` and link to the admin page to review. Before the first superadmin exists, the owner email the installer recorded (`BOOTSTRAP_OWNER_EMAIL`) gets them instead. Sending is best-effort: a failed email is logged (`security_alert.send_failed`) and never blocks the change. Without email, nothing is sent.
+The emails come from `security@agents.yourdomain.com` (on a single-box build that sends through SMTP, from `SMTP_FROM`; see [Email on a single-box build](#email-on-a-single-box-build)) and link to the admin page to review. Before the first superadmin exists, the owner email the installer recorded (`BOOTSTRAP_OWNER_EMAIL`) gets them instead. Sending is best-effort: a failed email is logged (`security_alert.send_failed`) and never blocks the change. Without email, nothing is sent.
 
 ### Set up GitLab sign-in
 
