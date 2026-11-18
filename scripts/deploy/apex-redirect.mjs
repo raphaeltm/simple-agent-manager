@@ -111,7 +111,18 @@ export async function reconcileApexRedirect({
   ) {
     throw new Error('Unmanaged apex redirect exists; inspect before applying.');
   }
-  const plan = buildPlan({ zonePath, entry, before, desired, remove });
+  // Report the other rules in the phase so overlaps are visible before an apply;
+  // they are never modified. Rule definitions are routing config, not secrets.
+  const unrelatedRules = (entry?.rules ?? [])
+    .filter((rule) => rule.ref !== APEX_REDIRECT_REF)
+    .map(({ ref, description, expression, action, enabled }) => ({
+      ref,
+      description,
+      expression,
+      action,
+      enabled,
+    }));
+  const plan = { ...buildPlan({ zonePath, entry, before, desired, remove }), unrelatedRules };
   report(plan);
   if (apply && plan.method) {
     const result = await request(plan.path, {

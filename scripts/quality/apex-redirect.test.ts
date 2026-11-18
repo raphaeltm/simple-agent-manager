@@ -108,6 +108,15 @@ describe('managed apex Single Redirect', () => {
       method: 'POST',
       path: `/zones/${zoneId}/rulesets/${rulesetId}/rules`,
       after: desired,
+      unrelatedRules: [
+        {
+          ref: 'other',
+          description: undefined,
+          expression: '(http.host eq "app.example.com")',
+          action: 'redirect',
+          enabled: undefined,
+        },
+      ],
     });
     expect(before.rules).toEqual([unrelated]);
     expect(request.mock.calls.filter(([, options]) => options?.method)).toEqual([
@@ -321,6 +330,8 @@ describe('managed apex Single Redirect', () => {
     expect(workflow).toContain('group: www-infra');
     expect(workflow).toContain('cancel-in-progress: false');
     expect(workflow).toContain('node scripts/deploy/apex-redirect.mjs --apply');
+    // Plan/apply skip pnpm install, so the pnpm cache post-step must not run for them.
+    expect(workflow).toContain("cache: ${{ inputs.operation == 'provision' && 'pnpm' || '' }}");
     expect(workflow).not.toContain('pagerules?status=active');
     for (const name of [
       'Create Pages Project',

@@ -41,7 +41,9 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'pnpm'
+          # Only provision installs dependencies; caching a store that plan/apply
+          # never create fails the post-step ("Path Validation Error").
+          cache: ${{ inputs.operation == 'provision' && 'pnpm' || '' }}
 
       - name: Install dependencies
         if: inputs.operation == 'provision'
