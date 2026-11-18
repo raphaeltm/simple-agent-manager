@@ -27,6 +27,7 @@ import {
   getLogQueryRateLimit,
   queryErrors,
 } from '../../services/observability';
+import { hasLiveLogStream } from '../../services/platform-capabilities';
 import { runPlatformFeedbackTriage } from '../../services/platform-feedback-triage';
 import {
   queryWorkerLogs,
@@ -326,6 +327,13 @@ adminObservabilityRoutes.get('/logs/stream', async (c) => {
   const upgradeHeader = c.req.header('Upgrade');
   if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket') {
     throw errors.badRequest('WebSocket upgrade required');
+  }
+  // Nothing feeds the AdminLogs DO without a tail worker; refuse instead of an empty stream.
+  if (!hasLiveLogStream(c.env)) {
+    throw errors.featureUnavailable(
+      'liveLogStream',
+      'The live log stream is not available on this installation; read logs on the server'
+    );
   }
 
   // Forward the upgrade request to the AdminLogs DO singleton
