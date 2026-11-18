@@ -58,12 +58,14 @@ coordinator review) and missing CI (F12).
 - [x] Owner security alert for an explicit `/link-social` link over SMTP: test
 - [x] F13a: SMTP readiness probes the relay (EHLO, TLS, AUTH, MAIL FROM, RCPT TO owner, RSET); failure is `unavailable`, not `ready`
 - [x] F13b: hung-relay test proving the code-request response returns before the send
-- [ ] F13b BOX: celld provides `waitUntil` (code request answers before a slow send)
-- [ ] F13c: `create-account --superadmin` refuses a non-owner before the owner is established (integration PR; L22 owns the command)
+- [x] F13b BOX: celld provides `waitUntil` (code request answers before a slow send)
+- [x] F13c: `create-account --superadmin` refuses a non-owner before the owner is established (integration PR #2888; L22 owns the command)
 - [x] F12: CI job for sam-mx `go test` + SMTP vertical tests, on self-host/SMTP paths only and nightly (D9); real-receiver test fails instead of skipping in CI
 - [x] F12: workerd (Miniflare) test of the real `cloudflare:sockets` SMTP client against a local server
-- [ ] Cloudflare unchanged: tests pin the Cloudflare branch for sign-in, alerts, account-link mail, inbound
-- [ ] Docs: configuration reference (SMTP, inbound), admin-settings (`agentEmail.smtpTimeoutMs`), self-hosting security-alert sender
+- [x] Cloudflare unchanged: tests pin the Cloudflare branch for sign-in, alerts, account-link mail, inbound
+- [x] Docs: self-hosting guide section "Email on a single-box build" (SMTP, readiness probe, inbound), admin-settings (`agentEmail.smtpTimeoutMs`), security-alert sender
+- [x] Review fixes: sam-mx strict alignment default, DKIM-only replay binding (signed To/Cc + Date window + single To/Cc/Date), conn-bound gateway ctx + timeout ordering, shutdown drain; SMTP envelope validation; sanitized agent-visible SMTP errors; create-account empty owner refusal; compose passthrough (#2888)
+- [x] Deferred MEDIUM/LOW review items tracked in idea 01M7QHHKBJP5D57Z9DQF25X2GP
 - [ ] Staging: Cloudflare email sign-in and inbound agent email unchanged
 - [ ] BOX: SMTP sign-in, inbound mail via sam-mx + gateway, F13 fixes, with real mail
 
@@ -88,3 +90,13 @@ coordinator review) and missing CI (F12).
 - CI runner budget for an all-filter PR raised 31 -> 32 for the Self-host Email job.
 - Local `ci-suite-selection.test.ts > packages` times out at 30 s on this workspace on the base
   commit too (not related).
+
+## BOX evidence (2026-11-18, box upgraded in place ba35d4905 -> sam/l21-box-proof 54c921e55)
+
+- Upgrade EXIT=0, healthy; `mail-in` profile enabled (sam-mx listening :25), SAM_MX_TRUSTED_NETWORKS=127.0.0.0/8 for loopback injection.
+- SMTP sign-in: create-account made l21-signin@vmtest.sam2.party; code request 200 (0.45 s) -> code in the Mailpit collector from sign-in@vmtest.sam2.party -> sign-in/email-otp 200 -> /api/auth/me returns the account. Unknown address: 200, no mail.
+- F13b: collector paused (relay hangs); code request for a known account answered 200 in 0.52 s, unknown in 0.35 s; celld logged email_sign_in.send_failed "SMTP exchange timed out after 15000 ms" 15 s AFTER the response -> celld provides waitUntil.
+- F13a: setup temporarily reopened (SETUP_FORCE + one-off SETUP_TOKEN in secrets.env): /api/setup/verify with the relay up -> emailReady true, collector total unchanged (5 -> 5: probe sent nothing); relay paused -> email false after 15.1 s, celld logged email_sign_in.smtp_relay_unusable. Lines removed, `deploy --unset SETUP_FORCE --unset SETUP_TOKEN`, secrets.env byte-identical to before, /api/setup/status 410 SETUP_CLOSED.
+- F13c: owner already established on the box, so the refusal is proven by the real-SQLite tests; the live `--superadmin --dry-run` SQL carries the owner guard (owner admin-r15@vmtest.sam2.party).
+- Inbound (trusted loopback): mail to agent+8mg1myz4hjnpkf5k@agents.vmtest.sam2.party via sam-mx -> gateway route -> agent_email.inbound_accepted, task 01M7QHDB6Q513Y9RCBTMPB1FJM submitted; node 01M7QHDG46H3BEV9B6CGM3JR5P provisioned over the reverse tunnel.
+- Inbound (real DNS DKIM, from the box's internal IP 10.10.0.2, not trusted): ed25519 key published at l21sel._domainkey.l21.vmtest.sam2.party; valid signed message -> sam-mx auth=pass dkim=pass -> gateway -> Worker 550 "Sender not allowed" (sender deliberately not on the allowlist, so no second task); replay (signed To = another address) -> 550 at sam-mx naming the signed To/Cc; 8-day-old Date -> 550 "too old".
