@@ -623,7 +623,7 @@ describe('inbox_write result', () => {
   const file = () =>
     fileAgentResult(ctxFor('owner', P1), chat1, {
       title: 'Hetzner is the cheapest option for the staging nodes',
-      why: 'Same machines cost about a third of the other providers. Details are in the linked PR.',
+      why: 'Same machines cost **about a third** of the other providers. Details are in the linked PR.',
       links: [{ kind: 'pr', url: 'https://github.com/acme/one/pull/9' }],
     });
 
@@ -643,7 +643,8 @@ describe('inbox_write result', () => {
         type: 'needs_input',
         // Leads with the outcome, not the task's name.
         title: 'Result ready: Hetzner is the cheapest option for the staging nodes',
-        body: expect.stringMatching(/^Same machines cost about a third/),
+        // `why` is markdown in the inbox; the push shows it as plain text.
+        body: 'Same machines cost about a third of the other providers. Details are in the linked PR.',
       })
     );
     // A result never pauses the chat.

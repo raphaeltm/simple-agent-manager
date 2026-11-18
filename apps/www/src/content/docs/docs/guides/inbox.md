@@ -83,8 +83,10 @@ Every session is told that nobody reads its chat: you see only what the agent pu
 (`apps/api/src/routes/mcp/instruction-inbox-guidance.ts`). So an agent files the answer or finished
 work you asked for as a result, something to check as a review, and a decision it needs as an ask.
 A question or an answer left only in the chat reaches nobody. Agents are also told to file only what
-is worth your time and to write each item like a short note to a colleague: the outcome first, in
-plain words, without IDs or jargon. A routine run with nothing for you, or work another agent
+is worth your time and to write each item like a short note to a colleague in clear, simple
+language: a one-sentence title with the outcome or the ask, then brief, easy-to-read context in
+markdown (short paragraphs, bullet lists, bold for what matters), without IDs or jargon. The Inbox
+and the chat card show that context as formatted text; the push notification shows it plain. A routine run with nothing for you, or work another agent
 handed out (which reports back to that agent), files nothing. SAM files nothing on an agent's
 behalf; the only items SAM files itself are [Problems](#problems-sam-files-for-you).
 The tools need a session started from a task or a project chat, as `request_human_input` always did;
@@ -110,7 +112,7 @@ a chat opened directly on a workspace has no inbox to file into.
   needed (`cancel`, with a reason). A withdrawn item leaves your inbox and the agent is not told
   anything new.
 
-Each item carries a one-sentence title, the agent's reason, and links to ideas, Library files,
+Each item carries a one-sentence title, the agent's context (markdown), and links to ideas, Library files,
 policies, knowledge, other chats, pull requests of the project's repository, or previews of its
 workspaces. Each link is checked to belong to the project when the item is filed, and opens with
 your own access. Related items from one chat share a group and stack together. When an agent files

@@ -30,7 +30,8 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 - **Agents put their answers in your Inbox.** When you ask an agent for something, its answer or
   finished work arrives as a **Result**: the outcome in one plain sentence, then the details.
   **Got it** closes it without waking the agent; **Reply** sends it your reply while it is still
-  running (after it finishes, **Open chat** takes Reply's place). Agents are told
+  running (after it finishes, **Open chat** takes Reply's place). Every item now comes with brief,
+  easy-to-read context, formatted with lists and bold where it helps. Agents are told
   nobody reads their chat, to file only what is worth your time, and to file nothing for routine
   runs or work another agent handed out. The content-free "Agent finished — your turn" update is
   gone. → [What agents file](/docs/guides/inbox/#what-agents-file)

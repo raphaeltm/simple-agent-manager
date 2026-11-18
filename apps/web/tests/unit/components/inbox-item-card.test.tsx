@@ -165,6 +165,21 @@ describe('InboxItemCard', () => {
     expect(screen.getByText(/Got it · the agent won’t be woken/)).toBeTruthy();
   });
 
+  it('renders the agent\'s markdown context, without raw HTML', async () => {
+    current = inboxItem({
+      kind: 'result',
+      title: 'Hetzner is the cheapest option',
+      body: 'Same machine, three prices:\n\n- **Hetzner**: €7.90\n- Scaleway: €21.50\n\n<img src=x onerror=alert(1)>',
+    });
+    const { container } = renderCard(toolCall(FILED));
+    expect(await screen.findByText('Hetzner is the cheapest option')).toBeTruthy();
+    // Markdown structure: a list, and bold for what matters.
+    expect(container.querySelectorAll('li')).toHaveLength(2);
+    expect(screen.getByText('Hetzner', { selector: 'strong' })).toBeTruthy();
+    // Agent text never becomes markup.
+    expect(container.querySelector('img')).toBeNull();
+  });
+
   it('shows a blocking question with its options and the answered state once settled', async () => {
     current = inboxItem({
       kind: 'question',

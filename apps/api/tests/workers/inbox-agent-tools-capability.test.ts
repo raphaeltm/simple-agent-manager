@@ -307,7 +307,9 @@ describe('agent inbox tools through the real entry points', () => {
       // matters (inbox Result items).
       expect(rule).toContain('method `result`');
       expect(rule).toContain('another agent dispatched this task');
-      expect(rule).toContain('Write like a short note to a colleague');
+      expect(rule).toContain('Write like a short note to a colleague, in clear, simple language');
+      // Every item gets brief, easy-to-read markdown context (Raphaël, 2026-11-18).
+      expect(rule).toContain('`why` always gives brief, easy-to-read context in markdown');
       // Nothing tells the agent to answer only in the chat.
       expect(lines.some((line) => line.includes('Respond to their messages directly'))).toBe(false);
     }

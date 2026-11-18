@@ -163,10 +163,11 @@ export const KIND_ITEMS: Item[] = [
     agentState: 'finished',
     topic: 'Hosting cost comparison',
     title: 'Hetzner is the cheapest place for the staging nodes, by about two thirds',
-    // A result carries its details as a short note; this one runs long to stress the layout.
+    // A result's context is markdown, as agents are told to write it; long to stress the layout.
     body:
-      'Same 4 vCPU / 8 GB machine: Hetzner €7.90, Scaleway €21.50, DigitalOcean $48 a month.\n\n' +
-      'Hetzner placement failed twice in Falkenstein last week, so I would keep the fallback chain. ' +
+      'Same 4 vCPU / 8 GB machine, per month:\n\n' +
+      '- **Hetzner**: €7.90\n- Scaleway: €21.50\n- DigitalOcean: $48\n\n' +
+      'Hetzner placement failed twice in Falkenstein last week, so I would **keep the fallback chain**. ' +
       'The full table with every region is in the linked file. '.repeat(3),
     createdAt: new Date(NOW - 30 * MIN).toISOString(),
     answerSpec: { type: 'acknowledge' },

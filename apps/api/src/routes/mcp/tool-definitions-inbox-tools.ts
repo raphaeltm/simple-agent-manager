@@ -14,11 +14,12 @@ import {
 const title = {
   type: 'string',
   description:
-    'One sentence the person reads in their inbox, on one line. State exactly what you need.',
+    'One plain sentence (no markdown) the person reads in their inbox, on one line: the outcome, or exactly what you need.',
 };
 const why = {
   type: 'string',
-  description: 'Short reason and the context the person needs to act without opening the chat.',
+  description:
+    'Always give it: brief, easy-to-read context in markdown (short paragraphs, bullet lists, bold for what matters) and clear, simple language, so the person can understand and act without opening the chat.',
 };
 const links = {
   type: 'array',

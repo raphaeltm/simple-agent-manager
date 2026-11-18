@@ -56,6 +56,11 @@ const ITEMS: Record<string, InboxItem> = {
     // A conversation still running, so Reply is offered (the inbox audit covers a finished one).
     agentState: 'working',
     title: 'The flaky login test is fixed: it was racing the session cookie on slow CI runners',
+    body:
+      'The login test read the session cookie **before the server had set it** on slow runners.\n\n' +
+      '- Waits for the cookie now instead of a fixed delay\n' +
+      '- Ran it 50 times on CI: no failures\n\n' +
+      'Nothing else changed. <script>alert(1)</script> https://app.example.com/a/very/long/path/that/does/not/break/at/all/when/it/should',
     links: [
       { kind: 'pr', id: 'https://github.com/user/sam/pull/2793', label: 'Login test fix PR #2793' },
     ],

@@ -13,6 +13,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import * as notificationService from '../notification';
 import * as projectDataService from '../project-data';
+import { stripMarkdown } from '../task-title';
 import { linkQuestionNotification } from './question-asks';
 
 /**
@@ -60,7 +61,8 @@ export async function announceAgentAsk(
       taskId: input.taskId,
       // A result's push leads with its outcome, not the task's name.
       taskTitle: input.kind === 'result' ? input.title : (task?.title ?? input.title),
-      context: input.body,
+      // `why` is markdown in the inbox; a push shows plain text.
+      context: stripMarkdown(input.body),
       category,
       options: input.options.length > 0 ? input.options : null,
       sessionId: input.sessionId,

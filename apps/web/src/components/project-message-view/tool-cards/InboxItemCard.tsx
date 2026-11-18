@@ -14,6 +14,7 @@ import { KIND_META } from '../../inbox/inbox-model';
 import { InboxAnswerControls } from '../../inbox/InboxAnswerControls';
 import { inboxPath } from '../../inbox/InboxButton';
 import { InboxLinkChips } from '../../inbox/InboxItemView';
+import { RenderedMarkdown } from '../../MarkdownRenderer';
 import { extractInboxItemRef } from './inbox-item-card-data';
 
 export interface InboxItemCardProps {
@@ -94,10 +95,10 @@ function Body({ text }: { text: string }) {
   return (
     <div>
       <div
-        className={`min-w-0 text-sm whitespace-pre-wrap text-fg-secondary [overflow-wrap:anywhere] ${collapsible && !expanded ? 'max-h-40 overflow-hidden [mask-image:linear-gradient(to_bottom,black_65%,transparent)]' : ''}`}
+        className={`min-w-0 text-sm text-fg-secondary [overflow-wrap:anywhere] ${collapsible && !expanded ? 'max-h-40 overflow-hidden [mask-image:linear-gradient(to_bottom,black_65%,transparent)]' : ''}`}
       >
-        {/* Agent-written and untrusted: plain text, as the Inbox shows it. */}
-        {text}
+        {/* Agent-written markdown, as the Inbox shows it: no raw HTML, sanitized links. */}
+        <RenderedMarkdown content={text} inline />
       </div>
       {collapsible && (
         <Button
