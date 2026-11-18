@@ -267,6 +267,9 @@ importers:
       '@modelcontextprotocol/server':
         specifier: 2.3.1
         version: 2.3.1
+      '@remix-run/multipart-parser':
+        specifier: 1.1.1
+        version: 1.1.1
       '@simple-agent-manager/agent-email':
         specifier: workspace:*
         version: link:../../packages/agent-email
@@ -4065,6 +4068,12 @@ packages:
         optional: true
       react-redux:
         optional: true
+
+  '@remix-run/headers@1.1.0':
+    resolution: {integrity: sha512-Rmzn+WesET0EfVukEHYYKT6RV9HYQb9WGdda3oWedQJXCoHnrXgaQc39DdwZ2rztI05izBAOF1HEHmEpGtjKHQ==}
+
+  '@remix-run/multipart-parser@1.1.1':
+    resolution: {integrity: sha512-ofIL0mdDH73NtiiowYf7yMlI9vv60Xe1jEzuJl2gGLnwScT7ai2wB0osvMmXJmumzxZ237YaMo2drM5hb7ULxg==}
 
   '@remix-run/route-pattern@0.22.1':
     resolution: {integrity: sha512-czdGJWh09Lapvcqt7Vb09KlrU2PhRJ8xQaI+AItTuD9aDJ5MAgxnS38lnys6Ll+6RJEqPiaUqTwIQhVLwFvv+w==}
@@ -12740,6 +12749,12 @@ snapshots:
     optionalDependencies:
       react: 19.3.1
       react-redux: 9.3.0(@types/react@19.3.0)(react@19.3.1)(redux@5.0.1)
+
+  '@remix-run/headers@1.1.0': {}
+
+  '@remix-run/multipart-parser@1.1.1':
+    dependencies:
+      '@remix-run/headers': 1.1.0
 
   '@remix-run/route-pattern@0.22.1': {}
 

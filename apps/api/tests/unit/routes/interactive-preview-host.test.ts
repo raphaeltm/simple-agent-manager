@@ -69,7 +69,9 @@ describe('interactive preview host handler', () => {
       env.R2,
       env.ENCRYPTION_KEY,
       'project-a',
-      'file-a'
+      'file-a',
+      // The stored size bounds both the memory reservation and the object read.
+      128
     );
   });
 
