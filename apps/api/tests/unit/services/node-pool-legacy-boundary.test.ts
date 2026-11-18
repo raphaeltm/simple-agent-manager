@@ -1129,6 +1129,35 @@ describe('node-pool source discovery', () => {
   });
 });
 
+describe('extracted task allocation boundaries', () => {
+  it('discovers schema-interpolated SQL writers without treating arbitrary templates as tables', () => {
+    const source =
+      'export function retry(db) { return db.run(sql`INSERT INTO ${schema.tasks} (${columns}) SELECT ${values}`); }';
+    expect(scanAllocationWriters([file('apps/api/src/retry.ts', source)])).toEqual([
+      expect.objectContaining({ table: 'tasks', owner: 'retry', writerKind: 'sql-insert' }),
+    ]);
+    expect(
+      scanAllocationWriters([
+        file('apps/api/src/retry.ts', source.replace('schema.tasks', 'untrusted.tasks')),
+      ])
+    ).toEqual([]);
+  });
+
+  it.each(['insertDispatchedTask', 'insertSamDispatchedTask', 'insertMcpRetriedTask'])(
+    'requires an admission contract for every new caller of %s',
+    (name) => {
+      const source = `export function bypass(env, row) { return ${name}(env, row); }`;
+      expect(
+        validateAllocationEntrypointInventory([file('apps/api/src/bypass.ts', source)], [])
+      ).toEqual([
+        expect.objectContaining({
+          reason: expect.stringContaining(`uninventoried allocation entrypoint ${name}()`),
+        }),
+      ]);
+    }
+  );
+});
+
 describe('node-pool inventories', () => {
   it('requires incarnation and workspace authority evidence in the durable allocation owner', () => {
     const filePath = 'apps/api/src/durable-objects/node-lifecycle-provisioning.ts';

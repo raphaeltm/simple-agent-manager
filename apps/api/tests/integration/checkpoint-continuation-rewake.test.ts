@@ -173,11 +173,17 @@ describe('a checkpoint continuation that outlives its wake', () => {
     await runDeliveryAlarm();
 
     expect(recovery.ensure).toHaveBeenCalledOnce();
-    expect(recovery.ensure).toHaveBeenCalledWith(env, PROJECT, CHAT, {
-      taskId: TASK,
-      projectId: PROJECT,
-      chatSessionId: CHAT,
-    });
+    expect(recovery.ensure).toHaveBeenCalledWith(
+      env,
+      PROJECT,
+      CHAT,
+      {
+        taskId: TASK,
+        projectId: PROJECT,
+        chatSessionId: CHAT,
+      },
+      { isDeliveryStillAuthorized: expect.any(Function) }
+    );
     expect(continuation()).toMatchObject({ state: 'retry_wait' });
   });
 
