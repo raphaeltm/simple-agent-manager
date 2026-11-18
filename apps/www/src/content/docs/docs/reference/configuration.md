@@ -215,7 +215,7 @@ On a self-hosted celld box, the `mail-in` compose profile runs an SMTP receiver
 (`deploy/selfhost/sam-mx`) that accepts mail for `agent+<key>@agents.<BASE_DOMAIN>`, requires the
 From domain to be authenticated (aligned SPF or DKIM), and hands each message during the SMTP
 session to the loopback-only route `POST /api/self-host/gateway/inbound-email`
-(`apps/api/src/routes/self-host-gateway-inbound-email.ts`), which runs the same inbound handler as
+(`apps/api/src/selfhost/reverse-tunnel/inbound-email.ts`), which runs the same inbound handler as
 Cloudflare Email Routing. Replies from `reply_to_email` go through the SMTP relay above, From
 `SMTP_FROM` with `Reply-To` set to the trigger's address (`selfHostAgentEmailSender()` in
 `apps/api/src/services/agent-email/self-host-inbound.ts`).

@@ -1,6 +1,9 @@
 // FILE SIZE EXCEPTION: Cross-boundary node-agent request layer marginally over the limit; interactive/background timeout tiers and cf-container interruption classification are one cohesive concern. Split candidate if it grows further. See .claude/rules/18-file-size-limits.md
 import type { McpServerEntry } from '@simple-agent-manager/shared';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
 
+import * as schema from '../db/schema';
 import type { VmAgentContainerRequestGuard } from '../durable-objects/vm-agent-container';
 import {
   getRuntimeRecoveryMessage,
@@ -308,9 +311,15 @@ export async function fetchNodeAgent(
     );
   }
 
-  // Single seam for control plane -> node HTTP: the node row decides container, reverse
-  // tunnel (loopback lease port on this box) or the public backend hostname.
-  const route = await resolveNodeAgentRoute(env, nodeId);
+  const db = drizzle(env.DATABASE, { schema });
+  const node = await db
+    .select({ runtime: schema.nodes.runtime, transport: schema.nodes.transport })
+    .from(schema.nodes)
+    .where(eq(schema.nodes.id, nodeId))
+    .get();
+
+  // Same single node read as before; only an installed build transport adds its own lookup.
+  const route = await resolveNodeAgentRoute(env, nodeId, node);
   if (route.kind !== 'container') {
     await beforeExternalMutation?.();
     return nodeResponse(

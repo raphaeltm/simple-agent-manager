@@ -14,7 +14,7 @@ import * as box from '../../../../../scripts/selfhost/box-settings';
 import {
   GATEWAY_ORIGINAL_HOST_HEADER,
   GATEWAY_SECRET_HEADER,
-} from '../../../src/routes/self-host-gateway';
+} from '../../../src/selfhost/reverse-tunnel/gateway';
 import { FRPS_PLUGIN_OPS } from '../../../src/selfhost/reverse-tunnel/authz';
 import * as config from '../../../src/selfhost/reverse-tunnel/config';
 import { GATEWAY_HEADER } from '../../../src/services/node-websocket-gateway';

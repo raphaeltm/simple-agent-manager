@@ -23,19 +23,19 @@
  */
 import type { Context } from 'hono';
 
-import type { Env } from '../env';
-import { log } from '../lib/logger';
-import { normalizeMailbox } from '../services/agent-email/address';
+import type { Env } from '../../env';
+import { log } from '../../lib/logger';
+import { normalizeMailbox } from '../../services/agent-email/address';
 import {
   handleInboundAgentEmail,
   type InboundDeps,
   type InboundEmailMessage,
-} from '../services/agent-email/inbound';
-import { isSelfHostInboundEmailConfigured } from '../services/agent-email/self-host-inbound';
+} from '../../services/agent-email/inbound';
+import { isSelfHostInboundEmailConfigured } from '../../services/agent-email/self-host-inbound';
 import {
   getReverseTunnelGatewaySecret,
   isAcceptedGatewaySecret,
-} from '../selfhost/reverse-tunnel/config';
+} from './config';
 
 export const INBOUND_EMAIL_HEADER = {
   secret: 'X-SAM-Gateway-Secret',

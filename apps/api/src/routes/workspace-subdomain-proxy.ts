@@ -4,10 +4,6 @@
  * D1, then proxy to the node's vm-agent or the Instant container. Moved verbatim out of
  * `index.ts` (rule 18); `index.ts` mounts it with `app.use('*', workspaceSubdomainProxy)` at
  * the same position in the middleware chain.
- *
- * On a self-hosted box the same handler also answers Caddy forward_auth for WebSocket upgrades
- * (`routes/self-host-gateway.ts`): when the request is a gateway authorization request it
- * returns the upstream decision instead of fetching, so the gateway runs exactly this auth.
  */
 import type { WorkspaceStatus } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
@@ -26,8 +22,7 @@ import { getNodeBackendBaseUrl } from '../services/node-agent-readiness';
 import {
   type NodeAgentRoute,
   NodeAgentRouteError,
-  nodeAgentRouteFromRow,
-  readNodeAgentRouteRow,
+  resolveNodeAgentRoute,
 } from '../services/node-agent-route';
 import {
   gatewayDecisionResponse,
@@ -147,11 +142,15 @@ export async function workspaceSubdomainProxy(
   }
 
   const workspaceStatus = workspace.status as WorkspaceStatus;
-  // One read for runtime, transport and the current incarnation's reverse-tunnel lease port.
-  const nodeRouteRow = workspace.nodeId
-    ? await readNodeAgentRouteRow(c.env, workspace.nodeId)
-    : null;
-  const nodeRuntime = nodeRouteRow?.runtime ?? 'vm';
+  // One node read, as before; `transport` routes a build-extension node (self-host tunnel).
+  const nodeRow = workspace.nodeId
+    ? await db
+        .select({ runtime: schema.nodes.runtime, transport: schema.nodes.transport })
+        .from(schema.nodes)
+        .where(eq(schema.nodes.id, workspace.nodeId))
+        .get()
+    : undefined;
+  const nodeRuntime = nodeRow?.runtime ?? 'vm';
   const gatewayRequest = isGatewayAuthorizationRequest(c.req.raw);
 
   if (workspaceStatus !== 'running' && workspaceStatus !== 'recovery') {
@@ -324,28 +323,8 @@ export async function workspaceSubdomainProxy(
 
   // Proxy to the VM agent via its proxied (orange-clouded) backend hostname.
   // The explicit scriptless *.vm route prevents recursion through this Worker.
-  // Its DNS record selects legacy public-IP or Cloudflare Tunnel transport. A reverse-tunnel
-  // node has no DNS record: it is reached on its leased loopback port on this box.
-  let nodeRoute: NodeAgentRoute;
-  try {
-    nodeRoute = nodeAgentRouteFromRow(workspace.nodeId || workspaceId, nodeRouteRow, c.env);
-  } catch (err) {
-    if (!(err instanceof NodeAgentRouteError)) throw err;
-    log.warn('ws_proxy_node_route_unavailable', { workspaceId, nodeId: workspace.nodeId });
-    if (portsListRequest) {
-      return c.json(
-        workspacePortsReadinessPayload(
-          'not_ready',
-          workspaceStatus,
-          'Workspace ports are not ready',
-          true,
-          { runtime: 'vm', reason: 'node_route_unavailable' }
-        ),
-        202
-      );
-    }
-    return c.json({ error: 'NODE_UNREACHABLE', message: 'Workspace node is not reachable' }, 503);
-  }
+  // Its DNS record selects legacy public-IP or Cloudflare Tunnel transport; a node on a
+  // build-extension transport (self-host reverse tunnel) is routed by `resolveNodeAgentRoute`.
   const routedNodeId = (workspace.nodeId || workspaceId).toLowerCase();
   const backendHostname = `${routedNodeId}.vm.${baseDomain}`;
   log.info('ws_proxy_route', {
@@ -365,12 +344,22 @@ export async function workspaceSubdomainProxy(
     },
     c.env
   );
-  // Both origins come from trusted routing config, never from the request: the fixed loopback
-  // lease origin for a reverse-tunnel node, the backend hostname for every other transport.
-  const vmUrl =
-    nodeRoute.kind === 'reverse-tunnel'
-      ? new URL(nodeRoute.origin)
-      : new URL(getNodeBackendBaseUrl(routedNodeId, c.env));
+  let nodeRoute: NodeAgentRoute;
+  try {
+    nodeRoute = await resolveNodeAgentRoute(c.env, workspace.nodeId || workspaceId, nodeRow);
+  } catch (err) {
+    // A tunnel-only node without a current lease: unreachable, never the public hostname.
+    if (!(err instanceof NodeAgentRouteError)) throw err;
+    log.warn('ws_proxy_node_unroutable', {
+      workspaceId,
+      nodeId: workspace.nodeId,
+      action: 'rejected',
+    });
+    return c.json({ error: 'NODE_UNREACHABLE', message: 'Node is not reachable' }, 503);
+  }
+  const vmUrl = new URL(
+    nodeRoute.kind === 'container' ? getNodeBackendBaseUrl(routedNodeId, c.env) : nodeRoute.origin
+  );
   vmUrl.pathname = url.pathname;
   vmUrl.search = url.search;
 
@@ -405,7 +394,7 @@ export async function workspaceSubdomainProxy(
   headers.delete('x-sam-node-id');
   headers.delete('x-sam-workspace-id');
   headers.delete('x-forwarded-host');
-  // The self-hosted gateway secret authenticates Caddy to the Worker; it never goes to a node.
+  // The self-host gateway secret authenticates Caddy/frps to the API; it never goes to a node.
   headers.delete('x-sam-gateway-secret');
   headers.set('X-SAM-Node-Id', workspace.nodeId || workspaceId);
   headers.set('X-SAM-Workspace-Id', workspaceId);
@@ -417,11 +406,8 @@ export async function workspaceSubdomainProxy(
   headers.set('X-Forwarded-Host', hostname);
   headers.set('X-Forwarded-Proto', 'https');
 
-  // Self-hosted WebSocket gateway: everything above (auth, ownership, status, port token,
-  // header rewriting) has run unchanged; Caddy proxies the socket to the decided upstream.
-  if (gatewayRequest) {
-    return gatewayDecisionResponse(c.req.raw, nodeRoute, { url: vmUrl, headers }, c.env);
-  }
+  // Self-hosted WebSocket gateway: same auth and headers above; the box's Caddy carries it.
+  if (gatewayRequest) return gatewayDecisionResponse(c.req.raw, nodeRoute, { url: vmUrl, headers });
 
   let response: Response;
   try {

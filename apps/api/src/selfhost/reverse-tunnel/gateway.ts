@@ -1,44 +1,42 @@
 /**
- * Internal endpoints for the self-hosted box's gateway processes (deploy/selfhost/):
+ * Internal endpoints for the self-hosted box's gateway processes (deploy/selfhost/), mounted
+ * only by the self-host entry (`entry.ts`); the Cloudflare Worker never loads this module.
  *
- * - `POST /frps-plugin?op=Login|NewProxy|Ping|NewWorkConn` — frps server plugin. Authenticated with HTTP
- *   basic auth whose password is REVERSE_TUNNEL_GATEWAY_SECRET (frps sends the userinfo of
- *   its plugin `addr`). Decisions: selfhost/reverse-tunnel/authz.ts.
- * - `GET /node-websocket` — Caddy forward_auth for node WebSocket upgrades. Authenticated with
- *   the `X-SAM-Gateway-Secret` header. It re-dispatches the original request through the SAM
- *   app so the EXISTING ws-* / logs-stream authentication runs unchanged
- *   (services/node-websocket-gateway.ts), and returns either that handler's refusal (401, 302
- *   port-token redirect, 403, 503, ...) for Caddy to send to the client, or a decision naming
- *   the loopback upstream and the headers Caddy must forward.
+ * - `POST {prefix}/frps-plugin?op=Login|NewProxy|Ping|NewWorkConn`: frps server plugin,
+ *   authenticated with HTTP basic auth whose password is REVERSE_TUNNEL_GATEWAY_SECRET (frps
+ *   sends its plugin `addr` userinfo). Decisions: `authz.ts`.
+ * - `GET {prefix}/node-websocket`: Caddy forward_auth for node WebSocket upgrades,
+ *   authenticated with `X-SAM-Gateway-Secret`. It re-dispatches the original request through
+ *   the SAM app so the EXISTING ws-* / logs-stream authentication runs unchanged
+ *   (`services/node-websocket-gateway.ts`), and returns that handler's refusal for Caddy to
+ *   send, or a decision naming the loopback upstream and the headers Caddy must forward.
  *
- * - `POST /inbound-email` — the box's sam-mx SMTP receiver hands over one inbound agent email
- *   (routes/self-host-gateway-inbound-email.ts). Same secret header, plus its own on-switch.
+ * - `POST {prefix}/inbound-email`: the box's sam-mx SMTP receiver hands over one inbound agent
+ *   email (`inbound-email.ts`). Same secret header, plus its own on-switch.
  *
- * All are unreachable from the internet: frps and Caddy call celld directly on loopback, and
- * the box's Caddy answers 404 for this path prefix on its public listener. Both also fail
- * closed here: with no (or a too-short) REVERSE_TUNNEL_GATEWAY_SECRET they answer 404, which
- * is every Cloudflare deployment, and a wrong secret is 401. These routes do not use session
- * auth and are mounted before every session-auth router.
+ * frps and Caddy call celld on loopback; the box's Caddy answers 404 for this prefix on its
+ * public listener (L22 owns that matcher). Both routes also fail closed here: no (or a
+ * too-short) secret answers 404, and a wrong secret 401.
  */
 import { type Context, Hono } from 'hono';
 
-import type { Env } from '../env';
-import { log } from '../lib/logger';
-import { readRequestJsonRecord, RequestBodyTooLargeError } from '../lib/runtime-validation';
-import { parseWorkspaceSubdomain } from '../lib/workspace-subdomain';
-import type { InboundDeps } from '../services/agent-email/inbound';
-import { authorizeFrpsPluginRequest } from '../selfhost/reverse-tunnel/authz';
-import {
-  getReverseTunnelGatewaySecret,
-  isAcceptedGatewaySecret,
-} from '../selfhost/reverse-tunnel/config';
+import type { Env } from '../../env';
+import { log } from '../../lib/logger';
+import { readRequestJsonRecord, RequestBodyTooLargeError } from '../../lib/runtime-validation';
+import { parseWorkspaceSubdomain } from '../../lib/workspace-subdomain';
+import { handleAppError } from '../../middleware/app-error-handler';
+import type { InboundDeps } from '../../services/agent-email/inbound';
 import {
   GATEWAY_HEADER,
   isGatewayDecisionFor,
   markGatewayAuthorizationRequest,
-} from '../services/node-websocket-gateway';
-import { handleInboundEmailGateway } from './self-host-gateway-inbound-email';
+} from '../../services/node-websocket-gateway';
+import { authorizeFrpsPluginRequest, type FrpsPluginDecision } from './authz';
+import { getReverseTunnelGatewaySecret, isAcceptedGatewaySecret } from './config';
+import type { ReverseTunnelEnv } from './env';
+import { handleInboundEmailGateway } from './inbound-email';
 
+export const SELF_HOST_GATEWAY_PATH_PREFIX = '/api/self-host/gateway';
 /** frps plugin bodies are a few hundred bytes; bound them well above that. */
 export const FRPS_PLUGIN_MAX_BODY_BYTES = 16 * 1024;
 export const GATEWAY_SECRET_HEADER = 'X-SAM-Gateway-Secret';
@@ -47,10 +45,8 @@ export const GATEWAY_ORIGINAL_HOST_HEADER = 'X-SAM-Gateway-Original-Host';
 
 /** Basic-auth username frps sends (deploy/selfhost/frps/frps.toml); only the password matters. */
 const FRPS_PLUGIN_BASIC_USER = 'frps';
-
 /** Logs-stream WebSocket on the API host (routes/nodes/diagnostics.ts). */
 const LOGS_STREAM_PATH_RE = /^\/api\/nodes\/[A-Za-z0-9_-]{1,64}\/logs\/stream$/;
-
 /** Headers the gateway itself consumes; never forwarded into the re-dispatched request. */
 const GATEWAY_INPUT_HEADERS = [
   'host',
@@ -60,12 +56,17 @@ const GATEWAY_INPUT_HEADERS = [
   'x-forwarded-uri',
   'x-forwarded-method',
   'x-forwarded-proto',
+  // Client-address headers: celld has no edge that overwrites them, so a client copy must never
+  // become the identity any IP-keyed check in the re-dispatched handler sees.
+  'cf-connecting-ip',
+  'x-forwarded-for',
+  'x-real-ip',
 ];
 
 export type GatewayDispatch = (
   request: Request,
   env: Env,
-  executionCtx: Context<{ Bindings: Env }>['executionCtx']
+  ctx: Context['executionCtx']
 ) => Response | Promise<Response>;
 
 function notFound(): Response {
@@ -92,12 +93,18 @@ function basicAuthPassword(header: string | undefined): string | null {
   return decoded.slice(separator + 1);
 }
 
-function frpsReply(decision: { allow: true } | { allow: false; reason: string }): Response {
-  return Response.json(
-    decision.allow
-      ? { reject: false, unchange: true }
-      : { reject: true, reject_reason: decision.reason }
-  );
+/**
+ * frps plugin response (frp v0.72 `pkg/plugin/server/types.go`). An allow that carries
+ * `replacementContent` MUST be `unchange: false` with `content`: frps applies `content` only
+ * then, and the Login replacement is what pins the server-chosen run_id that fences duplicate
+ * control sessions (`authz.ts`). Every other allow leaves the request unchanged.
+ */
+export function frpsPluginReply(decision: FrpsPluginDecision): Response {
+  if (!decision.allow) return Response.json({ reject: true, reject_reason: decision.reason });
+  if (decision.replacementContent) {
+    return Response.json({ reject: false, unchange: false, content: decision.replacementContent });
+  }
+  return Response.json({ reject: false, unchange: true });
 }
 
 /** Which original requests the gateway may authorize: node WebSocket upgrades only. */
@@ -109,10 +116,7 @@ function isGatewayTarget(env: Env, host: string, path: string): boolean {
   return host === `api.${baseDomain}` && LOGS_STREAM_PATH_RE.test(path);
 }
 
-/**
- * The original request Caddy is asking about, or null when it is not a node WebSocket upgrade
- * the gateway may authorize (any other target is refused rather than re-dispatched).
- */
+/** The original request Caddy asks about, or null when the gateway may not authorize it. */
 function forwardedGatewayTarget(env: Env, headers: Headers): URL | null {
   // Not X-Forwarded-Host: celld rebuilds request.url from that header, so Caddy sets it to the
   // API host (keeping this request on this route) and sends the socket's host separately.
@@ -126,9 +130,8 @@ function forwardedGatewayTarget(env: Env, headers: Headers): URL | null {
   } catch {
     original = null;
   }
-  // The target check reads the URL that is re-dispatched (original.hostname), and the host
-  // must survive URL parsing unchanged: WHATWG parsing drops tabs/newlines, applies IDNA and
-  // reads userinfo, so a header whose parsed host differs from its text is refused outright
+  // The host must survive URL parsing unchanged: WHATWG parsing drops tabs/newlines, applies
+  // IDNA and reads userinfo, so a header whose parsed host differs from its text is refused
   // rather than authorized as whichever workspace the parser happened to produce.
   const allowed =
     !!original &&
@@ -138,7 +141,7 @@ function forwardedGatewayTarget(env: Env, headers: Headers): URL | null {
     isGatewayTarget(env, original.hostname, original.pathname);
   if (!allowed) {
     log.warn('self_host_gateway.forward_auth_not_a_gateway_route', {
-      host,
+      host: host.slice(0, 255),
       method,
       upgrade: upgrade || null,
       action: 'rejected',
@@ -182,13 +185,17 @@ export function createSelfHostGatewayRoutes(
   dispatch: GatewayDispatch,
   options: { inboundEmailDeps?: InboundDeps } = {}
 ) {
-  const routes = new Hono<{ Bindings: Env }>();
+  const routes = new Hono<{ Bindings: ReverseTunnelEnv }>().basePath(SELF_HOST_GATEWAY_PATH_PREFIX);
+  routes.onError(handleAppError);
+  routes.notFound(notFound);
 
-  routes.post('/inbound-email', (c) => handleInboundEmailGateway(c, options.inboundEmailDeps));
+  // The celld entry passes the full Worker env; the inbound handler reads agent email settings.
+  routes.post('/inbound-email', (c) =>
+    handleInboundEmailGateway(c as unknown as Context<{ Bindings: Env }>, options.inboundEmailDeps)
+  );
 
   routes.post('/frps-plugin', async (c) => {
-    const secret = getReverseTunnelGatewaySecret(c.env);
-    if (!secret) return notFound();
+    if (!getReverseTunnelGatewaySecret(c.env)) return notFound();
     const presented = basicAuthPassword(c.req.header('Authorization'));
     if (presented === null || !isAcceptedGatewaySecret(c.env, presented)) {
       log.warn('self_host_gateway.frps_plugin_unauthenticated', { action: 'rejected' });
@@ -199,17 +206,15 @@ export function createSelfHostGatewayRoutes(
       body = await readRequestJsonRecord(c.req.raw, 'frps-plugin', FRPS_PLUGIN_MAX_BODY_BYTES);
     } catch (err) {
       // frps needs a 200 JSON verdict to report the refusal to frpc.
-      return frpsReply({
-        allow: false,
-        reason: err instanceof RequestBodyTooLargeError ? 'request too large' : 'malformed request',
-      });
+      const reason =
+        err instanceof RequestBodyTooLargeError ? 'request too large' : 'malformed request';
+      return frpsPluginReply({ allow: false, code: 'malformed', reason });
     }
-    return frpsReply(await authorizeFrpsPluginRequest(c.env, c.req.query('op'), body));
+    return frpsPluginReply(await authorizeFrpsPluginRequest(c.env, c.req.query('op'), body));
   });
 
   routes.get('/node-websocket', async (c) => {
-    const secret = getReverseTunnelGatewaySecret(c.env);
-    if (!secret) return notFound();
+    if (!getReverseTunnelGatewaySecret(c.env)) return notFound();
     if (!isAcceptedGatewaySecret(c.env, c.req.header(GATEWAY_SECRET_HEADER) ?? '')) {
       log.warn('self_host_gateway.forward_auth_unauthenticated', { action: 'rejected' });
       return unauthorized();

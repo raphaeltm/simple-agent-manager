@@ -8,12 +8,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ensureReverseTunnelLease, releaseNonLiveReverseTunnelLeases, releaseUnallocatedReverseTunnelLease, runReverseTunnelLeaseSweep } from '../../../src/selfhost/reverse-tunnel/leases';
 import { installReverseTunnelTransport } from '../../../src/selfhost/reverse-tunnel/transport';
-import { fetchNodeAgent } from '../../../src/services/node-agent';
 import { buildNodeProviderLabels } from '../../../src/services/node-provider-labels';
 import { releaseTerminatedNodeIngress } from '../../../src/services/node-provisioning-ingress';
 import { deleteCreatedProviderVmDirectly } from '../../../src/services/node-provisioning-race-cleanup';
 import * as transportRegistry from '../../../src/services/node-transport-extension';
-import { createNodeRecord, provisionNode } from '../../../src/services/nodes';
+import { provisionNode } from '../../../src/services/nodes';
 import { deleteNodeResourcesStrict } from '../../../src/services/strict-node-deletion';
 import { applySqliteMigration } from '../../helpers/sqlite-d1';
 import {
@@ -74,7 +73,7 @@ function leases(nodeId: string): LeaseView[] {
 
 beforeEach(() => {
   // Exercise the shipped DDL, not the schema-derived approximation.
-  sqlite.exec('DROP TABLE IF EXISTS node_reverse_tunnel_leases');
+
   applySqliteMigration(
     sqlite,
     new URL('../../../src/selfhost/migrations/0255_node_reverse_tunnel_leases.sql', import.meta.url)
@@ -514,90 +513,6 @@ describe('lease allocation bounds and C18', () => {
       // The same releasable row is cleaned when its owning build driver is installed.
       expect(await runReverseTunnelLeaseSweep(env)).toEqual({ released: 1 });
       expect(leases(node.id)).toMatchObject([{ status: 'released' }]);
-    }
-  );
-});
-
-// L17b routing seam (integration branch): fetchNodeAgent through node-agent-route.ts.
-describe('control plane -> node routing seam', () => {
-  it('routes a reverse-tunnel node to its loopback lease port and never to public DNS', async () => {
-    const node = await freshNode();
-    await provisionNode(node.id, env);
-    const port = leases(node.id)[0]!.port;
-    const seen: string[] = [];
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
-      seen.push(String(input instanceof Request ? input.url : input));
-      return new Response('ok');
-    }) as typeof fetch;
-    await fetchNodeAgent(
-      node.id,
-      env,
-      `https://${node.id.toLowerCase()}.vm.example.test:8443/health?x=1`,
-      { method: 'GET' },
-      1000
-    );
-    expect(seen).toEqual([`http://127.0.0.1:${port}/health?x=1`]);
-
-    // Released lease: fail closed, no request at all (no DNS record exists to fall back to).
-    await deleteNodeResourcesStrict(node.id, USER, env);
-    seen.length = 0;
-    await expect(
-      fetchNodeAgent(
-        node.id,
-        env,
-        `https://${node.id.toLowerCase()}.vm.example.test:8443/health`,
-        {},
-        1000
-      )
-    ).rejects.toThrow(/no active lease/);
-    expect(seen).toEqual([]);
-  });
-
-  it('never routes to a lease held by a superseded incarnation', async () => {
-    const node = await freshNode();
-    await provisionNode(node.id, env);
-    sqlite
-      .prepare('UPDATE nodes SET runtime_incarnation_id = ? WHERE id = ?')
-      .run(crypto.randomUUID(), node.id);
-    expect(leases(node.id)).toMatchObject([{ status: 'active' }]);
-    const seen: string[] = [];
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
-      seen.push(String(input instanceof Request ? input.url : input));
-      return new Response('ok');
-    }) as typeof fetch;
-    await expect(
-      fetchNodeAgent(
-        node.id,
-        env,
-        `https://${node.id.toLowerCase()}.vm.example.test:8443/health`,
-        {},
-        1000
-      )
-    ).rejects.toThrow(/no active lease/);
-    expect(seen).toEqual([]);
-  });
-
-  it.each(['vm-public-dns', 'cloudflare-tunnel', null] as const)(
-    'control: a %s node is still fetched at its public backend URL unchanged',
-    async (transport) => {
-      const node = await createNodeRecord(env, {
-        userId: USER,
-        name: 'n',
-        vmSize: 'medium',
-        vmLocation: 'nbg1',
-        heartbeatStaleAfterSeconds: 180,
-        cloudProvider: 'hetzner',
-        runtime: 'vm',
-      });
-      sqlite.prepare('UPDATE nodes SET transport = ? WHERE id = ?').run(transport, node.id);
-      const seen: string[] = [];
-      globalThis.fetch = (async (input: RequestInfo | URL) => {
-        seen.push(String(input instanceof Request ? input.url : input));
-        return new Response('ok');
-      }) as typeof fetch;
-      const url = `https://${node.id.toLowerCase()}.vm.example.test:8443/health`;
-      await fetchNodeAgent(node.id, env, url, { method: 'GET' }, 1000);
-      expect(seen).toEqual([url]);
     }
   );
 });

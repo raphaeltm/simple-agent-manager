@@ -34,12 +34,11 @@ describe('ws proxy source contract', () => {
   });
 
   it('constructs the backend VM URL from trusted routing config instead of cloning request origin', () => {
-    // Same assertion as before the ws-* proxy moved out of index.ts, plus the reverse-tunnel
-    // arm, which may only use the route's fixed loopback origin. Behaviour is pinned in
-    // tests/workers/self-host-gateway.test.ts ('proxies a %s workspace to its public backend
-    // hostname': the fetch target is {nodeId}.vm.{BASE_DOMAIN} for every non-reverse transport).
-    expect(file).toContain('new URL(getNodeBackendBaseUrl(routedNodeId, c.env))');
-    expect(file).toContain('new URL(nodeRoute.origin)');
+    // The node row decides the route (services/node-agent-route.ts); never the request origin.
+    expect(file).toContain(
+      'resolveNodeAgentRoute(c.env, workspace.nodeId || workspaceId, nodeRow)'
+    );
+    expect(file).toContain('getNodeBackendBaseUrl(routedNodeId, c.env)');
     expect(file).not.toContain('const vmUrl = new URL(c.req.url)');
   });
 

@@ -459,7 +459,7 @@ describe('the celld entry and the egress fence', () => {
   it('wraps the default export and every Durable Object class, and nothing else changes', () => {
     const main = renderRuntimeSecretsMain(['ProjectData', 'TaskRunner', 'ProjectData']);
     expect(main).toContain("export * from './src/index.ts';");
-    expect(main).toContain('export default wrapWorker(worker);');
+    expect(main).toContain('export default wrapWorker(withSelfHostBuild(worker));');
     expect(main.match(/wrapDurableObject\(api\.(\w+)\)/g)).toEqual([
       'wrapDurableObject(api.ProjectData)',
       'wrapDurableObject(api.TaskRunner)',
@@ -477,7 +477,7 @@ describe('the celld entry and the egress fence', () => {
       expect(main).toContain("export * from './src/index.ts';");
     }
     // The plaintext entry is the API's own entry, unwrapped.
-    expect(renderPlainMain()).toContain('export default worker;');
+    expect(renderPlainMain()).toContain('export default withSelfHostBuild(worker);');
     expect(renderPlainMain()).not.toContain('wrapWorker');
   });
 

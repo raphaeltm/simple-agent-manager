@@ -8,13 +8,10 @@
  */
 import { DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS } from '@simple-agent-manager/shared';
 
+import type { Env } from '../env';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { getNodeBackendBaseUrl } from './node-agent-readiness';
-import {
-  nodeAgentRequestInit,
-  resolveNodeAgentRoute,
-  retargetNodeAgentUrl,
-} from './node-agent-route';
+import { resolveNodeAgentRoute, retargetNodeAgentUrl } from './node-agent-route';
 import type {
   RuntimeWorkspaceSnapshot,
   TaskLivenessNodeHealthProbeEnv,
@@ -74,7 +71,7 @@ function isNodeHealthProbeTimeout(err: unknown): boolean {
   return err.name === 'AbortError' || err.message.startsWith('Request timed out after ');
 }
 
-/** Reject with the same message `fetchWithTimeout` uses, so both count as a probe timeout. */
+/** Reject with the message `fetchWithTimeout` uses, so both count as a probe timeout. */
 async function withinBudget<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<never>((_resolve, reject) => {
@@ -92,16 +89,15 @@ async function withinBudget<T>(work: Promise<T>, timeoutMs: number): Promise<T> 
 
 /**
  * Probe a VM node's `/health`. `nodeTransport` comes from the liveness snapshot the caller
- * already loaded (`loadRuntimeWorkspaceSnapshot`), so every transport other than
- * reverse-tunnel makes exactly the one public fetch it always made, with no D1 read. A
- * reverse-tunnel node has no public hostname: its route (the current incarnation's lease) is
- * read inside the same time budget, and any failure there is an inconclusive 'error' or
- * 'timeout', never a terminal verdict.
+ * already loaded, so every node on a public transport makes exactly the one fetch it always
+ * made, with no D1 read. A node on a build-extension transport (the self-host reverse tunnel)
+ * has no public hostname: its route is resolved inside the same time budget, and a failure
+ * there is an inconclusive `error`/`timeout`, never a terminal verdict.
  */
 export async function probeNodeHealthForTaskLiveness(
-  env: TaskLivenessNodeHealthProbeEnv,
+  env: Env,
   nodeId: string,
-  nodeTransport?: string | null
+  nodeTransport: string | null = null
 ): Promise<TaskLivenessNodeHealthProbeResult> {
   const timeoutMs = getTaskLivenessNodeHealthProbeTimeoutMs(env);
   if (!env.BASE_DOMAIN) {
@@ -114,38 +110,23 @@ export async function probeNodeHealthForTaskLiveness(
     };
   }
 
-  const backendEnv = {
-    BASE_DOMAIN: env.BASE_DOMAIN,
-    VM_AGENT_PROTOCOL: env.VM_AGENT_PROTOCOL,
-    VM_AGENT_PORT: env.VM_AGENT_PORT,
-  };
-  let url = `${getNodeBackendBaseUrl(nodeId, backendEnv)}/health`;
-  // Never follow a node's redirect, on any transport (node-agent-route.ts).
-  const init = nodeAgentRequestInit({ method: 'GET' });
-  // Existing transports keep the exact budget they always had; only the reverse-tunnel route
-  // read spends part of it.
+  let url = `${getNodeBackendBaseUrl(nodeId, env)}/health`;
   let fetchTimeoutMs = timeoutMs;
-
   try {
-    if (nodeTransport === 'reverse-tunnel') {
-      if (!env.DATABASE) throw new Error('Reverse-tunnel node route needs DATABASE');
-      const startedAt = Date.now();
-      const route = await withinBudget(
-        resolveNodeAgentRoute(
-          {
-            DATABASE: env.DATABASE,
-            REVERSE_TUNNEL_PORT_RANGE_START: env.REVERSE_TUNNEL_PORT_RANGE_START,
-            REVERSE_TUNNEL_PORT_RANGE_END: env.REVERSE_TUNNEL_PORT_RANGE_END,
-            ...backendEnv,
-          },
-          nodeId
-        ),
-        timeoutMs
-      );
-      url = retargetNodeAgentUrl(url, route);
-      fetchTimeoutMs = Math.max(1, timeoutMs - (Date.now() - startedAt));
-    }
-    const response = await fetchWithTimeout(url, init, fetchTimeoutMs);
+    const startedAt = Date.now();
+    // Resolve even when no driver is installed: extension-only rows must never fall
+    // back to public DNS. Public transports resolve locally with no additional I/O.
+    const route = await withinBudget(
+      resolveNodeAgentRoute(env, nodeId, { runtime: 'vm', transport: nodeTransport }),
+      timeoutMs
+    );
+    url = retargetNodeAgentUrl(url, route);
+    fetchTimeoutMs = Math.max(1, timeoutMs - (Date.now() - startedAt));
+    const response = await fetchWithTimeout(
+      url,
+      { method: 'GET', redirect: 'manual' },
+      fetchTimeoutMs
+    );
     return {
       outcome: response.ok ? 'ok' : 'failed',
       timeoutMs,

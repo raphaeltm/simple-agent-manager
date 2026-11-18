@@ -2175,41 +2175,6 @@ export const nodeCloudflareTunnels = sqliteTable(
   })
 );
 
-/**
- * Reverse-tunnel loopback port leases (migration 0232, services/node-reverse-tunnel-*.ts).
- * One row per node incarnation; at most one ACTIVE lease per port (partial unique index).
- * Rows end 'released' and are never deleted.
- */
-export const nodeReverseTunnelLeases = sqliteTable(
-  'node_reverse_tunnel_leases',
-  {
-    id: text('id').primaryKey(),
-    nodeId: text('node_id').notNull(),
-    userId: text('user_id').notNull(),
-    runtimeIncarnationId: text('runtime_incarnation_id').notNull(),
-    port: integer('port').notNull(),
-    /** SHA-256 hex of the per-node frp credential; the credential itself is never stored. */
-    credentialHash: text('credential_hash').notNull(),
-    /** 'active' | 'released' */
-    status: text('status').notNull().default('active'),
-    releaseReason: text('release_reason'),
-    createdAt: text('created_at').notNull(),
-    updatedAt: text('updated_at').notNull(),
-    releasedAt: text('released_at'),
-  },
-  (table) => ({
-    incarnationUnique: uniqueIndex('idx_node_reverse_tunnel_leases_incarnation').on(
-      table.nodeId,
-      table.runtimeIncarnationId
-    ),
-    activePortUnique: uniqueIndex('idx_node_reverse_tunnel_leases_active_port')
-      .on(table.port)
-      .where(sql`status = 'active'`),
-    portIdx: index('idx_node_reverse_tunnel_leases_port').on(table.port, table.releasedAt),
-    statusIdx: index('idx_node_reverse_tunnel_leases_status').on(table.status, table.nodeId),
-  })
-);
-
 // =============================================================================
 // Workspaces
 // =============================================================================
@@ -6093,7 +6058,7 @@ export const lifecycleStateEpisodes = sqliteTable(
 );
 
 /**
- * One row per reported lifecycle phase (Insights slice T, migration 0250). Written by
+ * One row per reported lifecycle phase (Insights slice T, migrations 0250 and 0260). Written by
  * `recordLifecycleTimings` and `recordRunnerPhase`, read by `packages/operations`
  * `insights-phase-timings`, purged by the daily lifecycle latency evaluation. No foreign keys:
  * bounded telemetry must never block or cascade an entity delete. `createdAt` is epoch ms.
@@ -6122,11 +6087,26 @@ export const lifecyclePhaseTimings = sqliteTable(
     taskIdx: index('idx_lifecycle_phase_timings_task')
       .on(table.taskId, table.createdAt)
       .where(sql`task_id IS NOT NULL`),
-    skillPhaseIdx: index('idx_lifecycle_phase_timings_skill_phase')
-      .on(table.projectId, table.skillId, table.phase, table.createdAt)
+    // Migration 0260: per (operation, phase) samples of successful rows, one index range each.
+    skillPairIdx: index('idx_lifecycle_phase_timings_skill_pair')
+      .on(
+        table.projectId,
+        table.skillId,
+        table.operation,
+        table.phase,
+        table.outcome,
+        table.createdAt
+      )
       .where(sql`skill_id IS NOT NULL`),
-    profilePhaseIdx: index('idx_lifecycle_phase_timings_profile_phase')
-      .on(table.projectId, table.agentProfileId, table.phase, table.createdAt)
+    profilePairIdx: index('idx_lifecycle_phase_timings_profile_pair')
+      .on(
+        table.projectId,
+        table.agentProfileId,
+        table.operation,
+        table.phase,
+        table.outcome,
+        table.createdAt
+      )
       .where(sql`agent_profile_id IS NOT NULL`),
     createdIdx: index('idx_lifecycle_phase_timings_created').on(table.createdAt),
   })

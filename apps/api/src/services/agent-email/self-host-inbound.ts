@@ -4,7 +4,7 @@
  * Inbound: the box's sam-mx SMTP receiver (deploy/selfhost/sam-mx, compose profile `mail-in`)
  * accepts mail for `agents.<BASE_DOMAIN>`, checks that the From domain is authenticated (aligned
  * SPF or DKIM), and posts each message during the SMTP session to the loopback gateway route
- * `POST /api/self-host/gateway/inbound-email` (routes/self-host-gateway-inbound-email.ts), which
+ * `POST /api/self-host/gateway/inbound-email` (selfhost/reverse-tunnel/inbound-email.ts), which
  * calls the same `handleInboundAgentEmail` the Worker's `email()` export calls on Cloudflare.
  *
  * Outbound: replies go through the SMTP relay SAM already uses for sign-in codes
@@ -28,7 +28,6 @@ import {
 import { AGENT_EMAIL_LOCAL_PART } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
-import { getReverseTunnelGatewaySecret } from '../../selfhost/reverse-tunnel/config';
 
 export type SelfHostInboundEnv = EmailTransportEnv &
   Pick<Env, 'AGENT_EMAIL_INBOUND_SMTP' | 'REVERSE_TUNNEL_GATEWAY_SECRET'>;
@@ -37,7 +36,10 @@ export type SelfHostInboundEnv = EmailTransportEnv &
 export function isSelfHostInboundEmailConfigured(env: SelfHostInboundEnv): boolean {
   if (env.AGENT_EMAIL || !env.BASE_DOMAIN?.trim()) return false;
   if (env.AGENT_EMAIL_INBOUND_SMTP?.trim().toLowerCase() !== 'true') return false;
-  if (!getReverseTunnelGatewaySecret(env)) return false;
+  // The box gateway that hands mail over (selfhost/reverse-tunnel/gateway.ts, self-host build
+  // only) answers 404 without its secret and enforces its minimum length itself; this
+  // Worker-loaded check only needs to know the secret is configured.
+  if (!env.REVERSE_TUNNEL_GATEWAY_SECRET?.trim()) return false;
   return emailTransportKind(env) === 'smtp';
 }
 

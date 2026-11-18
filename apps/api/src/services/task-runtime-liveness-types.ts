@@ -80,11 +80,7 @@ export interface RuntimeWorkspaceSnapshot {
   nodeId: string | null;
   userId: string | null;
   nodeRuntime: string | null;
-  /**
-   * `nodes.transport`, read by the same snapshot query. The node-health probe uses it to route
-   * a reverse-tunnel node through its lease without an extra D1 read for every other transport.
-   * Optional so older hand-built snapshots keep the public route.
-   */
+  /** `nodes.transport` from the same snapshot query; routes the node-health probe. */
   nodeTransport?: string | null;
   nodeStatus: string | null;
   nodeHealthStatus: string | null;

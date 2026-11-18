@@ -166,7 +166,6 @@ import { reportIssueRoutes } from './routes/report-issue';
 import { resolutionStatusRoute } from './routes/resolution-status';
 import { resourceLinkRoutes } from './routes/resource-links';
 import { samRoutes } from './routes/sam';
-import { createSelfHostGatewayRoutes } from './routes/self-host-gateway';
 import { setupRoutes } from './routes/setup';
 import { skillRuntimeRoutes } from './routes/skill-runtime';
 import { skillRoutes } from './routes/skills';
@@ -377,12 +376,6 @@ app.route('/api/auth', agentSignInRoutes);
 app.route('/api/auth', deviceFlowRoutes);
 app.route('/api/auth', authRoutes);
 app.route('/api/setup', setupRoutes);
-// Self-hosted box gateway (frps plugin, Caddy forward_auth). Own secret auth, no session
-// middleware; 404 unless REVERSE_TUNNEL_GATEWAY_SECRET is configured (routes/self-host-gateway.ts).
-app.route(
-  '/api/self-host/gateway',
-  createSelfHostGatewayRoutes((request, env, ctx) => app.fetch(request, env, ctx))
-);
 app.route('/api/credentials', resolutionStatusRoute);
 app.route('/api/credentials', credentialLimitsRoute);
 app.route('/api/credentials', credentialsRoutes);
