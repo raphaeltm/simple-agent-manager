@@ -359,6 +359,7 @@ export function ProjectChat() {
               projectId={state.projectId}
               agents={state.configuredAgents}
               agentProfiles={state.agentProfiles}
+              profilesLoading={state.profilesLoading}
               selectedProfileId={state.selectedProfileId}
               onProfileChange={state.setSelectedProfileId}
               profilePicker={state.profilePicker}
@@ -381,6 +382,7 @@ export function ProjectChat() {
               onCloseProfileWizard={state.closeProfileWizard}
               onUpdateProfileWizard={state.updateProfileWizard}
               onCreateProfileFromWizard={state.createProfileFromWizard}
+              onCreateDefaultChatProfile={state.createDefaultChatProfile}
               suggestProfileName={state.suggestProfileName}
               slashCommands={state.slashCommands}
               attachments={state.chatAttachments}

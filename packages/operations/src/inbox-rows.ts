@@ -102,7 +102,9 @@ export const AskAnswerSpecSchema = v.variant('type', [
 
 const ApprovalExtraSchema = v.object({ targetType: v.string(), targetId: v.string() });
 
-const TERMINAL_TASK = new Set(['completed', 'failed', 'cancelled']);
+/** Task statuses after which the filing agent can no longer be woken. */
+export const TERMINAL_TASK_STATUSES = ['completed', 'failed', 'cancelled'] as const;
+const TERMINAL_TASK = new Set<string>(TERMINAL_TASK_STATUSES);
 const NOT_STARTED_TASK = new Set(['draft', 'queued']);
 
 export function inboxAgentState(

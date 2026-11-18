@@ -6,6 +6,7 @@
  */
 import type { OperationContext } from '@simple-agent-manager/operations';
 import { projectSetups } from '@simple-agent-manager/operations';
+import { agentSetups } from '@simple-agent-manager/operations/internal/insights-agent';
 import type { RunNudgeWindow } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -13,7 +14,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { createOperationPorts } from '../../../src/operation-ports';
-import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import { invalidateAdminSettings } from '../../../src/services/admin-settings';
+import { recordHarnessRunUsage, recordProxyRunUsage } from '../../../src/services/agent-run-usage';
+import { countD1RoundTrips } from '../../helpers/insights-d1';
+import {
+  createAllSchemaTables,
+  createDeclaredIndexes,
+  createSqliteD1,
+} from '../../helpers/sqlite-d1';
 
 const NOW = Date.parse('2026-11-16T12:00:00.000Z');
 const DAY = 86_400_000;
@@ -175,6 +183,34 @@ describe('projectSetups', () => {
     });
   }
 
+  /** The same one-row admission setup for accepted and marker-only callback reports. */
+  function limitedUsageRun(id: string) {
+    createDeclaredIndexes(sqlite, [schema.agentRunUsage, schema.agentRunUsageAdmissionHits]);
+    sqlite.exec(
+      "INSERT INTO platform_settings(key,value,updated_at) VALUES ('insights.runUsageMaxRowsPerSession','1','2026-11-16T12:00:00.000Z')"
+    );
+    invalidateAdminSettings(env);
+    run(id);
+    const scope = {
+      projectId: 'p',
+      chatSessionId: `chat-${id}`,
+      workspaceId: `w-${id}`,
+      agentSessionId: `s-${id}`,
+      agentType: 'claude-code',
+      credentialReference: null,
+      credentialSource: null,
+    };
+    const model = {
+      model: 'claude-opus-5-5',
+      inputTokens: 10,
+      outputTokens: 1,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reasoningTokens: null,
+    };
+    return { scope, model };
+  }
+
   beforeEach(() => {
     prNumber = 0;
     nudgeCalls = [];
@@ -192,6 +228,72 @@ describe('projectSetups', () => {
     env = { DATABASE: createSqliteD1(sqlite), BASE_DOMAIN: 'example.test' } as unknown as Env;
   });
   afterEach(() => sqlite.close());
+
+  it('discloses rejected usage for a picked run while keeping proxy measurements complete', async () => {
+    const { scope, model } = limitedUsageRun('limited');
+    await recordHarnessRunUsage(env, scope, 'accepted', [model], NOW);
+    await recordHarnessRunUsage(env, scope, 'refused', [model], NOW);
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage').get()).toEqual({ n: 1 });
+    expect(
+      sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage_admission_hits').get()
+    ).toEqual({ n: 1 });
+    sqlite.exec('UPDATE agent_run_usage_admission_hits SET last_rejected_at=0');
+    const partial = await projectSetups(ctx(), { projectId: 'p', nowMs: NOW });
+    expect(partial.groups[0]?.tokens).toMatchObject({ state: 'reported', total: 11 });
+    expect(partial).toHaveProperty('usageAdmissionLimited', true);
+    expect(agentSetups(partial)).toHaveProperty('usageAdmissionLimited', true);
+    await recordProxyRunUsage(
+      env,
+      scope,
+      model.model,
+      { ...model, inputTokens: 90, outputTokens: 9 },
+      NOW
+    );
+    const complete = await projectSetups(ctx(), { projectId: 'p', nowMs: NOW });
+    expect(complete.groups[0]?.tokens).toMatchObject({ state: 'reported', total: 99 });
+    expect(complete).toHaveProperty('usageAdmissionLimited', false);
+    expect(agentSetups(complete)).toHaveProperty('usageAdmissionLimited', false);
+  });
+
+  it('ignores a foreign marker with the same chat id and keeps the owner run exact', async () => {
+    run('scope');
+    usage('chat-scope', 11);
+    insert('agent_run_usage_admission_hits', {
+      project_id: 'foreign',
+      chat_session_id: 'chat-scope',
+      last_rejected_at: NOW,
+    });
+    const complete = await projectSetups(ctx(), { projectId: 'p', nowMs: NOW });
+    expect(complete.groups[0]?.tokens).toMatchObject({ state: 'reported', total: 11 });
+    expect(complete).toHaveProperty('usageAdmissionLimited', false);
+    expect(agentSetups(complete)).toHaveProperty('usageAdmissionLimited', false);
+  });
+
+  it('discloses marker-only usage only for the selected project and run window', async () => {
+    const { scope, model } = limitedUsageRun('empty-usage');
+    await recordHarnessRunUsage(
+      env,
+      scope,
+      'refused',
+      [model, { ...model, model: 'claude-sonnet-5-5' }],
+      NOW
+    );
+    const partial = await projectSetups(ctx(), { projectId: 'p', range: '7d', nowMs: NOW });
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage').get()).toEqual({ n: 0 });
+    expect(partial.groups[0]?.tokens).toMatchObject({ state: 'not_reported' });
+    expect(partial).toHaveProperty('usageAdmissionLimited', true);
+    expect(agentSetups(partial)).toHaveProperty('usageAdmissionLimited', true);
+    expect(
+      await projectSetups(ctx('outsider'), { projectId: 'foreign', nowMs: NOW })
+    ).toHaveProperty('usageAdmissionLimited', false);
+    sqlite
+      .prepare('UPDATE tasks SET created_at=?, completed_at=? WHERE id=?')
+      .run(iso(9 * DAY), iso(8 * DAY), 'empty-usage');
+    expect(await projectSetups(ctx(), { projectId: 'p', range: '7d', nowMs: NOW })).toHaveProperty(
+      'usageAdmissionLimited',
+      false
+    );
+  });
 
   it('groups runs by profile with each measure, and names only what the viewer may see', async () => {
     profile('prof-proj', 'Opus Chat', 'p');
@@ -593,45 +695,8 @@ describe('projectSetups', () => {
   });
 
   it('stays within its round-trip budget', async () => {
-    const real = env.DATABASE;
-    let trips = 0;
-    const wrap = <T extends Record<string, unknown>>(statement: T): T => ({
-      ...statement,
-      all: async (...a: unknown[]) => {
-        trips += 1;
-        return (statement.all as (...x: unknown[]) => unknown)(...a);
-      },
-      first: async (...a: unknown[]) => {
-        trips += 1;
-        return (statement.first as (...x: unknown[]) => unknown)(...a);
-      },
-      run: async (...a: unknown[]) => {
-        trips += 1;
-        return (statement.run as (...x: unknown[]) => unknown)(...a);
-      },
-      raw: async (...a: unknown[]) => {
-        trips += 1;
-        return (statement.raw as (...x: unknown[]) => unknown)(...a);
-      },
-    });
-    env = {
-      ...env,
-      DATABASE: {
-        ...real,
-        prepare: (sql: string) => {
-          const statement = real.prepare(sql) as unknown as Record<string, unknown>;
-          return {
-            ...wrap(statement),
-            bind: (...params: unknown[]) =>
-              wrap((statement.bind as (...p: unknown[]) => Record<string, unknown>)(...params)),
-          };
-        },
-        batch: async (statements: unknown[]) => {
-          trips += 1;
-          return (real.batch as (s: unknown[]) => unknown)(statements);
-        },
-      },
-    } as unknown as Env;
+    const counted = countD1RoundTrips(env);
+    env = counted.env;
     profile('prof', 'P', 'p');
     skill('sk', 'do');
     for (let i = 0; i < 120; i += 1) {
@@ -640,12 +705,12 @@ describe('projectSetups', () => {
       usage(`chat-t${i}`, 100);
     }
     await projectSetups(ctx(), { projectId: 'p', nowMs: NOW }); // warm settings
-    trips = 0;
+    counted.reset();
     nudgeCalls = [];
     const result = await projectSetups(ctx(), { projectId: 'p', nowMs: NOW });
     expect(result.groups[0]?.runs).toBe(120);
     // Rule 60 budget for this read is 6 (Insights spec). Measured: membership and the batch on
     // D1 (settings are cached after the first call), plus one ProjectData call for nudges.
-    expect(trips + nudgeCalls.length).toBe(3);
+    expect(counted.trips() + nudgeCalls.length).toBe(3);
   });
 });

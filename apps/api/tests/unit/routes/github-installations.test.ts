@@ -633,16 +633,13 @@ describe('GitHub App installation sharing', () => {
 
     const res = await app.request('/api/github/installations', {}, mockEnv);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toMatchObject({ error: 'GITHUB_UNAVAILABLE' });
     expect(mocks.log.warn).toHaveBeenCalledWith('github.user_access_token_unavailable', {
       userId: 'user-1',
       tokenPresent: false,
       error: 'BetterAuth unavailable',
       flow: 'request',
-    });
-    expect(mocks.log.info).toHaveBeenCalledWith('github.installations_sync.token_status', {
-      userId: 'user-1',
-      tokenPresent: false,
     });
     expect(mocks.getUserAccessibleInstallations).not.toHaveBeenCalled();
   });
@@ -656,7 +653,8 @@ describe('GitHub App installation sharing', () => {
 
     const res = await app.request('/api/github/installations', {}, mockEnv);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toMatchObject({ error: 'GITHUB_REAUTH_REQUIRED' });
     expect(mocks.log.warn).toHaveBeenCalledWith('github.user_access_token_expired', {
       userId: 'user-1',
       tokenPresent: true,
@@ -671,12 +669,13 @@ describe('GitHub App installation sharing', () => {
     expect(JSON.stringify(mocks.log.warn.mock.calls)).not.toContain('stale-github-user-token');
   });
 
-  it('returns null when GitHub refresh fails instead of surfacing a stale token', async () => {
+  it('reports retryable failure when refresh expiry cannot be established', async () => {
     mocks.getAccessToken.mockRejectedValue(new Error('FAILED_TO_GET_ACCESS_TOKEN'));
 
     const res = await app.request('/api/github/installations', {}, mockEnv);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toMatchObject({ error: 'GITHUB_UNAVAILABLE' });
     expect(mocks.log.warn).toHaveBeenCalledWith('github.user_access_token_unavailable', {
       userId: 'user-1',
       tokenPresent: false,
@@ -1361,7 +1360,8 @@ describe('GitHub App installation sharing', () => {
 
     const res = await app.request('/api/github/installations', {}, mockEnv);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({ error: 'GITHUB_NOT_CONNECTED' });
     expect(mocks.getAccessToken).not.toHaveBeenCalled();
     expect(mocks.log.warn).toHaveBeenCalledWith('github.user_access_token_account_missing', {
       userId: 'user-1',

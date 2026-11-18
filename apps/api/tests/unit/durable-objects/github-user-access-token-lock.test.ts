@@ -329,7 +329,7 @@ describe('GitHubUserAccessTokenLock', () => {
     expectBetterAuthTokenLookup(getAccessToken, 'github-account-row');
   });
 
-  it('returns 401 when BetterAuth cannot produce a token', async () => {
+  it('returns 503 when BetterAuth fails without proof that authorization expired', async () => {
     mocks.createAuth.mockReturnValue({
       api: {
         getAccessToken: vi.fn().mockRejectedValue(new Error('FAILED_TO_GET_ACCESS_TOKEN')),
@@ -340,7 +340,7 @@ describe('GitHubUserAccessTokenLock', () => {
     const lock = new GitHubUserAccessTokenLock(makeLockState() as never, env as never);
     const res = await lock.fetch(makeAccessTokenLockRequest('https://do-internal/token'));
 
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(503);
     await expect(res.json()).resolves.toEqual({ error: 'token_unavailable' });
     expect(mocks.logWarn).toHaveBeenCalledWith('github.user_access_token_lock.unavailable', {
       flow: 'test',

@@ -132,6 +132,11 @@ export function SetupsBody({
           {data.unavailable.map((s) => (s === 'runs' ? 'runs' : 'human nudges')).join(', ')}.
         </Notice>
       )}
+      {data.usageAdmissionLimited && (
+        <Notice>
+          Some token usage is incomplete. Token totals and comparisons may be understated.
+        </Notice>
+      )}
       {data.sample.truncated && (
         <Notice>
           Showing the newest {data.sample.runs} runs of this range. An administrator can raise the

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const maxTableCellWidth = 120
@@ -35,7 +36,7 @@ func PrintTable(w io.Writer, headers []string, rows [][]string) {
 }
 
 func SanitizeTableCell(value string) string {
-	fields := strings.Fields(value)
+	fields := strings.Fields(sanitizeTerminalLine(value))
 	if len(fields) == 0 {
 		return ""
 	}
@@ -46,7 +47,12 @@ func SanitizeTableCell(value string) string {
 	if maxTableCellWidth <= 1 {
 		return sanitized[:maxTableCellWidth]
 	}
-	return sanitized[:maxTableCellWidth-3] + "..."
+	end := maxTableCellWidth - 3
+	// Sanitization can expand controls, moving the byte cutoff into a rune.
+	for !utf8.RuneStart(sanitized[end]) {
+		end--
+	}
+	return sanitized[:end] + "..."
 }
 
 func writeRow(w io.Writer, cells []string, widths []int) {

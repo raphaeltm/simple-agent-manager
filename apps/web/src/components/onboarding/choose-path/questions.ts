@@ -72,7 +72,7 @@ function repoChoices(context: SetupContext): Choice<RepoChoice>[] {
     choices.push({
       id: 'hosted',
       label: 'Let SAM keep it',
-      description: 'A fresh Git repository in your Cloudflare account. No GitHub needed.',
+      description: 'A fresh Git repository hosted by this SAM installation. No GitHub needed.',
       icon: PackageOpen,
     });
   choices.push({

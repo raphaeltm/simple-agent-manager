@@ -1305,6 +1305,7 @@ const AI_BUDGET_RESPONSE = {
   dailyUsage: { inputTokens: 610_000, outputTokens: 98_000 },
   effectiveLimits: { dailyInputTokenLimit: 900_000, dailyOutputTokenLimit: 150_000 },
   monthCostUsd: 184.2,
+  monthlyCostCap: { available: true, ceilingUsd: null, effectiveCapUsd: 400 },
   utilization: { dailyInputPercent: 67.8, dailyOutputPercent: 65.3, monthlyCostPercent: 46.05 },
   exceeded: false,
 };

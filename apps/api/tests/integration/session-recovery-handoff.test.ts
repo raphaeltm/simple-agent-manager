@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,7 +14,10 @@ import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { crudRoutes } from '../../src/routes/tasks/crud';
 import { runWorkspaceEvictionRecovery } from '../../src/scheduled/workspace-eviction-recovery';
+import { cancelTask } from '../../src/services/cancel-task';
+import * as projectDataService from '../../src/services/project-data';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
+import * as terminalCleanup from '../../src/services/task-terminal-cleanup';
 import { cancelVmTaskAdmission } from '../../src/services/vm-admission-control';
 import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
@@ -71,6 +75,8 @@ vi.mock('../../src/services/workspace-cleanup', () => ({
 }));
 vi.mock('../../src/services/project-data', () => ({
   recordActivityEvent: vi.fn(async () => undefined),
+  cancelUnissuedSessionPrompts: vi.fn(async () => ({ matched: true, cancelled: 0 })),
+  stopSession: vi.fn(async () => undefined),
   repairFailedSessionForSnapshotRecovery: vi.fn(async () => undefined),
   linkSessionToWorkspace: vi.fn(async () => undefined),
 }));
@@ -79,7 +85,7 @@ vi.mock('../../src/services/project-lifecycle-events', () => ({
   isLifecycleTaskStatus: () => true,
 }));
 
-async function archive(database: D1Database) {
+async function archive(database: D1Database, cancel = false) {
   const app = new Hono<{ Bindings: Env }>();
   app.onError((error, c) =>
     error instanceof AppError
@@ -88,9 +94,18 @@ async function archive(database: D1Database) {
   );
   app.route('/api/projects/:projectId/tasks', crudRoutes);
   return app.fetch(
-    new Request('https://api.test/api/projects/project-1/tasks/task-1/close', {
-      method: 'POST',
-    }),
+    new Request(
+      `https://api.test/api/projects/project-1/tasks/task-1/${cancel ? 'status' : 'close'}`,
+      {
+        method: 'POST',
+        ...(cancel
+          ? {
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ toStatus: 'cancelled' }),
+            }
+          : {}),
+      }
+    ),
     { DATABASE: database } as Env,
     {
       waitUntil: vi.fn(),
@@ -241,6 +256,150 @@ describe('session recovery stable task identity', () => {
     getUserIdMock.mockReturnValue('user-1');
     ensureTaskRunnerStartedMock.mockResolvedValue(false);
     startTaskRunnerDOMock.mockResolvedValue(undefined);
+  });
+
+  it('normal cancellation with no workspace revokes a human wake suspended before reactivation', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      await seedStableRecoveryFixture(sqlite);
+      sqlite.exec("UPDATE tasks SET workspace_id = NULL WHERE id = 'task-1'");
+      const database = createSqliteD1(sqlite);
+      const batch = database.batch.bind(database);
+      let cancelled = false;
+      interceptRecoveryBatch(database, async (statements) => {
+        const response = await archive(database, true);
+        expect(response.status).toBe(200);
+        cancelled = true;
+        return batch(statements);
+      });
+      const result = await ensureSessionRecovery(
+        { DATABASE: database } as Env,
+        'project-1',
+        'chat-1'
+      );
+      expect(cancelled).toBe(true);
+      expect(result.status).toBe('unavailable');
+      expect(taskRow(sqlite)).toMatchObject({ status: 'cancelled', workspace_id: null });
+      expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+      const snapshot = sqlite
+        .prepare('SELECT status, sleeping_at, recovery_attempt_id FROM session_snapshots')
+        .get();
+      expect(snapshot).toMatchObject({ status: 'available', recovery_attempt_id: null });
+      expect((snapshot as { sleeping_at: string }).sleeping_at).toBeTruthy();
+      // A NEW human intent may still wake the preserved snapshot after cancellation.
+      await expect(
+        ensureSessionRecovery({ DATABASE: database } as Env, 'project-1', 'chat-1')
+      ).resolves.toEqual({ status: 'waking', taskId: 'task-1' });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('revalidates the queued delivery after placement before claiming a snapshot', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      await seedStableRecoveryFixture(sqlite);
+      sqlite.exec("UPDATE tasks SET workspace_id = NULL WHERE id = 'task-1'");
+      const database = createSqliteD1(sqlite);
+      const authority = vi.fn(async () => {
+        expect((await archive(database, true)).status).toBe(200);
+        return false;
+      });
+      await expect(
+        ensureSessionRecovery({ DATABASE: database } as Env, 'project-1', 'chat-1', undefined, {
+          isDeliveryStillAuthorized: authority,
+        })
+      ).resolves.toMatchObject({ status: 'unavailable' });
+      expect(authority).toHaveBeenCalledTimes(1);
+      expect(taskRow(sqlite)).toMatchObject({ status: 'cancelled' });
+      expect(
+        sqlite.prepare('SELECT recovery_attempt_id FROM session_snapshots').pluck().get()
+      ).toBeNull();
+      expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it.each(['cancelled', 'completed', 'failed'] as const)(
+    'a repeated stop fences an in-flight wake while preserving its %s verdict',
+    async (status) => {
+      const sqlite = new Database(':memory:');
+      try {
+        await seedStableRecoveryFixture(sqlite);
+        // The terminal clock may be ahead of this worker's clock; cancellation
+        // still must create a distinct fence rather than reuse the same instant.
+        const prior = new Date(Date.now() + 60_000).toISOString();
+        sqlite
+          .prepare(
+            "UPDATE tasks SET status = ?, completed_at = ?, updated_at = ?, workspace_id = NULL WHERE id = 'task-1'"
+          )
+          .run(status, prior, prior);
+        const database = createSqliteD1(sqlite);
+        const db = drizzle(database, { schema });
+        const batch = database.batch.bind(database);
+        interceptRecoveryBatch(database, async (statements) => {
+          const task = await db
+            .select()
+            .from(schema.tasks)
+            .where(eq(schema.tasks.id, 'task-1'))
+            .get();
+          expect(task).toBeTruthy();
+          await cancelTask({ DATABASE: database } as Env, db, task!, 'user-1');
+          return batch(statements);
+        });
+        await expect(
+          ensureSessionRecovery({ DATABASE: database } as Env, 'project-1', 'chat-1')
+        ).resolves.toMatchObject({ status: 'unavailable' });
+        expect(taskRow(sqlite)).toMatchObject({ status, workspace_id: null });
+        expect(sqlite.prepare("SELECT updated_at FROM tasks WHERE id='task-1'").pluck().get()).toBe(
+          new Date(Date.parse(prior) + 1).toISOString()
+        );
+        expect(
+          sqlite.prepare("SELECT completed_at FROM tasks WHERE id='task-1'").pluck().get()
+        ).toBe(prior);
+        expect(
+          sqlite.prepare('SELECT recovery_attempt_id FROM session_snapshots').pluck().get()
+        ).toBeNull();
+        expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+        await expect(
+          ensureSessionRecovery({ DATABASE: database } as Env, 'project-1', 'chat-1')
+        ).resolves.toMatchObject({ status: 'waking' });
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
+  it('cancels legacy workspace-linked prompts before publishing the task cancellation', async () => {
+    const sqlite = new Database(':memory:');
+    const cleanup = vi
+      .spyOn(terminalCleanup, 'cleanupTerminalTaskResourcesOrThrow')
+      .mockResolvedValueOnce(undefined);
+    try {
+      await seedStableRecoveryFixture(sqlite);
+      sqlite.exec("UPDATE tasks SET chat_session_id = NULL WHERE id='task-1'");
+      const database = createSqliteD1(sqlite);
+      const db = drizzle(database, { schema });
+      const task = await db.select().from(schema.tasks).where(eq(schema.tasks.id, 'task-1')).get();
+      vi.mocked(projectDataService.cancelUnissuedSessionPrompts).mockImplementationOnce(
+        async () => {
+          expect(taskRow(sqlite)).toMatchObject({ status: 'sleeping' });
+          return { matched: true, cancelled: 1 };
+        }
+      );
+      await cancelTask({ DATABASE: database } as Env, db, task!, 'user-1');
+      expect(projectDataService.cancelUnissuedSessionPrompts).toHaveBeenCalledWith(
+        expect.anything(),
+        'project-1',
+        'chat-1',
+        'task-1'
+      );
+      expect(taskRow(sqlite)).toMatchObject({ status: 'cancelled' });
+    } finally {
+      cleanup.mockRestore();
+      sqlite.close();
+    }
   });
 
   it('automatically retries a failed accepted eviction wake through the durable runner boundary', async () => {

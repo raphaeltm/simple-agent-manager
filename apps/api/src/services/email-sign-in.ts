@@ -114,14 +114,31 @@ export async function emailSignUpAllowed(env: Env, email: string): Promise<boole
  */
 export async function emailCodeRedemptionAllowed(env: Env, email: string): Promise<boolean> {
   const normalized = email.trim().toLowerCase();
-  return (await accountExists(env, normalized)) || (await emailSignUpAllowed(env, normalized));
+  const account = await findAccountByEmail(env, normalized);
+  return account ? !account.providerOnly : emailSignUpAllowed(env, normalized);
 }
 
-async function accountExists(env: Env, email: string): Promise<boolean> {
-  const row = await env.DATABASE.prepare('SELECT 1 FROM users WHERE lower(email) = ? LIMIT 1')
+/** An OTP would make BetterAuth revoke this unproven account's provider links and sessions. */
+async function findAccountByEmail(
+  env: Env,
+  email: string
+): Promise<{ providerOnly: boolean } | null> {
+  const row = await env.DATABASE.prepare(
+    `SELECT u.email_verified AS emailVerified,
+      EXISTS (SELECT 1 FROM accounts a WHERE a.user_id = u.id AND a.provider_id != 'credential') AS linked
+     FROM users u WHERE lower(u.email) = ? LIMIT 1`
+  )
     .bind(email)
-    .first();
-  return row !== null;
+    .first<{ emailVerified: number | null; linked: number }>();
+  if (!row) return null;
+  return { providerOnly: !row.emailVerified && Boolean(row.linked) };
+}
+
+export function providerSignInRequiredEmail(baseDomain: string) {
+  return {
+    subject: 'Sign in to SAM with your connected provider',
+    text: `Someone requested a SAM sign-in code. This account's email has not been confirmed by its sign-in provider. To keep your connected accounts safe, use GitHub, GitLab or the provider you previously used at https://app.${baseDomain}. No sign-in code was sent. If you did not request this, ignore this email.`,
+  };
 }
 
 async function sha256Hex(value: string): Promise<string> {
@@ -201,12 +218,15 @@ export async function deliverSignInCode(env: Env, email: string, code: string): 
   const sender = agentEmailSenderFor(env);
   if (!sender) return;
   try {
-    const known = await accountExists(env, email);
+    const account = await findAccountByEmail(env, email);
+    const known = account !== null;
     if (!known && !(await emailSignUpAllowed(env, email))) {
       log.info('email_sign_in.code_not_sent', { reason: 'no_account' });
       return;
     }
-    const message = signInCodeEmail(env.BASE_DOMAIN, code);
+    const message = account?.providerOnly
+      ? providerSignInRequiredEmail(env.BASE_DOMAIN)
+      : signInCodeEmail(env.BASE_DOMAIN, code);
     await sender.send({
       from: {
         email: `${EMAIL_SIGN_IN_LOCAL_PART}@${agentEmailDomain(env.BASE_DOMAIN)}`,
@@ -217,7 +237,12 @@ export async function deliverSignInCode(env: Env, email: string, code: string): 
       text: message.text,
       headers: {},
     });
-    log.info('email_sign_in.code_sent', { newAccount: !known });
+    log.info(
+      account?.providerOnly
+        ? 'email_sign_in.provider_required_note_sent'
+        : 'email_sign_in.code_sent',
+      { newAccount: !known }
+    );
   } catch (error) {
     log.error('email_sign_in.send_failed', {
       error: error instanceof Error ? error.message : String(error),

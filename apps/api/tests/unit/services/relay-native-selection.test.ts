@@ -13,7 +13,12 @@ vi.mock('../../../src/services/canonical-vm-allocation', async (load) => ({
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import { findSessionSnapshotUploadRelay } from '../../../src/services/session-snapshot-upload-relay';
+import { installNodeTransportExtension } from '../../../src/services/node-transport-extension';
+import {
+  ensureSessionSnapshotUploadRelay,
+  findSessionSnapshotUploadRelay,
+  resolveSessionSnapshotUploadTargets,
+} from '../../../src/services/session-snapshot-upload-relay';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const databases: Database.Database[] = [];
@@ -87,5 +92,65 @@ describe('native relay selection', () => {
     const { sqlite, env } = fixture();
     sqlite.exec("UPDATE nodes SET vm_size = 'small', provider_instance_type = 'wrong-sku'");
     expect(await findSessionSnapshotUploadRelay(env, 'user', 'project')).toBeNull();
+  });
+
+  // A relay URL is handed to another VM over the public hostname; a reverse-tunnel node has none.
+  it('never selects a reverse-tunnel node as a relay; the same node on a public transport is selected', async () => {
+    const { sqlite, env } = fixture();
+    sqlite.exec("UPDATE nodes SET transport = 'reverse-tunnel'");
+    expect(await findSessionSnapshotUploadRelay(env, 'user', 'project')).toBeNull();
+    sqlite.exec("UPDATE nodes SET transport = 'vm-public-dns'");
+    expect(await findSessionSnapshotUploadRelay(env, 'user', 'project')).toEqual({
+      id: 'node',
+      name: 'native node',
+    });
+  });
+
+  it('keeps an existing public relay selectable after switching new nodes to reverse tunnels, without provisioning tunnel-only relays', async () => {
+    const { sqlite, env } = fixture();
+    const input = {
+      workspaceId: 'ws',
+      userId: 'user',
+      projectId: 'project',
+      chatSessionId: 'chat',
+      generation: 'g1',
+      directUploadAvailable: true,
+      directUploadSupported: false,
+    };
+    // Control first, with no driver installed (Cloudflare): the public relay is used.
+    const before = await resolveSessionSnapshotUploadTargets(
+      { ...env, BASE_DOMAIN: 'example.test', VM_AGENT_TRANSPORT: 'reverse-tunnel' } as Env,
+      input
+    );
+    expect(before.upload.home).toContain('node');
+    installNodeTransportExtension({
+      transport: 'reverse-tunnel',
+      select: () => null,
+      prepare: async () => () => '',
+      releaseUnallocated: async () => false,
+      releaseNonLive: async () => 0,
+      resolveAgentOrigin: async () => 'http://127.0.0.1:20000',
+    });
+    const selfHostEnv = { ...env, VM_AGENT_TRANSPORT: 'reverse-tunnel' } as Env;
+    const prepare = vi.spyOn(selfHostEnv.DATABASE, 'prepare');
+    expect(await findSessionSnapshotUploadRelay(selfHostEnv, 'user', 'project')).toEqual({
+      id: 'node',
+      name: 'native node',
+    });
+    const legacyTargets = await resolveSessionSnapshotUploadTargets(selfHostEnv, input);
+    expect(legacyTargets.upload.home).toContain('node');
+    expect(legacyTargets.needsRelayProvisioning).toBe(false);
+    sqlite.exec("UPDATE nodes SET transport = 'reverse-tunnel'");
+    expect(await findSessionSnapshotUploadRelay(selfHostEnv, 'user', 'project')).toBeNull();
+    const targets = await resolveSessionSnapshotUploadTargets(selfHostEnv, input);
+    expect(targets.needsRelayProvisioning).toBe(false);
+    expect(targets.upload.home).toMatch(/^\/api\/workspaces\/ws\/session-snapshot/);
+    prepare.mockClear();
+    await ensureSessionSnapshotUploadRelay(selfHostEnv, {
+      userId: 'user',
+      sourceNodeId: 'node',
+      projectId: 'project',
+    });
+    expect(prepare).not.toHaveBeenCalled();
   });
 });

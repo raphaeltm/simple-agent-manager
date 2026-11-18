@@ -1,4 +1,4 @@
-import { log } from '@simple-agent-manager/worker-core';
+import { AppError, log } from '@simple-agent-manager/worker-core';
 
 import type { Env, RepoHostingRequestContext } from './env';
 import { getTokenType } from './github-route-helpers';
@@ -55,7 +55,12 @@ async function getDirectGitHubUserAccessTokenWithHeaders(
       tokenPresent: false,
       error: err instanceof Error ? err.message : String(err),
     });
-    return null;
+    if (err instanceof AppError && err.statusCode === 401) return null;
+    throw new AppError(
+      503,
+      'GITHUB_UNAVAILABLE',
+      'GitHub authorization could not be checked. Please try again later.'
+    );
   }
 }
 
@@ -79,6 +84,12 @@ export async function getGitHubUserAccessTokenWithHeaders(
       'github.user_access_token.locked'
     );
     if (!token) {
+      if (status >= 500 || status === 429)
+        throw new AppError(
+          503,
+          'GITHUB_UNAVAILABLE',
+          'GitHub is temporarily unavailable. Please try again later.'
+        );
       log.warn('github.user_access_token_unavailable', {
         flow,
         userId,
@@ -103,7 +114,12 @@ export async function getGitHubUserAccessTokenWithHeaders(
       tokenPresent: false,
       error: err instanceof Error ? err.message : String(err),
     });
-    return null;
+    if (err instanceof AppError && err.statusCode === 401) return null;
+    throw new AppError(
+      503,
+      'GITHUB_UNAVAILABLE',
+      'GitHub authorization could not be checked. Please try again later.'
+    );
   }
 }
 

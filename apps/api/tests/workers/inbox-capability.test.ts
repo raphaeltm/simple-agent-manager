@@ -31,6 +31,18 @@ async function syncSummaries(project: DurableObjectStub<ProjectData>) {
   });
 }
 
+/** The chat's reconciliation check-in gate in ProjectData, or null. */
+async function checkinGate(project: DurableObjectStub<ProjectData>, sessionId: string) {
+  return runInDurableObject(project, async (_instance, state) => {
+    const row = state.storage.sql
+      .exec('SELECT value FROM do_meta WHERE key = ?', `taskReconciliationGate:${sessionId}`)
+      .toArray()[0];
+    return row
+      ? (JSON.parse(String(row.value)) as { nextAttemptAt: number; questionHold?: boolean })
+      : null;
+  });
+}
+
 type ListBody = { items: { ref: string; kind: string; canAct: boolean; projectId: string }[] };
 
 describe('inbox capability through the real entry points', () => {
@@ -45,7 +57,7 @@ describe('inbox capability through the real entry points', () => {
     vi.unstubAllGlobals();
   });
 
-  it('a request_human_input question is one asks row that reaches the right inbox; archiving tells the agent', async () => {
+  it('a request_human_input question is one asks row that reaches the right inbox; archiving tells no one', async () => {
     const s = await seed();
     const result = await callTool(s.token, 'request_human_input', {
       context: 'Should I deploy the billing fix to staging first?',
@@ -93,27 +105,41 @@ describe('inbox capability through the real entry points', () => {
     );
     expect(count.body).toEqual({ needsYou: 1, blocking: 1 });
 
-    // The agent ends its turn and the chat sleeps; archiving queues one wake-capable prompt.
+    // The agent ends its turn and the chat sleeps. Archive closes the item and tells no one: the
+    // chat stays asleep, no prompt is queued, and the notice sweep does not send one later.
     expect(await s.project.sleepSession(s.chatSessionId)).toBe(true);
     const archived = await post(
       `/api/projects/${s.projectId}/inbox/items/${encodeURIComponent(ref)}/archive`,
       s.ownerCookie
     );
     expect(archived.status).toBe(200);
-    expect(archived.body).toMatchObject({ outcome: 'archived', agentNotified: true });
+    expect(archived.body).toMatchObject({ outcome: 'archived', agentNotified: false });
+    const closed = await testEnv.DATABASE.prepare(
+      'SELECT status, notified_at FROM asks WHERE id = ?'
+    )
+      .bind(askId)
+      .first<{ status: string; notified_at: number | null }>();
+    expect(closed?.status).toBe('archived');
+    expect(closed?.notified_at).not.toBeNull();
+    // Liveness: the sweep ran and found no notice to retry.
+    await expect(runInboxAskSweep(testEnv, Date.now() + 2 * 60_000)).resolves.toMatchObject({
+      noticesRetried: 0,
+    });
     const snapshot = await s.project.getDurableExecutionSnapshot(s.chatSessionId);
-    const notices = snapshot.deliveries.filter(
-      (delivery: { id: string }) => delivery.id === `inbox-ask:${askId}`
-    );
-    expect(notices).toEqual([
-      expect.objectContaining({ sourceKind: 'inbox_ask', sourceTaskId: s.taskId }),
-    ]);
+    expect(
+      snapshot.deliveries.filter((delivery: { id: string }) => delivery.id === `inbox-ask:${askId}`)
+    ).toEqual([]);
     const { messages } = await s.project.getMessages(s.chatSessionId, 50);
     expect(
       messages.filter((message: { content: string }) =>
         message.content.includes('archived your question')
       )
-    ).toHaveLength(1);
+    ).toHaveLength(0);
+    // SAM's check-ins stay off the chat (the closed question no longer holds them) until the
+    // person writes in it, so a check-in cannot nudge the agent instead (default 168 hours).
+    const held = await checkinGate(s.project, s.chatSessionId);
+    expect(held?.questionHold).toBe(true);
+    expect(held!.nextAttemptAt).toBeGreaterThan(Date.now() + 167 * 3_600_000);
     // The item leaves the inbox; a late answer loses.
     const after = await get<ListBody>('/api/inbox', s.ownerCookie);
     expect(after.body.items.map((entry) => entry.ref)).not.toContain(ref);
@@ -123,6 +149,11 @@ describe('inbox capability through the real entry points', () => {
       { answer: 'Staging first' }
     );
     expect(late.status).toBe(409);
+    // The person writes in the chat: the hold is released and check-ins may resume.
+    await s.project.persistMessage(s.chatSessionId, 'user', 'Back to this: carry on.', null);
+    expect((await checkinGate(s.project, s.chatSessionId))!.nextAttemptAt).toBeLessThanOrEqual(
+      Date.now()
+    );
   });
 
   it('answering an asks question of a sleeping chat queues the answer once as a wake', async () => {
@@ -181,7 +212,7 @@ describe('inbox capability through the real entry points', () => {
 
   // Overlap (slice G): a question asked before the deploy is still a ProjectData marker and stays
   // answerable and archivable through its own path until it resolves or expires.
-  it('a marker-era question reaches the right inbox and archiving tells the agent', async () => {
+  it('a marker-era question reaches the right inbox and archiving tells no one, even a live agent', async () => {
     const s = await seed();
     await s.project.createAttentionMarker({
       sessionId: s.chatSessionId,
@@ -278,33 +309,25 @@ describe('inbox capability through the real entry points', () => {
     );
     expect(plain.status).toBe(415);
 
-    // Archive: the live agent receives the "will not act" prompt, then the marker resolves.
-    vi.stubGlobal('fetch', fetchMock);
-    fetchMock.mockImplementation(
-      async () =>
-        new Response(JSON.stringify({ status: 'accepted' }), {
-          status: 202,
-          headers: { 'Content-Type': 'application/json' },
-        })
-    );
+    // Archive: the agent is running and reachable, and still receives nothing; the marker resolves.
+    fetchMock.mockClear();
     const archived = await post(
       `/api/projects/${s.projectId}/inbox/items/${encodeURIComponent(ref)}/archive`,
       s.ownerCookie
     );
     expect(archived.status).toBe(200);
-    expect(archived.body).toMatchObject({ outcome: 'archived', agentNotified: true });
+    expect(archived.body).toMatchObject({ outcome: 'archived', agentNotified: false });
     const prompt = fetchMock.mock.calls.find(([input]) =>
-      (typeof input === 'string' ? input : input.url).includes(
-        `/workspaces/${s.workspaceId}/agent-sessions/${s.agentSessionId}/prompt`
-      )
+      (typeof input === 'string' ? input : input.url).includes('/prompt')
     );
-    expect(prompt).toBeTruthy();
-    expect(String(prompt?.[1]?.body)).toContain('will not act on it');
+    expect(prompt).toBeUndefined();
 
     const markerId = ref.split(':')[2]!;
     const { marker } = await s.project.getAttentionRequest(s.chatSessionId, markerId, s.ownerId);
     expect(marker).toMatchObject({ resolvedReason: 'archived', resolvedAnswer: null });
     expect(marker?.resolvedAt).not.toBeNull();
+    // The resolved marker no longer keeps check-ins off the chat; the archive holds them instead.
+    expect(await checkinGate(s.project, s.chatSessionId)).toMatchObject({ questionHold: true });
     // The item leaves the inbox once the index catches up.
     await syncSummaries(s.project);
     const after = await get<ListBody>('/api/inbox', s.ownerCookie);
@@ -316,6 +339,117 @@ describe('inbox capability through the real entry points', () => {
       { answer: 'Staging first' }
     );
     expect(late.status).toBe(409);
+  });
+
+  it('a marker-era item on a chat whose workspace is gone archives without telling anyone', async () => {
+    // Production shape (2026-11-17): a SAM check-in pause left on a chat whose task was cancelled,
+    // workspace deleted and session stopped. Archive used to tell the agent, the live-agent
+    // resolver 404'd, the claim was released, and the inbox read the 404 as "already handled" and
+    // showed the item again: it could never be archived.
+    const s = await seed();
+    await s.project.createAttentionMarker({
+      sessionId: s.chatSessionId,
+      taskId: s.taskId,
+      workspaceId: s.workspaceId,
+      kind: 'needs_input',
+      source: 'reconciliation_loop',
+      reason: 'SAM paused automatic check-ins because the runtime rejected the selected model.',
+      metadata: null,
+      expiresAt: null,
+    });
+    await s.project.stopSession(s.chatSessionId);
+    await testEnv.DATABASE.prepare(`UPDATE workspaces SET status = 'deleted' WHERE id = ?`)
+      .bind(s.workspaceId)
+      .run();
+    await testEnv.DATABASE.prepare(`UPDATE agent_sessions SET status = 'completed' WHERE id = ?`)
+      .bind(s.agentSessionId)
+      .run();
+    await syncSummaries(s.project);
+
+    const before = await get<ListBody>('/api/inbox', s.ownerCookie);
+    const ref = before.body.items.find((item) => item.projectId === s.projectId)?.ref;
+    expect(ref).toMatch(new RegExp(`^attention:${s.chatSessionId}:`));
+
+    const archived = await post(
+      `/api/projects/${s.projectId}/inbox/items/${encodeURIComponent(ref!)}/archive`,
+      s.ownerCookie
+    );
+    expect(archived.status).toBe(200);
+    expect(archived.body).toMatchObject({ outcome: 'archived', agentNotified: false });
+    // No agent exists to receive a prompt, so none is sent.
+    const prompt = fetchMock.mock.calls.find(([input]) =>
+      (typeof input === 'string' ? input : input.url).includes('/prompt')
+    );
+    expect(prompt).toBeUndefined();
+
+    const markerId = ref!.split(':')[2]!;
+    const { marker } = await s.project.getAttentionRequest(s.chatSessionId, markerId, s.ownerId);
+    expect(marker).toMatchObject({ resolvedReason: 'archived', resolvedAnswer: null });
+    expect(marker?.resolvedAt).not.toBeNull();
+    await syncSummaries(s.project);
+    const after = await get<ListBody>('/api/inbox', s.ownerCookie);
+    expect(after.body.items.map((entry) => entry.ref)).not.toContain(ref);
+  });
+
+  it('an archived question keeps SAM’s check-in hold; a withdrawn one releases it (control)', async () => {
+    const s = await seed();
+    const key = `taskReconciliationGate:${s.chatSessionId}`;
+    const until = Date.now() + 3_600_000;
+    const hold = JSON.stringify({ attempts: 0, nextAttemptAt: until, questionHold: true });
+    const readGate = () =>
+      runInDurableObject(s.project, async (_instance, state) => {
+        const row = state.storage.sql
+          .exec('SELECT value FROM do_meta WHERE key = ?', key)
+          .toArray()[0];
+        return row ? (JSON.parse(String(row.value)) as { nextAttemptAt: number }) : null;
+      });
+    const seedHold = () =>
+      runInDurableObject(s.project, async (_instance, state) => {
+        state.storage.sql.exec(
+          'INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+          key,
+          hold
+        );
+      });
+
+    await seedHold();
+    await s.project.recordQuestionArchived({
+      sessionId: s.chatSessionId,
+      askId: 'ask-1',
+      // Shorter than the question's own hold: the archive never shortens it.
+      holdCheckinsUntil: Date.now() + 60_000,
+    });
+    expect((await readGate())?.nextAttemptAt).toBe(until);
+
+    await seedHold();
+    await s.project.recordQuestionWithdrawn({ sessionId: s.chatSessionId, askId: 'ask-1' });
+    expect((await readGate())?.nextAttemptAt).toBeLessThan(until);
+  });
+
+  it('a message written between an archive and its hold keeps the hold off; one before it does not', async () => {
+    const s = await seed();
+    const holdCheckinsUntil = () => Date.now() + 3_600_000;
+    // The archive closed its question at `archivedAt`; the person writes before the hold lands.
+    const archivedAt = Date.now();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await s.project.persistMessage(s.chatSessionId, 'user', 'Never mind that, carry on.', null);
+    await s.project.recordQuestionArchived({
+      sessionId: s.chatSessionId,
+      askId: 'ask-1',
+      archivedAt,
+      holdCheckinsUntil: holdCheckinsUntil(),
+    });
+    expect((await checkinGate(s.project, s.chatSessionId))?.questionHold).not.toBe(true);
+
+    // Control: a message written before the archive does not end a hold the archive starts.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await s.project.recordQuestionArchived({
+      sessionId: s.chatSessionId,
+      askId: 'ask-2',
+      archivedAt: Date.now(),
+      holdCheckinsUntil: holdCheckinsUntil(),
+    });
+    expect(await checkinGate(s.project, s.chatSessionId)).toMatchObject({ questionHold: true });
   });
 
   it('a secret request archived through the inbox is declined and the agent notified', async () => {
@@ -349,7 +483,7 @@ describe('inbox capability through the real entry points', () => {
     expect(after.body.items.map((item) => item.ref)).not.toContain(ref);
   });
 
-  it('an ask filed through the internal operation lists, archives and queues the agent notice', async () => {
+  it('an ask filed through the internal operation lists and archives without an agent notice', async () => {
     const s = await seed();
     const { samInboxAskCreate } = await import('@simple-agent-manager/operations');
     const ctx = webOperationContext(
@@ -371,12 +505,14 @@ describe('inbox capability through the real entry points', () => {
       `/api/projects/${s.projectId}/inbox/items/${encodeURIComponent(created.ref)}/archive`,
       s.ownerCookie
     );
-    expect(archived.body).toMatchObject({ outcome: 'archived', agentNotified: true });
+    expect(archived.body).toMatchObject({ outcome: 'archived', agentNotified: false });
     const row = await testEnv.DATABASE.prepare('SELECT status, notified_at FROM asks WHERE id = ?')
       .bind(created.id)
       .first<{ status: string; notified_at: number | null }>();
     expect(row).toMatchObject({ status: 'archived' });
+    // Settled in the closing write, so the notice sweep has nothing to retry.
     expect(row?.notified_at).not.toBeNull();
+    await runInboxAskSweep(testEnv, Date.now() + 2 * 60_000);
     const delivered = await runInDurableObject(s.project, async (_instance, state) =>
       state.storage.sql
         .exec(
@@ -385,8 +521,7 @@ describe('inbox capability through the real entry points', () => {
         )
         .toArray()
     );
-    expect(delivered).toHaveLength(1);
-    expect(String(delivered[0]?.content)).toContain('will not act on it');
+    expect(delivered).toHaveLength(0);
     const archivedList = await get<ListBody>('/api/inbox?filter=archived', s.ownerCookie);
     expect(archivedList.body.items.map((item) => item.ref)).toContain(created.ref);
   });

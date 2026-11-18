@@ -14,8 +14,14 @@
  * workspaceId, and projectId. Upstream provider credentials are never accepted
  * from, or returned to, tenant workspaces.
  */
-import type { MeasuredTokenUsage } from '@simple-agent-manager/ai-proxy';
 import {
+  findPricedModel,
+  hasLocalAiCostMetering,
+  type MeasuredTokenUsage,
+  type MonthlyCostCapCheck,
+} from '@simple-agent-manager/ai-proxy';
+import {
+  AI_PROVIDER_BASE_URLS,
   DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
   DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
   DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES,
@@ -44,7 +50,11 @@ import {
   openaiError,
   openaiUsageGateError,
 } from './ai-proxy-passthrough-errors';
-import { type ResolvedProxyUpstream, resolveProxyUpstream } from './ai-proxy-passthrough-upstream';
+import {
+  type ResolvedProxyUpstream,
+  resolveProxyUpstream,
+  trimTrailingSlashes,
+} from './ai-proxy-passthrough-upstream';
 
 type ProxyContext = Context<{ Bindings: Env }>;
 
@@ -85,7 +95,10 @@ interface PrepareProxyOptions {
   requestTooLargeResponse: (maxBytes: number) => Response;
   invalidBodyResponse?: (body: Record<string, unknown>) => Response | null;
   missingModelResponse: () => Response;
-  usageGateResponse: (reason: 'daily-token-budget' | 'monthly-cost-cap') => Response;
+  usageGateResponse: (
+    reason: 'daily-token-budget' | 'monthly-cost-cap',
+    cap?: MonthlyCostCapCheck
+  ) => Response;
   missingUpstreamResponse: () => Response;
 }
 
@@ -170,6 +183,56 @@ export function openaiProxyOptions(jsonContext: string): PrepareProxyOptions {
   };
 }
 
+/** A model id prices only its vendor's endpoint, not an arbitrary compatible alias. */
+function hasCanonicalCatalogPrice(upstream: ResolvedProxyUpstream, modelId: string): boolean {
+  const model = findPricedModel(modelId);
+  if (!model || model.provider === 'workers-ai') return false;
+  const dialect = model.provider === 'anthropic' ? 'anthropic' : 'openai-compatible';
+  if (upstream.dialect !== dialect) return false;
+  try {
+    const actual = new URL(upstream.baseUrl);
+    const canonical = new URL(AI_PROVIDER_BASE_URLS[model.provider]);
+    return (
+      !actual.username &&
+      !actual.password &&
+      !actual.search &&
+      !actual.hash &&
+      actual.origin === canonical.origin &&
+      trimTrailingSlashes(actual.pathname) === trimTrailingSlashes(canonical.pathname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Admission depends on the resolved owner; locally funded calls must be priceable. */
+async function enforcePassthroughFunding(
+  c: ProxyContext,
+  userId: string,
+  modelId: string,
+  upstream: ResolvedProxyUpstream,
+  options: PrepareProxyOptions
+): Promise<Response | null> {
+  const platformBilled = upstream.credentialSource === 'platform';
+  if (
+    platformBilled &&
+    hasLocalAiCostMetering(c.env) &&
+    !hasCanonicalCatalogPrice(upstream, modelId)
+  ) {
+    const message =
+      'Model and upstream endpoint must match a catalog-priced provider to use an installation-funded credential.';
+    return options.dialect === 'anthropic'
+      ? anthropicError(message, 'invalid_request_error', 400)
+      : openaiError(message, 'invalid_request_error', 400);
+  }
+  const usageGate = await checkAiUsageGate(c.env.KV, userId, c.env, { platformBilled });
+  if (usageGate.allowed) return null;
+  return options.usageGateResponse(
+    usageGate.reason,
+    usageGate.reason === 'monthly-cost-cap' ? usageGate.monthlyCap : undefined
+  );
+}
+
 export async function prepareProxyRequest(
   c: ProxyContext,
   options: PrepareProxyOptions
@@ -226,11 +289,6 @@ export async function prepareProxyRequest(
     return { ok: false, response: options.missingModelResponse() };
   }
 
-  const usageGate = await checkAiUsageGate(c.env.KV, auth.userId, c.env);
-  if (!usageGate.allowed) {
-    return { ok: false, response: options.usageGateResponse(usageGate.reason) };
-  }
-
   const upstream = await resolveProxyUpstream({
     env: c.env,
     userId: auth.userId,
@@ -244,6 +302,9 @@ export async function prepareProxyRequest(
   if (!upstream) {
     return { ok: false, response: options.missingUpstreamResponse() };
   }
+
+  const fundingError = await enforcePassthroughFunding(c, auth.userId, modelId, upstream, options);
+  if (fundingError) return { ok: false, response: fundingError };
 
   // Insights run usage: the measured tokens go to this workspace's run, keyed by the credential
   // the proxy forwards with.
