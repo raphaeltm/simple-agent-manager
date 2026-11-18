@@ -83,9 +83,8 @@ projectCommentRoutes.get('/', async (c) => {
             columns: { id: true, filename: true },
           });
 
-    // Defense in depth for an object still running the previous build: task bodies remain
-    // filtered here even though the current DO already applies the same readable-id set before
-    // ranking and counting. `?? []` also supports an older object with no inbox-item threads.
+    // Defence in depth: the DO already excludes unreadable task threads before ranking and
+    // counting, and the route still refuses to return a body or title it did not authorize.
     const itemThreads = inbox.inboxItemThreads ?? [];
     const returnedItemIds = new Set(itemThreads.map((thread) => thread.itemId));
 

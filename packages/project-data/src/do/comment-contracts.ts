@@ -7,7 +7,6 @@ import type {
   LibraryFileCommentThread,
   MessageCommentReply,
   MessageCommentThread,
-  StoredCommentAnchorKind,
 } from '@simple-agent-manager/shared';
 
 export type CommentActor = CommentAuthor;
@@ -144,9 +143,6 @@ export type ListProjectCommentThreadsInput = {
 /** One cheap, `updated_at DESC`-ranked candidate row from a project-wide read. */
 export type ProjectCommentThreadCandidate = {
   id: string;
-  anchorKind: StoredCommentAnchorKind;
-  /** Present only for `inbox_item` candidates, whose visibility is viewer-specific. */
-  inboxItemId: string | null;
   updatedAt: number;
   /** Estimated content bytes: root body + quote + reply bodies. */
   estimatedBytes: number;

@@ -5,8 +5,6 @@ import { parseRow } from './row-schemas';
 
 type ProjectCandidateRow = {
   id: string;
-  anchor_kind: ProjectCommentThreadCandidate['anchorKind'];
-  inbox_item_id: string | null;
   updated_at: number;
   estimated_bytes: number;
 };
@@ -33,8 +31,6 @@ export function parseProjectCommentThreadCandidates(
       const parsed = parseRow(schema, row, context);
       candidates.push({
         id: parsed.id,
-        anchorKind: parsed.anchor_kind,
-        inboxItemId: parsed.inbox_item_id,
         updatedAt: parsed.updated_at,
         estimatedBytes: Math.max(0, parsed.estimated_bytes),
       });

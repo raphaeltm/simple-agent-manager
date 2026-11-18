@@ -196,4 +196,54 @@ describe('inbox item comment scope', () => {
       'ask-many-149',
     ]);
   });
+
+  it('hides every task thread when no readable ids are passed', () => {
+    const inbox = listProjectCommentInbox(sql, env, {});
+
+    expect(inbox.inboxItemThreads).toEqual([]);
+    expect(inbox.messageThreads.map((thread) => thread.id)).toEqual([sessionThreadId]);
+    expect(inbox.fileThreads.map((thread) => thread.id)).toEqual([fileThreadId]);
+    expect(inbox.totalCount).toBe(2);
+  });
+
+  it('reads one window when more hidden task threads than a window are newer', () => {
+    // Twelve unreadable task threads, all newer than the visible ones, with limit 2: filtering
+    // after ranking would need six windows and still show nothing on the first.
+    for (let index = 0; index < 12; index++) {
+      const hidden = itemComments.createInboxItemComment(sql, env, {
+        itemId: `ask-hidden-${index}`,
+        body: `hidden ${index}`,
+        actor: MAYA,
+      }).thread;
+      sql.exec(
+        `UPDATE anchored_comment_threads SET updated_at = ? WHERE id = ?`,
+        9000 + index,
+        hidden.id
+      );
+    }
+    sql.exec(`UPDATE anchored_comment_threads SET updated_at = 8000 WHERE id = ?`, itemThreadId);
+    sql.exec(`UPDATE anchored_comment_threads SET updated_at = 7000 WHERE id = ?`, fileThreadId);
+    sql.exec(`UPDATE anchored_comment_threads SET updated_at = 1000 WHERE id = ?`, sessionThreadId);
+    const statements: string[] = [];
+    const exec = sql.exec.bind(sql);
+    const counted = Object.assign(Object.create(sql), {
+      exec: (query: string, ...bindings: unknown[]) => {
+        statements.push(query);
+        return exec(query, ...(bindings as never[]));
+      },
+    }) as SqlStorage;
+
+    const inbox = listProjectCommentInbox(counted, env, {
+      limit: 2,
+      readableInboxItemIds: ['ask-1'],
+    });
+
+    expect(inbox.inboxItemThreads.map((thread) => thread.itemId)).toEqual(['ask-1']);
+    expect(inbox.fileThreads.map((thread) => thread.id)).toEqual([fileThreadId]);
+    expect(inbox.totalCount).toBe(3);
+    expect(inbox.hasMore).toBe(true);
+    expect(statements.filter((query) => query.includes('ORDER BY t.updated_at DESC'))).toHaveLength(
+      1
+    );
+  });
 });
