@@ -162,7 +162,7 @@ Without the `/do` instruction, a dispatched agent may skip critical phases like 
 
 ## CI Wait Recovery
 
-Default CI waits: `check_suite.completed` + `workflow_run.completed` on the full
+CI: `check_suite.completed` + `workflow_run.completed` on full
 SHA; opt in to `check_run.completed` for early per-job failure/progress. Follow
 [CI wait recovery](../../docs/guides/ci-wait-recovery.md): reconcile GitHub on
-resume and keep one bounded fallback. Expiry does not wake.
+resume; retain the active subscription/fallback while checks pend. Expiry is no wake.

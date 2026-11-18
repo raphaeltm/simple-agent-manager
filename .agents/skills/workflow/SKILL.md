@@ -11,7 +11,9 @@ For CI waits, default to `check_suite.completed` + `workflow_run.completed` for 
 full 40-character PR head SHA. Opt in to `check_run.completed` only for early
 per-job failure or job-specific progress. Reconcile all current GitHub checks on
 every resume; one suite/workflow completion includes failures and is not all-CI
-success. Keep one bounded fallback schedule for missing terminal webhooks; follow
+success. Subscriptions stay active after delivery: while required checks are
+pending on the same SHA, retain the existing subscription and fallback and end
+your turn again; do not recreate them on each wake. Keep one bounded fallback schedule for missing terminal webhooks; follow
 `docs/guides/ci-wait-recovery.md` for registration, reconciliation and cleanup.
 
 ## Quick Summary

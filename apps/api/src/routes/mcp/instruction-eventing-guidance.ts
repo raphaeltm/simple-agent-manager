@@ -15,6 +15,7 @@ export function buildEventingInstructions(input: {
       '"check_suite.completed", "workflow_run.completed"; bare names do not match. ' +
       'Opt in to "check_run.completed" only for early per-job failure or job-specific progress. ' +
       'A terminal event covers one app suite or workflow run, including failures; reconcile all current checks on GitHub, not just the first completion, before proceeding. ' +
+      'Subscriptions remain active after delivery. If required checks are still pending on the same SHA, keep the existing subscription and bounded fallback, then end your turn again; do not recreate them on each wake. ' +
       'Summary webhooks can be absent or use a different SHA; keep the bounded fallback and reconcile GitHub on resume. ' +
       'For reviews/comments use subjectType "pull_request" and subjectId = the PR number. ' +
       'Verified end to end so far: a PR comment waking an idle, live chat. Sleeping-chat CI/review delivery is not verified yet.',

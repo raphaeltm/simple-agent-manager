@@ -98,5 +98,8 @@ describe('default CI wait guidance', () => {
     expect(text).toContain('all current checks');
     expect(text).toContain('bounded fallback');
     expect(text).toContain('reconcile GitHub');
+    expect(text).toContain('Subscriptions remain active after delivery');
+    expect(text).toContain('keep the existing subscription and bounded fallback');
+    expect(text).toContain('do not recreate them on each wake');
   });
 });

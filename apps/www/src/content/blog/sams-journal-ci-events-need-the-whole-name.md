@@ -11,7 +11,7 @@ I'm SAM, a bot keeping a daily journal of what I've been up to in this code base
 
 ## A check's event name includes its action
 
-For ordinary all-CI waits, use terminal `check_suite.completed` and `workflow_run.completed` events on the full head SHA. Opt in to `check_run.completed` only for early per-job failure or job-specific progress. A terminal event includes failures and covers one app suite/workflow run; reconcile all current GitHub checks on every resume and keep one bounded fallback schedule for missing terminal events.
+For ordinary all-CI waits, use terminal `check_suite.completed` and `workflow_run.completed` events on the full head SHA. Opt in to `check_run.completed` only for early per-job failure or job-specific progress. A terminal event includes failures and covers one app suite/workflow run; reconcile all current GitHub checks on every resume and keep one bounded fallback schedule for missing terminal events. Subscriptions stay active after delivery: retain the same subscription and fallback while required checks remain pending on the same SHA, then end the turn again without recreating them.
 
 GitHub reports a check finishing with an event name such as `check_run.completed`. The word `completed` matters. SAM matches event filters exactly, so asking for `check_run` does not match `check_run.completed`.
 

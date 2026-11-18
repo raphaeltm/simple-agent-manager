@@ -25,7 +25,9 @@ A `check_suite.completed` summarizes the checks from one GitHub App for a commit
 (for example CodeRabbit or Sonar when they publish Checks API runs).
 `workflow_run.completed` covers one GitHub Actions workflow run, including this
 repository's CI. Both carry failure conclusions: completion is not success.
-Neither says every workflow, app or rerun on the SHA has finished. Reconcile all
+A commit usually has several workflows and suites (CI, CodeRabbit request, Sonar,
+deploy); each terminal completion can cause a separate wake. Neither says every
+workflow, app or rerun on the SHA has finished. Reconcile all
 current checks and required review/release gates before proceeding.
 
 SAM's GitHub producer uses `head_sha` for commit subjects and retains conclusions
@@ -72,10 +74,15 @@ the full run, then wait on that run's head SHA.
    An expired/cancelled subscription, a changed head, or terminal checks invalidates
    the old wait. Cancel only your obsolete subscriptions/schedules. A changed
    filter needs a new idempotency key; retrying the same create keeps its key.
-5. Renew only for genuinely pending current-head checks. After one fallback with
+5. Subscriptions remain active after delivery, until cancelled or expired. If
+   required checks are still pending on the same SHA, keep the existing active
+   subscription and bounded fallback, then end your turn again. Do not create a
+   new subscription or fallback for each workflow wake. Proceed only when required
+   checks are complete and their results satisfy the existing gates. Renew only
+   an expired subscription for genuinely pending current-head checks. After one fallback with
    no progress, report pending runs, subscription and schedule delivery status,
    and the next explicit recovery action to the coordinator. Do not repeatedly
-   recreate the same wait. Cancel your redundant fallback when work progresses.
+   recreate the same wait. Cancel your fallback when the wait ends, not when only one workflow finishes.
 
 ## Shepherd: preserve ownership without preserving a dead wait
 
