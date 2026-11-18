@@ -83,11 +83,22 @@ describe('resolvePlatformCapabilities', () => {
     expect(resolvePlatformCapabilities(cloudflareEnv({ AI: {} as never })).workersAi).toBe(false);
   });
 
-  it('separates analytics ingest (binding) from analytics query (account API)', () => {
-    const ingestOnly = resolvePlatformCapabilities(cloudflareEnv({ CF_API_TOKEN: '' }));
-    expect(ingestOnly.analyticsIngest).toBe(true);
-    expect(ingestOnly.analyticsQuery).toBe(false);
-    expect(ingestOnly.workersObservability).toBe(false);
+  it('needs the account API for analytics query and log search', () => {
+    const noAccountApi = resolvePlatformCapabilities(cloudflareEnv({ CF_API_TOKEN: '' }));
+    expect(noAccountApi.analyticsQuery).toBe(false);
+    expect(noAccountApi.workersObservability).toBe(false);
+  });
+
+  // Main's L20 pin, kept when this file replaced main's at the M5 merge.
+  it('treats only LOG_TAIL_AVAILABLE="false" as no live stream', () => {
+    for (const value of ['true', '', 'TRUE']) {
+      expect(
+        resolvePlatformCapabilities(cloudflareEnv({ LOG_TAIL_AVAILABLE: value })).liveLogStream
+      ).toBe(true);
+    }
+    expect(
+      resolvePlatformCapabilities(cloudflareEnv({ LOG_TAIL_AVAILABLE: ' False ' })).liveLogStream
+    ).toBe(false);
   });
 
   it('needs both the flag and the binding for Artifacts', () => {
@@ -276,7 +287,6 @@ describe('analytics through a local sink (L20 seam)', () => {
     // only ANALYTICS_SINK="d1" activates it, and production does not set it.
     installLocalAnalyticsSinkExtension(localSink);
     const capabilities = resolvePlatformCapabilities(cloudflareProductionEnv());
-    expect(capabilities.analyticsIngest).toBe(true);
     expect(capabilities.analyticsQuery).toBe(true);
     expect(capabilities.workersObservability).toBe(true);
     expect(capabilities.liveLogStream).toBe(true);
@@ -284,20 +294,17 @@ describe('analytics through a local sink (L20 seam)', () => {
 
   it('reports analytics, log search and the stream absent on a box with nothing installed', () => {
     const capabilities = resolvePlatformCapabilities(selfHostEnv());
-    expect(capabilities.analyticsIngest).toBe(false);
     expect(capabilities.analyticsQuery).toBe(false);
     expect(capabilities.workersObservability).toBe(false);
     expect(capabilities.liveLogStream).toBe(false);
   });
 
-  it('reports analytics ingest and query on a box whose installed local sink is active', () => {
+  it('reports analytics available on a box whose installed local sink is active', () => {
     installLocalAnalyticsSinkExtension(localSink);
     const on = resolvePlatformCapabilities(selfHostEnv({ ANALYTICS_SINK: 'd1' }));
-    expect(on.analyticsIngest).toBe(true);
     expect(on.analyticsQuery).toBe(true);
     // Control: the same box without the switch has no analytics.
     const off = resolvePlatformCapabilities(selfHostEnv());
-    expect(off.analyticsIngest).toBe(false);
     expect(off.analyticsQuery).toBe(false);
   });
 });

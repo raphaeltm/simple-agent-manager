@@ -8,4 +8,3 @@ export {
   type OutboundRefusalReason,
   OutboundRequestRefusedError,
 } from './guarded-fetch';
-export { isAcceptableOperatorEndpoint, isForbiddenEndpointHost, isPrivateNetworkHost } from './operator-endpoint';

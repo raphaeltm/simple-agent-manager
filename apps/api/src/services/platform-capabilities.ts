@@ -43,7 +43,6 @@ export type PlatformCapability =
   | 'aiGateway'
   | 'monthlyCostCap'
   | 'cloudflareAccountApi'
-  | 'analyticsIngest'
   | 'analyticsQuery'
   | 'artifacts'
   | 'containerRuntime'
@@ -157,11 +156,9 @@ export function resolvePlatformCapabilities(env: CapabilityEnv): PlatformCapabil
     aiGateway: resolveAiGatewayId(env) !== null,
     monthlyCostCap: isMonthlyCostCapAvailable(env),
     cloudflareAccountApi,
-    // A local sink the self-host build installed and enabled (selfhost/analytics/) records and
-    // reads analytics instead of Analytics Engine.
-    analyticsIngest: !!env.ANALYTICS || activeLocalAnalyticsSink(env) !== undefined,
     // Admin analytics reads Cloudflare's Analytics Engine SQL API (CF_ACCOUNT_ID + CF_API_TOKEN),
-    // or that local sink.
+    // or a local sink the self-host build installed and enabled (selfhost/analytics/). Writes
+    // decide for themselves through resolveAnalyticsSink (services/analytics-sink.ts).
     analyticsQuery: cloudflareAccountApi || activeLocalAnalyticsSink(env) !== undefined,
     artifacts: isArtifactsAvailable(env),
     containerRuntime: hasContainerRuntime(env),
@@ -195,7 +192,10 @@ export function resolvePlatformCapabilities(env: CapabilityEnv): PlatformCapabil
 export interface PublicPlatformCapabilities {
   speechToText: boolean;
   textToSpeech: boolean;
-  /** Whether a monthly AI dollar cap can be set (onboarding's SAM-managed AI step reads it). */
+  /**
+   * Whether a monthly AI dollar cap can be set. No web page reads it yet: onboarding and the
+   * budget settings read the budget API's `monthlyCostCap.available` (L13).
+   */
   monthlyCostCap: boolean;
   /** Admin → Logs search (Workers Observability). Off on self-host: logs are read on the box. */
   logSearch: boolean;

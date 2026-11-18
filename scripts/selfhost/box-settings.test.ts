@@ -3,7 +3,6 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { resolveR2PresignConfig } from '../../apps/api/src/services/r2-presign-config.js';
 import {
   BOX_RESERVED_PORTS,
   celldChildEnv,
@@ -159,6 +158,9 @@ describe('presignVars', () => {
     });
   });
 
+  // The Worker side (main's resolveR2PresignConfig) is exercised against these vars in
+  // apps/api/tests/unit/selfhost/presign-vars-resolver.test.ts; importing the Worker's env types
+  // here would pull the whole API into this package's typecheck.
   it('passes an explicit region through and requires one for an s3:// store', () => {
     expect(
       presignVars(
@@ -176,34 +178,6 @@ describe('presignVars', () => {
         'assets'
       )
     ).toThrow(/R2_S3_REGION is required/);
-  });
-
-  it('yields vars the Worker accepts as an operator store (real resolver)', () => {
-    const vars = presignVars(
-      { CELLD_BUCKET: 'gs://my-bucket/celld/', R2_S3_ENDPOINT: 'https://storage.googleapis.com' },
-      'assets'
-    );
-    const config = resolveR2PresignConfig({
-      ...vars,
-      R2_ACCESS_KEY_ID: 'scoped-key-id',
-      R2_SECRET_ACCESS_KEY: 'scoped-key-secret',
-    } as Parameters<typeof resolveR2PresignConfig>[0]);
-    expect(config).toMatchObject({
-      endpoint: 'https://storage.googleapis.com',
-      bucket: 'my-bucket',
-      keyPrefix: 'celld/r2/assets/',
-      region: 'auto',
-    });
-    // Control: without the region the Worker would leave presigning off.
-    const withoutRegion = { ...vars };
-    delete withoutRegion.R2_S3_REGION;
-    expect(
-      resolveR2PresignConfig({
-        ...withoutRegion,
-        R2_ACCESS_KEY_ID: 'scoped-key-id',
-        R2_SECRET_ACCESS_KEY: 'scoped-key-secret',
-      } as Parameters<typeof resolveR2PresignConfig>[0])
-    ).toBeNull();
   });
 
   it('gives Azure buckets no presign vars', () => {
