@@ -57,7 +57,8 @@ export async function installationWifProviderId(baseDomain: string): Promise<str
   const slug = normalized
     .replace(/[^a-z0-9]+/g, '-')
     .slice(0, slugBudget)
-    .replace(/^-+|-+$/g, '');
+    // Normalization collapses each separator run to one hyphen.
+    .replace(/^-|-$/g, '');
   return slug ? `${WIF_PROVIDER_ID_PREFIX}${slug}-${hash}` : `${WIF_PROVIDER_ID_PREFIX}${hash}`;
 }
 
