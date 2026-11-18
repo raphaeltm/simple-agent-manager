@@ -4,7 +4,7 @@ import type { InboxItem } from '@simple-agent-manager/shared';
 import { assertNoOverflow, screenshot, setupProjectChatMocks } from './audit-helpers';
 
 /**
- * In-chat inbox item cards (inbox slice D): an agent's `inbox_write` ask or review renders as the
+ * In-chat inbox item cards (inbox slice D): an agent's `inbox_write` ask, review or result renders as the
  * inbox item it filed, read from and answered through the inbox routes.
  */
 
@@ -50,6 +50,15 @@ function inboxItem(overrides: Partial<InboxItem> & { ref: string }): InboxItem {
 
 const ITEMS: Record<string, InboxItem> = {
   'ask:review': inboxItem({ ref: 'ask:review' }),
+  'ask:result': inboxItem({
+    ref: 'ask:result',
+    kind: 'result',
+    agentState: 'finished',
+    title: 'The flaky login test is fixed: it was racing the session cookie on slow CI runners',
+    links: [
+      { kind: 'pr', id: 'https://github.com/user/sam/pull/2793', label: 'Login test fix PR #2793' },
+    ],
+  }),
   'ask:question': inboxItem({
     ref: 'ask:question',
     kind: 'question',
@@ -175,6 +184,23 @@ async function auditReview(page: Page, name: string) {
   await assertNoOverflow(page);
 }
 
+async function auditResult(page: Page, name: string) {
+  await setupMocks(page, [inboxRow('ask:result', 1)]);
+  await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
+  const card = page.getByTestId('inbox-item-card');
+  await expect(card).toHaveCount(1);
+  await expect(card.getByText('Result for you')).toBeVisible();
+  await expect(card.getByText('Waiting for you')).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Looks good' })).toHaveCount(0);
+  await screenshot(page, `${name}-result-open`);
+  await assertNoOverflow(page);
+  await card.getByRole('button', { name: 'Got it' }).click();
+  await expect(card.getByText(/Marked “Got it”/)).toBeVisible();
+  await expect(card.getByText('Seen')).toBeVisible();
+  await screenshot(page, `${name}-result-answered`);
+  await assertNoOverflow(page);
+}
+
 async function auditQuestionAndStates(page: Page, name: string) {
   await setupMocks(page, [
     inboxRow('ask:cancelled', 1),
@@ -200,6 +226,9 @@ test.describe('Project chat inbox item cards — Mobile', () => {
   test('review: open, then Looks good', async ({ page }) => {
     await auditReview(page, 'project-chat-inbox-item-card-mobile');
   });
+  test('result: open, then Got it', async ({ page }) => {
+    await auditResult(page, 'project-chat-inbox-item-card-mobile');
+  });
   test('blocking question, withdrawn item and a missing item', async ({ page }) => {
     await auditQuestionAndStates(page, 'project-chat-inbox-item-card-mobile');
   });
@@ -209,6 +238,9 @@ test.describe('Project chat inbox item cards — Desktop', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
   test('review: open, then Looks good', async ({ page }) => {
     await auditReview(page, 'project-chat-inbox-item-card-desktop');
+  });
+  test('result: open, then Got it', async ({ page }) => {
+    await auditResult(page, 'project-chat-inbox-item-card-desktop');
   });
   test('blocking question, withdrawn item and a missing item', async ({ page }) => {
     await auditQuestionAndStates(page, 'project-chat-inbox-item-card-desktop');

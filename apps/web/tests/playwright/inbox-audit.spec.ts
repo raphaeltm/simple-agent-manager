@@ -210,6 +210,7 @@ test.describe('Inbox — Desktop', () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Allow once' })).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Looks good' })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Got it' })).toBeVisible();
     // A 10-option question is never one tap.
     await expect(dialog.getByRole('button', { name: 'Falkenstein (fsn1)' })).toHaveCount(0);
     const box = await dialog.boundingBox();
