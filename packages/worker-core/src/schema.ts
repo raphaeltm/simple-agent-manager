@@ -6155,7 +6155,7 @@ export const agentRunUsage = sqliteTable(
   })
 );
 
-/** Sticky disclosure of harness usage refused by admission (migration 0260). */
+/** Sticky disclosure of harness usage refused by admission (migration 0261). */
 export const agentRunUsageAdmissionHits = sqliteTable(
   'agent_run_usage_admission_hits',
   {

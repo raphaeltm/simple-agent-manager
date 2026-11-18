@@ -6,6 +6,7 @@
  */
 import type { OperationContext } from '@simple-agent-manager/operations';
 import { projectAccounts } from '@simple-agent-manager/operations';
+import { agentAccounts } from '@simple-agent-manager/operations/internal/insights-agent';
 import {
   accountUsageStatement,
   parseAccountUsageRows,
@@ -214,6 +215,10 @@ describe('projectAccounts tokens and spend', () => {
     expect(usageRows()).toMatchObject([{ input_tokens: 10, output_tokens: 1 }]);
     const { result, byKey } = await accounts();
     expect(result).toMatchObject({ usageLimited: false, usageAdmissionLimited: true });
+    expect(agentAccounts(result)).toMatchObject({
+      usageLimited: false,
+      usageAdmissionLimited: true,
+    });
     expect(byKey['cred:cc-key']?.tokens).toMatchObject({ total: 11 });
     expect(byKey['cred:cc-key']?.spend).toMatchObject({ state: 'reported', unpricedModels: [] });
   });

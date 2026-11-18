@@ -6,6 +6,7 @@
  */
 import type { OperationContext } from '@simple-agent-manager/operations';
 import { projectSetups } from '@simple-agent-manager/operations';
+import { agentSetups } from '@simple-agent-manager/operations/internal/insights-agent';
 import type { RunNudgeWindow } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -13,13 +14,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { createOperationPorts } from '../../../src/operation-ports';
+import { invalidateAdminSettings } from '../../../src/services/admin-settings';
+import { recordHarnessRunUsage, recordProxyRunUsage } from '../../../src/services/agent-run-usage';
 import {
   createAllSchemaTables,
   createDeclaredIndexes,
   createSqliteD1,
 } from '../../helpers/sqlite-d1';
-import { invalidateAdminSettings } from '../../../src/services/admin-settings';
-import { recordHarnessRunUsage, recordProxyRunUsage } from '../../../src/services/agent-run-usage';
 
 const NOW = Date.parse('2026-11-16T12:00:00.000Z');
 const DAY = 86_400_000;
@@ -233,6 +234,7 @@ describe('projectSetups', () => {
     const partial = await projectSetups(ctx(), { projectId: 'p', nowMs: NOW });
     expect(partial.groups[0]?.tokens).toMatchObject({ state: 'reported', total: 11 });
     expect(partial).toHaveProperty('usageAdmissionLimited', true);
+    expect(agentSetups(partial)).toHaveProperty('usageAdmissionLimited', true);
     await recordProxyRunUsage(
       env,
       scope,
@@ -243,6 +245,7 @@ describe('projectSetups', () => {
     const complete = await projectSetups(ctx(), { projectId: 'p', nowMs: NOW });
     expect(complete.groups[0]?.tokens).toMatchObject({ state: 'reported', total: 99 });
     expect(complete).toHaveProperty('usageAdmissionLimited', false);
+    expect(agentSetups(complete)).toHaveProperty('usageAdmissionLimited', false);
   });
 
   it('ignores a foreign marker with the same chat id and keeps the owner run exact', async () => {
@@ -256,6 +259,7 @@ describe('projectSetups', () => {
     const complete = await projectSetups(ctx(), { projectId: 'p', nowMs: NOW });
     expect(complete.groups[0]?.tokens).toMatchObject({ state: 'reported', total: 11 });
     expect(complete).toHaveProperty('usageAdmissionLimited', false);
+    expect(agentSetups(complete)).toHaveProperty('usageAdmissionLimited', false);
   });
 
   it('discloses marker-only usage only for the selected project and run window', async () => {
@@ -293,6 +297,7 @@ describe('projectSetups', () => {
     expect(sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage').get()).toEqual({ n: 0 });
     expect(partial.groups[0]?.tokens).toMatchObject({ state: 'not_reported' });
     expect(partial).toHaveProperty('usageAdmissionLimited', true);
+    expect(agentSetups(partial)).toHaveProperty('usageAdmissionLimited', true);
     expect(
       await projectSetups(ctx('outsider'), { projectId: 'foreign', nowMs: NOW })
     ).toHaveProperty('usageAdmissionLimited', false);
