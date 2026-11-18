@@ -460,7 +460,8 @@ export interface InboxAskNoticeRow {
   assigneeUserId: string | null;
 }
 
-export type InboxAskNoticeOutcome = 'answered' | 'done' | 'archived' | 'expired';
+/** What closed an ask the agent is told about. An archive tells the agent nothing (2026-11-17). */
+export type InboxAskNoticeOutcome = 'answered' | 'done' | 'expired';
 
 /**
  * The inbox's reach into other areas (`apps/api/src/services/inbox/`). Every answer and archive

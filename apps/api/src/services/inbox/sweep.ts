@@ -69,7 +69,6 @@ function noticeRow(row: Record<string, unknown>): InboxAskNoticeRow | null {
 const OUTCOMES: Record<string, InboxAskNoticeOutcome> = {
   answered: 'answered',
   done: 'done',
-  archived: 'archived',
   expired: 'expired',
 };
 
