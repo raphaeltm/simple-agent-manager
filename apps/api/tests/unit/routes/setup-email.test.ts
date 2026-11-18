@@ -241,6 +241,16 @@ describe('first-run setup with email', () => {
       }
     );
 
+    it('does not close setup on email alone when the owner address cannot go on the SMTP envelope', async () => {
+      // The relay would take it, but the sender refuses any address it cannot put on the envelope
+      // verbatim, so a code could never be sent: the probe must refuse it too.
+      env = { ...(await smtpEnv()), BOOTSTRAP_OWNER_EMAIL: "o'brien@fixture.example" } as Env;
+      const verify = (await (await post('/verify', { token: 'setup-token' })).json()) as VerifyBody;
+      expect(verify.signIn).toMatchObject({ email: false, emailReady: false });
+      expect((await post('/complete', { token: 'setup-token', config: {} })).status).toBe(400);
+      expect(relay?.commands).toEqual([]);
+    });
+
     it('does not close setup on email alone when the relay is unreachable', async () => {
       env = await smtpEnv();
       await relay?.close();

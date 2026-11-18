@@ -270,6 +270,37 @@ describe('self-hosted inbound agent email', () => {
     ).toEqual([{ status: 'sent', toAddress: 'alice@example.com' }]);
   });
 
+  it('tells the agent only "SMTP relay unavailable" when the relay cannot be reached, and logs the detail', async () => {
+    const response = await gatewayRequest(rawEmail());
+    expect(await response.json()).toEqual({ outcome: 'accepted' });
+    const submission = submitter.mock.calls[0]![1];
+    // The relay goes away between the inbound mail and the agent's reply.
+    await smtp.close();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const reply = await callReplyTool(submission.triggerExecutionId, 'Fixed and deployed.');
+    const text = JSON.stringify(reply.body);
+    expect(text).toContain('The email could not be sent: SMTP relay unavailable');
+    expect(text).not.toContain('127.0.0.1');
+    expect(text).not.toContain('ECONNREFUSED');
+    expect(
+      logged.mock.calls.some((call) =>
+        String(call[0]).includes('agent_email.smtp_transport_failed')
+      )
+    ).toBe(true);
+  });
+
+  it('control: a relay refusal still reaches the agent as the refused step and code', async () => {
+    const response = await gatewayRequest(rawEmail());
+    expect(await response.json()).toEqual({ outcome: 'accepted' });
+    const submission = submitter.mock.calls[0]![1];
+    await smtp.close();
+    smtp = await startFakeSmtpServer({ mode: 'plain', rcptCode: 550 });
+    env = makeEnv();
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const reply = await callReplyTool(submission.triggerExecutionId, 'Fixed and deployed.');
+    expect(JSON.stringify(reply.body)).toContain('SMTP RCPT TO refused with 550');
+  });
+
   it('refuses a sender outside the allowlist, so the receiver answers 550', async () => {
     const raw = rawEmail({ from: 'Mallory <mallory@example.com>' });
     const response = await gatewayRequest(raw, {

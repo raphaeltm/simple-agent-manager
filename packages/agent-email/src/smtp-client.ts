@@ -13,7 +13,7 @@
 // eslint-disable-next-line sam/no-unguarded-outbound-fetch -- the installation operator chooses the SMTP relay host and port
 import { connect } from 'cloudflare:sockets';
 
-import type { SmtpConfig } from './smtp-config';
+import { isSmtpAddress, type SmtpConfig } from './smtp-config';
 import { dotStuff } from './smtp-message';
 
 export type SmtpConnect = typeof connect;
@@ -210,6 +210,17 @@ async function probe(
   await connection.command('QUIT', [221], 'QUIT').catch(() => undefined);
 }
 
+/**
+ * The envelope goes into MAIL FROM and RCPT TO verbatim, so both must be plain addresses (no
+ * CR/LF, quotes or brackets). The message builder checks its headers the same way; the probe has
+ * no message, so the client checks the envelope itself rather than trusting its callers.
+ */
+function assertEnvelope(envelope: SmtpEnvelope): void {
+  if (!isSmtpAddress(envelope.envelopeFrom) || !isSmtpAddress(envelope.envelopeTo)) {
+    throw new SmtpError('SMTP envelope address is not a plain email address');
+  }
+}
+
 /** One connection with one deadline for `exchange`; every failure becomes an `SmtpError`. */
 async function withSmtpConnection(
   config: SmtpConfig,
@@ -250,6 +261,7 @@ export async function sendSmtpMessage(
   delivery: SmtpDelivery,
   options: SmtpSendOptions
 ): Promise<void> {
+  assertEnvelope(delivery);
   await withSmtpConnection(config, options, (connection) =>
     converse(connection, config, delivery, options.heloName)
   );
@@ -264,6 +276,7 @@ export async function probeSmtpRelay(
   envelope: SmtpEnvelope,
   options: SmtpSendOptions
 ): Promise<void> {
+  assertEnvelope(envelope);
   await withSmtpConnection(config, options, (connection) =>
     probe(connection, config, envelope, options.heloName)
   );

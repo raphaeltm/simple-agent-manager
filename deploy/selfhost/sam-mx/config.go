@@ -35,8 +35,15 @@ const (
 	// so the gateway call gets most of that window; a timeout answers 451 and the sender retries.
 	DefaultGatewayTimeout = 540 * time.Second
 	DefaultMaxLineLength  = 2000
-	// Absolute bound on one connection: above DATA, DNS and the gateway timeout together.
+	// Absolute bound on one connection: above DATA, DNS and the gateway timeout together
+	// (LoadConfig refuses a shorter one).
 	DefaultMaxSessionDuration = 15 * time.Minute
+	// A message authenticated by DKIM alone must be dated within this window: a signature stays
+	// valid for as long as the key is published, so without it an old signed message from an
+	// allowed sender could be replayed to an agent address years later.
+	DefaultDKIMMaxAge = 7 * 24 * time.Hour
+	// Time in-flight deliveries get to finish on SIGTERM, below docker's default 10 s grace.
+	DefaultShutdownGrace = 8 * time.Second
 )
 
 // Agent address shape, mirroring apps/api/src/services/agent-email/address.ts and the shared
@@ -70,6 +77,13 @@ type Config struct {
 	TrustedNetworks     []*net.IPNet
 	TLSCertFile         string
 	TLSKeyFile          string
+	// RelaxedAlignment (SAM_MX_RELAXED_ALIGNMENT=true) accepts SPF or DKIM for any domain under
+	// the From domain's organizational domain, as DMARC's relaxed mode does. Off by default: the
+	// trigger allowlist names whole addresses, so relaxed alignment would let anyone who controls
+	// a sibling subdomain (a tenant or marketing subdomain) send as an allowed sender.
+	RelaxedAlignment bool
+	DKIMMaxAge       time.Duration
+	ShutdownGrace    time.Duration
 }
 
 // minGatewaySecretLength matches the Worker's floor (node-reverse-tunnel-config.ts): a shorter
@@ -200,6 +214,25 @@ func LoadConfig(get func(string) string) (*Config, error) {
 	}
 	if cfg.TrustedNetworks, err = ParseTrustedNetworks(get("SAM_MX_TRUSTED_NETWORKS")); err != nil {
 		return nil, err
+	}
+	switch strings.ToLower(strings.TrimSpace(get("SAM_MX_RELAXED_ALIGNMENT"))) {
+	case "", "false":
+	case "true":
+		cfg.RelaxedAlignment = true
+	default:
+		return nil, fmt.Errorf("SAM_MX_RELAXED_ALIGNMENT must be true or false")
+	}
+	if cfg.DKIMMaxAge, err = positiveDuration(get, "SAM_MX_DKIM_MAX_AGE", DefaultDKIMMaxAge); err != nil {
+		return nil, err
+	}
+	if cfg.ShutdownGrace, err = positiveDuration(get, "SAM_MX_SHUTDOWN_GRACE", DefaultShutdownGrace); err != nil {
+		return nil, err
+	}
+	// The lifetime timer closes the connection, so it must outlast one whole delivery: the last
+	// DATA read, the DNS checks and the gateway call. Shorter, it would cut deliveries the Worker
+	// may already have committed, and every sender would retry.
+	if floor := cfg.ReadTimeout + cfg.DNSTimeout + cfg.GatewayTimeout; cfg.MaxSessionDuration <= floor {
+		return nil, fmt.Errorf("SAM_MX_MAX_SESSION must be longer than SAM_MX_READ_TIMEOUT + SAM_MX_DNS_TIMEOUT + SAM_MX_GATEWAY_TIMEOUT (%s)", floor)
 	}
 	return cfg, nil
 }
