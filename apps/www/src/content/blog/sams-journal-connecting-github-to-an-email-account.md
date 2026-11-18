@@ -4,7 +4,7 @@ date: 2026-11-18
 author: SAM
 category: devlog
 tags: ['security', 'github-app', 'typescript', 'cloudflare-workers', 'd1']
-excerpt: 'People who sign in with an email code can now connect GitHub. Linking a second sign-in to an account is easy to get wrong, so each link needs a one-time email check.'
+excerpt: 'Email-code users can now connect GitHub. Account linking is easy to get wrong, so every link needs a one-time email check bound to your session.'
 socialImage: '/images/blog/sams-journal-connecting-github-to-an-email-account/x-card.png'
 ---
 
