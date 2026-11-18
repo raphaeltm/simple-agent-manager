@@ -204,6 +204,11 @@ export function ingressFragments(variables: CloudInitVariables): Record<string, 
 export function tunnelReplacements(variables: CloudInitVariables): Record<string, string> {
   const tunnel = isTunnelMode(variables);
   const cloudflare = isCloudflareTunnelMode(variables);
+  // Reverse mode renders validated numbers in canonical decimal: frpc's TOML rejects leading
+  // zeros and dash arithmetic reads them as octal. Cloudflare output stays byte-identical to
+  // before the reverse mode existed (tests/cloudflare-output-snapshot.test.ts); its own
+  // leading-zero handling is tracked in tasks/backlog/2026-11-18-reverse-tunnel-cloud-init-hardening.md.
+  const num = (value: string) => (isReverseTunnelMode(variables) ? String(Number(value)) : value);
   const version = orDefault(variables.cloudflaredVersion, DEFAULT_CLOUDFLARED_VERSION);
   const release = CLOUDFLARED_RELEASES[version];
   return {
@@ -213,23 +218,25 @@ export function tunnelReplacements(variables: CloudInitVariables): Record<string
     '{{ vm_agent_exec_start_pre }}': tunnel
       ? 'ExecStartPre=/etc/sam/firewall/setup-firewall.sh'
       : '',
-    '{{ tunnel_port }}': tunnelListenerPort(variables),
+    '{{ tunnel_port }}': num(tunnelListenerPort(variables)),
     '{{ tunnel_token }}': cloudflare ? (variables.cloudflareTunnelToken ?? '') : '',
-    '{{ tunnel_listener_wait_seconds }}': orDefault(
-      variables.tunnelListenerWaitSeconds,
-      DEFAULT_TUNNEL_LISTENER_WAIT_SECONDS
+    '{{ tunnel_listener_wait_seconds }}': num(
+      orDefault(variables.tunnelListenerWaitSeconds, DEFAULT_TUNNEL_LISTENER_WAIT_SECONDS)
     ),
-    '{{ tunnel_listener_probe_timeout_seconds }}': orDefault(
-      variables.tunnelListenerProbeTimeoutSeconds,
-      DEFAULT_TUNNEL_LISTENER_PROBE_TIMEOUT_SECONDS
+    '{{ tunnel_listener_probe_timeout_seconds }}': num(
+      orDefault(
+        variables.tunnelListenerProbeTimeoutSeconds,
+        DEFAULT_TUNNEL_LISTENER_PROBE_TIMEOUT_SECONDS
+      )
     ),
-    '{{ tunnel_listener_probe_interval_seconds }}': orDefault(
-      variables.tunnelListenerProbeIntervalSeconds,
-      DEFAULT_TUNNEL_LISTENER_PROBE_INTERVAL_SECONDS
+    '{{ tunnel_listener_probe_interval_seconds }}': num(
+      orDefault(
+        variables.tunnelListenerProbeIntervalSeconds,
+        DEFAULT_TUNNEL_LISTENER_PROBE_INTERVAL_SECONDS
+      )
     ),
-    '{{ tunnel_connector_restart_seconds }}': orDefault(
-      variables.tunnelConnectorRestartSeconds,
-      DEFAULT_TUNNEL_CONNECTOR_RESTART_SECONDS
+    '{{ tunnel_connector_restart_seconds }}': num(
+      orDefault(variables.tunnelConnectorRestartSeconds, DEFAULT_TUNNEL_CONNECTOR_RESTART_SECONDS)
     ),
     '{{ cloudflared_url }}': `${CLOUDFLARED_DOWNLOAD_BASE_URL}/${version}/cloudflared-linux`,
     '{{ cloudflared_sha256_amd64 }}': release?.amd64 ?? '',

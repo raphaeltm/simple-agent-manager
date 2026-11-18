@@ -89,6 +89,49 @@ describe('reverse-tunnel variable validation', () => {
     expect(() => validateCloudInitVariables(reverse(overrides))).toThrow(/validation failed/);
   });
 
+  it('rejects a control plane URL that frpc could not dial (no empty serverAddr)', () => {
+    const url = 'https://api.box.example.org:65536';
+    expect(() => validateCloudInitVariables(reverse({ controlPlaneUrl: url }))).toThrow(
+      'controlPlaneUrl: must be an HTTPS URL with a host and a valid port in reverse-tunnel mode'
+    );
+    // Control: the same URL is not this mode's concern on other nodes.
+    let message = '';
+    try {
+      validateCloudInitVariables(variables({ controlPlaneUrl: url }));
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).not.toContain('reverse-tunnel mode');
+  });
+
+  it('keeps an explicit control plane port and defaults to 443', () => {
+    const toml = (url: string) =>
+      file(
+        parse(reverse({ controlPlaneUrl: url, jwksUrl: `${url}/jwks` })),
+        '/etc/sam/frpc/frpc.toml'
+      ).content;
+    expect(toml('https://api.box.example.org:8443')).toMatch(/^serverPort = 8443$/m);
+    expect(toml('https://api.box.example.org')).toMatch(/^serverPort = 443$/m);
+  });
+
+  it('renders leading-zero numbers in canonical decimal (TOML and dash arithmetic)', () => {
+    const parsed = parse(
+      reverse({
+        reverseTunnelRemotePort: '020007',
+        reverseTunnelLocalPort: '08444',
+        tunnelListenerWaitSeconds: '08',
+        tunnelListenerProbeIntervalSeconds: '09',
+      })
+    );
+    const toml = file(parsed, '/etc/sam/frpc/frpc.toml').content;
+    expect(toml).toMatch(/^remotePort = 20007$/m);
+    expect(toml).toMatch(/^localPort = 8444$/m);
+    const wait = file(parsed, '/usr/local/sbin/sam-wait-tunnel-listener').content;
+    expect(wait).toContain('+ 8))');
+    expect(wait).toContain('sleep 9');
+    expect(wait).toContain('http://127.0.0.1:8444/health');
+  });
+
   it('never echoes the credential in validation errors', () => {
     let message = '';
     try {
@@ -166,6 +209,7 @@ describe('rendered reverse-tunnel user-data', () => {
   it('supervises frpc as an unprivileged, restart-always unit gated on the agent listener', () => {
     const parsed = parse(reverse());
     const unit = file(parsed, '/etc/systemd/system/sam-frpc.service').content;
+    expect(unit).toContain('Type=exec\n');
     expect(unit).toContain('User=sam-frpc\n');
     expect(unit).toContain('EnvironmentFile=/etc/sam/frpc/credential.env\n');
     expect(unit).toContain('ExecStartPre=/usr/local/sbin/sam-wait-tunnel-listener\n');
@@ -254,7 +298,7 @@ function runBootScript(vars: CloudInitVariables, env: Record<string, string> = {
   while [ "$#" -gt 0 ]; do if [ "$1" = -fsSLo ]; then shift; cp "$TEST_DIR/frp.tar.gz" "$1"; fi; shift; done; exit 0 ;; esac
 while [ "$#" -gt 0 ]; do if [ "$1" = -fLo ] || [ "$1" = -fsSLo ]; then shift; printf 'binary' > "$1"; fi; shift; done`,
     sha256sum: `echo "\${FAKE_SHA:-${RELEASE.amd64}}  $1"`,
-    install: 'true',
+    install: 'case "$*" in *frpc*) exit "${FRPC_INSTALL_EXIT:-0}" ;; esac',
     id: 'exit 1',
     useradd: 'true',
     chown: 'true',
@@ -319,6 +363,36 @@ describe('executed reverse-tunnel boot sequence', () => {
     expect(calls).not.toContain('systemctl start vm-agent');
     expect(calls).not.toContain('sam-frpc.service');
     if (reason === 'frpc_install') expect(calls).not.toMatch(/^install /m);
+  });
+
+  it('fails closed when the verified frpc cannot be installed', () => {
+    const { result, calls } = runBootScript(reverse(), { FRPC_INSTALL_EXIT: '1' });
+    expect(result.status).toBe(1);
+    expect(calls).toMatch(/^install -m 0755 \S+\/frpc /m);
+    expect(calls).toContain('sam-boot-failure frpc_install');
+    expect(calls).not.toContain('systemctl start vm-agent');
+    expect(calls).not.toContain('sam-frpc.service');
+  });
+
+  it('runs the rendered listener wait script under /bin/sh with a leading-zero wait', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sam-reverse-wait-test-'));
+    tempDirs.push(dir);
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    for (const [name, body] of Object.entries({ curl: 'exit 0', logger: 'true', sleep: 'true' })) {
+      writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    }
+    const script = file(
+      parse(reverse({ tunnelListenerWaitSeconds: '08' })),
+      '/usr/local/sbin/sam-wait-tunnel-listener'
+    ).content;
+    const result = spawnSync('/bin/sh', ['-c', script], {
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+      encoding: 'utf8',
+      timeout: 10_000,
+    });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
   });
 
   it('reports a connector that cannot start', () => {
