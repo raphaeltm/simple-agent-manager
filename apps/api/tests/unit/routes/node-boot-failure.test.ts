@@ -46,6 +46,7 @@ describe('boot failure callback', () => {
     'origin_ca_bootstrap',
     'vm_agent_download',
     'cloudflared_install',
+    'frpc_install',
     'tunnel_firewall',
     'tunnel_connector',
   ])('records %s through authenticated callback routing', async (reason) => {

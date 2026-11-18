@@ -326,31 +326,55 @@ export function listThreadRecords(
 }
 
 /**
- * Every thread of a known anchor kind in the project, newest activity first.
+ * The threads one viewer may see: message and library-file threads are readable by every project
+ * reader; an inbox-item (task) thread only when the API's D1 authorization query returned its item.
+ * The ids are bound as one JSON array, so the statement text is fixed whatever their number, and
+ * matched on the indexed `scope_key`, which DO migration CHECKs equal to `inbox_item_id` for task
+ * threads. Ranking and counting share this predicate so they cannot disagree.
+ */
+function readableThreadConditions(
+  status: string | null | undefined,
+  readableInboxItemIds: readonly string[]
+): { conditions: string[]; params: Array<string | number> } {
+  const kindPlaceholders = STORED_COMMENT_ANCHOR_KINDS.map(() => '?').join(', ');
+  const conditions = [
+    `t.anchor_kind IN (${kindPlaceholders})`,
+    "(t.anchor_kind <> 'inbox_item' OR t.scope_key IN (SELECT value FROM json_each(?)))",
+  ];
+  const params: Array<string | number> = [
+    ...STORED_COMMENT_ANCHOR_KINDS,
+    JSON.stringify([...new Set(readableInboxItemIds)]),
+  ];
+  if (status) {
+    conditions.push('t.status = ?');
+    params.push(status);
+  }
+  return { conditions, params };
+}
+
+/**
+ * Every thread of a known anchor kind in the project that this viewer may read, newest activity
+ * first.
  *
- * No scope predicate, by design: this Durable Object *is* the project, so every row belongs
+ * No project predicate, by design: this Durable Object *is* the project, so every row belongs
  * to it. `updated_at` is bumped by every reply and status change, so `updated_at DESC`
  * means "most recently active", the order a reader triaging an inbox needs
- * (.claude/rules/65). Returns up to `limit + 1` candidates and the true total.
+ * (.claude/rules/65). Returns up to `limit + 1` cheap candidates. Unreadable task threads are
+ * excluded here, before ranking, so they can neither take a page slot nor cost extra windows.
  */
 export function listProjectThreadCandidates(
   sql: SqlStorage,
   input: {
     status?: string | null;
     limit: number;
+    /** Task ids this viewer may read; an empty list hides every task thread. */
+    readableInboxItemIds: readonly string[];
     /** Keyset cursor: continue after this candidate in `updated_at DESC, id ASC` order. */
     after?: ProjectCommentThreadCandidate | null;
   }
 ): ListProjectCommentThreadCandidatesPage {
-  const kindPlaceholders = STORED_COMMENT_ANCHOR_KINDS.map(() => '?').join(', ');
-  const conditions = [`t.anchor_kind IN (${kindPlaceholders})`];
-  const params: Array<string | number> = [...STORED_COMMENT_ANCHOR_KINDS];
-  if (input.status) {
-    conditions.push('t.status = ?');
-    params.push(input.status);
-  }
+  const { conditions, params } = readableThreadConditions(input.status, input.readableInboxItemIds);
   if (input.after) {
-    // Keyset cursor. The count below only runs on the first window, before any cursor.
     conditions.push('(t.updated_at < ? OR (t.updated_at = ? AND t.id > ?))');
     params.push(input.after.updatedAt, input.after.updatedAt, input.after.id);
   }
@@ -375,13 +399,6 @@ export function listProjectThreadCandidates(
       input.limit + 1
     )
     .toArray();
-  // The total is the same for every window, so only the first one counts it.
-  const countRow = input.after
-    ? null
-    : sql
-        .exec(`SELECT COUNT(*) AS count FROM anchored_comment_threads t ${whereClause}`, ...params)
-        .toArray()[0];
-
   return {
     candidates: parseProjectCommentThreadCandidates(
       rows,
@@ -390,9 +407,23 @@ export function listProjectThreadCandidates(
       log,
       'comments.project_candidate_row_skipped'
     ),
-    totalCount: typeof countRow?.count === 'number' ? countRow.count : 0,
     windowFull: rows.length > input.limit,
   };
+}
+
+/** Count the threads this viewer may see, with the predicate the ranking uses. */
+export function countReadableProjectThreads(
+  sql: SqlStorage,
+  status: string | null,
+  readableInboxItemIds: readonly string[]
+): number {
+  const { conditions, params } = readableThreadConditions(status, readableInboxItemIds);
+  // Named `whereClause` deliberately — see `listThreadRecords`.
+  const whereClause = `WHERE ${conditions.join(' AND ')}`;
+  const row = sql
+    .exec(`SELECT COUNT(*) AS count FROM anchored_comment_threads t ${whereClause}`, ...params)
+    .toArray()[0];
+  return typeof row?.count === 'number' ? row.count : 0;
 }
 
 /** Hydrate the ids the project-wide ranking already selected, in the given order. */

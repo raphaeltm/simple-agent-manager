@@ -34,6 +34,7 @@ async function seedRun(runId: string, userId: string): Promise<void> {
 
 async function duringModelAwait(
   runner: DurableObjectStub<DiagnosisRunner>,
+  runId: string,
   action: (instance: DiagnosisRunner) => Promise<void>
 ): Promise<void> {
   // The full Workers pool has no AI binding/account credentials. Configure this DO's own
@@ -69,7 +70,16 @@ async function duringModelAwait(
   });
   vi.stubGlobal('fetch', upstream);
   try {
-    await runDurableObjectAlarm(runner);
+    // Keep start's immediate alarm behind the fixture barrier, then drive the
+    // real alarm explicitly. Otherwise the automatic handler can still be running
+    // when runDurableObjectAlarm() observes no scheduled alarm and returns false.
+    await runInDurableObject(runner, async (instance) => {
+      await instance.ctx.blockConcurrencyWhile(async () => {
+        await instance.start(runId);
+        await instance.ctx.storage.setAlarm(Date.now() + 60_000);
+      });
+    });
+    expect(await runDurableObjectAlarm(runner)).toBe(true);
     if (boundaryError) throw boundaryError; // The production alarm handles model errors itself.
     expect(upstream).toHaveBeenCalledTimes(1);
   } finally {
@@ -179,9 +189,8 @@ describe('DiagnosisRunner DO durability and fault injection', () => {
     const runId = 'diagnosis-do-cancel-race-001';
     await seedRun(runId, 'diagnosis-user-cancel-race');
     const runner = stub(runId);
-    await runner.start(runId);
 
-    await duringModelAwait(runner, async (instance) => {
+    await duringModelAwait(runner, runId, async (instance) => {
       await instance.cancel(runId);
       expect(
         await instance.env.DATABASE.prepare(
@@ -220,9 +229,8 @@ describe('DiagnosisRunner DO durability and fault injection', () => {
     const runId = 'diagnosis-do-deadline-race-001';
     await seedRun(runId, 'diagnosis-user-deadline-race');
     const runner = stub(runId);
-    await runner.start(runId);
 
-    await duringModelAwait(runner, async (instance) => {
+    await duringModelAwait(runner, runId, async (instance) => {
       await instance.env.DATABASE.prepare(
         "UPDATE debug_diagnosis_runs SET deadline_at='2020-01-01T00:00:00.000Z',heartbeat_at='2020-01-01T00:00:00.000Z' WHERE id=?"
       )

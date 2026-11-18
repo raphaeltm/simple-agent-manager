@@ -352,9 +352,9 @@ export interface ProjectCommentListResponse {
   /** True when the row or byte budget kept the response from covering every thread. */
   hasMore: boolean;
   /**
-   * Total threads in the project across every anchor kind, matching the same
-   * status filter. Present so a truncated list can never be read as a complete
-   * one (.claude/rules/65-capped-selection-must-rank-and-disclose.md).
+   * Total threads visible to this viewer across every anchor kind, matching the
+   * same status filter. Present so a truncated list can never be read as a
+   * complete one (.claude/rules/65-capped-selection-must-rank-and-disclose.md).
    */
   totalCount: number;
 }

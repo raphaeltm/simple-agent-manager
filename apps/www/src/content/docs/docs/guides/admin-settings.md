@@ -1209,3 +1209,14 @@ background login driver may already have started. A late successful scrub or a s
 can finish its current attempt once; it never reopens quarantined cleanup. Once destruction
 is proven, successful D1/pool bookkeeping clears pending cleanup before the failure budget
 is checked; failed bookkeeping still spends the bounded budget.
+
+## Library browser uploads
+
+Search for **library.multipart** in **Admin → Settings** to lower the browser file
+ceiling or adjust multipart overhead, part/header limits and ingress time. The default
+file ceiling is 50 MiB and cannot be raised above that memory-safe ceiling. Existing
+`LIBRARY_UPLOAD_MAX_BYTES` overrides may lower it further. Library writes, downloads/previews and agent transfers share a 50 MiB memory budget
+per Worker isolate. Small uploads and previews run together; a transfer that does not fit
+receives `429` (or an MCP retry error); retry after the active transfer finishes. HTTP reads hold their reservation through response
+consumption/cancellation and use the existing download timeout for their egress deadline. See [Browser Library upload limits](/docs/reference/configuration/#browser-library-upload-limits)
+for defaults and throughput.

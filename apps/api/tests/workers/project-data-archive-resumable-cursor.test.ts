@@ -317,12 +317,26 @@ describe('resumable archive cursor', () => {
   });
 
   it('reports the session cap when every slot is occupied by an existing migration', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    onTestFinished(() => vi.useRealTimers());
     const { projectId, sessionId, source } = await seedCandidate('occupied-slots', LARGE_MESSAGES);
-    const first = await tick({
-      PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '150',
-      PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '1',
+    const { bucket, puts } = countingR2(env.PROJECT_DATA_ARCHIVE_R2 as R2Bucket, {
+      // As in the large-cursor case, actual copy writes consume the tick budget.
+      // A fast or loaded runner must leave the same occupied migration slot.
+      beforePut: () => vi.setSystemTime(Date.now() + 25),
     });
-    expect(first.yielded).toBe(1);
+    const first = await withR2(bucket, () =>
+      tick({
+        PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '150',
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '1',
+      })
+    );
+    expect(first).toMatchObject({ yielded: 1, migrated: 0, failed: 0 });
+    expect(puts.size).toBeGreaterThan(0);
+    expect(await readJournal(projectId, sessionId)).toMatchObject({
+      state: 'copying',
+      lease_owner: null,
+    });
     const pending = await source.createSession(null, 'Waiting behind occupied slot');
     await source.persistMessageBatch(pending, messagesFor('waiting-behind-slot', 20));
     await source.stopSession(pending);
