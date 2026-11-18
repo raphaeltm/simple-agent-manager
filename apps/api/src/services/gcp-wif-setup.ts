@@ -27,6 +27,40 @@ function assertSafeCelValue(value: string, fieldName: string): void {
   }
 }
 
+/** Google allows 4-32 characters of [a-z0-9-] for a provider ID and reserves the "gcp-" prefix. */
+const WIF_PROVIDER_ID_MAX_LENGTH = 32;
+const WIF_PROVIDER_ID_PREFIX = 'sam-';
+const WIF_PROVIDER_ID_HASH_LENGTH = 6;
+
+/**
+ * Workload identity provider ID for one SAM installation.
+ *
+ * A provider trusts exactly one issuer, so installations that share a Google Cloud
+ * project need distinct providers. The ID is a readable slug of the installation's
+ * base domain plus a hash of it, so two domains that slug alike still differ:
+ * `sammy2.party` → `sam-sammy2-party-<hash>`. Saved credentials keep the IDs they
+ * were created with; this only names providers created by a new setup run.
+ */
+export async function installationWifProviderId(baseDomain: string): Promise<string> {
+  const normalized = baseDomain.trim().toLowerCase();
+  if (!normalized) {
+    throw new Error('BASE_DOMAIN is required to name the workload identity provider');
+  }
+  const digest = new Uint8Array(
+    await crypto.subtle.digest('SHA-256', new TextEncoder().encode(normalized))
+  );
+  const hash = Array.from(digest, (byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, WIF_PROVIDER_ID_HASH_LENGTH);
+  const slugBudget =
+    WIF_PROVIDER_ID_MAX_LENGTH - WIF_PROVIDER_ID_PREFIX.length - 1 - WIF_PROVIDER_ID_HASH_LENGTH;
+  const slug = normalized
+    .replace(/[^a-z0-9]+/g, '-')
+    .slice(0, slugBudget)
+    .replace(/^-+|-+$/g, '');
+  return slug ? `${WIF_PROVIDER_ID_PREFIX}${slug}-${hash}` : `${WIF_PROVIDER_ID_PREFIX}${hash}`;
+}
+
 /**
  * Create a Workload Identity Pool.
  * Returns the pool name or reuses an existing one if it already exists.

@@ -281,9 +281,13 @@ describe('runGcpSetup', () => {
       ) {
         return existing ? json({ error: { code: 409 } }, 409) : json({ done: true });
       }
-      if (url.endsWith('/providers/sam-oidc') && (init?.method ?? 'GET') === 'GET') {
+      if (
+        url.includes('/workloadIdentityPools/sam-pool/providers/') &&
+        (init?.method ?? 'GET') === 'GET'
+      ) {
+        // This installation's own provider from an earlier run.
         return json({
-          name: 'projects/123456/locations/global/workloadIdentityPools/sam-pool/providers/sam-oidc',
+          name: url.slice(url.indexOf('projects/')),
           oidc: { issuerUri: 'https://api.example.com' },
         });
       }

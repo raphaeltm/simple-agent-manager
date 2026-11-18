@@ -3,7 +3,6 @@ import {
   DEFAULT_GCP_API_TIMEOUT_MS,
   DEFAULT_GCP_SERVICE_ACCOUNT_ID,
   DEFAULT_GCP_WIF_POOL_ID,
-  DEFAULT_GCP_WIF_PROVIDER_ID,
   GCP_CREDENTIAL_VERSION,
   GCP_REQUIRED_APIS,
 } from '@simple-agent-manager/shared';
@@ -21,12 +20,18 @@ import {
   requireOperationName,
   SERVICE_USAGE_URL,
 } from './gcp-setup-transport';
-import { createOidcProvider, createWifPool, grantWifUserOnSa } from './gcp-wif-setup';
+import {
+  createOidcProvider,
+  createWifPool,
+  grantWifUserOnSa,
+  installationWifProviderId,
+} from './gcp-wif-setup';
 export { fetchWithTimeout, pollOperation } from './gcp-setup-transport';
 export {
   createOidcProvider,
   createWifPool,
   grantWifUserOnSa,
+  installationWifProviderId,
   updateOidcProvider,
 } from './gcp-wif-setup';
 
@@ -365,7 +370,8 @@ export async function runGcpSetup(
     ? parseInt(env.GCP_API_TIMEOUT_MS, 10)
     : DEFAULT_GCP_API_TIMEOUT_MS;
   const poolId = env.GCP_WIF_POOL_ID || DEFAULT_GCP_WIF_POOL_ID;
-  const providerId = env.GCP_WIF_PROVIDER_ID || DEFAULT_GCP_WIF_PROVIDER_ID;
+  // Per installation: a provider trusts one issuer, and installations may share a project.
+  const providerId = env.GCP_WIF_PROVIDER_ID || (await installationWifProviderId(env.BASE_DOMAIN));
   const saAccountId = env.GCP_SERVICE_ACCOUNT_ID || DEFAULT_GCP_SERVICE_ACCOUNT_ID;
   const issuerUri = `https://api.${env.BASE_DOMAIN}`;
 

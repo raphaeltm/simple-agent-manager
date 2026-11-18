@@ -82,9 +82,6 @@ export const INFOMANIAK_BOOT_VOLUME_MAX_GB = 4_096;
 /** Default GCP WIF pool ID. Override via GCP_WIF_POOL_ID env var. */
 export const DEFAULT_GCP_WIF_POOL_ID = 'sam-pool';
 
-/** Default GCP WIF provider ID. Override via GCP_WIF_PROVIDER_ID env var. */
-export const DEFAULT_GCP_WIF_PROVIDER_ID = 'sam-oidc';
-
 /** Default GCP service account ID. Override via GCP_SERVICE_ACCOUNT_ID env var. */
 export const DEFAULT_GCP_SERVICE_ACCOUNT_ID = 'sam-vm-manager';
 
