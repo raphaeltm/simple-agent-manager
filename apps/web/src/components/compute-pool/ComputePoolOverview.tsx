@@ -190,7 +190,12 @@ export function ComputePoolOverview({
     // Placement needs an active, currently available candidate on an enabled account.
     defaultWorkspaceFitWarning(
       groups
-        .filter((group) => !isCapacitySourceExcluded(pool, group.key))
+        .filter(
+          (group) =>
+            summary.sources.some(
+              (source) => source.id === group.key && source.status === 'active'
+            ) && !isCapacitySourceExcluded(pool, group.key)
+        )
         .flatMap((group) =>
           group.rows.filter((row) =>
             row.cells.some((cell) =>

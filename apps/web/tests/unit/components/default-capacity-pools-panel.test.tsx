@@ -165,6 +165,11 @@ describe('DefaultCapacityPoolsPanel', () => {
       hostMemoryReserveMb: number
     ) {
       const base = response('installation', summary('installation'));
+      // Keep candidate foreign keys aligned with the installation source in this response.
+      base.effective!.candidates = base.effective!.candidates.map((candidate) => ({
+        ...candidate,
+        capacitySourceId: base.effective!.sources[0]!.id,
+      }));
       return {
         ...base,
         placementSettings: {
@@ -307,6 +312,24 @@ describe('DefaultCapacityPoolsPanel', () => {
       expect(
         await screen.findByText(/No allowed machine can run a default workspace/)
       ).toBeInTheDocument();
+    });
+
+    it.each([
+      ['disabled', true],
+      ['active', false],
+    ] as const)('requires an active fitting capacity source (%s)', async (status, warns) => {
+      const body = withSecondAccount(false);
+      body.effective!.sources = body.effective!.sources.map((source) =>
+        source.id === 'source-off' ? { ...source, status } : source
+      );
+      mocks.fetchUserDefaultCapacityPools.mockResolvedValue(body);
+
+      renderPanel({ scope: 'user' });
+
+      expect(await screen.findByText(/Allowed machines/)).toBeInTheDocument();
+      const warning = screen.queryByText(/No allowed machine can run a default workspace/);
+      if (warns) expect(warning).toBeInTheDocument();
+      else expect(warning).not.toBeInTheDocument();
     });
 
     it('counts the same machine when its account is on (control)', async () => {

@@ -754,8 +754,22 @@ test.describe('Default capacity pool scope surfaces', () => {
       minVcpu: 8,
       minMemoryGb: 16,
       unavailable: false,
+      disabledSource: false,
     },
-    { name: 'unavailable fitting machine', minVcpu: 2, minMemoryGb: 4, unavailable: true },
+    {
+      name: 'unavailable fitting machine',
+      minVcpu: 2,
+      minMemoryGb: 4,
+      unavailable: true,
+      disabledSource: false,
+    },
+    {
+      name: 'disabled fitting source',
+      minVcpu: 2,
+      minMemoryGb: 4,
+      unavailable: false,
+      disabledSource: true,
+    },
   ]) {
     test(`personal shared pool warns: ${scenario.name}`, async ({ page }, testInfo) => {
       await setupCommonMocks(page, user, 'installation');
@@ -785,7 +799,7 @@ test.describe('Default capacity pool scope surfaces', () => {
           hostMemoryReserveMb: 1024,
         },
       };
-      if (scenario.unavailable) {
+      if (scenario.unavailable || scenario.disabledSource) {
         body.effective.candidates = body.effective.candidates
           .slice(0, 2)
           .map((candidate, index) => ({
@@ -795,9 +809,21 @@ test.describe('Default capacity pool scope surfaces', () => {
             providerInstanceVcpuCount: index === 0 ? 2 : 4,
             providerInstanceMemoryMb: index === 0 ? 4096 : 8192,
             providerInstanceDiskGb: 80,
-            catalogAvailability: index === 0 ? 'available' : 'last-known-unavailable',
+            catalogAvailability:
+              scenario.unavailable && index === 1 ? 'last-known-unavailable' : 'available',
+            capacitySourceId:
+              scenario.disabledSource && index === 1
+                ? 'disabled-fitting-source'
+                : candidate.capacitySourceId,
             providerInstanceCatalogSource: 'api',
           }));
+      }
+      if (scenario.disabledSource) {
+        body.effective.sources.push({
+          ...body.effective.sources[0]!,
+          id: 'disabled-fitting-source',
+          status: 'disabled',
+        });
       }
       await page.route('**/api/capacity-pools/defaults*', (route) =>
         jsonResponse(route, 200, body)
@@ -817,7 +843,7 @@ test.describe('Default capacity pool scope surfaces', () => {
       await screenshotNearHeading(
         page,
         POOL_HEADINGS.user,
-        `default-capacity-pools-${scenario.unavailable ? 'unavailable' : 'installation'}-fit-warning-${getProjectSuffix(testInfo.project.name)}`,
+        `default-capacity-pools-${scenario.name.replaceAll(' ', '-')}-fit-warning-${getProjectSuffix(testInfo.project.name)}`,
         { outputDir: '../../.tmp/l15/unavailable-fit-screenshots' }
       );
       await warning.scrollIntoViewIfNeeded();
