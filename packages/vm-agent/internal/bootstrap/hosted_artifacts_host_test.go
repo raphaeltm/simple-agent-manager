@@ -101,6 +101,13 @@ func TestWithGitTokenBoundHostIsExact(t *testing.T) {
 			t.Fatalf("token attached to unbound url %s: %s", u, got)
 		}
 	}
+	custom := &config.Config{RepoProvider: "artifacts", RepositoryHost: "api.sam.example:8443"}
+	for _, u := range []string{"https://api.sam.example/git/d.git", "https://api.sam.example:443/git/d.git"} {
+		got, err := withGitToken(u, "samgit1.tok", custom)
+		if err != nil || got != u {
+			t.Fatalf("custom-port binding must reject default HTTPS origin: got %q, err %v", got, err)
+		}
+	}
 }
 
 // Positive cases the exact match must keep accepting: the control plane binds
@@ -114,6 +121,13 @@ func TestWithGitTokenBoundHostCaseAndPort(t *testing.T) {
 		{"API.Sam.Example", "https://api.sam.example/git/d.git", "https://x:t@api.sam.example/git/d.git"},
 		{"api.sam.example", "https://API.SAM.EXAMPLE/git/d.git", "https://x:t@API.SAM.EXAMPLE/git/d.git"},
 		{"api.sam.example:8443", "https://api.sam.example:8443/git/d.git", "https://x:t@api.sam.example:8443/git/d.git"},
+		// WHATWG URL.host in the control plane removes the default HTTPS port.
+		{"api.sam.example", "https://api.sam.example:443/git/d.git", "https://x:t@api.sam.example:443/git/d.git"},
+		{"api.sam.example:443", "https://api.sam.example/git/d.git", "https://x:t@api.sam.example/git/d.git"},
+		{"[2001:db8::1]", "https://[2001:db8::1]:443/git/d.git", "https://x:t@[2001:db8::1]:443/git/d.git"},
+		{"api.sam.example", "https://api.sam.example:0443/git/d.git", "https://x:t@api.sam.example:0443/git/d.git"},
+		{"api.sam.example", "https://api.sam.example:/git/d.git", "https://x:t@api.sam.example:/git/d.git"},
+		{"api.sam.example:8443", "https://api.sam.example:08443/git/d.git", "https://x:t@api.sam.example:08443/git/d.git"},
 	}
 	for _, tc := range cases {
 		cfg := &config.Config{RepoProvider: "artifacts", RepositoryHost: tc.bound}
