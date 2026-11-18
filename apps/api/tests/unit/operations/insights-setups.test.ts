@@ -183,6 +183,34 @@ describe('projectSetups', () => {
     });
   }
 
+  /** The same one-row admission setup for accepted and marker-only callback reports. */
+  function limitedUsageRun(id: string) {
+    createDeclaredIndexes(sqlite, [schema.agentRunUsage, schema.agentRunUsageAdmissionHits]);
+    sqlite.exec(
+      "INSERT INTO platform_settings(key,value,updated_at) VALUES ('insights.runUsageMaxRowsPerSession','1','2026-11-16T12:00:00.000Z')"
+    );
+    invalidateAdminSettings(env);
+    run(id);
+    const scope = {
+      projectId: 'p',
+      chatSessionId: `chat-${id}`,
+      workspaceId: `w-${id}`,
+      agentSessionId: `s-${id}`,
+      agentType: 'claude-code',
+      credentialReference: null,
+      credentialSource: null,
+    };
+    const model = {
+      model: 'claude-opus-5-5',
+      inputTokens: 10,
+      outputTokens: 1,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reasoningTokens: null,
+    };
+    return { scope, model };
+  }
+
   beforeEach(() => {
     prNumber = 0;
     nudgeCalls = [];
@@ -202,29 +230,7 @@ describe('projectSetups', () => {
   afterEach(() => sqlite.close());
 
   it('discloses rejected usage for a picked run while keeping proxy measurements complete', async () => {
-    createDeclaredIndexes(sqlite, [schema.agentRunUsage, schema.agentRunUsageAdmissionHits]);
-    sqlite.exec(
-      "INSERT INTO platform_settings(key,value,updated_at) VALUES ('insights.runUsageMaxRowsPerSession','1','2026-11-16T12:00:00.000Z')"
-    );
-    invalidateAdminSettings(env);
-    run('limited');
-    const scope = {
-      projectId: 'p',
-      chatSessionId: 'chat-limited',
-      workspaceId: 'w-limited',
-      agentSessionId: 's-limited',
-      agentType: 'claude-code',
-      credentialReference: null,
-      credentialSource: null,
-    };
-    const model = {
-      model: 'claude-opus-5-5',
-      inputTokens: 10,
-      outputTokens: 1,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      reasoningTokens: null,
-    };
+    const { scope, model } = limitedUsageRun('limited');
     await recordHarnessRunUsage(env, scope, 'accepted', [model], NOW);
     await recordHarnessRunUsage(env, scope, 'refused', [model], NOW);
     expect(sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage').get()).toEqual({ n: 1 });
@@ -264,29 +270,7 @@ describe('projectSetups', () => {
   });
 
   it('discloses marker-only usage only for the selected project and run window', async () => {
-    createDeclaredIndexes(sqlite, [schema.agentRunUsage, schema.agentRunUsageAdmissionHits]);
-    sqlite.exec(
-      "INSERT INTO platform_settings(key,value,updated_at) VALUES ('insights.runUsageMaxRowsPerSession','1','2026-11-16T12:00:00.000Z')"
-    );
-    invalidateAdminSettings(env);
-    run('empty-usage');
-    const scope = {
-      projectId: 'p',
-      chatSessionId: 'chat-empty-usage',
-      workspaceId: 'w-empty-usage',
-      agentSessionId: 's-empty-usage',
-      agentType: 'claude-code',
-      credentialReference: null,
-      credentialSource: null,
-    };
-    const model = {
-      model: 'claude-opus-5-5',
-      inputTokens: 10,
-      outputTokens: 1,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      reasoningTokens: null,
-    };
+    const { scope, model } = limitedUsageRun('empty-usage');
     await recordHarnessRunUsage(
       env,
       scope,
