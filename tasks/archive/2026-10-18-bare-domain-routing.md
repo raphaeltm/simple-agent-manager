@@ -20,8 +20,8 @@ The final implementation uses one Single Redirect in the supported Rulesets `htt
 - [x] Relevant local validation and independent final-design specialist reviews.
 - [x] Open draft PR and report concrete design for Astra review.
 - [ ] CI and remaining review gates, including Astra and CodeRabbit when otherwise ready.
-- [ ] Resolve existing-credential access blocker without unauthorized permission/credential changes.
-- [ ] Coordinate shared deployment lease before any apply.
+- [x] Resolve existing-credential access blocker without unauthorized permission/credential changes (Raphaël updated the token 2026-11-18; read-only plan 44291125123 passes).
+- [x] Coordinate shared deployment lease before any apply (apply uses the `www-infra` concurrency group; no staging lease is involved because the marketing zone exists only in production).
 - [ ] Apply only after gates/required approval; public smoke apex/www/app/API; keep task active until verified.
 
 ## Validation and review evidence
@@ -55,3 +55,11 @@ No paid browser runs. Authenticated journeys are staging only; production gets b
 ## Sonar review follow-up
 
 Sonar's initial quality gate passed but reported six maintainability issues: reconciliation cognitive complexity22, nested ternaries/templates in plan construction, and promise-chain CLI handling. Extracted plan construction with explicit branches and path accumulation; used top-level await with the same error handling. Independent bounded review confirms identical method/path/payload decisions and unchanged ownership/phase/DNS/apply safeguards. All81 relevant tests, focused lint, deployment typecheck and Node syntax pass. Fresh CI/Sonar verification is required on the new head. No live requests or permissions/configuration changes were performed during this follow-up; the approval hold remains.
+
+## 2026-11-18 completion (task 01M7PX56RHZZXRKS2Z3RXJDQ4B)
+
+- Read-only plan 44275567686 still got HTTP403 (no error code) on the exact phase entrypoint; the owner was asked for Zone > Single Redirect > Edit on production `CF_API_TOKEN`. After Raphaël updated the token, plan 44290463776 read the zone, DNS and entrypoint, but the run failed in setup-node's pnpm cache post-step because plan/apply skip `pnpm install`. Fixed: cache only for `provision`.
+- The plan now also reports the other rules in the phase (ref, description, expression, action, enabled), never modifying them. Plan 44291125123 (exit 0) showed the live before-state: entrypoint `29482f9b…` holds one dashboard rule, "Redirect from root to WWW [Template]", matching `https://simple-agent-manager.org/*` only. That is why HTTPS apex already 301s while HTTP apex still 522s. Planned diff: POST one rule `sam_apex_to_www` appended after it; the template rule is left alone.
+- Public baseline 2026-11-18: HTTPS apex `/docs/?routing_probe=1` 301 → `https://www.simple-agent-manager.org/docs/?routing_probe=1`; HTTP apex 522; www, app 200; api `/health` 200.
+- Staging: not exercised. The marketing zone and its redirect phase exist only in production and the changed workflows are manual production-only operations; no staging deploy runs them. The live read-only plan against the real zone plus the post-merge apply and public smoke are the verification.
+- Post-merge (recorded on the PR): dispatch `provision-www.yml` with `apply-redirect` from `main`, then curl HTTP and HTTPS apex (path and query kept), www, app and api.
