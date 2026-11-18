@@ -14,7 +14,7 @@ materializeCandidate calls claimProjectEventMatchesForBatch, which updates match
 
 ### wake_due_at inventory
 
-Production readers: computeProjectEventMaterializationAlarmTime (due/cooldown MIN); selectWakeCandidates (non-null eligibility/order); terminalizeIneligibleWakeMatchesByPredicate (non-null/order); repairStaleWakeDueAtBackstop (non-null/order). Read-modify-write readers: insertMatchIfAbsent (earliest admitted match); deferWakeTarget (existing earlier due preservation). Migrations 052/057 contain schema probes/backfill/indexes, not runtime scheduling readers. Generic subscription SELECT * passes through mapProjectEventSubscription, which does not expose wake_due_at. Tests directly read for assertions only.
+Production readers: computeProjectEventMaterializationAlarmTime (due/cooldown MIN); selectWakeCandidates (non-null eligibility/order); terminalizeIneligibleWakeMatchesByPredicate (non-null/order); repairStaleWakeDueAtBackstop (non-null/order). Read-modify-write readers: insertMatchIfAbsent (earliest admitted match); deferWakeTarget (existing earlier due preservation). Migrations 052/063 contain schema probes/backfill/indexes, not runtime scheduling readers. Generic subscription SELECT * passes through mapProjectEventSubscription, which does not expose wake_due_at. Tests directly read for assertions only.
 
 Writers: insertMatchIfAbsent; refreshWakeDueAtForSubscription via claim, terminalization, pull and repair; deferWakeTarget; subscription cancellation/expiry and revoked-source cancellation clear it; historical migrations backfill. These are the same schedule's admission/disposition transitions, not unrelated liveness clocks. Removing caller refresh leaves every reader's final state identical.
 
@@ -23,8 +23,8 @@ Narrow audit: markSchedulerSuccess still writes failure reset/diagnostics; capac
 ## Checklist
 
 - [x] Read supplied measurement notes and trace both refreshes and all readers/writers
-- [ ] Verify current-main workerd counts, add budget and behavior tests
-- [ ] Remove only explicit post-claim refresh
+- [x] Verify current-main workerd counts, add budget and behavior tests
+- [x] Remove only explicit post-claim refresh
 - [ ] Prove cost and scheduler/delivery tests discriminating
 - [ ] Run lint/typecheck/tests/build and local specialist reviews
 - [ ] Deploy staging and verify Instant subscription -> channel event -> agent wake; clean up/release
