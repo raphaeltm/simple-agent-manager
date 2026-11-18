@@ -206,6 +206,42 @@ describe('MCP instruction context handlers', () => {
     expect(instructions).toMatch(/expiresAt/);
   });
 
+  it('a taskless conversation keeps answering in the chat: it has no inbox tools', async () => {
+    // inbox_write needs a task-backed token (`resolveSource`), so sending this agent to the inbox
+    // would leave it no way to reach the person.
+    mocks.selectRows = [[project]];
+    mocks.projectData.getSession.mockResolvedValue({ id: 'chat-1', topic: 'Instant topic' });
+    const response = await handleGetInstructions(
+      'request-1',
+      {
+        ...baseToken,
+        taskId: '',
+        contextType: 'conversation',
+        taskMode: 'conversation',
+        chatSessionId: 'chat-1',
+        agentSessionId: 'agent-1',
+      },
+      makeEnv()
+    );
+    const instructions = (parseInstructionPayload(response).instructions as string[]).join('\n');
+    expect(instructions).toContain('Respond to their messages directly.');
+    expect(instructions).not.toContain('Nobody reads this chat.');
+    expect(instructions).not.toContain('they do not watch it');
+  });
+
+  it('a task-backed conversation is sent to the inbox (control)', async () => {
+    mocks.selectRows = [[{ ...task, taskMode: 'conversation' }], [project]];
+    const response = await handleGetInstructions(
+      'request-1',
+      { ...baseToken, taskMode: 'conversation' },
+      makeEnv()
+    );
+    const instructions = (parseInstructionPayload(response).instructions as string[]).join('\n');
+    expect(instructions).toContain('they do not watch it');
+    expect(instructions).toContain('Nobody reads this chat.');
+    expect(instructions).not.toContain('Respond to their messages directly.');
+  });
+
   it('appends a complete entity index naming entities that were not injected', async () => {
     mocks.selectRows = [[task], [project]];
 

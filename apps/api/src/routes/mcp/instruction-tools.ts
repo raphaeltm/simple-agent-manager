@@ -329,8 +329,11 @@ export async function handleGetInstructions(
       ...(isConversation
         ? [
             // The chat is where the person writes to you, not where they read: answers go to
-            // their inbox (INBOX_TURN_END_INSTRUCTION, below).
-            'A person started this conversation and may write to you here, but they do not watch it: whatever you want them to see goes in their inbox, as described below.',
+            // their inbox (INBOX_TURN_END_INSTRUCTION, below). The inbox tools need a task, so a
+            // taskless conversation keeps answering in the chat.
+            tokenData.taskId
+              ? 'A person started this conversation and may write to you here, but they do not watch it: whatever you want them to see goes in their inbox, as described below.'
+              : 'You are in a conversation with a human. Respond to their messages directly.',
             'Use the SAM MCP `dispatch_task` tool to spawn follow-up work to other agents when needed.',
             'Use the SAM MCP `update_task_status` tool to report significant findings or progress.',
             'Do NOT call the SAM MCP `complete_task` tool — the human will end the conversation when they are ready.',

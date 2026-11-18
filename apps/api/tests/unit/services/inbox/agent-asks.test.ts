@@ -695,7 +695,7 @@ describe('inbox_write result', () => {
     sqlite.prepare(`UPDATE tasks SET status = 'completed' WHERE id = 'task-1'`).run();
     await rejects(
       answerInboxItem(webCtx('owner'), { projectId: P1, ref: filed.ref, answer: 'And production?' }),
-      'conflict',
+      'invalid_input',
       /has finished.*Continue in its chat/
     );
     expect(askRow(filed.id)).toMatchObject({ status: 'open', answer_json: null });

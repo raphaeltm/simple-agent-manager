@@ -281,6 +281,8 @@ export async function notifyNeedsInput(
     label?: string;
     /** Replaces "<label> needed" ("Result ready" for an inbox result item). */
     heading?: string;
+    /** An inbox item's kind; notifications of different kinds are never merged. */
+    inboxKind?: 'review' | 'result';
   }
 ): Promise<NotificationResponse> {
   const categoryLabel =
@@ -306,6 +308,7 @@ export async function notifyNeedsInput(
       category: opts.category ?? null,
       options: opts.options ?? null,
       attentionMarkerId: opts.attentionMarkerId,
+      ...(opts.inboxKind ? { inboxKind: opts.inboxKind } : {}),
     },
   });
 }

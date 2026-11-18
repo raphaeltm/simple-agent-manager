@@ -60,7 +60,7 @@ has done since. The answer controls stay pinned at the bottom:
 | Secret             | The secure value field; it is saved encrypted and never shown to the agent ([details](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret)). **Decline** says you will not supply it. |
 | Approval           | **Approve** or **Deny** (superadmins, Operations project).                                                                                                                                          |
 | Review             | **Looks good**, or **Reply** with a comment.                                                                                                                                                        |
-| Result             | **Got it** closes it without waking the agent. **Reply** sends the agent your reply and wakes its chat.                                                                                             |
+| Result             | **Got it** closes it without waking the agent. **Reply** sends your reply and wakes its chat while the agent is still running; once it has finished, **Open chat** takes its place.                 |
 | Task               | Read-only in the Inbox for now: the task's title, why a person is needed, its steps and links. **Archive** closes it. See [Tasks for people](#tasks-for-people).                                    |
 | Problem            | The fix for what failed, such as **Retry** or **Wake the chat**. See [Problems SAM files for you](#problems-sam-files-for-you).                                                                     |
 | Form, Sign-in link | Answered in the chat: the item says **This request is answered in its chat.** with an **Answer in chat** button.                                                                                    |
@@ -99,8 +99,10 @@ a chat opened directly on a workspace has no inbox to file into.
   preview. Answer **Looks good** or reply. It never expires.
 - **Result** (`result`): what you asked for, such as the answer to a question, a finding, or work
   that is done. The title is the outcome and the details follow. **Got it** closes it and leaves
-  the agent alone; a reply wakes the agent's chat with your reply. It never blocks the agent and
-  never expires. You get a push titled **Result ready**.
+  the agent alone; a reply wakes the agent's chat with your reply. A reply reaches the agent only
+  while its task is still running: once it has finished, the item offers **Open chat** instead of
+  **Reply** (`canReplyToAgent`, and `answerAsk` refuses the reply). It never blocks the agent and
+  never expires. You get a push titled **Result ready** that opens the item.
 - **Task** (`assign`): work only a person can do, such as adding a production secret or deciding a
   price. It never blocks the agent and never expires; a soft due date only sorts and highlights it.
   See [Tasks for people](#tasks-for-people).

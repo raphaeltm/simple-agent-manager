@@ -198,8 +198,9 @@ async function answerAsk(
   if ((item.kind === 'result' || item.kind === 'review') && answer && item.agentState === 'finished')
     // A reply reaches the agent only while its task is live (`sourceTaskGuardForClaim`,
     // `inbox_ask`); after that it would be stored and silently never delivered.
+    // Not `conflict`: clients read a 409 as "answered elsewhere" and would hide this message.
     throw new OperationError(
-      'conflict',
+      'invalid_input',
       'The agent that filed this has finished, so it would not see a reply. Continue in its chat.'
     );
   if (item.kind === 'result' && !answer) {

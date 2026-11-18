@@ -67,6 +67,10 @@ export async function announceAgentAsk(
       attentionMarkerId: input.askId,
       label: input.kind === 'review' ? 'Review' : undefined,
       heading: input.kind === 'result' ? 'Result ready' : undefined,
+      // A review or result opens its inbox item; a question keeps its chat link.
+      ...(input.kind === 'question'
+        ? {}
+        : { inboxKind: input.kind, inboxRef: `ask:${input.askId}` }),
     });
     const scheduled = notification.id !== 'suppressed';
     if (scheduled && input.kind === 'question') {

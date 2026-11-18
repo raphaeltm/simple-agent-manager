@@ -201,7 +201,9 @@ function AcknowledgeControls({
   }, [replying]);
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      {replying ? (
+      {/* If the agent finishes while a reply is being written, the form gives way to Open chat;
+          the draft stays in state. */}
+      {replying && canReplyToAgent(item) ? (
         <form
           className="flex min-w-0 flex-col gap-2"
           onSubmit={(e) => {
