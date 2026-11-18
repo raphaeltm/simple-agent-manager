@@ -46,7 +46,11 @@ function makeDb(installationRows: Array<Partial<schema.GitHubInstallation>>) {
   } as unknown as Parameters<typeof requireRepositoryUserAccess>[1];
 }
 
-const ctx = { env: {} as Env } as Context<{ Bindings: Env }>;
+const ctx = {
+  env: {
+    DATABASE: { prepare: () => ({ bind: () => ({ first: async () => ({ present: 1 }) }) }) },
+  } as unknown as Env,
+} as Context<{ Bindings: Env }>;
 
 function makeProject(overrides: Partial<schema.Project> = {}): schema.Project {
   return {
@@ -172,7 +176,7 @@ describe('requireRepositoryUserAccess', () => {
     );
   });
 
-  it('fails fast with typed 401 reauth when the user has no GitHub token — before any repo query', async () => {
+  it('fails fast with typed 401 reauth when a linked user has no GitHub token — before any repo query', async () => {
     mocks.getGitHubUserAccessToken.mockResolvedValue(null);
 
     await expect(

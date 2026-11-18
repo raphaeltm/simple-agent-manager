@@ -1,6 +1,7 @@
 import { Button } from '@simple-agent-manager/ui';
 import { useState } from 'react';
 
+import { ApiClientError } from '../lib/api/client';
 import { resumeProviderLimitTask, startProviderLimitTaskAnyway } from '../lib/api/tasks';
 import { queryClient } from '../lib/query-client';
 
@@ -11,6 +12,13 @@ const ACTIONS = {
     pending: 'Resuming…',
     done: 'Waking…',
     failed: 'Unable to resume task. Try again.',
+  },
+  'resume-anyway': {
+    run: startProviderLimitTaskAnyway,
+    idle: 'Resume anyway',
+    pending: 'Resuming…',
+    done: 'Waking…',
+    failed: 'Unable to resume this session. Try again.',
   },
   'start-anyway': {
     run: startProviderLimitTaskAnyway,
@@ -23,7 +31,7 @@ const ACTIONS = {
 
 /**
  * One explicit owner action on a provider-limit hold: resume a blocked wait, or start a
- * never-started task now despite the limit. Accepted actions stay disabled until fresh
+ * never-started task or resume a saved waiting session despite the limit. Accepted actions stay disabled until fresh
  * server state arrives.
  */
 export function ProviderLimitResume({
@@ -48,13 +56,22 @@ export function ProviderLimitResume({
       setState('done');
       void queryClient.invalidateQueries();
     } catch (cause) {
+      if (
+        action === 'resume-anyway' &&
+        cause instanceof ApiClientError &&
+        cause.code === 'RECOVERY_ACCEPTED_PENDING'
+      ) {
+        setState('done');
+        void queryClient.invalidateQueries();
+        return;
+      }
       setError(cause instanceof Error ? cause.message : copy.failed);
       setState('idle');
     }
   }
 
   return (
-    <div className="min-w-0">
+    <div className="min-w-0 sm:max-w-64">
       <Button
         variant="accent"
         size="sm"

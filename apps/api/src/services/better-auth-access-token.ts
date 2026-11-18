@@ -30,9 +30,20 @@ export async function getBetterAuthAccessTokenForProvider(
     return null;
   }
 
-  const auth = await createAuth(env);
-  return auth.api.getAccessToken({
-    ...(headers ? { headers } : {}),
-    body: { accountId, userId },
+  let refreshFailure: unknown;
+  const auth = await createAuth(env, {
+    onGitHubRefreshError: (error) => {
+      refreshFailure = error;
+    },
   });
+  try {
+    return await auth.api.getAccessToken({
+      ...(headers ? { headers } : {}),
+      body: { accountId, userId },
+    });
+  } catch (error) {
+    // BetterAuth deliberately wraps every refresh failure as FAILED_TO_GET_ACCESS_TOKEN.
+    // Retain the provider's retry/auth category through the same request-local closure.
+    throw refreshFailure ?? error;
+  }
 }

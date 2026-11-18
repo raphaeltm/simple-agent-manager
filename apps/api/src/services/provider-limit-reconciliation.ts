@@ -13,8 +13,11 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { evaluateRunawayCostCeiling } from '../scheduled/stuck-task-ceiling';
+import { acknowledgeProviderLimitRecovery } from './provider-limit-force-resume';
+import { repairOwnerApprovedRecovery } from './provider-limit-owner-recovery';
 import { repairProviderLimitIntents } from './provider-limit-parking';
 import { presentBlockedProviderLimitWait } from './provider-limit-recovery';
+export { resolveProviderLimitRecoveryRpcTimeoutMs } from './provider-limit-owner-recovery';
 
 /** A `waiting` hold past its deadline gets no automatic retry: TaskRunner admission blocks it. */
 export function isExpiredProviderLimitWait(wait: ProviderLimitWait, now: number): boolean {
@@ -57,7 +60,28 @@ export async function preserveProviderLimitWait(
   const db = drizzle(env.DATABASE, { schema });
   const task = await db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).get();
   const wait = parseProviderLimitWait(task?.providerLimitWaitJson);
-  if (!task || !wait || wait.phase === 'released') return false;
+  if (!task || !wait) return false;
+  if (wait.phase === 'released') {
+    if (
+      task.admissionState === 'provider_limit_recovery_pending' &&
+      task.status === 'in_progress'
+    ) {
+      await acknowledgeProviderLimitRecovery(env, task.id, task.providerLimitWaitJson ?? '', true);
+      return false; // ACK only; the ordinary sweep still owns the live compute ceiling.
+    }
+    if (
+      task.admissionState !== 'provider_limit_recovery_pending' ||
+      !['sleeping', 'queued', 'delegated'].includes(task.status)
+    )
+      return false;
+    if (
+      task.workspaceId &&
+      (await providerLimitComputeCeiling(env, task, wait, now)).kind === 'terminalize'
+    )
+      return false;
+    await repairOwnerApprovedRecovery(env, task, wait, now);
+    return true;
+  }
   const expired = isExpiredProviderLimitWait(wait, now);
   const current = expired ? await blockExpiredProviderLimitWait(env, task, wait) : wait;
   if (wait.origin === 'callback' && !expired) {
@@ -71,7 +95,17 @@ export async function preserveProviderLimitWait(
   if (!task.workspaceId) return true;
   // A failed sleep remains visibly blocked without check-ins or stall diagnosis.
   // Only the existing absolute compute ceiling can terminalize retained compute.
-  const ceiling = await evaluateRunawayCostCeiling(
+  return (await providerLimitComputeCeiling(env, task, current, now)).kind !== 'terminalize';
+}
+
+/** The same compute budget applies before every pending or held repair. */
+function providerLimitComputeCeiling(
+  env: Env,
+  task: schema.Task,
+  wait: ProviderLimitWait,
+  now: number
+) {
+  return evaluateRunawayCostCeiling(
     env,
     {
       id: task.id,
@@ -81,7 +115,7 @@ export async function preserveProviderLimitWait(
       startedAtMs:
         task.startedAt || task.createdAt
           ? Date.parse(task.startedAt ?? task.createdAt)
-          : current.observedAt,
+          : wait.observedAt,
     },
     {
       nowMs: now,
@@ -95,5 +129,4 @@ export async function preserveProviderLimitWait(
       ),
     }
   );
-  return ceiling.kind !== 'terminalize';
 }

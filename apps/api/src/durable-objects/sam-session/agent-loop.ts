@@ -1,4 +1,7 @@
-import { estimateInputTokensFromMessages } from '@simple-agent-manager/ai-proxy';
+import {
+  estimateInputTokensFromMessages,
+  monthlyCostCapMessage,
+} from '@simple-agent-manager/ai-proxy';
 /**
  * Agent loop — unified OpenAI-format code path routed through AI Gateway.
  *
@@ -138,7 +141,7 @@ export async function runAgentLoop(
       const message =
         usageGate.reason === 'daily-token-budget'
           ? 'Daily token budget exceeded. Resets at midnight UTC.'
-          : 'Monthly cost cap exceeded. Adjust your cap in Settings > Usage.';
+          : monthlyCostCapMessage(usageGate.monthlyCap);
       log.warn('sam.ai_usage_gate_denied', {
         userId,
         conversationId,
@@ -151,15 +154,10 @@ export async function runAgentLoop(
 
     let response: Response;
     try {
-      response = await callLLM(
-        env,
-        config,
-        llmMessages,
-        userId,
-        conversationId,
-        systemPrompt,
-        { tools, endpoint }
-      );
+      response = await callLLM(env, config, llmMessages, userId, conversationId, systemPrompt, {
+        tools,
+        endpoint,
+      });
       response = await attachTokenUsageAccounting(response, {
         env,
         userId,

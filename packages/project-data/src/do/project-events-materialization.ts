@@ -361,7 +361,7 @@ function materializeCandidate(
   if (claimed !== matchIds.length) {
     throw new Error('Project event wake match claim lost contention');
   }
-  refreshWakeDueAtForSubscription(sql, projectId, subscription.id, now);
+  // The claim helper already refreshes the subscription's due state in this transaction.
   promptInput.expiresAt = eventWakeAuthorityExpiresAt(sql, subscription.id);
   promptInput.ttlMs =
     promptInput.expiresAt === null

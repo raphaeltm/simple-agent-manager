@@ -34,7 +34,12 @@ export {
   type UsageByProvider,
 } from './ai-gateway-logs';
 export { checkModelTierAllowance, describeModelTierDenial } from './ai-model-tier-gate';
-export { getLocalMonthlyAiCostUsd } from './ai-monthly-cost-cap';
+export { getLocalUsageBreakdown } from './ai-model-usage';
+export {
+  getLocalMonthlyAiCostUsd,
+  type MonthlyCostCapCheck,
+  monthlyCostCapMessage,
+} from './ai-monthly-cost-cap';
 export { type MonthlyCostCronResult, runMonthlyCostAggregation } from './ai-monthly-cost-cron';
 export type { WorkersAIChatCompletionOptions, WorkersAIChatMessage } from './ai-proxy-shared';
 export {
@@ -52,6 +57,7 @@ export {
   checkAiUsageGate,
   consumeFeatureTokenBudget,
   deleteUserBudgetSettings,
+  effectiveMonthlyCostCapUsd,
   getAdminAiAllowance,
   getAiBudgetLimits,
   getFeatureTokenBudget,
@@ -60,8 +66,11 @@ export {
   getUserBudgetSettings,
   incrementProviderUsage,
   incrementTokenUsage,
+  MONTHLY_COST_CAP_UNAVAILABLE_MESSAGE,
+  type MonthlyCostCeilingPort,
   releaseFeatureTokenBudget,
   resolveEffectiveLimits,
+  resolveMonthlyCostCeilingUsd,
   resolvePlatformDailyTokenLimits,
   saveUserBudgetSettings,
   validateBudgetUpdate,
@@ -71,6 +80,7 @@ export {
   attachTokenUsageAccounting,
   attachUpstreamTokenUsageAccounting,
   estimateInputTokensFromMessages,
+  estimateInputTokensFromRequest,
   type MeasuredTokenUsage,
   measuredTokenUsage,
   optionalExecutionContext,

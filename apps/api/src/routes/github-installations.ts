@@ -13,6 +13,7 @@ import { IoTimeoutError, withDeadline } from '../services/fetch-timeout';
 import { getAuthenticatedGitHubUser, getUserAccessibleInstallations } from '../services/github-app';
 import { normalizeAccountType } from '../services/github-installation-accounts';
 import { getExternalInstallationId } from '../services/github-installation-ids';
+import { githubUserTokenUnavailableError } from '../services/github-token-errors';
 import { getGitHubUserAccessToken } from '../services/github-user-access-token';
 import { filterVisibleInstallations, syncUserInstallations } from './github-installation-sync';
 export function registerGitHubInstallationsRoute(githubRoutes: Hono<{ Bindings: Env }>) {
@@ -37,6 +38,7 @@ export function registerGitHubInstallationsRoute(githubRoutes: Hono<{ Bindings: 
           userId,
           tokenPresent: Boolean(accessToken),
         });
+        if (!accessToken) throw await githubUserTokenUnavailableError(c.env, userId);
         const verified = accessToken
           ? await Promise.all([
               getAuthenticatedGitHubUser(accessToken, { flow: 'sync', userId, ...io }),

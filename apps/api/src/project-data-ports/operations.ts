@@ -1,4 +1,5 @@
-import type { OperationsPort } from '../durable-objects/project-data/ports';
+import type { OperationsPort } from '@simple-agent-manager/project-data';
+
 import { alertProjectDataArchiveBreakerOpened } from '../scheduled/project-data-archive-breaker-alerts';
 import {
   classifyReconciliationLoop,
