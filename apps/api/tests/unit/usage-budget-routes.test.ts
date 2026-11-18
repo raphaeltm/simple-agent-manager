@@ -80,6 +80,7 @@ describe('GET /api/usage/ai/budget', () => {
     kvStore.clear();
     mockIterateGatewayLogs.mockReset();
     vi.clearAllMocks();
+    mockResolveAdminSettingDetails.mockResolvedValue({ value: 0 });
   });
 
   it('returns platform defaults when user has no custom settings', async () => {
@@ -169,6 +170,7 @@ describe('GET /api/usage/ai/budget', () => {
 
   it('returns zero month cost when gateway is not configured', async () => {
     const resp = await testApp.request('/api/usage/ai/budget', {}, makeEnv({ AI_GATEWAY_ID: '' }));
+    expect(resp.status).toBe(200);
     const data = await resp.json();
 
     expect(data.monthCostUsd).toBe(0);
