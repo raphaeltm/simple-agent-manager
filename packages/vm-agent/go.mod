@@ -7,7 +7,7 @@ toolchain go1.26.11
 godebug multipathtcp=0
 
 require (
-	github.com/MicahParks/keyfunc/v3 v3.9.1
+	github.com/MicahParks/keyfunc/v3 v3.9.2
 	github.com/coder/acp-go-sdk v0.13.5
 	github.com/compose-spec/compose-go/v2 v2.16.2
 	github.com/creack/pty v1.1.24
