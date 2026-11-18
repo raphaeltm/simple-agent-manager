@@ -2313,6 +2313,10 @@ func renderGitCredentialHelperScript(cfg *config.Config, exchangeToken string) (
 	// Hostnames are case-insensitive; normalize once here and lowercase the
 	// requested host in the shell so the comparison cannot fail on casing.
 	allowedGitLabHost := strings.ToLower(strings.TrimSpace(cfg.RepositoryHost))
+	// Hosted Artifacts authority checks have one owner: the authenticated local
+	// exchange validates both the workspace binding and the resolved credential.
+	// Forward the raw host rather than duplicating Go's port parser in POSIX sh.
+	delegateHostedArtifacts := isBoundHostedArtifactsHost(cfg, cfg.RepositoryHost)
 
 	// When TLS is enabled on the VM agent, the credential helper must use https://
 	// with -k (skip cert verification) because the TLS cert is issued for the
@@ -2337,14 +2341,20 @@ fi
 
 requested_host=""
 requested_path=""
+requested_protocol=""
 while IFS= read -r line; do
   [ -z "$line" ] && break
   case "$line" in
     host=*) requested_host="${line#host=}" ;;
     path=*) requested_path="${line#path=}" ;;
+    protocol=*) requested_protocol="${line#protocol=}" ;;
   esac
 done
 
+delegate_host_filter=%t
+if [ "$delegate_host_filter" = true ]; then
+  [ "$requested_protocol" = https ] || exit 0
+else
 case "$requested_host" in
   ""|github.com|api.github.com|artifacts.cloudflare.net|*.artifacts.cloudflare.net) ;;
   *)
@@ -2355,6 +2365,7 @@ case "$requested_host" in
     fi
     ;;
 esac
+fi
 
 credential_query="%s"
 exchange_token=%s
@@ -2398,7 +2409,7 @@ for target in host.docker.internal "$gateway" 172.17.0.1; do
 done
 
 exit 0
-`, shellSingleQuote(allowedGitLabHost), query, shellSingleQuote(exchangeToken), credentialTimeoutSeconds, curlTLSFlag, scheme, cfg.Port), nil
+`, delegateHostedArtifacts, shellSingleQuote(allowedGitLabHost), query, shellSingleQuote(exchangeToken), credentialTimeoutSeconds, curlTLSFlag, scheme, cfg.Port), nil
 }
 
 // sanitizeWorkspaceID strips characters that are not alphanumeric or hyphens

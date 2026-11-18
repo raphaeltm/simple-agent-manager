@@ -114,7 +114,11 @@ func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	if requestedHost != "" && !credentialHostMatchesRequest(host, requestedHost) {
+	hostMatches := credentialHostMatchesRequest(host, requestedHost)
+	if strings.EqualFold(boundProvider, "artifacts") && (resp.Provider == "" || strings.EqualFold(resp.Provider, "artifacts")) {
+		hostMatches = requestedHost == "" || gitrepo.HTTPSAuthoritiesEqual(host, requestedHost)
+	}
+	if requestedHost != "" && !hostMatches {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -149,7 +153,13 @@ func (s *Server) isAllowedCredentialHostForWorkspace(workspaceID, requestedHost 
 		return true
 	}
 	if runtime, ok := s.getWorkspaceRuntime(workspaceID); ok {
+		if strings.EqualFold(runtime.RepoProvider, "artifacts") {
+			return gitrepo.HTTPSAuthoritiesEqual(runtime.RepositoryHost, requestedHost)
+		}
 		return strings.EqualFold(strings.TrimSpace(runtime.RepositoryHost), requestedHost)
+	}
+	if strings.EqualFold(s.config.RepoProvider, "artifacts") {
+		return gitrepo.HTTPSAuthoritiesEqual(s.config.RepositoryHost, requestedHost)
 	}
 	return strings.EqualFold(strings.TrimSpace(s.config.RepositoryHost), requestedHost)
 }
