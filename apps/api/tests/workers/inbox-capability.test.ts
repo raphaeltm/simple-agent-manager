@@ -426,6 +426,32 @@ describe('inbox capability through the real entry points', () => {
     expect((await readGate())?.nextAttemptAt).toBeLessThan(until);
   });
 
+  it('a message written between an archive and its hold keeps the hold off; one before it does not', async () => {
+    const s = await seed();
+    const holdCheckinsUntil = () => Date.now() + 3_600_000;
+    // The archive closed its question at `archivedAt`; the person writes before the hold lands.
+    const archivedAt = Date.now();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await s.project.persistMessage(s.chatSessionId, 'user', 'Never mind that, carry on.', null);
+    await s.project.recordQuestionArchived({
+      sessionId: s.chatSessionId,
+      askId: 'ask-1',
+      archivedAt,
+      holdCheckinsUntil: holdCheckinsUntil(),
+    });
+    expect((await checkinGate(s.project, s.chatSessionId))?.questionHold).not.toBe(true);
+
+    // Control: a message written before the archive does not end a hold the archive starts.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await s.project.recordQuestionArchived({
+      sessionId: s.chatSessionId,
+      askId: 'ask-2',
+      archivedAt: Date.now(),
+      holdCheckinsUntil: holdCheckinsUntil(),
+    });
+    expect(await checkinGate(s.project, s.chatSessionId)).toMatchObject({ questionHold: true });
+  });
+
   it('a secret request archived through the inbox is declined and the agent notified', async () => {
     const s = await seed();
     const created = await callTool(s.token, 'request_secret', {

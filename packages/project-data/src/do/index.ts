@@ -3016,23 +3016,28 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   /**
-   * The agent cancelled its blocking question in D1 `asks` (`inbox_write` method `cancel`, inbox
-   * slice D): the chat stops showing it as paused, as when a question is answered. Nothing is
-   * stored here; the row is already closed.
-   */
-  /**
    * The person archived a question in this chat: open chat views stop showing it, and SAM's
    * check-ins stay off the chat until `holdCheckinsUntil` or until the person writes in it
    * (`holdReconciliationAfterArchive`), so archiving does not nudge the agent (archive tells the
    * agent nothing; Raphaël, 2026-11-17).
+   *
+   * The archive closed its record before this call, so a person's message can land in between;
+   * its persistence released a hold that did not exist yet. A message newer than `archivedAt`
+   * therefore means no hold. `archivedAt` is absent only from an earlier build's call.
    */
   async recordQuestionArchived(input: {
     sessionId: string;
     askId: string;
     holdCheckinsUntil: number;
+    archivedAt?: number;
   }): Promise<void> {
-    holdReconciliationAfterArchive(this.sql, input.sessionId, input.holdCheckinsUntil);
-    await this.recalculateAlarm();
+    const wroteSince =
+      input.archivedAt !== undefined &&
+      questionAsks.humanMessageSince(this.sql, input.sessionId, input.archivedAt);
+    if (!wroteSince) {
+      holdReconciliationAfterArchive(this.sql, input.sessionId, input.holdCheckinsUntil);
+      await this.recalculateAlarm();
+    }
     this.broadcastEvent(
       'attention.resolved',
       { sessionId: input.sessionId, markerId: input.askId, reason: 'archived' },
@@ -3040,6 +3045,11 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
+  /**
+   * The agent cancelled its blocking question in D1 `asks` (`inbox_write` method `cancel`, inbox
+   * slice D): the chat stops showing it as paused, as when a question is answered. Nothing is
+   * stored here; the row is already closed.
+   */
   async recordQuestionWithdrawn(input: { sessionId: string; askId: string }): Promise<void> {
     if (releaseQuestionHold(this.sql, input.sessionId)) await this.recalculateAlarm();
     this.broadcastEvent(

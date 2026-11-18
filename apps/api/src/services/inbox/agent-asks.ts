@@ -5,7 +5,7 @@
  * be filed live in `packages/operations/src/inbox-agent-core.ts`; this file only reaches the
  * stores and services the operations layer cannot.
  */
-import type { InboxAskAnnouncement } from '@simple-agent-manager/operations';
+import type { ArchiveCheckinHold, InboxAskAnnouncement } from '@simple-agent-manager/operations';
 import type { HumanInputCategory, InboxLink } from '@simple-agent-manager/shared';
 import { HUMAN_INPUT_CATEGORIES } from '@simple-agent-manager/shared';
 
@@ -116,12 +116,13 @@ export async function withdrawAgentQuestion(
  */
 export async function announceQuestionArchived(
   env: Env,
-  input: { projectId: string; sessionId: string; askId: string; holdCheckinsUntil: number }
+  input: { projectId: string; sessionId: string; askId: string } & ArchiveCheckinHold
 ): Promise<void> {
   try {
     await projectDataService.recordQuestionArchived(env, input.projectId, {
       sessionId: input.sessionId,
       askId: input.askId,
+      archivedAt: input.archivedAt,
       holdCheckinsUntil: input.holdCheckinsUntil,
     });
   } catch (error) {

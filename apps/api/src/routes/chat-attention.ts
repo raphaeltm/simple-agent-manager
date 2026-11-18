@@ -3,6 +3,7 @@
  * (the owner or an active grantee) picks one. Split out of `chat.ts`
  * (`.claude/rules/18-file-size-limits.md`).
  */
+import type { ArchiveCheckinHold } from '@simple-agent-manager/operations';
 import { HUMAN_INPUT_CATEGORIES, type HumanInputCategory } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Context, Hono } from 'hono';
@@ -355,7 +356,7 @@ export async function archiveAttention(
   projectId: string,
   sessionId: string,
   markerId: string,
-  holdCheckinsUntil: number
+  hold: ArchiveCheckinHold
 ): Promise<{ agentNotified: boolean }> {
   const db = drizzle(env.DATABASE, { schema });
   await requireProjectCapability(db, projectId, userId, 'task:write');
@@ -396,7 +397,7 @@ export async function archiveAttention(
   }
   // The resolved marker no longer keeps SAM's check-ins off this chat; hold them until the
   // person writes in it, so archiving does not nudge the agent.
-  await announceQuestionArchived(env, { projectId, sessionId, askId: markerId, holdCheckinsUntil });
+  await announceQuestionArchived(env, { projectId, sessionId, askId: markerId, ...hold });
   await recordSharedSessionAnswer(env, writer, { markerId, archived: true });
   return { agentNotified: false };
 }

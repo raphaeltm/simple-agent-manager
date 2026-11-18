@@ -21,7 +21,7 @@ import { INBOX_NOT_FOUND, resolveInboxItem } from './inbox-item-core';
 import { TERMINAL_TASK_STATUSES } from './inbox-rows';
 import { getInboxLimits } from './inbox-settings';
 import { archiveTask, completeTask } from './inbox-task-core';
-import type { InboxAskNoticeOutcome, InboxAskNoticeRow } from './ports';
+import type { ArchiveCheckinHold, InboxAskNoticeOutcome, InboxAskNoticeRow } from './ports';
 import type { OperationContext } from './types';
 
 export interface InboxAnswerInput {
@@ -401,9 +401,14 @@ export async function answerInboxItem(
   }
 }
 
-/** When SAM's check-ins may resume on a chat whose question was archived (`inbox.archiveCheckinHoldHours`). */
-async function archiveCheckinHoldUntil(ctx: OperationContext): Promise<number> {
-  return Date.now() + (await getInboxLimits(ctx)).archiveCheckinHoldHours * 3_600_000;
+/**
+ * SAM's check-in hold for a question being archived (`inbox.archiveCheckinHoldHours`). Call it
+ * before the closing write: `archivedAt` must precede any chat message that ends the hold.
+ */
+async function archiveCheckinHold(ctx: OperationContext): Promise<ArchiveCheckinHold> {
+  const holdHours = (await getInboxLimits(ctx)).archiveCheckinHoldHours;
+  const archivedAt = Date.now();
+  return { archivedAt, holdCheckinsUntil: archivedAt + holdHours * 3_600_000 };
 }
 
 /**
@@ -427,6 +432,7 @@ export async function archiveInboxItem(
       // answers or writes in the chat (Raphaël, 2026-11-17, revising spec decision 4 of idea
       // 01M7G03ZCQ6TM6CMEYDRKQ8ST9). `notified_at` is set in the closing write, so the
       // ask-notice sweep never sends one later.
+      const hold = await archiveCheckinHold(ctx);
       if (!(await closeAsk(ctx, item.projectId, ref.id, 'archived', null, { silent: true })))
         throw new OperationError('conflict', 'This inbox item was already answered or closed');
       if (item.kind === 'question' && item.sessionId)
@@ -434,7 +440,7 @@ export async function archiveInboxItem(
           projectId: item.projectId,
           sessionId: item.sessionId,
           askId: ref.id,
-          holdCheckinsUntil: await archiveCheckinHoldUntil(ctx),
+          ...hold,
         });
       return { ref: item.ref, outcome: 'archived', agentNotified: false };
     }
@@ -448,7 +454,7 @@ export async function archiveInboxItem(
         item.projectId,
         ref.sessionId,
         ref.markerId,
-        await archiveCheckinHoldUntil(ctx)
+        await archiveCheckinHold(ctx)
       );
       return { ref: item.ref, outcome: 'archived', agentNotified: result.agentNotified };
     }

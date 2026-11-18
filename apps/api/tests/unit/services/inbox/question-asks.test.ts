@@ -461,10 +461,14 @@ describe('answering a question', () => {
     expect(edges.recordQuestionArchived).toHaveBeenCalledWith(env, P1, {
       sessionId: 'chat-1',
       askId: id,
+      archivedAt: expect.any(Number),
       holdCheckinsUntil: expect.any(Number),
     });
     const [, , archivedInput] = edges.recordQuestionArchived.mock.calls[0]!;
     expect(archivedInput.holdCheckinsUntil).toBeGreaterThan(Date.now() + 167 * 3_600_000);
+    // Read before the closing write, so a chat message persisted after the close is newer than
+    // it and ends the hold (`ProjectData.recordQuestionArchived`).
+    expect(archivedInput.archivedAt).toBeLessThanOrEqual(Number(askRow(id).resolved_at));
     // A late answer from the chat card meets the archived row.
     await expect(answer(id, 'eu')).rejects.toMatchObject({ statusCode: 409 });
   });

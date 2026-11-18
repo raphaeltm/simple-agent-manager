@@ -44,7 +44,11 @@ import type { Env } from '../../../src/env';
 import { archiveAttention } from '../../../src/routes/chat-attention';
 
 const env = { DATABASE: {} } as unknown as Env;
-const archive = () => archiveAttention(env, 'owner', 'proj-1', 'chat-1', 'marker-1', Date.now());
+const archive = () =>
+  archiveAttention(env, 'owner', 'proj-1', 'chat-1', 'marker-1', {
+    archivedAt: Date.now(),
+    holdCheckinsUntil: Date.now() + 3_600_000,
+  });
 
 describe('archiveAttention: the staged claim when completing it fails', () => {
   beforeEach(() => {
