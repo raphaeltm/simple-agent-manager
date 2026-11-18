@@ -50,7 +50,7 @@ COLUMN` would ship unscanned. Fix: move all DO-SQLite DDL into
   `capture_poll_ms`), scrub bound = `SANDBOX_EXEC_TIMEOUT_MS`. The recovery-attempt cap (3) is a
   crash-loop circuit breaker, exported as `DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS`.
 - Rule 81: the monitor poll is not ported, so the per-start cost on Cloudflare is zero. Recovery
-  cost: at most 3 extra alarm runs per failed/interrupted teardown, each one cached/bounded settings read, scrub + destroy (default5s each, max10s each), release + D1 repair, followed on exhaustion by one quarantine/observability write. No new remote settings reads per start. SDK tracking adds two local SQL counter writes per chain; at most two polling chains/four writes per poll (~1,200 over default15min TTL/3s polls), plus finite provisioning/verification/scrub chains.
+  cost: default3/maximum10 work attempts per failed/interrupted teardown plus at most two successful-phase continuation passes and one final metadata assessment, each one cached/bounded settings read, scrub + destroy (default5s each, max10s each), release + D1 repair, followed on exhaustion by one quarantine/observability write. No new remote settings reads per start. SDK tracking adds two local SQL counter writes per chain; at most two polling chains/four writes per poll (~1,200 over default15min TTL/3s polls), plus finite provisioning/verification/scrub chains.
 
 ## Implementation checklist
 
@@ -75,9 +75,11 @@ COLUMN` would ship unscanned. Fix: move all DO-SQLite DDL into
 - [x] Teardown from `provisioning` does no scrub exec; still destroys and releases (test)
 - [x] The SDK permanent start message maps to `sandbox_runtime_unavailable`; other errors keep `sandbox_provision_failed` (test)
 - [x] `quality:do-migration-safety` scans the constructor DDL
-- [ ] Staging: Instant session gets an agent reply; Q1 guided Codex login shows verification URL/code, cancellation immediately terminalizes D1, clears DO cleanup and releases pool slot, and a new attempt starts; Q2 cancellation during provisioning shows terminal UI immediately and logs `credential_setup.scrub_skipped` (coordinator accepted 2026-11-17 12:25 UTC; SDK permanent-start mapping covered by contract test; no throwaway image deploy)
+- [x] Staging: Instant session gets an agent reply; Q1 guided Codex login shows verification URL/code, cancellation immediately terminalizes D1, clears DO cleanup and releases pool slot, and a new attempt starts; Q2 cancellation during provisioning shows terminal UI immediately and logs `credential_setup.scrub_skipped` (coordinator accepted 2026-11-17 12:25 UTC; SDK permanent-start mapping covered by contract test; no throwaway image deploy)
 
 ## Review-driven changes (Phase 5)
+
+The following sections preserve historical checkpoints. Their pending statements are resolved by the final continuation evidence at the end.
 
 - cloudflare-specialist M1 / validator: the recovery alarm could start a second cleanup while
   teardown's claim-time D1 write was in flight (`cleanupInFlight` was set only after it).
@@ -99,13 +101,13 @@ COLUMN` would ship unscanned. Fix: move all DO-SQLite DDL into
 - [x] Codex P1: regex literals can contain comment-looking text; use the existing TypeScript parser for SQL extraction. Regression and real file scanner test prove a same-line DROP is detected.
 - [x] Codex P2: failed destroy, pool release, or D1 repair retains cleanup owed; exhausted recovery retains that marker and persists an operator-visible error while stopping automatic retries. Pool leases independently expire at next admission (default TTL + buffer = 20 minutes); Sandbox SDK defaults stop idle containers after 10 minutes.
 - [x] Verify failed inline cleanup re-arms after an alarm joined the in-flight attempt (controlled regression red before fix).
-- [ ] Complete fresh delta specialist reviews, final local checks and current-head CI.
-- [ ] Complete agreed live checks, clean fixtures and release staging lease.
-- [ ] Observe coordinator's production #2841 merge-hold-lifted message before normal merge.
+- [x] Complete fresh delta specialist reviews, final local checks and current-head CI (230d64574: full CI44189930037 and E2E44189930159 SUCCESS).
+- [x] Complete agreed live checks, clean fixtures and release staging lease.
+- [x] Observe coordinator's production #2841 merge-hold-lifted message before normal merge (be50db76, production44174587033 SUCCESS).
 
 - [x] Later Codex P2: persist successful sandbox destruction before pool/D1 I/O; recovery skips scrub and destroy once proven, so it cannot recreate a destroyed container. Nullable additive `cleanup_sandbox_destroyed` column is migration-scanned; interrupted-release regression was red before fix. Legacy NULL retains conservative scrub/destroy behavior.
 
-- [x] Late Codex P2: alarm arming is best-effort at initial teardown, resumed cleanup and failed-cleanup rearm. A scheduling rejection never prevents inline D1/resource cleanup; three boundary regressions failed before fix and now pass (teardown suite27/27).
+- [x] Historical Codex P2 (initial-arm behavior superseded by the required-wake fix below): resumed cleanup and failed-cleanup rearm are best-effort; three boundary regressions failed before fix and now pass (teardown suite27/27).
 
 - [x] Sixth Codex P2: dedicated admin setting `credentialSetup.cleanupRecoveryStepTimeoutMs` (default5s, max10s per sandbox step) for recovery scrub/destroy, including SDK acquisition. Inline retains30s. Recovery alone adds cached settings read, max3attempts. Timer regression proves old30s behavior fails at5s; late acquisition must not start a fresh exec after timeout/destruction.
 
@@ -119,7 +121,7 @@ Final continuation local evidence: full API run completed1093passingfiles/16715p
 - [x] Recovery D1 repair and pool release use the same short configurable deadline as scrub and destroy. Four remote waits total at most 20 seconds by default/40 seconds maximum per attempt, plus the existing bounded settings read. The quarantine alert is background work after its durable disposition.
 - [x] Final focused suites: teardown40/native12/existing30/admin3 =85/85; scanner15/15; API TypeScript/scopedESLint/migration safety/runtime-tunable/secret-readback checks pass. Surgical D1 guard, overlap counter and settlement-cap mutations each reproduced the intended regression before restoration. Tests also cover all four provisioning await phases, legacy rows, late scrub settlement, eviction and actual recovery timers.
 - [x] Independent Cloudflare/security/constitution and test/completion/public-doc reviews PASS for this implementation delta. Final current-head CI remains required.
-- [ ] Agreed live staging checks, fixture cleanup, lease release and coordinator merge-hold release remain pending; no staging resources have been created by this continuation.
+- [x] Agreed live staging checks, fixture cleanup, lease release and coordinator merge-hold release completed in final continuation verification below; all owned resources cleaned.
 
 ## Sonar follow-up
 
@@ -127,20 +129,20 @@ Sonar's green aggregate still exposed four open findings through its PR issue AP
 
 ## Pending-work watchdog and scrub-success review fixes
 
-- [x] Pending-only alarms do not consume the three recovery work attempts. A single immutable watchdog uses the later of session expiry and teardown time plus configured interactive timeout and one poll. Original settlement schedules prompt recovery; expiry or invalid clocks quarantine once with the obligation retained.
+- [x] Pending-only alarms do not consume the snapshotted recovery work attempts (default three, configurable1–10). A single immutable watchdog uses the later of session expiry and teardown time plus configured interactive timeout and one poll. Original settlement schedules prompt recovery; expiry or invalid clocks quarantine once with the obligation retained.
 - [x] D1 terminal repair runs before pending deferral; a fresh post-await local row read prevents a stale watchdog from replacing the settlement wake. Actual attempt claiming follows deferral.
 - [x] Only SDK success=true plus exitCode0 records successful scrubbing. Rejection, unsuccessful result and nonzero exit reset to retryable NULL; if destruction also fails, recovery retries the scrub.
 - [x] Two pre-fix red proofs reproduced budget spending and false scrub success. Final teardown47/47 and existing30/native12 pass; admin3 unchanged from prior validation. Secret-readback guard reports zero findings. Independent Cloudflare/security/constitution delta review PASS.
 - [x] Four new minor scanner RegExp.exec suggestions addressed without changing regex behavior; scanner15, five real files and48-fixture output parity pass.
-- [ ] New pushed candidate still requires its own CI/Sonar analysis and live staging gates.
+- [x] New candidate CI/Sonar and live staging gates completed; see final continuation evidence.
 
 ## Alarm wake, original destruction and configurable retry policy
 
 - [x] Alarm completion verifies a durable future wake while nonquarantined cleanup remains owed; missing or unknown alarm state throws for Cloudflare native bounded retries (up to six). Inline terminal/resource cleanup remains best-effort. Abrupt alarm termination is retried by the platform; no sweep selection is widened.
 - [x] Original destruction is tracked across acquisition and raw SDK completion, including beyond the helper's former hidden30s timeout. Only original success plus durable proof permits settlement. Failed proof writes preserve uncertainty; late success cannot restart a destroyed sandbox.
-- [x] Operations cleanupRecoveryMaxAttempts default3/range1–10; first recovery snapshots its cap. Existing legacy attempts retain3; alreadyquarantined legacy rows cannot revive. Both settings share one cached override read; inline starts add no remote settings reads. Maximum remote wait budget480s/default100s including two one-use success continuations across the episode, plus bounded settings reads and final local alarm lookup.
+- [x] Operations cleanupRecoveryMaxAttempts default3/range1–10; first recovery snapshots its cap. Existing legacy attempts retain3; alreadyquarantined legacy rows cannot revive. Both settings share one cached override read; inline starts add no remote settings reads. Maximum remote wait budget500s/default110s including two one-use success continuations across the episode, plus bounded settings reads and final local alarm lookup.
 - [x] Independent CF/security/constitution/doc review PASS; config10/10 and existing/native42/42 pass. Destroy race RED reproduced premature pool release after5s. Latest abeebb142 actual Sonar issues0/hotspots0 and E2EsmokeSUCCESS.
-- [ ] Final new regressions/quality checks, fresh push/CI, live staging and production merge-hold release still required.
+- [x] Final regressions/quality checks, CI, live staging and production hold release completed; see final continuation evidence.
 
 Final latest delta evidence: teardown56/56 +existing30/native12 +recoveryconfig10 =108/108 pass. Real helper observes original SDK destruction beyond35s. Root surgical removal of the alarm-finally wake assertion reproduces the failed rejection expectation (.tmp/l19-alarm-wake-red.log); assertion restored and targeted green required. Independent source/security/CF/doc reviews PASS.
 
@@ -158,3 +160,18 @@ Latest final delta local verification: teardown66/66 +existing30/native12 +confi
 A new P2 reproduced false quarantine when D1 repair succeeded after the last sandbox attempt. Successful original destruction now grants its one metadata completion credit even when timely. Proven-destroyed sessions reconcile bounded D1/pool work before the failure-budget gate, clearing pending on success; failed metadata passes consume the same bounded budget, with no new SDK work or quarantine revival. This also covers D1 failing once more on the credited pass. Two initial tests were RED before the fix; final tests pending. Conservative recovery remote-wait ceiling110s default/500s maximum includes the final two-step metadata assessment.
 
 Final D1 delta validation: teardown69/69 +existing/native42/42 +unchangedconfig10=121/121 PASS. New real-D1 cases cover immediate recovery, delayed recovery after a failed credited pass, and permanent failure ending in one quarantine. TypeScript/scopedlint/format/secretguard/diff checks PASS; independent CF/security/constitution/doc reviews PASS.
+
+## Final continuation evidence (2026-11-18 UTC)
+
+This checkpoint supersedes the historical progress notes above. The existing branch and PR were preserved, and main `4fc4cb99a` was merged without conflicts. The feature patch stayed identical except for Git blob hashes. Implementation `230d64574` passed 121 focused tests, API build/typecheck, lint, format, migration and secret guards, and independent specialist reviews. Full CI `44189930037` and E2E `44189930159` succeeded: 24 passing checks and 10 inapplicable skips, with no failures or pending checks. Sonar reported zero issues and hotspots.
+
+Normal gated staging2 deployment `44202361573` succeeded, including rollout and smoke tests. Both queues were checked, the reservation preceded deployment, and the actual turn was honored. The installation test user signed in through workload identity.
+
+- **Instant:** Artifacts project `01M7NZBZNQJXSPW89MZT548XT3`, session `9b0bb068-9b77-4996-844c-ee0484f5d9f5`, returned the actual Claude Code reply `L19 INSTANT VERIFIED` in the live UI.
+- **Q1:** Setup `01M7NZJJZ86KEMHXHF762A5MTB` produced the real auth.openai.com verification link and code on desktop/mobile; native copy readback matched. Cancel returned 200 and closed the dialog in 1,536 ms; immediate state GET was cancelled. D1 was cancelled with completion at 00:05:58.585Z. DO cleanup_pending=0, destroyed=1, io_pending=0; pool held=0. The direct D1 observation followed cancellation; real-SQL barriers independently cover concurrent writer ordering.
+- **Q2 / fresh attempt:** The next attempt `01M7NZM94ZYBS48702DFVGC1PX` returned 201/provisioning and showed Preparing secure sign-in. Cancel returned 200 and closed the dialog in 626 ms, with no hang/reload; immediate state GET was cancelled. D1 completion was 00:06:44.280Z, DO cleanup_pending=0/destroyed=1/io_pending=0, and pool held=0. The raw Cloudflare log at 00:06:44.521Z records `credential_setup.scrub_skipped` for that exact session, reason `provisioning_still_in_flight`, request `0b1b323bc5999c1862733748b3c3c33a`.
+- **Agreed scope:** SDK permanent-start mapping remains contract-covered. No throwaway image, provider login completion, account creation or personal/production credentials were used. Screenshots were opened and inspected at 1280×800 and 375×667; no UI code changed.
+- **Cleanup:** Own workspace/profile/project deletion returned 200; workspace/node/project GET returned 404. Direct D1 counts for workspace/project/profile were zero. The node is only a deleted audit row with provider_instance_id=NULL. Both guided sessions are cancelled with cleanup=0 and pool held=0. Sign-out returned 200 and the saved browser session was removed. No shared settings or credentials changed; terminal audit rows remain through normal lifecycle, without direct D1 writes.
+- **Release:** Normal release `44205797976` succeeded. Authoritative status at 00:17:41Z showed holder=null and L13's turn; the next task was notified.
+
+Final independent completion review passed A/B/C/E/F; D is N/A because no UI inputs changed. The reviewer verified the tests, actual UI/Cloudflare proof, cleanup and deleted-node audit record before archival. All implementation and live acceptance items are complete. The archive-only checkpoint's CI and serialized normal merge/post-merge reporting remain workflow gates. Production #2841's merge hold is lifted.
