@@ -37,13 +37,13 @@ still log in and obtain the new session ID; root-key rotation alone does not rev
 
 The self-host build supplies these bootstrap settings; they are not Cloudflare Worker bindings:
 
-| Setting | Default and contract |
-| --- | --- |
-| `REVERSE_TUNNEL_GATEWAY_SECRET` | Required random secret, at least 32 characters, shared with the frps/plugin gateway. |
-| `REVERSE_TUNNEL_GATEWAY_SECRET_ALTERNATE` | Unset; optional second gateway secret during a coordinated rotation. |
+| Setting                                                             | Default and contract                                                                     |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `REVERSE_TUNNEL_GATEWAY_SECRET`                                     | Required random secret, at least 32 characters, shared with the frps/plugin gateway.     |
+| `REVERSE_TUNNEL_GATEWAY_SECRET_ALTERNATE`                           | Unset; optional second gateway secret during a coordinated rotation.                     |
 | `REVERSE_TUNNEL_PORT_RANGE_START` / `REVERSE_TUNNEL_PORT_RANGE_END` | `20000` / `29999`; ports 1024–65535, at most 20,000 ports; must match frps `allowPorts`. |
-| `REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS` | `90`; 60–3600 seconds; the build must supply the same timeout to frps. |
-| `REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS` | `180`; cannot be shorter than twice the heartbeat timeout; maximum 86400 seconds. |
+| `REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS`                          | `90`; 60–3600 seconds; the build must supply the same timeout to frps.                   |
+| `REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS`                         | `180`; cannot be shorter than twice the heartbeat timeout; maximum 86400 seconds.        |
 
 Allocation considers the whole bounded port range in one atomic SQL statement, with indexed
 history lookups. Release checks all active leases in one local statement, without network calls
@@ -51,7 +51,6 @@ or pagination. At the outer normal limit of 20,000 active leases, one backstop p
 eligible leases; the later gateway slice schedules that backstop every five minutes. A newly
 freed port still waits for its cooling interval. A full range and a cooling range have distinct
 errors so operators can distinguish capacity exhaustion from a wait for safe reuse.
-
 
 ## Speech endpoints on a single-box build
 
@@ -73,13 +72,13 @@ Once your single-box build includes that integration:
    Use a base URL such as `https://speech.example.com/v1`; SAM appends the audio route, so do
    not include `/audio/transcriptions` or `/audio/speech`, credentials, a query, or a fragment.
 
-   | Voice input setting | Read-aloud setting | Value |
-   | --- | --- | --- |
-   | `speech.transcription.baseUrl` | `speech.synthesis.baseUrl` | The provider's API base URL. |
-   | `speech.transcription.model` | `speech.synthesis.model` | A model ID supported by that endpoint. |
-   | — | `speech.synthesis.voice` | A voice ID supported by the synthesis model; required. |
-   | `speech.transcription.apiKey` | `speech.synthesis.apiKey` | Optional Bearer API key; required when the provider requires authentication. |
-   | `speech.transcription.allowPrivateNetwork` | `speech.synthesis.allowPrivateNetwork` | Defaults to `false`; opt in only for a trusted private endpoint. |
+   | Voice input setting                        | Read-aloud setting                     | Value                                                                        |
+   | ------------------------------------------ | -------------------------------------- | ---------------------------------------------------------------------------- |
+   | `speech.transcription.baseUrl`             | `speech.synthesis.baseUrl`             | The provider's API base URL.                                                 |
+   | `speech.transcription.model`               | `speech.synthesis.model`               | A model ID supported by that endpoint.                                       |
+   | —                                          | `speech.synthesis.voice`               | A voice ID supported by the synthesis model; required.                       |
+   | `speech.transcription.apiKey`              | `speech.synthesis.apiKey`              | Optional Bearer API key; required when the provider requires authentication. |
+   | `speech.transcription.allowPrivateNetwork` | `speech.synthesis.allowPrivateNetwork` | Defaults to `false`; opt in only for a trusted private endpoint.             |
 
 3. Enter keys in the secret setting fields, never in the URL, repository, or GitHub Actions
    logs. SAM stores them encrypted in its credential store and sends them as Bearer tokens.
@@ -361,6 +360,10 @@ Register both static redirect URIs on that infrastructure client:
 - `https://api.yourdomain.com/api/deployment/gcp/callback`
 
 The flow requests the Google `cloud-platform` scope. Runtime values saved by a superadmin are encrypted in D1 and take precedence over the environment pair; removing the runtime pair reveals the environment fallback, if present. This client is never used for user login. Google sign-in uses a different client, different variable names (`GOOGLE_LOGIN_*`), and only `https://api.yourdomain.com/api/auth/callback/google`.
+
+Use a separate workload identity pool or provider for each SAM installation when installations share a Google Cloud project. A provider has one issuer URL. SAM refuses to update an existing provider whose issuer differs from its own. Configure distinct `GCP_WIF_POOL_ID` or `GCP_WIF_PROVIDER_ID` deployment bindings before connecting the second installation, and scope the service-account IAM grant to its intended identities. Existing connections keep their recorded pool and provider; changing a deployment binding alone does not rewrite connection metadata.
+
+If STS reports an issuer mismatch, create dedicated trust for the affected installation and reconnect it. Do not switch a shared provider back and forth or accept both issuers. A failed token exchange does not prove a failed node has no cloud server. After independently checking the provider account and in-flight allocation, the existing owner-confirmed removal action can remove a failed node on user-owned cloud capacity. Its audit reason stays `owner_attested_manual_deletion`, separate from strict provider-confirmed termination. Fresh terminal provisioning failures positively proven to precede the provider create request retain an exact incarnation and placement absence proof, allowing normal teardown without minting another token. Intermediate durable retries keep their allocation state.
 
 ### Service account JSON (OAuth-free alternative)
 

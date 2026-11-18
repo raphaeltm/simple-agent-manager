@@ -159,6 +159,40 @@ export async function createOidcProvider(
   }
 }
 
+/** A setup retry may update its own provider, never a different installation's trust. */
+async function requireOidcProviderIssuer(
+  oauthToken: string,
+  name: string,
+  issuerUri: string,
+  timeoutMs: number
+): Promise<void> {
+  const res = await fetchWithTimeout(
+    `${IAM_URL}/${name}`,
+    { headers: { Authorization: `Bearer ${oauthToken}` } },
+    timeoutMs
+  );
+  if (!res.ok) {
+    throw new GcpApiError({
+      step: 'update_oidc_provider',
+      message: `Failed to read existing OIDC provider (${res.status})`,
+      statusCode: res.status,
+      rawBody: await res.text(),
+    });
+  }
+  const current = await readResponseJson(
+    res,
+    v.object({ name: v.string(), oidc: v.object({ issuerUri: v.string() }) }),
+    'gcp.iam.existing_oidc_provider'
+  );
+  if (current.name !== name || current.oidc.issuerUri !== issuerUri) {
+    throw new GcpApiError({
+      step: 'oidc_provider_issuer_mismatch',
+      statusCode: 409,
+      message: 'Existing workload identity provider belongs to a different SAM installation',
+    });
+  }
+}
+
 /**
  * Update an existing OIDC provider (if it already existed).
  */
@@ -181,6 +215,7 @@ export async function updateOidcProvider(
     : `assertion.iss == '${issuerUri}'`;
 
   const name = `projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
+  await requireOidcProviderIssuer(oauthToken, name, issuerUri, timeoutMs);
   const url = `${IAM_URL}/${name}?updateMask=attributeMapping,attributeCondition,oidc`;
   const res = await fetchWithTimeout(
     url,

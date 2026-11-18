@@ -1,4 +1,5 @@
 import {
+  isProviderCreateNotDispatched,
   isTransientCapacityError,
   ProviderError,
   type ProviderRequestContext,
@@ -26,6 +27,7 @@ import {
 import type { NodeTunnelProvisioningPhase } from './node-tunnel-provisioning';
 import { recordTunnelProvisioningFailure } from './node-tunnel-provisioning-failure';
 import { persistError } from './observability';
+import { recordRejectedAllocationAbsence } from './node-rejection-proof';
 
 interface NodeProvisioningFailureInput {
   env: Env;
@@ -148,6 +150,30 @@ async function finalizeNodeProvisioningFailure(
   err: unknown,
   input: NodeProvisioningFailureInput
 ): Promise<void> {
+  // Only a terminal, fresh non-durable allocation may consume the adapter's positive
+  // pre-dispatch proof. Durable attempts retry the same incarnation; marking it terminated
+  // here would poison that retry. An initially unproven incarnation may have an earlier
+  // dispatched create, so it also stays unresolved (never infer absence from STS text).
+  if (
+    !input.durable &&
+    input.node.runtimeTerminationConfirmedAt !== null &&
+    input.attemptedProvider &&
+    isProviderCreateNotDispatched(err)
+  ) {
+    const proof = await recordRejectedAllocationAbsence(
+      input.db,
+      input.node,
+      {
+        providerName: input.attemptedProvider,
+        // Match the original placement snapshot; never re-resolve a rotated credential.
+        exactCredentialBinding: undefined,
+      },
+      input.provisioningRuntimeIncarnationId
+    );
+    input.providerAllocationRejected = !!proof;
+    input.providerRejectionProofAt = proof?.proofAt ?? null;
+    input.rejectedPlacementPredicate = proof?.placementPredicate;
+  }
   const { options, providerCreateRejected, providerAllocationRejected } = input;
   const errorMessage = provisioningFailureMessage(err);
   await recordNodeProvisioningError(err, input, errorMessage);
@@ -215,13 +241,23 @@ async function recordFailedProvisioningNode(
       healthStatus: 'unhealthy',
       errorMessage: `[${providerName}] ${truncatedError}`,
       ...(providerAllocationRejected
-        ? { runtimeTerminationConfirmedAt: new Date().toISOString() }
+        ? { runtimeTerminationConfirmedAt: input.providerRejectionProofAt }
         : {}),
       updatedAt: new Date().toISOString(),
       cleanupBlockedSince: null,
       cleanupBlockedReason: null,
       cleanupBlockedAlertedAt: null,
     })
-    .where(creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId))
+    .where(
+      and(
+        creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId),
+        ...(providerAllocationRejected
+          ? [
+              sql`${schema.nodes.runtimeTerminationConfirmedAt} IS ${input.providerRejectionProofAt}`,
+              input.rejectedPlacementPredicate,
+            ]
+          : [])
+      )
+    )
     .run();
 }
