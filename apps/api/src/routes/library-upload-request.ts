@@ -30,7 +30,9 @@ export async function withLibraryUpload<T>(
 ): Promise<T> {
   let release: (() => void) | undefined;
   try {
-    release = acquireLibraryMemory();
+    // A valid declared length is enforced while streaming (parseUpload), so it bounds what
+    // this request can hold; a missing or invalid one reserves the whole budget.
+    release = acquireLibraryMemory(declaredContentLength(request));
     // Resolve together: one cached settings snapshot, not a query per limit or part.
     const settings = await resolveAdminSettingDetailsMany(env, [
       'library.multipartFileMaxBytes',
@@ -68,6 +70,13 @@ export async function withLibraryUpload<T>(
   } finally {
     release?.();
   }
+}
+
+function declaredContentLength(request: Request): number | undefined {
+  const declared = request.headers.get('content-length');
+  if (declared === null || !/^\d+$/.test(declared)) return undefined;
+  const bytes = Number(declared);
+  return Number.isSafeInteger(bytes) ? bytes : undefined;
 }
 
 interface MultipartLimits {
@@ -205,6 +214,10 @@ async function parseUpload(request: Request, limits: MultipartLimits): Promise<M
       throw errors.badRequest(
         `Multipart request exceeds maximum size of ${limits.maxBodyBytes} bytes`
       );
+    }
+    // The memory reservation was sized from the declared length: refuse excess immediately.
+    if (declared !== null && received > Number(declared)) {
+      throw errors.badRequest('Content-Length does not match multipart request size');
     }
     let offset = 0;
     while (offset < bytes.byteLength) {

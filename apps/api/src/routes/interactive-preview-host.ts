@@ -50,8 +50,10 @@ export async function handleInteractivePreviewRequest(
     }
     const timeoutMs = getDownloadTimeoutMs(env);
     const download = await loadLibraryDownload(
-      () => downloadFile(db, env.R2, encryptionKey(env), scope.projectId, scope.fileId),
-      timeoutMs
+      () =>
+        downloadFile(db, env.R2, encryptionKey(env), scope.projectId, scope.fileId, file.sizeBytes),
+      timeoutMs,
+      file.sizeBytes
     );
     try {
       const headers = getInteractivePreviewHeaders(env);

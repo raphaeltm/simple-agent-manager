@@ -1,25 +1,52 @@
 import { releaseArrayBuffer } from '../lib/release-array-buffer';
 import { errors } from '../middleware/error';
+import { LIBRARY_MULTIPART_DEFAULTS } from './admin-settings-library-definitions';
 
-let occupied = false;
+/**
+ * Per-isolate budget for file-sized Library buffers, in file bytes. One maximum-size
+ * file uses all of it, which is the peak the memory invariant was measured at
+ * (plaintext + ciphertext for a 50 MiB file). Smaller transfers share it, so the
+ * several small uploads or previews a page issues together do not refuse each other.
+ */
+export const LIBRARY_MEMORY_BUDGET_BYTES = LIBRARY_MULTIPART_DEFAULTS.fileMaxBytes;
+/** Smallest reservation: one 64 KiB parser/egress chunk, so tiny files are never free. */
+export const LIBRARY_MEMORY_MIN_RESERVATION_BYTES = 64 * 1024;
 
-/** One materializing Library operation per isolate; rejected callers never queue buffers. */
-export function acquireLibraryMemory(): () => void {
-  if (occupied) {
+let reservedBytes = 0;
+
+/** Bytes to reserve for a transfer of `size` bytes; unknown or invalid sizes take the whole budget. */
+export function libraryMemoryReservation(size?: number): number {
+  if (size === undefined || !Number.isSafeInteger(size) || size < 0) {
+    return LIBRARY_MEMORY_BUDGET_BYTES;
+  }
+  return Math.min(
+    LIBRARY_MEMORY_BUDGET_BYTES,
+    Math.max(LIBRARY_MEMORY_MIN_RESERVATION_BYTES, size)
+  );
+}
+
+/**
+ * Reserve Library memory for one materializing operation; rejected callers never queue
+ * buffers. `size` must bound the bytes the caller will hold (a declared request length
+ * enforced while streaming, or stored file metadata); omit it when the size is unknown.
+ */
+export function acquireLibraryMemory(size?: number): () => void {
+  const amount = libraryMemoryReservation(size);
+  if (reservedBytes + amount > LIBRARY_MEMORY_BUDGET_BYTES) {
     throw errors.tooManyRequests('Another Library transfer is in progress. Please retry shortly.');
   }
-  occupied = true;
+  reservedBytes += amount;
   let released = false;
   return () => {
     if (released) return;
     released = true;
-    occupied = false;
+    reservedBytes -= amount;
   };
 }
 
 /** The callback must await every consumer of its owned file buffers before returning. */
-export async function withLibraryMemory<T>(operation: () => Promise<T>): Promise<T> {
-  const release = acquireLibraryMemory();
+export async function withLibraryMemory<T>(operation: () => Promise<T>, size?: number): Promise<T> {
+  const release = acquireLibraryMemory(size);
   try {
     return await operation();
   } finally {
@@ -41,12 +68,13 @@ interface DownloadOwner<T> {
  */
 export async function loadLibraryDownload<T extends { data: ArrayBuffer }>(
   load: () => Promise<T>,
-  timeoutMs: number
+  timeoutMs: number,
+  size?: number
 ): Promise<DownloadOwner<T>> {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
     throw errors.internal('Library download timeout is unavailable');
   }
-  const release = acquireLibraryMemory();
+  const release = acquireLibraryMemory(size);
   const value = await new Promise<T>((resolve, reject) => {
     let expired = false;
     const timeout = setTimeout(() => {

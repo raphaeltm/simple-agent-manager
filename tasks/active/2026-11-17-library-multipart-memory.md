@@ -48,3 +48,20 @@ Normal 50 MiB upload/replacement/download and existing preview/range/HEAD behavi
 ## Release state
 
 Replacement is ready after full local checks; exact-head full CI and trusted CodeRabbit review were requested in parallel with remaining release work. Both staging queues/owners checked; normal primary reservation run 44153749840 accepted, latest observed turn 21:31:52 UTC. No lease held or deployment yet. The unchanged primary 24-hour/threshold-10 observability noise gate fails on existing session/snapshot/providerless-node groups; existing repair task 01M7NHBKR3B9T4KPATYFCNA0X8 owns remediation. Preserve peer resources and require an actual unchanged-gate pass; this is an engineering blocker, not a human hold. Runtime/evidence artifacts and existing .codex/config.toml modification remain uncommitted. Task-only main push was rejected by protected-branch GH013; task record travels through this PR without bypass.
+
+## Takeover correction (2026-11-18, Claude task 01M7PX40M0GEX6J4VXM4X7PV3T)
+
+Independent security review found that the single per-isolate boolean permit refused every overlapping Library transfer, of any size. The Library page starts all selected uploads in parallel (`ProjectLibrary.tsx` `uploadLibraryFile` loop), and chat document cards fetch previews together. In one isolate, all but one of them got `429 Another Library transfer is in progress`. A new Workers test reproduced this on the original head: three concurrent 22-byte uploads, and the second upload returned 429.
+
+Fix: the permit is now a 50 MiB byte budget (`library-memory.ts`, `acquireLibraryMemory(size?)`).
+- A full-size or unknown-size transfer still takes the whole budget, so the measured one-50 MiB-file peak is unchanged. The existing 50 MiB overlap test still gets 429.
+- Uploads reserve their declared Content-Length. `parseUpload` now refuses bytes beyond the declared length as they arrive, instead of only at the end.
+- Previews (library and interactive host) reserve the stored file size. `downloadFile(..., maxPlaintextBytes)` refuses with 409 an R2 object larger than that reservation, which covers a replace racing the metadata read.
+- Each reservation is at least 64 KiB.
+
+Tests:
+- `tests/workers/library-concurrent-previews.test.ts`: overlapping previews, parallel uploads, and the outgrown-object 409 with a control. The guard was deleted once, the test went red, and it was restored.
+- Budget unit tests.
+- Two upload tests were updated, because an understated length is now refused before materialization.
+
+Residual: large concurrent transfers that together exceed 50 MiB still get 429. On main those would have exceeded the isolate's memory.

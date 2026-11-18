@@ -306,7 +306,7 @@ describe('Library multipart request memory and admission bounds', () => {
   );
 
   it.each(['malformed suffix', 'declared mismatch'])(
-    'releases materialized plaintext after late parse failure: %s',
+    'releases plaintext and admission after a parse failure: %s',
     async (failure) => {
       const buffers: ArrayBuffer[] = [];
       const materializedContent: string[] = [];
@@ -326,9 +326,15 @@ describe('Library multipart request memory and admission bounds', () => {
       const ingress = request(raw, failure === 'declared mismatch' ? { length: '1' } : {});
       const response = await app().fetch(ingress.request, env);
       expect(response.status).toBe(400);
-      expect(materializedContent).toEqual(['hello']);
-      expect(buffers).toHaveLength(1);
-      expect(buffers[0]!.byteLength).toBe(0);
+      if (failure === 'declared mismatch') {
+        // The reservation was sized from the declared length: excess is refused on arrival.
+        expect(materializedContent).toEqual([]);
+        expect(buffers).toHaveLength(0);
+      } else {
+        expect(materializedContent).toEqual(['hello']);
+        expect(buffers).toHaveLength(1);
+        expect(buffers[0]!.byteLength).toBe(0);
+      }
       expect(mocks.upload).not.toHaveBeenCalled();
       // The failure must not leave admission wedged.
       expect((await app().fetch(request(multipart(filePart('hello'))).request, env)).status).toBe(
@@ -382,7 +388,7 @@ describe('Library multipart request memory and admission bounds', () => {
   });
 
   it.each([false, true])(
-    'uses bounded BYOB reads and releases owned chunks (late rejection=%s)',
+    'uses bounded BYOB reads and releases owned chunks (understated length=%s)',
     async (reject) => {
       const ingressBuffers: ArrayBufferLike[] = [];
       const nativeRead = ReadableStreamBYOBReader.prototype.read;
@@ -423,7 +429,8 @@ describe('Library multipart request memory and admission bounds', () => {
       if (reject) ingress.headers.set('content-length', '1');
       expect((await app().fetch(ingress, env)).status).toBe(reject ? 400 : 201);
       expect(requested).toEqual([64 * 1024]);
-      expect(ingressBuffers.length).toBeGreaterThanOrEqual(5);
+      // An understated Content-Length is refused at the first chunk that exceeds it.
+      expect(ingressBuffers.length).toBeGreaterThanOrEqual(reject ? 1 : 5);
       expect(ingressBuffers.every((buffer) => buffer.byteLength === 0)).toBe(true);
       if (reject) {
         expect(mocks.upload).not.toHaveBeenCalled();

@@ -339,9 +339,11 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
 
   const encryptionKey = getEncryptionKey(c.env);
   const timeoutMs = getDownloadTimeoutMs(c.env);
+  // Stored size bounds the plaintext, so small previews share the memory budget.
   const owned = await loadLibraryDownload(
-    () => downloadFile(db, c.env.R2, encryptionKey, projectId, fileId),
-    timeoutMs
+    () => downloadFile(db, c.env.R2, encryptionKey, projectId, fileId, file.sizeBytes),
+    timeoutMs,
+    file.sizeBytes
   );
   try {
     const { data } = owned.value;

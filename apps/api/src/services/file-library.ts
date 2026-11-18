@@ -31,6 +31,7 @@ import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import type { AppDb } from '../middleware/project-auth';
 import {
+  AES_GCM_TAG_BYTES,
   decryptFile,
   encryptFile,
   metadataToR2CustomMetadata,
@@ -649,7 +650,8 @@ export async function downloadFile(
   r2: R2Bucket,
   encryptionKey: string,
   projectId: string,
-  fileId: string
+  fileId: string,
+  maxPlaintextBytes?: number
 ): Promise<{ data: ArrayBuffer; file: ProjectFile; metadata: FileEncryptionMetadata }> {
   const rows = await db
     .select()
@@ -668,6 +670,12 @@ export async function downloadFile(
   if (!r2Object) {
     log.error('file_library_r2_missing', { projectId, fileId, r2Key: fileRow.r2Key });
     throw errors.internal('File data not found in storage');
+  }
+
+  // A caller that reserved memory from earlier metadata must not read a larger replacement.
+  if (maxPlaintextBytes !== undefined && r2Object.size > maxPlaintextBytes + AES_GCM_TAG_BYTES) {
+    await r2Object.body.cancel();
+    throw errors.conflict('File changed while loading. Please retry.');
   }
 
   // Read encryption metadata from R2 custom metadata
