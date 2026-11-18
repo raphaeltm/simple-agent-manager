@@ -32,7 +32,6 @@ import { DurableObject } from 'cloudflare:workers';
 
 import { measureArchiveSql } from '../archive/sql-metrics';
 import { estimateArchiveWrites } from '../archive/write-budget';
-import { BROWSER_SOCKET_UNAUTHORIZED_CLOSE_CODE } from '../browser-socket-auth';
 import {
   assertExactWriteAllowed,
   isProjectDataArchiveExactRoutingEnabled,
@@ -113,6 +112,7 @@ import { runStandingWatchAlarm } from './project-standing-watches-runner';
 import * as standingWatches from './project-standing-watches-storage';
 import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from './prompt-delivery';
 import * as promptDelivery from './prompt-delivery';
+import { cancelUnissuedSessionPrompts } from './prompt-delivery-cancellation';
 import {
   type ProviderLimitAttentionResult,
   syncProviderLimitAttention,
@@ -131,14 +131,12 @@ import * as sessionActivityProbe from './session-activity-probe';
 import * as sessionActivityReconciliation from './session-activity-reconciliation';
 import * as sessionReads from './session-reads';
 import { guardedSessionSleep, type SessionSleepRuntimeGuard } from './session-sleep-runtime-guard';
+import { countLegacyToolSockets } from './session-sockets';
 import {
   admitBrowserSocket,
   broadcastToBrowserSockets,
   closeQuietly,
   countLegacySockets,
-  getBrowserSocketAuthorization,
-  hasCurrentBrowserSocketAuthority,
-  revokeBrowserSocketsForActor as closeBrowserSocketsForActor,
 } from './session-sockets';
 import * as sessionState from './session-state';
 import * as sessionSummarySync from './session-summary-sync';
@@ -154,6 +152,7 @@ import { resolveTaskWaitConfig } from './task-wait-config';
 import { processTaskWaits } from './task-wait-supervisor';
 import * as taskWaits from './task-waits';
 import * as terminalSessionReconciliation from './terminal-session-reconciliation';
+import { readToolChanges, sealToolMerging } from './tool-call-changes';
 import * as toolPayloadArchive from './tool-payload-archive';
 import type {
   ProjectDataManualToolPayloadCleanupInput,
@@ -521,9 +520,27 @@ export class ProjectData extends DurableObject<Env> {
    */
   async stopSession(
     sessionId: string,
-    options: { deferAlarm?: boolean; source?: 'workspace_eviction_finalization' } = {}
+    options: {
+      deferAlarm?: boolean;
+      source?: 'workspace_eviction_finalization';
+      guard?: sessions.SessionIdentityGuard;
+    } = {}
   ): Promise<boolean> {
-    const result = sessions.stopSession(this.sql, sessionId, undefined, options);
+    let result: ReturnType<typeof sessions.stopSession>;
+    try {
+      result = sessions.stopSession(this.sql, sessionId, options.guard, options);
+    } catch (error) {
+      // An expected owner change is a refused stop, not a failed RPC. Keep the
+      // decision at the DO mutation boundary so no successor mirror is touched.
+      if (
+        options.guard &&
+        error instanceof Error &&
+        (error.message.startsWith(`Session ${sessionId} cannot stopped: expected `) ||
+          error.message === `Session ${sessionId} not found`)
+      )
+        return false;
+      throw error;
+    }
     if (result) {
       attention.resolveAttentionMarkersByKind(
         this.sql,
@@ -927,6 +944,7 @@ export class ProjectData extends DurableObject<Env> {
       // Informational only: project sockets get no transcript frames and never gate merging.
       metrics.legacyProjectSocketsMax = legacy.project;
       const legacyClient = legacy.session > 0;
+      const toolLegacyClient = countLegacyToolSockets(this.ctx, sessionId);
       if (!config.enabled) refuseMerge(metrics, 'setting_disabled');
       else if (legacyClient) refuseMerge(metrics, 'legacy_client');
       return messagePersistence.persistMessageBatchWithSideEffects(
@@ -935,9 +953,44 @@ export class ProjectData extends DurableObject<Env> {
         this.messagePersistenceHooks(),
         sessionId,
         batchMessages,
-        { source, config: { ...config, enabled: config.enabled && !legacyClient }, metrics }
+        {
+          source,
+          config: { ...config, enabled: config.enabled && !legacyClient, toolLegacyClient },
+          metrics,
+        }
       );
     });
+  }
+
+  /** Retire only unissued prompts of the exact cancelled task; later messages stay eligible. */
+  async cancelUnissuedSessionPrompts(
+    sessionId: string,
+    taskId: string,
+    options?: { acceptedBefore: number }
+  ): Promise<import('./prompt-delivery-cancellation').CancelUnissuedSessionPromptsResult> {
+    const cancelled = await this.withArchiveTranscriptLock(() => {
+      messages.assertTranscriptWriteAllowed(this.sql, sessionId, 'cancelUnissuedSessionPrompts');
+      return this.meteredStorage.transactionSync(() =>
+        cancelUnissuedSessionPrompts(
+          this.sql,
+          sessionId,
+          taskId,
+          this.getProjectId(),
+          options?.acceptedBefore
+        )
+      );
+    });
+    // An uncertain retry can settle a wake batch without increasing the cancelled count.
+    if (cancelled.matched) {
+      this.recalculateAlarm().catch((error) =>
+        log.warn('prompt_delivery.cancel_recalculate_alarm_failed', {
+          sessionId,
+          taskId,
+          ...serializeError(error),
+        })
+      );
+    }
+    return cancelled;
   }
 
   async acceptPromptDelivery(input: AcceptPromptDeliveryInput): Promise<AcceptedPromptDelivery> {
@@ -1080,6 +1133,7 @@ export class ProjectData extends DurableObject<Env> {
 
   private messagePersistenceHooks(): messagePersistence.MessagePersistenceHooks {
     return {
+      isLegacyToolClient: (sessionId) => countLegacyToolSockets(this.ctx, sessionId),
       recordMessageIngest: (metrics) => this.rowUsage.recordMessageIngest(metrics),
       transactionSync: (fn) => this.meteredStorage.transactionSync(fn),
       recalculateAlarm: () => this.recalculateAlarm(),
@@ -1155,6 +1209,18 @@ export class ProjectData extends DurableObject<Env> {
   async getSession(sessionId: string): Promise<Record<string, unknown> | null> {
     const result = sessionReads.getSession(this.sql, sessionId);
     return result ? this.addBaseDomain(result) : null;
+  }
+
+  async getToolChanges(sessionId: string, afterRevision?: number, legacyClient = false) {
+    if (legacyClient) {
+      const config = await projectDataPorts().operations.messageMergeConfig?.(this.env);
+      if (config?.toolUpdatesEnabled && sealToolMerging(this.sql, sessionId)) {
+        const metrics = emptyMessageIngestMetrics();
+        metrics.toolSealedSessions = 1;
+        this.rowUsage.recordMessageIngest(metrics);
+      }
+    }
+    return readToolChanges(this.sql, this.env, sessionId, afterRevision);
   }
 
   async getMessages(
@@ -2002,9 +2068,13 @@ export class ProjectData extends DurableObject<Env> {
   // matches, delivery batches, and attempts in this per-project DO. They do not
   // inject prompts, steer runtimes, spawn tasks, or expose API/MCP producers.
 
-  admitProjectEvent(
+  async admitProjectEvent(
     input: projectEvents.AdmitProjectEventInput
-  ): projectEvents.ProjectEventAdmissionResult {
+  ): Promise<projectEvents.ProjectEventAdmissionResult> {
+    const ciEvent = projectEvents.isGitHubCiProjectEvent(input);
+    const skipUnsubscribedGitHubCi = ciEvent
+      ? ((await projectDataPorts().operations.skipUnsubscribedGitHubCi?.(this.env)) ?? true)
+      : false;
     this.ensureProjectId(input.projectId);
     const now = Date.now();
     const previousRetentionAt = projectEvents.readSchedulerState(
@@ -2018,8 +2088,17 @@ export class ProjectData extends DurableObject<Env> {
       now
     );
     const result = this.meteredStorage.transactionSync(() =>
-      projectEvents.admitProjectEvent(this.sql, this.env, this.getProjectId(), input)
+      projectEvents.admitProjectEvent(
+        this.sql,
+        this.env,
+        this.getProjectId(),
+        input,
+        false,
+        skipUnsubscribedGitHubCi
+      )
     );
+    if (ciEvent) this.rowUsage.setProjectEventStoragePolicy(skipUnsubscribedGitHubCi);
+    if (result.outcome === 'skipped_no_subscriber') return result;
     const nextRetentionAt = projectEvents.readSchedulerState(
       this.sql,
       input.projectId
@@ -2551,13 +2630,16 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
-  getProjectEventRecentStatus(
+  async getProjectEventRecentStatus(
     input: projectEvents.GetProjectEventRecentStatusInput
-  ): projectEvents.ProjectEventRecentStatus {
+  ): Promise<projectEvents.ProjectEventRecentStatus> {
     this.ensureProjectId(input.projectId);
-    return this.meteredStorage.transactionSync(() =>
+    const enabled =
+      (await projectDataPorts().operations.skipUnsubscribedGitHubCi?.(this.env)) ?? true;
+    const status = this.meteredStorage.transactionSync(() =>
       projectEvents.getProjectEventRecentStatus(this.sql, this.env, this.getProjectId(), input)
     );
+    return { ...status, admission: this.rowUsage.projectEventAdmissions(enabled) };
   }
 
   validateProjectEventWakeRecoveryAuthority(
@@ -3785,91 +3867,43 @@ export class ProjectData extends DurableObject<Env> {
       const upgradeHeader = request.headers.get('Upgrade');
       if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket')
         return new Response('Expected WebSocket upgrade', { status: 426 });
-      const projectId = this.getProjectId();
-      if (!projectId) return new Response('Project identity is unavailable', { status: 503 });
-      return admitBrowserSocket(this.ctx, this.sql, request, projectId);
+      return admitBrowserSocket(this.ctx, this.sql, url, () => {
+        const metrics = emptyMessageIngestMetrics();
+        metrics.toolSealedSessions = 1;
+        this.rowUsage.recordMessageIngest(metrics);
+      });
     }
     return new Response('Not found', { status: 404 });
   }
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     if (typeof message !== 'string') return;
-    let msg: Record<string, unknown>;
     try {
       const parsed: unknown = JSON.parse(message);
-      msg = expectJsonRecord(parsed, 'project-data.websocket.message');
-    } catch {
-      return;
-    }
-    if (msg.type !== 'ping' && msg.type !== 'message.send') return;
-
-    const projectId = this.getProjectId();
-    const authorization = projectId
-      ? getBrowserSocketAuthorization(this.ctx, ws, projectId)
-      : null;
-    if (!authorization) {
-      log.warn('websocket.authorization_rejected', {
-        projectId,
-        action: 'closed',
-      });
-      closeQuietly(ws, BROWSER_SOCKET_UNAUTHORIZED_CLOSE_CODE, 'authorization expired');
-      return;
-    }
-    try {
-      if (!(await hasCurrentBrowserSocketAuthority(this.env.DATABASE, authorization))) {
-        log.warn('websocket.authority_revoked', {
-          projectId,
-          actorId: authorization.actorId,
-          action: 'closed',
-        });
-        closeQuietly(ws, BROWSER_SOCKET_UNAUTHORIZED_CLOSE_CODE, 'authorization revoked');
+      const msg = expectJsonRecord(parsed, 'project-data.websocket.message');
+      if (msg.type === 'ping') {
+        ws.send(JSON.stringify({ type: 'pong' }));
         return;
       }
-    } catch (error) {
-      log.warn('websocket.authority_check_failed', {
-        projectId,
-        actorId: authorization.actorId,
-        error: error instanceof Error ? error.message : String(error),
-        action: 'closed',
-      });
-      closeQuietly(ws, BROWSER_SOCKET_UNAUTHORIZED_CLOSE_CODE, 'authorization unavailable');
-      return;
+      if (msg.type === 'message.send') {
+        // Browser sockets are read-only. This path used to persist a `role=user` row into any
+        // active session for any connected project member, without knowing who they were
+        // (idea 01M59MYE4GY91BWTE8TZF1ZB5D, gap G1). Prompts and their transcript rows now
+        // come only from authorized REST delivery (`sendChat` → durable prompt delivery).
+        log.warn('websocket.message_send_rejected', {
+          sessionTag: this.ctx.getTags(ws).find((tag) => tag.startsWith('session:')) ?? null,
+          action: 'rejected',
+        });
+        ws.send(
+          JSON.stringify({
+            type: 'error',
+            message: 'Sending messages over this socket is not supported',
+          })
+        );
+      }
+    } catch {
+      /* Ignore non-JSON messages */
     }
-
-    if (msg.type === 'ping') {
-      ws.send(JSON.stringify({ type: 'pong' }));
-      return;
-    }
-
-    // Browser sockets are read-only. This path used to persist a `role=user` row into any
-    // active session for any connected project member, without knowing who they were
-    // (idea 01M59MYE4GY91BWTE8TZF1ZB5D, gap G1). Prompts and their transcript rows now
-    // come only from authorized REST delivery (`sendChat` -> durable prompt delivery).
-    log.warn('websocket.message_send_rejected', {
-      projectId,
-      actorId: authorization.actorId,
-      sessionId: authorization.sessionId,
-      action: 'rejected',
-    });
-    ws.send(
-      JSON.stringify({
-        type: 'error',
-        message: 'Sending messages over this socket is not supported',
-      })
-    );
-  }
-
-  revokeBrowserSocketsForActor(actorId: string): number {
-    const projectId = this.getProjectId();
-    if (!projectId || !actorId) {
-      log.warn('websocket.revocation_rejected', {
-        projectId,
-        hasActorId: Boolean(actorId),
-        action: 'rejected',
-      });
-      throw new Error('Project and actor identity are required to revoke browser sockets');
-    }
-    return closeBrowserSocketsForActor(this.ctx, projectId, actorId);
   }
 
   async webSocketClose(
@@ -4311,12 +4345,7 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   private broadcastEvent(type: string, payload: Record<string, unknown>, sessionId?: string): void {
-    const projectId = this.getProjectId();
-    if (!projectId) {
-      log.warn('websocket.broadcast_skipped_no_project_id', { type, action: 'dropped' });
-      return;
-    }
-    broadcastToBrowserSockets(this.ctx, projectId, type, payload, sessionId);
+    broadcastToBrowserSockets(this.ctx, type, payload, sessionId);
   }
 
   private broadcastCommentThread(

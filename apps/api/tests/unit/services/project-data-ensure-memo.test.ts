@@ -149,13 +149,16 @@ describe('ProjectData ensure memo — DO roundtrip budget', () => {
     expect(counters.get('doid-proj-b')?.ensuredWith).toEqual(['proj-b']);
   });
 
-  it('issues a single ensure when concurrent first-callers race', async () => {
+  it('keeps concurrent cold ensures request-owned, then reuses the completed fact', async () => {
     const { env, totals } = makeEnv();
 
     await Promise.all(Array.from({ length: 8 }, () => svc.getSummary(env, 'proj-race')));
 
-    expect(totals.ensure).toBe(1);
+    expect(totals.ensure).toBe(8);
     expect(totals.method).toBe(8);
+    await svc.getSummary(env, 'proj-race');
+    expect(totals.ensure).toBe(8);
+    expect(totals.method).toBe(9);
   });
 
   it('re-ensures after a failed DO call so a reset DO re-persists its projectId', async () => {

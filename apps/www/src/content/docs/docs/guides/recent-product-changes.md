@@ -75,6 +75,9 @@ Also changed this week:
 - **The sign-in page waits for your instance** to say which sign-in options it has, instead of
   briefly showing a GitHub button that might not work.
 - **A task waiting on a usage limit is no longer failed as "stuck"** when the limit resets.
+- **A VM chat whose sleep saved no recovery point wakes again.** Every wake of such a chat used to
+  fail; the agent now starts fresh in a new workspace and rebuilds its context from the transcript.
+  → [Continue from the transcript](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot)
 
 ### For self-hosters & admins
 
@@ -422,7 +425,8 @@ in the first release after v2026.10.26.
   default ($50 at most); `aiModels.enabled` in **Admin → Settings** turns them off.
   → [AI models for agents](/docs/guides/ai-models-for-agents/)
 - **SAM assistant** is off until each person turns it on; setting `operations.samOperatorDisabled` to
-  **Enabled** turns it off for everyone. It uses `SAM_MODEL` (GLM 5.3 Flash on Workers AI by default).
+  **Enabled** turns it off for everyone. It uses `SAM_MODEL`; the current default is DeepSeek V4.1
+  Flash 1017 on Workers AI. See the [current assistant configuration](/docs/guides/sam-assistant/#for-self-hosters).
 - **Workload identity** tokens come from `https://api.<your-domain>/oidc`, which the services that
   trust them must be able to reach. Their lifetime is `operations.workloadIdentityTokenTtlSeconds`
   (5 minutes).

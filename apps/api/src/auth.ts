@@ -11,6 +11,7 @@ import { CLIENT_IP_HEADER } from './lib/client-ip';
 import { createModuleLogger } from './lib/logger';
 import { readResponseJson } from './lib/runtime-validation';
 import { getBetterAuthSecret } from './lib/secrets';
+import { accountLinkingPlugin, validateLinkUserInfo } from './services/account-linking';
 import { clampSessionRefresh, HARD_EXPIRES_AT_FIELD } from './services/agent-sign-in/session-cap';
 import {
   bootstrapOwnerEmail,
@@ -21,6 +22,7 @@ import { emailSignInPlugins } from './services/email-sign-in';
 import { establishFirstSuperadmin, FIRST_SUPERADMIN_SETTING } from './services/first-superadmin';
 import { refreshGitHubAccessToken } from './services/github-oauth-refresh';
 import { gitLabLoginProvider } from './services/gitlab-login-provider';
+import { keepLinkedAccountEmail } from './services/linked-account-identity';
 import {
   resolveLoginOAuthConfig,
   selectGitHubOAuthConfig,
@@ -150,6 +152,8 @@ export function selectPrimaryGitHubEmail(
  * Create BetterAuth instance with Cloudflare D1 + KV configuration.
  */
 export interface CreateAuthOptions {
+  /** Preserve refresh failure category across BetterAuth's generic token-error wrapper. */
+  onGitHubRefreshError?: (error: unknown) => void;
   /**
    * Keeps work BetterAuth runs in the background alive after the response (the request's
    * `executionCtx.waitUntil`). Email sign-in codes are sent this way, so the response time does
@@ -179,7 +183,10 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
       clientId: githubOAuth.clientId,
       clientSecret: githubOAuth.clientSecret,
       scope: ['read:user', 'user:email', 'read:org'],
-      refreshAccessToken: (refreshToken: string) => refreshGitHubAccessToken(env, refreshToken),
+      refreshAccessToken: async (refreshToken: string) => {
+        try { return await refreshGitHubAccessToken(env, refreshToken); }
+        catch (error) { options.onGitHubRefreshError?.(error); throw error; }
+      },
       // Ensure existing linked users are refreshed with latest provider profile data on sign-in.
       overrideUserInfoOnSignIn: true,
       // Custom getUserInfo to ensure we persist the account's primary email when available.
@@ -248,12 +255,13 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
           return null;
         }
 
+        const identity = await keepLinkedAccountEmail(env, 'github', user.id, { email, emailVerified });
         return {
           user: {
-            email,
+            email: identity.email ?? email,
             name: (user.name || user.login || '').trim(),
             image: user.avatar_url || undefined,
-            emailVerified,
+            emailVerified: identity.emailVerified,
           },
           // better-auth keys the linked account on `data.id` (its GitHub provider declares
           // `accountSubject: ({ profile }) => profile.id`); without it every sign-in fails
@@ -330,13 +338,14 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
       },
     },
     socialProviders,
-    plugins: emailSignInPlugins(env),
+    plugins: [...emailSignInPlugins(env), accountLinkingPlugin(env)],
     advanced: {
       // Ingress owns this header. BetterAuth's X-Forwarded-For default is client-controlled.
       ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] },
       ...(options.waitUntil ? { backgroundTasks: { handler: options.waitUntil } } : {}),
     },
     user: {
+      validateUserInfo: validateLinkUserInfo,
       additionalFields: {
         githubId: {
           type: 'string',
@@ -361,7 +370,7 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
       },
     },
     databaseHooks: {
-      // Owner alert when a social sign-in is linked to an admin or superadmin (best-effort).
+      // Notify the affected account owner when a social sign-in is linked (best-effort).
       account: {
         create: {
           after: (account) => {
@@ -475,6 +484,9 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
       accountLinking: {
         enabled: true,
         trustedProviders,
+        allowDifferentEmails: true,
+        // The plugin permits removing the last provider only with usable verified email login.
+        allowUnlinkingAll: true,
       },
     },
   });

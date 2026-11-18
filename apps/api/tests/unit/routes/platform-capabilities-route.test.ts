@@ -61,6 +61,7 @@ describe('GET /api/config/platform-capabilities', () => {
 
     expect(res.status).toBe(200);
     expect(body).toEqual({ speechToText: false, textToSpeech: false, agentModelCalls: false });
+    expect(res.headers.get('Cache-Control')).toContain('no-store');
   });
 
   it('turns text-to-speech off with TTS_ENABLED=false while speech-to-text stays on', async () => {

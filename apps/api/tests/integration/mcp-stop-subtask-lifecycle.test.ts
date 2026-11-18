@@ -20,6 +20,7 @@ vi.mock('../../src/services/node-agent', () => ({
 vi.mock('../../src/services/project-data', () => ({
   enqueueMailboxMessage: vi.fn(),
   stopSession: (...args: unknown[]) => mocks.stopSession(...args),
+  cancelUnissuedSessionPrompts: vi.fn(async () => ({ matched: true, cancelled: 0 })),
 }));
 
 vi.mock('../../src/services/task-runner', () => ({
@@ -49,6 +50,7 @@ describe('MCP parent-stop lifecycle boundary', () => {
       schema.nodes,
       schema.agentSessions,
       schema.triggerExecutions,
+      schema.sessionSnapshots,
     ]);
     sqlite
       .prepare(
@@ -85,6 +87,7 @@ describe('MCP parent-stop lifecycle boundary', () => {
             '2026-08-09T08:00:00.000Z', '2026-08-09T08:00:00.000Z', 'trigger-execution-1')`
       )
       .run();
+    sqlite.exec("UPDATE tasks SET user_id='user-1'; UPDATE workspaces SET user_id='user-1'");
     env = { DATABASE: createSqliteD1(sqlite) } as Env;
     mocks.stopAgentSessionOnNode.mockImplementation(async () => {
       const row = sqlite.prepare(`SELECT status FROM tasks WHERE id = 'child-task'`).get() as {
@@ -103,24 +106,27 @@ describe('MCP parent-stop lifecycle boundary', () => {
   it.each([
     { role: 'owner', status: 'removed' },
     { role: 'viewer', status: 'active' },
-  ])('denies parent stop with $status $role membership before runtime effects', async (membership) => {
-    sqlite
-      .prepare('UPDATE project_members SET role = ?, status = ?')
-      .run(membership.role, membership.status);
-    const { handleStopSubtask } = await import('../../src/routes/mcp/orchestration-comms');
-    const result = await handleStopSubtask(1, { taskId: 'child-task' }, tokenData, env);
-    expect(result.error?.message).toContain("no longer has 'task:write' access");
-    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
-    expect(mocks.stopAgentSessionOnNode).not.toHaveBeenCalled();
-    expect(mocks.stopSession).not.toHaveBeenCalled();
-    expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
-    expect(sqlite.prepare("SELECT status FROM tasks WHERE id = 'child-task'").get()).toEqual({
-      status: 'in_progress',
-    });
-    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM task_status_events').get()).toEqual({
-      count: 0,
-    });
-  });
+  ])(
+    'denies parent stop with $status $role membership before runtime effects',
+    async (membership) => {
+      sqlite
+        .prepare('UPDATE project_members SET role = ?, status = ?')
+        .run(membership.role, membership.status);
+      const { handleStopSubtask } = await import('../../src/routes/mcp/orchestration-comms');
+      const result = await handleStopSubtask(1, { taskId: 'child-task' }, tokenData, env);
+      expect(result.error?.message).toContain("no longer has 'task:write' access");
+      expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+      expect(mocks.stopAgentSessionOnNode).not.toHaveBeenCalled();
+      expect(mocks.stopSession).not.toHaveBeenCalled();
+      expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
+      expect(sqlite.prepare("SELECT status FROM tasks WHERE id = 'child-task'").get()).toEqual({
+        status: 'in_progress',
+      });
+      expect(sqlite.prepare('SELECT COUNT(*) AS count FROM task_status_events').get()).toEqual({
+        count: 0,
+      });
+    }
+  );
 
   it('hard-stops first, then persists cancellation, event, trigger sync, and cleanup', async () => {
     const { handleStopSubtask } = await import('../../src/routes/mcp/orchestration-comms');
@@ -165,7 +171,9 @@ describe('MCP parent-stop lifecycle boundary', () => {
         )
         .get()
     ).toMatchObject({ status: 'failed', error_message: null });
-    expect(mocks.stopSession).toHaveBeenCalledWith(env, 'project-1', 'chat-1');
+    expect(mocks.stopSession).toHaveBeenCalledWith(env, 'project-1', 'chat-1', {
+      guard: { taskId: 'child-task' },
+    });
     expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('child-task', env, undefined, 'user-1');
   });
 

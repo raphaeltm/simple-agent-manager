@@ -19,18 +19,9 @@ function getStub(projectId: string): DurableObjectStub<ProjectData> {
 
 type Broadcast = { type?: string; payload?: Record<string, unknown> } & Record<string, unknown>;
 
-async function subscribe(
-  stub: DurableObjectStub<ProjectData>,
-  projectId: string,
-  chatSessionId: string
-) {
-  await stub.ensureProjectId(projectId);
+async function subscribe(stub: DurableObjectStub<ProjectData>, chatSessionId: string) {
   const response = await stub.fetch(`https://do/ws?sessionId=${chatSessionId}`, {
-    headers: {
-      Upgrade: 'websocket',
-      'x-sam-browser-socket-actor-id': 'broadcast-reader',
-      'x-sam-browser-socket-expires-at': '2000000000000',
-    },
+    headers: { Upgrade: 'websocket' },
   });
   expect(response.status).toBe(101);
   const ws = response.webSocket!;
@@ -54,10 +45,9 @@ async function settle(): Promise<void> {
 
 describe('createAcpSession pushes agentSessionId to the open chat page', () => {
   it('a socket subscribed to the chat session receives session.updated with the ACP id', async () => {
-    const projectId = `proj-acp-broadcast-${crypto.randomUUID()}`;
-    const stub = getStub(projectId);
+    const stub = getStub(`proj-acp-broadcast-${crypto.randomUUID()}`);
     const chatSessionId = await stub.createSession(null, 'Usage chip reactivity');
-    const { ws, messages } = await subscribe(stub, projectId, chatSessionId);
+    const { ws, messages } = await subscribe(stub, chatSessionId);
 
     const acp = await stub.createAcpSession({
       chatSessionId,
@@ -74,11 +64,10 @@ describe('createAcpSession pushes agentSessionId to the open chat page', () => {
   });
 
   it('does not leak the ACP id to a socket subscribed to another chat session (scoping control)', async () => {
-    const projectId = `proj-acp-broadcast-${crypto.randomUUID()}`;
-    const stub = getStub(projectId);
+    const stub = getStub(`proj-acp-broadcast-${crypto.randomUUID()}`);
     const chatSessionId = await stub.createSession(null, 'Target');
     const otherChatSessionId = await stub.createSession(null, 'Bystander');
-    const other = await subscribe(stub, projectId, otherChatSessionId);
+    const other = await subscribe(stub, otherChatSessionId);
 
     const acp = await stub.createAcpSession({
       chatSessionId,

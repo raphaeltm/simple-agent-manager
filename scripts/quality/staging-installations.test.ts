@@ -4,18 +4,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
-  decryptToken,
-  encryptToken,
-  hmacApiToken,
-} from '../deploy/bootstrap-installation-credentials';
-import {
-  bootstrapCloudCredentialId,
   bootstrapInstallation,
-  bootstrapSmokeTokenId,
   bootstrapUsers,
   type D1Like,
-  deriveAgentSignInTrust,
-  primaryTestAccountIds,
+  findDatabaseIdByName,
+  installationDatabaseName,
 } from '../deploy/bootstrap-staging-installation';
 import { resolveInstallationZone } from '../deploy/resolve-installation-zone.mjs';
 import {
@@ -47,12 +40,6 @@ function migratedDatabase(): { db: DatabaseSync; d1: D1Like } {
   return { db, d1 };
 }
 
-function key(seed: number): string {
-  return Buffer.alloc(32, seed).toString('base64');
-}
-
-const SOURCE_KEY = key(1);
-const TARGET_KEY = key(2);
 const PRIMARY = { baseDomain: 'sammy.party', prefix: 'sam', stack: 'staging' };
 
 describe('resolveInstallation', () => {
@@ -161,8 +148,6 @@ describe('resolveResourceNames with an installation', () => {
       analytics_dataset: 'sam2_analytics',
       assets_bucket: 'sam2-staging2-assets',
       pulumi_state_bucket: 'sam-pulumi-state',
-      primary_stack: 'staging',
-      primary_prefix: 'sam',
     });
     for (const value of Object.values(names)) {
       expect(value).not.toMatch(/^sam-.*staging$/);
@@ -183,76 +168,9 @@ describe('resolveResourceNames with an installation', () => {
   });
 });
 
-describe('deriveAgentSignInTrust', () => {
-  const source = JSON.stringify({
-    issuer: 'https://api.example.org/oidc',
-    allowedSources: [{ projectId: 'P', userId: 'U' }],
-    allowedTargets: ['primary-user'],
-    sessionTtlSeconds: 3600,
-  });
-
-  it('keeps issuer, sources and limits and retargets the users', () => {
-    const derived = JSON.parse(deriveAgentSignInTrust(source, ['a', 'b'])!);
-    expect(derived).toEqual({
-      issuer: 'https://api.example.org/oidc',
-      allowedSources: [{ projectId: 'P', userId: 'U' }],
-      allowedTargets: ['a', 'b'],
-      sessionTtlSeconds: 3600,
-    });
-  });
-
-  it('stays off when the primary has no trust, and rejects malformed trust', () => {
-    expect(deriveAgentSignInTrust(undefined, ['a'])).toBeNull();
-    expect(deriveAgentSignInTrust('  ', ['a'])).toBeNull();
-    expect(() => deriveAgentSignInTrust('{', ['a'])).toThrow(/not valid JSON/);
-    expect(() => deriveAgentSignInTrust('[]', ['a'])).toThrow(/not a JSON object/);
-    expect(() => deriveAgentSignInTrust(source, [])).toThrow();
-  });
-});
-
 describe('bootstrapInstallation on the real migration chain', () => {
   let target: ReturnType<typeof migratedDatabase>;
-  let source: ReturnType<typeof migratedDatabase>;
   const logs: string[] = [];
-
-  async function seedSourceCredential(input: {
-    table: 'platform_credentials' | 'credentials';
-    id: string;
-    provider: string;
-    plaintext: string;
-    keyBase64?: string;
-    updatedAt?: string;
-  }): Promise<void> {
-    const sealed = await encryptToken(input.plaintext, input.keyBase64 ?? SOURCE_KEY);
-    const at = input.updatedAt ?? '2026-11-01T00:00:00.000Z';
-    if (input.table === 'platform_credentials') {
-      source.db
-        .prepare(
-          `INSERT INTO platform_credentials (id, credential_type, provider, label, encrypted_token, iv, is_enabled, created_by, created_at, updated_at)
-           VALUES (?, 'cloud-provider', ?, 'x', ?, ?, 1, 'owner', ?, ?)`
-        )
-        .run(input.id, input.provider, sealed.ciphertext, sealed.iv, at, at);
-    } else {
-      source.db
-        .prepare(
-          `INSERT INTO credentials (id, user_id, provider, encrypted_token, iv, created_at, updated_at, credential_type, credential_kind, is_active)
-           VALUES (?, 'owner', ?, ?, ?, ?, ?, 'cloud-provider', 'api-key', 1)`
-        )
-        .run(input.id, input.provider, sealed.ciphertext, sealed.iv, at, at);
-    }
-  }
-
-  const gcpKey = JSON.stringify({
-    version: 1,
-    provider: 'gcp',
-    authType: 'service-account-key',
-    gcpProjectId: 'p',
-    serviceAccountEmail: 'sa@p.iam.gserviceaccount.com',
-    privateKeyId: 'k',
-    privateKey: 'PRIVATE',
-    defaultZone: 'us-central1-a',
-  });
-  const gcpWif = JSON.stringify({ version: 1, provider: 'gcp', authType: 'workload-identity' });
 
   function run(overrides: Partial<Parameters<typeof bootstrapInstallation>[0]> = {}) {
     return bootstrapInstallation({
@@ -260,12 +178,6 @@ describe('bootstrapInstallation on the real migration chain', () => {
       environment: 'staging',
       baseDomain: 'sammy2.party',
       target: target.d1,
-      source: source.d1,
-      targetCredentialKey: TARGET_KEY,
-      targetEncryptionKey: TARGET_KEY,
-      sourceCredentialKey: SOURCE_KEY,
-      smokeTestToken: 'sam_smoke_token_value',
-      primaryTestAccountIds: ['owner'],
       now: new Date('2026-11-15T20:00:00.000Z'),
       log: (message) => logs.push(message),
       ...overrides,
@@ -278,51 +190,16 @@ describe('bootstrapInstallation on the real migration chain', () => {
 
   beforeEach(() => {
     target = migratedDatabase();
-    source = migratedDatabase();
     logs.length = 0;
-    source.db
-      .prepare(
-        `INSERT INTO users (id, email, role, status, created_at, updated_at) VALUES ('owner', 'o@x', 'superadmin', 'active', 1, 1)`
-      )
-      .run();
   });
 
-  it('seeds users, a GCP service-account credential and the smoke token, and closes setup', async () => {
-    await seedSourceCredential({
-      table: 'platform_credentials',
-      id: 'hz',
-      provider: 'hetzner',
-      plaintext: 'hetzner-token',
-    });
-    await seedSourceCredential({
-      table: 'credentials',
-      id: 'gcp-wif',
-      provider: 'gcp',
-      plaintext: gcpWif,
-      updatedAt: '2026-11-14T00:00:00.000Z',
-    });
-    await seedSourceCredential({
-      table: 'credentials',
-      id: 'gcp-sa',
-      provider: 'gcp',
-      plaintext: gcpKey,
-    });
-
+  it('seeds the two test users, opts them into the SAM AI proxy, and closes setup', async () => {
     const report = await run();
 
-    expect(report.cloudCredential).toMatchObject({
-      provider: 'gcp',
-      authType: 'service-account-key',
-      sourceTable: 'credentials',
-      sourceId: 'gcp-sa',
-      targetId: 'staging2-bootstrap-cloud',
+    expect(report).toEqual({
+      users: ['staging2-agent-admin', 'staging2-agent-user'],
+      proxyAgents: ['claude-code'],
     });
-    expect(JSON.stringify(report)).not.toContain('PRIVATE');
-    expect(logs.join('\n')).not.toContain('PRIVATE');
-    expect(logs.join('\n')).toContain(
-      'skip credentials gcp-wif (gcp): auth type workload-identity is not portable'
-    );
-
     const users = target.db
       .prepare(`SELECT id, email, role, status FROM users WHERE status != 'system' ORDER BY id`)
       .all();
@@ -347,75 +224,6 @@ describe('bootstrapInstallation on the real migration chain', () => {
       )
       .get();
     expect(owner).toEqual({ id: 'staging2-agent-admin' });
-
-    const credential = target.db
-      .prepare(
-        `SELECT provider, credential_type, is_enabled, encrypted_token, iv FROM platform_credentials WHERE id = ?`
-      )
-      .get(bootstrapCloudCredentialId('staging2')) as {
-      provider: string;
-      credential_type: string;
-      is_enabled: number;
-      encrypted_token: string;
-      iv: string;
-    };
-    expect(credential).toMatchObject({
-      provider: 'gcp',
-      credential_type: 'cloud-provider',
-      is_enabled: 1,
-    });
-    expect(await decryptToken(credential.encrypted_token, credential.iv, TARGET_KEY)).toBe(gcpKey);
-    await expect(
-      decryptToken(credential.encrypted_token, credential.iv, SOURCE_KEY)
-    ).rejects.toThrow();
-
-    const token = target.db
-      .prepare('SELECT user_id, token_hash, revoked_at FROM smoke_test_tokens WHERE id = ?')
-      .get(bootstrapSmokeTokenId('staging2'));
-    expect(token).toEqual({
-      user_id: 'staging2-agent-admin',
-      token_hash: await hmacApiToken('sam_smoke_token_value', TARGET_KEY),
-      revoked_at: null,
-    });
-  });
-
-  it('copies the primary platform agent keys, one per agent type, re-encrypted', async () => {
-    await seedSourceCredential({
-      table: 'platform_credentials',
-      id: 'hz',
-      provider: 'hetzner',
-      plaintext: 'hetzner-token',
-    });
-    const add = async (
-      id: string,
-      agentType: string,
-      plaintext: string,
-      keyBase64 = SOURCE_KEY,
-      at = '2026-11-01'
-    ) => {
-      const sealed = await encryptToken(plaintext, keyBase64);
-      source.db
-        .prepare(
-          `INSERT INTO platform_credentials (id, credential_type, provider, agent_type, credential_kind, label, encrypted_token, iv, is_enabled, created_by, created_at, updated_at)
-           VALUES (?, 'agent-api-key', NULL, ?, 'api-key', 'k', ?, ?, 1, 'owner', ?, ?)`
-        )
-        .run(id, agentType, sealed.ciphertext, sealed.iv, at, at);
-    };
-    await add('claude-old', 'claude-code', 'OLD-KEY', SOURCE_KEY, '2026-01-01');
-    await add('claude-new', 'claude-code', 'NEW-KEY', SOURCE_KEY, '2026-11-10');
-    await add('codex-bad', 'openai-codex', 'X', key(9));
-    const oauth = await encryptToken('ROTATING', SOURCE_KEY);
-    source.db
-      .prepare(
-        `INSERT INTO platform_credentials (id, credential_type, provider, agent_type, credential_kind, label, encrypted_token, iv, is_enabled, created_by)
-         VALUES ('codex-oauth', 'agent-api-key', NULL, 'openai-codex', 'oauth-token', 'k', ?, ?, 1, 'owner')`
-      )
-      .run(oauth.ciphertext, oauth.iv);
-
-    const report = await run();
-
-    expect(report.agentKeys).toEqual(['claude-code']);
-    // The test users are opted into the SAM AI proxy, the only way a platform key is used.
     expect(
       target.db
         .prepare(`SELECT user_id, agent_type, provider_mode FROM agent_settings ORDER BY user_id`)
@@ -424,208 +232,33 @@ describe('bootstrapInstallation on the real migration chain', () => {
       { user_id: 'staging2-agent-admin', agent_type: 'claude-code', provider_mode: 'sam' },
       { user_id: 'staging2-agent-user', agent_type: 'claude-code', provider_mode: 'sam' },
     ]);
-    expect(JSON.stringify(report) + logs.join('\n')).not.toContain('NEW-KEY');
-    const row = target.db
-      .prepare(
-        `SELECT agent_type, credential_type, encrypted_token, iv FROM platform_credentials WHERE id = 'staging2-bootstrap-agent-claude-code'`
-      )
-      .get() as {
-      agent_type: string;
-      credential_type: string;
-      encrypted_token: string;
-      iv: string;
-    };
-    expect(row).toMatchObject({ agent_type: 'claude-code', credential_type: 'agent-api-key' });
-    expect(await decryptToken(row.encrypted_token, row.iv, TARGET_KEY)).toBe('NEW-KEY');
-    expect(logs.join('\n')).toMatch(/skip agent key codex-bad \(openai-codex\): cannot decrypt/);
-    expect(logs.join('\n')).not.toContain('codex-oauth');
+  });
 
+  it('writes no credential, token or secret-bearing row', async () => {
+    await run();
+    for (const table of ['platform_credentials', 'credentials', 'smoke_test_tokens']) {
+      expect(count(target.db, table)).toBe(0);
+    }
+  });
+
+  it('is idempotent and leaves an admin change alone', async () => {
+    await run();
+    target.db.prepare(`UPDATE users SET role = 'user' WHERE id = 'staging2-agent-admin'`).run();
     target.db
       .prepare(
-        `UPDATE agent_settings SET provider_mode = NULL WHERE user_id = 'staging2-agent-user'`
+        `UPDATE agent_settings SET provider_mode = 'user-api-key' WHERE user_id = 'staging2-agent-user'`
       )
       .run();
     await run();
     expect(
-      target.db
-        .prepare(
-          `SELECT count(*) AS n FROM platform_credentials WHERE credential_type = 'agent-api-key'`
-        )
-        .get()
-    ).toEqual({ n: 1 });
-    // A user's own later choice survives the next deploy.
+      target.db.prepare(`SELECT role FROM users WHERE id = 'staging2-agent-admin'`).get()
+    ).toEqual({ role: 'user' });
     expect(
       target.db
-        .prepare(
-          `SELECT count(*) AS n, max(provider_mode) AS mode FROM agent_settings WHERE user_id = 'staging2-agent-user'`
-        )
+        .prepare(`SELECT provider_mode FROM agent_settings WHERE user_id = 'staging2-agent-user'`)
         .get()
-    ).toEqual({ n: 1, mode: null });
-  });
-
-  it('is idempotent and keeps changes an admin made on the installation', async () => {
-    await seedSourceCredential({
-      table: 'platform_credentials',
-      id: 'hz',
-      provider: 'hetzner',
-      plaintext: 'hetzner-token',
-    });
-    await run();
-    target.db
-      .prepare(
-        `UPDATE users SET role = 'user', status = 'suspended' WHERE id = 'staging2-agent-admin'`
-      )
-      .run();
-    target.db.prepare(`UPDATE smoke_test_tokens SET revoked_at = 5`).run();
-    target.db.prepare(`UPDATE platform_credentials SET is_enabled = 0`).run();
-    const before = ['users', 'platform_credentials', 'smoke_test_tokens'].map((t) =>
-      count(target.db, t)
-    );
-    const oldIv = (target.db.prepare('SELECT iv FROM platform_credentials').get() as { iv: string })
-      .iv;
-
-    await run();
-
-    expect(
-      ['users', 'platform_credentials', 'smoke_test_tokens'].map((t) => count(target.db, t))
-    ).toEqual(before);
-    expect(
-      target.db.prepare(`SELECT role, status FROM users WHERE id = 'staging2-agent-admin'`).get()
-    ).toEqual({ role: 'user', status: 'suspended' });
-    expect(target.db.prepare('SELECT revoked_at FROM smoke_test_tokens').get()).toEqual({
-      revoked_at: 5,
-    });
-    const credential = target.db
-      .prepare('SELECT is_enabled, iv, encrypted_token FROM platform_credentials')
-      .get() as { is_enabled: number; iv: string; encrypted_token: string };
-    expect(credential.is_enabled).toBe(0);
-    // The ciphertext still follows the primary's credential.
-    expect(credential.iv).not.toBe(oldIv);
-    expect(await decryptToken(credential.encrypted_token, credential.iv, TARGET_KEY)).toBe(
-      'hetzner-token'
-    );
-  });
-
-  it("never copies the GCP credential of an account that is not one of the primary's test accounts", async () => {
-    await seedSourceCredential({
-      table: 'platform_credentials',
-      id: 'hz',
-      provider: 'hetzner',
-      plaintext: 'hetzner-token',
-    });
-    await seedSourceCredential({
-      table: 'credentials',
-      id: 'gcp-sa',
-      provider: 'gcp',
-      plaintext: gcpKey,
-    });
-
-    expect(
-      (await run({ primaryTestAccountIds: ['someone-else-123'] })).cloudCredential
-    ).toMatchObject({ provider: 'hetzner', sourceId: 'hz' });
-    expect((await run({ primaryTestAccountIds: [] })).cloudCredential).toMatchObject({
-      provider: 'hetzner',
-    });
-    // Control: the same row is chosen when its owner is a designated test account.
-    expect((await run()).cloudCredential).toMatchObject({ provider: 'gcp', sourceId: 'gcp-sa' });
-  });
-
-  it('reads test account IDs from the primary trust, ignoring emails and the wildcard', () => {
-    expect(
-      primaryTestAccountIds(
-        JSON.stringify({ allowedTargets: ['toWzGjNW3IyUkCVItRQv3qSn0wI8c22y', 'a@b.c', '*', 7] })
-      )
-    ).toEqual(['toWzGjNW3IyUkCVItRQv3qSn0wI8c22y']);
-    expect(primaryTestAccountIds(JSON.stringify({ allowedTargets: '*' }))).toEqual([]);
-    expect(primaryTestAccountIds('{')).toEqual([]);
-    expect(primaryTestAccountIds(undefined)).toEqual([]);
-  });
-
-  it('leaves credentials an admin added by hand alone', async () => {
-    await seedSourceCredential({
-      table: 'platform_credentials',
-      id: 'hz',
-      provider: 'hetzner',
-      plaintext: 'hetzner-token',
-    });
-    await run();
-    target.db
-      .prepare(
-        `INSERT INTO platform_credentials (id, credential_type, provider, label, encrypted_token, iv, is_enabled, created_by)
-         VALUES ('manual', 'cloud-provider', 'gcp', 'manual', 'c', 'i', 1, 'staging2-agent-admin')`
-      )
-      .run();
-    await run();
-    expect(
-      target.db
-        .prepare(`SELECT encrypted_token FROM platform_credentials WHERE id = 'manual'`)
-        .get()
-    ).toEqual({
-      encrypted_token: 'c',
-    });
-  });
-
-  it('prefers a platform GCP credential, and skips a row it cannot decrypt', async () => {
-    await seedSourceCredential({
-      table: 'platform_credentials',
-      id: 'gcp-bad',
-      provider: 'gcp',
-      plaintext: gcpKey,
-      keyBase64: key(9),
-      updatedAt: '2026-11-15T00:00:00.000Z',
-    });
-    await seedSourceCredential({
-      table: 'platform_credentials',
-      id: 'gcp-good',
-      provider: 'gcp',
-      plaintext: gcpKey,
-    });
-    await seedSourceCredential({
-      table: 'credentials',
-      id: 'gcp-user',
-      provider: 'gcp',
-      plaintext: gcpKey,
-      updatedAt: '2026-11-16T00:00:00.000Z',
-    });
-
-    const report = await run();
-
-    expect(report.cloudCredential).toMatchObject({
-      sourceTable: 'platform_credentials',
-      sourceId: 'gcp-good',
-    });
-    expect(logs.join('\n')).toMatch(/skip platform_credentials gcp-bad \(gcp\): cannot decrypt/);
-  });
-
-  it('falls back to Hetzner when no GCP credential is portable', async () => {
-    await seedSourceCredential({
-      table: 'platform_credentials',
-      id: 'gcp-wif',
-      provider: 'gcp',
-      plaintext: gcpWif,
-    });
-    await seedSourceCredential({
-      table: 'platform_credentials',
-      id: 'hz',
-      provider: 'hetzner',
-      plaintext: 'hetzner-token',
-    });
-    expect((await run()).cloudCredential).toMatchObject({ provider: 'hetzner', sourceId: 'hz' });
-  });
-
-  it('fails when the primary has no usable cloud credential', async () => {
-    await expect(run()).rejects.toThrow(/No portable cloud credential/);
-  });
-
-  it('skips the smoke token when none is configured', async () => {
-    await seedSourceCredential({
-      table: 'platform_credentials',
-      id: 'hz',
-      provider: 'hetzner',
-      plaintext: 'hetzner-token',
-    });
-    expect((await run({ smokeTestToken: undefined })).smokeToken).toBe('skipped');
-    expect(count(target.db, 'smoke_test_tokens')).toBe(0);
+    ).toEqual({ provider_mode: 'user-api-key' });
+    expect(count(target.db, 'agent_settings')).toBe(2);
   });
 
   it.each([
@@ -636,22 +269,61 @@ describe('bootstrapInstallation on the real migration chain', () => {
     ['a domain other than the registered one', { baseDomain: 'simple-agent-manager.org' }],
     ['another environment', { environment: 'development' }],
   ])('refuses %s before writing anything', async (_label, overrides) => {
-    await seedSourceCredential({
-      table: 'platform_credentials',
-      id: 'hz',
-      provider: 'hetzner',
-      plaintext: 'hetzner-token',
-    });
     await expect(run(overrides)).rejects.toThrow();
     expect(count(target.db, 'users')).toBe(1); // the migration-seeded system user only
-    expect(count(target.db, 'platform_credentials')).toBe(0);
+    expect(count(target.db, 'agent_settings')).toBe(0);
   });
 
-  it('names the users the derived trust allows', () => {
+  it('names the users an agent sign-in trust can allow', () => {
     expect(bootstrapUsers('staging2', 'sammy2.party').map((u) => u.id)).toEqual([
       'staging2-agent-admin',
       'staging2-agent-user',
     ]);
+  });
+});
+
+describe('findDatabaseIdByName', () => {
+  function fakeFetch(status: number, body: unknown): typeof fetch {
+    return (async () =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      })) as unknown as typeof fetch;
+  }
+  const lookup = (fetchImpl: typeof fetch) =>
+    findDatabaseIdByName({ accountId: 'a', apiToken: 't', name: 'sam2-staging2', fetchImpl });
+
+  it('names the registered database and returns the exact match only', async () => {
+    expect(installationDatabaseName('staging2')).toBe('sam2-staging2');
+    await expect(
+      lookup(
+        fakeFetch(200, {
+          success: true,
+          result: [
+            { uuid: 'other', name: 'sam2-staging2-old' },
+            { uuid: 'db-1', name: 'sam2-staging2' },
+          ],
+        })
+      )
+    ).resolves.toBe('db-1');
+  });
+
+  it.each([
+    ['no database', { success: true, result: [] }, 200],
+    [
+      'two databases',
+      {
+        success: true,
+        result: [
+          { uuid: '1', name: 'sam2-staging2' },
+          { uuid: '2', name: 'sam2-staging2' },
+        ],
+      },
+      200,
+    ],
+    ['an API error', { success: false, result: [] }, 403],
+  ])('fails closed on %s', async (_label, body, status) => {
+    await expect(lookup(fakeFetch(status, body))).rejects.toThrow();
   });
 });
 
@@ -703,6 +375,32 @@ describe('workflowTargetFor (deploy-staging.yml)', () => {
 
   it('needs a domain for a primary', () => {
     expect(() => workflowTargetFor('staging', undefined)).toThrow(/valid domain/);
+  });
+});
+
+describe('deploy-staging.yml smoke-token probe', () => {
+  const workflow = readFileSync(
+    new URL('../../.github/workflows/deploy-staging.yml', import.meta.url),
+    'utf8'
+  );
+  const probe =
+    workflow.match(
+      /      - name: Check smoke token on a secondary installation\n[\s\S]*?(?=\n      - name:)/
+    )?.[0] ?? '';
+
+  it('runs only for a secondary installation, never the primary', () => {
+    expect(probe).not.toBe('');
+    // workflowTargetFor gives the primary an empty installation and a secondary its name.
+    expect(workflowTargetFor('staging', 'sammy.party').installation).toBe('');
+    expect(workflowTargetFor('staging2', 'sammy.party').installation).toBe('staging2');
+    expect(probe).toContain("needs.lease.outputs.installation != ''");
+    expect(probe).not.toContain('needs.lease.outputs.credential_environment');
+  });
+
+  it('skips only on a refusal and never prints the token', () => {
+    expect(probe).toContain('if [ "$status" = "401" ]; then');
+    expect(probe).toContain('--data-binary @-');
+    expect(probe).not.toMatch(/echo[^\n]*SMOKE_TEST_TOKEN/);
   });
 });
 
@@ -828,21 +526,34 @@ describe('deploy-reusable.yml secondary installation wiring', () => {
     expect(configure).toContain(
       "SECRET_ENCRYPTION_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.ENCRYPTION_KEY || '' }}"
     );
-    // The primary's trust can never reach a secondary, and the derived trust travels in a file.
+    // The primary's trust never reaches a secondary, and an unset secondary trust leaves the
+    // Worker secret alone instead of deleting it.
     expect(configure).toContain(
       "AGENT_SIGN_IN_TRUST: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.AGENT_SIGN_IN_TRUST || '' }}"
     );
-    expect(configure).toContain("format('{0}/agent-sign-in-trust.json', runner.temp)");
-    expect(workflow).not.toMatch(/installation_trust\.outputs/);
+    expect(configure).toContain(
+      "AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET: ${{ steps.deploy_resources.outputs.secondary == 'true' && 'true' || '' }}"
+    );
+    // A secondary's own trust is passed straight in and written in the same bulk deployment.
+    expect(configure).toContain(
+      "SECONDARY_AGENT_SIGN_IN_TRUST: ${{ steps.deploy_resources.outputs.secondary == 'true' && steps.deploy_resources.outputs.installation == 'staging2' && secrets.AGENT_SIGN_IN_TRUST_STAGING2 || '' }}"
+    );
+    expect(workflow).not.toContain('wrangler secret put');
+    expect(workflow).not.toMatch(/derive-trust|agent-sign-in-trust\.json/);
   });
 
   it('bootstraps secondary installations only and never production', () => {
     const bootstrap = step('Bootstrap Secondary Installation');
     expect(bootstrap).toContain("steps.deploy_resources.outputs.secondary == 'true'");
     expect(bootstrap).toContain("inputs.environment != 'production'");
-    expect(bootstrap).toContain(
-      'pnpm tsx scripts/deploy/bootstrap-staging-installation.ts bootstrap'
-    );
-    expect(bootstrap).toContain('echo "::add-mask::$TARGET_ENCRYPTION_KEY"');
+    expect(bootstrap).toContain('run: pnpm tsx scripts/deploy/bootstrap-staging-installation.ts');
+  });
+
+  it('hands the bootstrap no key, token or Pulumi state (policy 795e72a6)', () => {
+    const bootstrap = step('Bootstrap Secondary Installation');
+    expect(bootstrap).not.toBe('');
+    const secrets = [...bootstrap.matchAll(/secrets\.([A-Z0-9_]+)/g)].map((m) => m[1]).sort();
+    expect(secrets).toEqual(['CF_ACCOUNT_ID', 'CF_API_TOKEN']);
+    expect(bootstrap).not.toMatch(/pulumi|ENCRYPTION_KEY|SMOKE_TEST_TOKEN|AGENT_SIGN_IN_TRUST/);
   });
 });

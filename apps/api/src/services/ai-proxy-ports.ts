@@ -4,7 +4,8 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import type { Env } from '../env';
 import { getCredentialEncryptionKey } from '../lib/secrets';
-import { resolveAdminSetting } from './admin-settings-resolution';
+import { resolveAdminSetting, resolveAdminSettingDetails } from './admin-settings-resolution';
+import { AI_PROXY_PER_USER_MONTHLY_COST_CEILING_SETTING } from './ai-proxy-settings';
 import { getPlatformAgentCredential } from './platform-credentials';
 
 /**
@@ -23,5 +24,19 @@ export function aiProxyPorts(env: Env, db?: ReturnType<typeof drizzle>): AiProxy
     },
     externalReadTimeoutMs: async () =>
       Number(await resolveAdminSetting(env, 'performance.externalReadTimeoutMs')),
+    monthlyCostCeilingUsd: () => readMonthlyCostCeilingUsd(env),
   };
+}
+
+/**
+ * Read the strict admin-settings snapshot (cached for at most 60 seconds). A failed read must
+ * remain a failure: defaulting to zero or retaining an older disabled/higher ceiling could spend
+ * beyond the operator's current limit. The package maps the failure to a retryable 503.
+ */
+async function readMonthlyCostCeilingUsd(env: Env): Promise<number> {
+  const { value } = await resolveAdminSettingDetails(
+    env,
+    AI_PROXY_PER_USER_MONTHLY_COST_CEILING_SETTING
+  );
+  return Number(value);
 }

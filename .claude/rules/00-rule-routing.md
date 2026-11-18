@@ -130,5 +130,6 @@ work, or planning in one of these areas, open the rule yourself.
 - `79-new-enum-values-audit-every-denylist.md`: A New Value in a Shared Status Enum Must Audit Every Denylist Over That Enum. Loads for: apps/web; packages/shared
 - `80-sam-glass.md`: SAM Glass. Loads for: apps/web; packages/ui
 - `82-typed-cards-every-harness.md`: A Typed Chat Card Must Render for Every Agent Harness. Loads for: apps/web; packages/shared (src/typed-chat-cards.ts)
+- `83-no-secret-readback-in-ci.md`: No Secret Readback or Printing in CI. Loads for: .github; scripts; infra
 
 <!-- END GENERATED RULE INDEX -->

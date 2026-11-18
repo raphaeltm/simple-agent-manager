@@ -18,6 +18,7 @@ import type {
 } from './default-capacity-pools';
 import { IoTimeoutError, withDeadline } from './fetch-timeout';
 import { resolveGcpBootDiskPolicy } from './gcp-provider-factory';
+import { resolveInfomaniakBootVolumeGb } from './infomaniak-provider-settings';
 import {
   buildProviderCatalogForCredential,
   getStaticProviderCatalogOfferings,
@@ -379,8 +380,10 @@ function normalizeOfferingResolution(
 async function staticCatalogOptions(
   provider: CredentialProvider,
   env: Env | undefined
-): Promise<{ gcpBootDiskPolicy?: GcpBootDiskPolicy }> {
-  return provider === 'gcp' && env
-    ? { gcpBootDiskPolicy: await resolveGcpBootDiskPolicy(env) }
-    : {};
+): Promise<{ gcpBootDiskPolicy?: GcpBootDiskPolicy; infomaniakBootVolumeGb?: number }> {
+  if (!env) return {};
+  if (provider === 'gcp') return { gcpBootDiskPolicy: await resolveGcpBootDiskPolicy(env) };
+  if (provider === 'infomaniak')
+    return { infomaniakBootVolumeGb: await resolveInfomaniakBootVolumeGb(env) };
+  return {};
 }

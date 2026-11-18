@@ -148,11 +148,7 @@ async function runAlarm() {
 
 async function subscribe(sessionId: string) {
   const response = await stub().fetch(`https://do/ws?sessionId=${sessionId}`, {
-    headers: {
-      Upgrade: 'websocket',
-      'x-sam-browser-socket-actor-id': OWNER,
-      'x-sam-browser-socket-expires-at': '2000000000000',
-    },
+    headers: { Upgrade: 'websocket' },
   });
   expect(response.status).toBe(101);
   const ws = response.webSocket!;

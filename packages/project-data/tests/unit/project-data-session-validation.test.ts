@@ -50,7 +50,6 @@ type SqlResult = {
 type MockWebSocket = WebSocket & {
   tags: string[];
   sent: string[];
-  attachment: unknown;
 };
 
 type QueryHandler = (query: string, args: unknown[]) => Record<string, unknown>[];
@@ -70,29 +69,13 @@ function sqlResult(rows: Record<string, unknown>[] = []): SqlResult {
   };
 }
 
-function createMockWebSocket(
-  tags: string[] = [],
-  attachment: unknown = {
-    version: 1,
-    actorId: 'user-1',
-    projectId: 'project-1',
-    sessionId: tags.find((tag) => tag.startsWith('session:'))?.slice('session:'.length) ?? null,
-    capability: 'project:read',
-    expiresAt: 2_000_000_000_000,
-  }
-): MockWebSocket {
+function createMockWebSocket(tags: string[] = []): MockWebSocket {
   const sent: string[] = [];
-  let storedAttachment = attachment;
   return {
     tags,
     sent,
-    attachment,
     send: vi.fn((data: string) => sent.push(data)),
     close: vi.fn(),
-    serializeAttachment: vi.fn((value: unknown) => {
-      storedAttachment = value;
-    }),
-    deserializeAttachment: vi.fn(() => storedAttachment),
   } as unknown as MockWebSocket;
 }
 
@@ -121,21 +104,13 @@ function createMockCtx(queryHandler: QueryHandler) {
   };
 }
 
-function createProjectData(
-  queryHandler: QueryHandler,
-  currentAuthority: Record<string, unknown> | null = { authorized: 1 }
-) {
+function createProjectData(queryHandler: QueryHandler) {
   const ctx = createMockCtx(queryHandler);
-  const first = vi.fn(async () => currentAuthority);
   const projectData = new ProjectData(ctx as unknown as DurableObjectState, {
-    DATABASE: {
-      prepare: vi.fn(() => ({ bind: vi.fn(() => ({ first })) })),
-    },
     DO_SUMMARY_SYNC_DEBOUNCE_MS: '999999',
     SESSION_IDLE_TIMEOUT_MINUTES: '15',
   });
-  projectData.ensureProjectId('project-1');
-  return { ctx, first, projectData };
+  return { ctx, projectData };
 }
 
 function parseSent(socket: MockWebSocket) {
@@ -281,46 +256,6 @@ describe('ProjectData DO session validation behavior', () => {
     const sent = parseSent(socket);
     expect(sent.map((message) => message.type)).toEqual(['error', 'pong']);
     expect(sent.some((message) => message.type === 'message.ack')).toBe(false);
-  });
-
-  it('closes a socket when its actor no longer has current project authority', async () => {
-    const { first, projectData } = createProjectData(() => [], null);
-    const socket = createMockWebSocket(['session:session-a']);
-
-    await projectData.webSocketMessage(socket, JSON.stringify({ type: 'ping' }));
-
-    expect(first).toHaveBeenCalledOnce();
-    expect(socket.close).toHaveBeenCalledWith(4403, 'authorization revoked');
-    expect(parseSent(socket)).toEqual([]);
-  });
-
-  it('closes only the removed actor sockets and rejects unbound legacy sockets', () => {
-    const { ctx, projectData } = createProjectData(() => []);
-    const removed = createMockWebSocket([], {
-      version: 1,
-      actorId: 'removed-user',
-      projectId: 'project-1',
-      sessionId: null,
-      capability: 'project:read',
-      expiresAt: 2_000_000_000_000,
-    });
-    const active = createMockWebSocket([], {
-      version: 1,
-      actorId: 'active-user',
-      projectId: 'project-1',
-      sessionId: null,
-      capability: 'project:read',
-      expiresAt: 2_000_000_000_000,
-    });
-    const legacy = createMockWebSocket([], null);
-    ctx.acceptWebSocket(removed);
-    ctx.acceptWebSocket(active);
-    ctx.acceptWebSocket(legacy);
-
-    expect(projectData.revokeBrowserSocketsForActor('removed-user')).toBe(2);
-    expect(removed.close).toHaveBeenCalledWith(4403, 'authorization expired');
-    expect(legacy.close).toHaveBeenCalledWith(4403, 'authorization expired');
-    expect(active.close).not.toHaveBeenCalled();
   });
 
   it('rejects batch persistence to stopped sessions', async () => {

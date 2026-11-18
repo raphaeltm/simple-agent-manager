@@ -26,6 +26,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Env } from '../../src/env';
 import * as svc from '../../src/services/project-data';
+import { useFullProjectEventHistory } from './helpers/full-project-event-history';
 import { seedMaterializationFairnessPrefix } from './helpers/project-event-fairness-fixture';
 import { seedInstallation, seedProject, seedTask, seedUser } from './helpers/seed-d1';
 import {
@@ -171,6 +172,8 @@ async function disableProjectEventWakeOnStub(projectId: string): Promise<void> {
     ).env.DURABLE_PROMPT_DELIVERY_ENABLED = 'false';
   });
 }
+
+useFullProjectEventHistory();
 
 describe('ProjectData event subscription core', () => {
   it('admits normalized events idempotently and exposes same-key fingerprint conflicts', async () => {

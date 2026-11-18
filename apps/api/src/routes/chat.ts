@@ -14,7 +14,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { requireRouteParam } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
-import { getAuth, getUserId, requireApproved, requireAuth } from '../middleware/auth';
+import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import { CreateChatSessionSchema, parseOptionalBody } from '../schemas';
@@ -42,6 +42,7 @@ import { registerChatSessionDetailRoute } from './chat-session-detail';
 import { registerChatSessionListRoute } from './chat-session-list';
 import { chatStateRoutes } from './chat-state';
 import { registerChatStopRoute } from './chat-stop';
+import { readChatToolChanges } from './chat-tool-changes';
 import { registerChatWorkloadIdentityRoute } from './chat-workload-identity';
 
 const chatRoutes = new Hono<{ Bindings: Env }>();
@@ -112,8 +113,7 @@ chatRoutes.post('/', async (c) => {
  * captured as a sessionId parameter.
  */
 chatRoutes.get('/ws', async (c) => {
-  const auth = getAuth(c);
-  const userId = auth.user.id;
+  const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
 
@@ -124,14 +124,7 @@ chatRoutes.get('/ws', async (c) => {
     throw errors.badRequest('Expected WebSocket upgrade');
   }
 
-  const expiresAt = Math.min(
-    auth.session.expiresAt.getTime(),
-    auth.session.hardExpiresAt?.getTime() ?? Number.POSITIVE_INFINITY
-  );
-  return projectDataService.forwardWebSocket(c.env, projectId, c.req.raw, {
-    actorId: userId,
-    expiresAt,
-  });
+  return projectDataService.forwardWebSocket(c.env, projectId, c.req.raw);
 });
 
 /**
@@ -170,6 +163,7 @@ chatRoutes.get('/:sessionId/messages', async (c) => {
 
   const compact = getCompactMode(c.req.query('compact'), getDefaultCompactMode(c.env));
 
+  const toolChanges = await readChatToolChanges(c, projectId, sessionId);
   const messagesResult = await projectDataService.getMessages(
     c.env,
     projectId,
@@ -182,7 +176,7 @@ chatRoutes.get('/:sessionId/messages', async (c) => {
     order
   );
 
-  return c.json(messagesResult);
+  return c.json({ ...messagesResult, ...(toolChanges ? { toolChanges } : {}) });
 });
 
 /**
@@ -212,6 +206,8 @@ chatRoutes.get('/:sessionId/messages/:messageId/tool-content', async (c) => {
     throw errors.notFound('Message tool content');
   }
 
+  // A canonical tool ID has mutable output; browser/proxy caches must revalidate it.
+  c.header('Cache-Control', 'no-store');
   return c.json(toolContent);
 });
 

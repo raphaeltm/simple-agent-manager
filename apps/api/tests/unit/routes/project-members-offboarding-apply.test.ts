@@ -9,7 +9,6 @@ import { projectMembersRoutes } from '../../../src/routes/projects/members';
 const mocks = vi.hoisted(() => ({
   currentUserId: 'owner-user',
   requireProjectCapability: vi.fn(),
-  revokeBrowserSocketsForActor: vi.fn(),
   revokeSessionAccessForDepartedMember: vi.fn(),
 }));
 
@@ -23,10 +22,6 @@ vi.mock('../../../src/middleware/auth', () => ({
 }));
 vi.mock('../../../src/services/session-access', () => ({
   revokeSessionAccessForDepartedMember: mocks.revokeSessionAccessForDepartedMember,
-}));
-vi.mock('../../../src/services/project-data', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../src/services/project-data')>()),
-  revokeBrowserSocketsForActor: mocks.revokeBrowserSocketsForActor,
 }));
 vi.mock('../../../src/middleware/project-auth', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../src/middleware/project-auth')>();
@@ -385,7 +380,6 @@ describe('project member offboarding apply', () => {
     vi.clearAllMocks();
     mocks.currentUserId = 'owner-user';
     mocks.requireProjectCapability.mockResolvedValue(makeProject());
-    mocks.revokeBrowserSocketsForActor.mockResolvedValue(1);
     selectResults = [];
     // Active members available as a trigger execution principal.
     executionPrincipalMembers = [
@@ -589,14 +583,6 @@ describe('project member offboarding apply', () => {
       'proj-1',
       'departing-user'
     );
-    expect(mocks.revokeBrowserSocketsForActor).toHaveBeenCalledWith(
-      expect.anything(),
-      'proj-1',
-      'departing-user'
-    );
-    expect(mocks.revokeBrowserSocketsForActor.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.revokeSessionAccessForDepartedMember.mock.invocationCallOrder[0]!
-    );
   });
 
   it('keeps a trigger active when reattaching to existing project credential coverage', async () => {
@@ -712,7 +698,6 @@ describe('project member offboarding apply', () => {
     });
     expect(updatedRows.some((row) => row.table === schema.projectMembers)).toBe(false);
     // Still a member, so their shared session access stays.
-    expect(mocks.revokeBrowserSocketsForActor).not.toHaveBeenCalled();
     expect(mocks.revokeSessionAccessForDepartedMember).not.toHaveBeenCalled();
   });
 

@@ -1,6 +1,6 @@
 import type { ProjectData as ProjectDataDO } from '@simple-agent-manager/project-data/durable-object';
 import type { UserRole, UserStatus } from '@simple-agent-manager/shared';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { desc, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -22,7 +22,6 @@ import {
   UpdateSignupApprovalConfigSchema,
 } from '../schemas';
 import { getRuntimeLimits } from '../services/limits';
-import { revokeBrowserSocketsForActor } from '../services/project-data';
 import { getSignupApprovalConfig, setSignupApprovalConfig } from '../services/signup-approval';
 import { getVmAdmissionDiagnostics } from '../services/vm-admission-control';
 import { adminObservabilityRoutes } from './admin/observability';
@@ -126,19 +125,6 @@ adminRoutes.patch('/users/:userId', jsonValidator(AdminUserActionSchema), async 
   }
 
   const newStatus: UserStatus = body.action === 'approve' ? 'active' : 'suspended';
-  const activeProjectMemberships =
-    newStatus === 'suspended'
-      ? await db
-          .select({ projectId: schema.projectMembers.projectId })
-          .from(schema.projectMembers)
-          .where(
-            and(
-              eq(schema.projectMembers.userId, userId),
-              eq(schema.projectMembers.status, 'active')
-            )
-          )
-          .all()
-      : [];
 
   await db
     .update(schema.users)
@@ -147,15 +133,6 @@ adminRoutes.patch('/users/:userId', jsonValidator(AdminUserActionSchema), async 
       updatedAt: new Date(),
     })
     .where(eq(schema.users.id, userId));
-
-  // Account suspension invalidates every project socket, not only future HTTP requests.
-  // Start all idempotent closures together; Promise.all still fails the request if any project
-  // cannot confirm revocation, while already-started closures continue independently.
-  await Promise.all(
-    activeProjectMemberships.map(({ projectId }) =>
-      revokeBrowserSocketsForActor(c.env, projectId, userId)
-    )
-  );
 
   return c.json({ id: userId, status: newStatus });
 });

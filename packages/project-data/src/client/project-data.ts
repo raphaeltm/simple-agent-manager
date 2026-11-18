@@ -169,13 +169,10 @@ import {
   type ProjectDataArchiveLocation,
   type ProjectDataArchiveOwnerRef,
 } from '../archive/contract';
-import {
-  BROWSER_SOCKET_ACTOR_ID_HEADER,
-  BROWSER_SOCKET_EXPIRES_AT_HEADER,
-} from '../browser-socket-auth';
 import { projectDataPorts } from '../do/ports';
 import type { ValidateProjectEventWakeRecoveryAuthorityInput } from '../do/project-events-wake-delivery';
 import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from '../do/prompt-delivery';
+import type { CancelUnissuedSessionPromptsResult } from '../do/prompt-delivery-cancellation';
 import type { ActivityReportOutcome } from '../do/session-work-clock';
 import type {
   CreateReservedTaskSessionWithInitialMessageInput,
@@ -200,7 +197,7 @@ import type { ProjectDataRootSearchCoverage } from './project-data-search-covera
 import { recordReservedTaskSessionRevocation } from './project-data-session-revocations';
 import { toProjectDataStorageFullError } from './project-data-storage-errors';
 
-export type { ProjectDataSessionIdentityGuard };
+export type { CancelUnissuedSessionPromptsResult, ProjectDataSessionIdentityGuard };
 
 function rootExactReadOwner(projectId: string, sessionId: string): ProjectDataArchiveLocation {
   return {
@@ -643,24 +640,70 @@ export async function linkSessionToWorkspace(
   );
 }
 
+/** Cancel pending prompts without discarding saved work or inventing access revocation. */
+export async function cancelUnissuedSessionPrompts(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  taskId: string,
+  options?: { acceptedBefore: number }
+): Promise<CancelUnissuedSessionPromptsResult> {
+  await assertExactWriteAllowedIfArchiveEnabled(
+    env,
+    projectId,
+    sessionId,
+    'cancelUnissuedSessionPrompts'
+  );
+  const stub = await getStub(env, projectId);
+  return options
+    ? stub.cancelUnissuedSessionPrompts(sessionId, taskId, options)
+    : stub.cancelUnissuedSessionPrompts(sessionId, taskId);
+}
+
 export async function stopSession(
   env: Env,
   projectId: string,
   sessionId: string,
-  options?: { lifecycleSource: 'workspace_eviction_finalization' }
+  options?: {
+    lifecycleSource?: 'workspace_eviction_finalization';
+    guard?: ProjectDataSessionIdentityGuard;
+  }
 ): Promise<boolean> {
   await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'stopSession');
   const source = options?.lifecycleSource ?? 'project_data.stop_session';
   await recordReservedTaskSessionRevocation(env, {
     projectId,
     chatSessionId: sessionId,
+    taskId: options?.guard?.taskId,
     reason: 'session_stopped',
     source,
   });
   const stub = await getStub(env, projectId);
-  const stopped = options?.lifecycleSource
-    ? await stub.stopSession(sessionId, { source: options.lifecycleSource })
-    : await stub.stopSession(sessionId);
+  let stopped: boolean;
+  try {
+    stopped =
+      options?.lifecycleSource || options?.guard
+        ? await stub.stopSession(sessionId, {
+            source: options.lifecycleSource,
+            guard: options.guard,
+          })
+        : await stub.stopSession(sessionId);
+  } catch (error) {
+    if (
+      options?.guard &&
+      error instanceof Error &&
+      (error.message.startsWith(`Session ${sessionId} cannot stopped: expected `) ||
+        error.message === `Session ${sessionId} not found`)
+    ) {
+      log.info('project_data.stop_session_identity_guard_denied', {
+        projectId,
+        sessionId,
+        taskId: options.guard.taskId ?? null,
+      });
+      return false;
+    }
+    throw error;
+  }
   if (stopped) {
     await recordSessionLifecycleEventBestEffort(env, {
       projectId,
@@ -3431,8 +3474,7 @@ export async function getHandoffPacketsForTask(env: Env, projectId: string, task
 export async function forwardWebSocket(
   env: Env,
   projectId: string,
-  request: Request,
-  authorization: { actorId: string; expiresAt: number }
+  request: Request
 ): Promise<Response> {
   // A WebSocket upgrade creates no state a repeat could duplicate; a retried attempt simply
   // accepts a fresh socket if the first one never reached the object.
@@ -3443,31 +3485,8 @@ export async function forwardWebSocket(
     (stub) => {
       const url = new URL(request.url);
       url.pathname = '/ws';
-      const forwardedRequest = new Request(url.toString(), request);
-      // Never trust similarly named browser headers: the authenticated route overwrites both
-      // values before this request crosses into the Durable Object.
-      forwardedRequest.headers.set(BROWSER_SOCKET_ACTOR_ID_HEADER, authorization.actorId);
-      forwardedRequest.headers.set(
-        BROWSER_SOCKET_EXPIRES_AT_HEADER,
-        String(authorization.expiresAt)
-      );
-      return stub.fetch(forwardedRequest);
+      return stub.fetch(new Request(url.toString(), request));
     },
-    'idempotent_read'
-  );
-}
-
-/** Close all browser sockets bound to an actor after their project access is revoked. */
-export function revokeBrowserSocketsForActor(
-  env: Env,
-  projectId: string,
-  actorId: string
-): Promise<number> {
-  return callProjectDataWithRetry(
-    env,
-    projectId,
-    'revokeBrowserSocketsForActor',
-    (stub) => stub.revokeBrowserSocketsForActor(actorId),
     'idempotent_read'
   );
 }

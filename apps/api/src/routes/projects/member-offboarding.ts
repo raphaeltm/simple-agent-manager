@@ -13,7 +13,6 @@ import { ApplyProjectMemberOffboardingSchema, jsonValidator } from '../../schema
 import { moveDepartedMemberTasksToTeam } from '../../services/inbox/departed-member-tasks';
 import { applyProjectMemberOffboarding } from '../../services/project-offboarding-apply';
 import { createProjectMemberOffboardingPreview } from '../../services/project-offboarding-preview';
-import { revokeBrowserSocketsForActor } from '../../services/project-data';
 import { revokeSessionAccessForDepartedMember } from '../../services/session-access';
 
 export const projectMemberOffboardingRoutes = new Hono<{ Bindings: Env }>();
@@ -60,9 +59,6 @@ projectMemberOffboardingRoutes.post(
       defaultAgentType: c.env.DEFAULT_TASK_AGENT_TYPE || 'opencode',
     });
     if (response.status === 'removed') {
-      // The membership write and socket closure cross D1/DO boundaries. Await the idempotent
-      // closure before any later broadcasts so the removed actor cannot observe offboarding work.
-      await revokeBrowserSocketsForActor(c.env, projectId, memberUserId);
       // Per-request membership checks already stop a removed member from driving a shared
       // session; this also deletes their stored grants (and grants on sessions they own) so a
       // later re-approval cannot bring them back.
