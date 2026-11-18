@@ -50,7 +50,11 @@ import {
   openaiError,
   openaiUsageGateError,
 } from './ai-proxy-passthrough-errors';
-import { type ResolvedProxyUpstream, resolveProxyUpstream } from './ai-proxy-passthrough-upstream';
+import {
+  type ResolvedProxyUpstream,
+  resolveProxyUpstream,
+  trimTrailingSlashes,
+} from './ai-proxy-passthrough-upstream';
 
 type ProxyContext = Context<{ Bindings: Env }>;
 
@@ -188,9 +192,14 @@ function hasCanonicalCatalogPrice(upstream: ResolvedProxyUpstream, modelId: stri
   try {
     const actual = new URL(upstream.baseUrl);
     const canonical = new URL(AI_PROVIDER_BASE_URLS[model.provider]);
-    return !actual.username && !actual.password && !actual.search && !actual.hash &&
+    return (
+      !actual.username &&
+      !actual.password &&
+      !actual.search &&
+      !actual.hash &&
       actual.origin === canonical.origin &&
-      actual.pathname.replace(/\/+$/, '') === canonical.pathname.replace(/\/+$/, '');
+      trimTrailingSlashes(actual.pathname) === trimTrailingSlashes(canonical.pathname)
+    );
   } catch {
     return false;
   }
@@ -205,8 +214,13 @@ async function enforcePassthroughFunding(
   options: PrepareProxyOptions
 ): Promise<Response | null> {
   const platformBilled = upstream.credentialSource === 'platform';
-  if (platformBilled && hasLocalAiCostMetering(c.env) && !hasCanonicalCatalogPrice(upstream, modelId)) {
-    const message = 'Model and upstream endpoint must match a catalog-priced provider to use an installation-funded credential.';
+  if (
+    platformBilled &&
+    hasLocalAiCostMetering(c.env) &&
+    !hasCanonicalCatalogPrice(upstream, modelId)
+  ) {
+    const message =
+      'Model and upstream endpoint must match a catalog-priced provider to use an installation-funded credential.';
     return options.dialect === 'anthropic'
       ? anthropicError(message, 'invalid_request_error', 400)
       : openaiError(message, 'invalid_request_error', 400);
