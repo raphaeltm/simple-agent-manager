@@ -23,4 +23,8 @@ cycle released, then cancel awaited) passed its security assertions on main (tas
 - [ ] An early return after `createSession` in the dispatch cycle stops the session it created
 - [ ] A worker test holds the cycle inside `createSession`, cancels the mission, releases the
       cycle, and asserts the session is `stopped` while the task is cancelled with no runner
+- [ ] When `persistMessage` rejects after `createSession`, the dispatch cycle's `catch`
+      (`auto-dispatch.ts`) also stops the session it created; a worker test rejects
+      `persistMessage` after `createSession` and asserts the session is `stopped`, with or without
+      cancellation
 - [ ] Control: an uncancelled cycle still binds the session and starts the runner

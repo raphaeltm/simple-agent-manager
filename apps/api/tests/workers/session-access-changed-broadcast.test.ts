@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Env } from '../../src/env';
 import * as projectDataService from '../../src/services/project-data';
+import { socketMember } from './helpers/socket-member';
 
 const testEnv = env as unknown as Env;
 
@@ -27,7 +28,7 @@ type Broadcast = { type?: string; payload?: Record<string, unknown> } & Record<s
 
 async function subscribe(stub: DurableObjectStub<ProjectData>, chatSessionId: string) {
   const response = await stub.fetch(`https://do/ws?sessionId=${chatSessionId}`, {
-    headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': 'test-user' },
+    headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': await socketMember(stub) },
   });
   expect(response.status).toBe(101);
   const ws = response.webSocket!;

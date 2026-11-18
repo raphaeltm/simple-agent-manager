@@ -12,6 +12,8 @@ import type { ProjectData } from '@simple-agent-manager/project-data/internal/do
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
+import { socketMember } from './helpers/socket-member';
+
 function getStub(projectId: string): DurableObjectStub<ProjectData> {
   const id = env.PROJECT_DATA.idFromName(projectId);
   return env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectData>;
@@ -21,7 +23,7 @@ type Broadcast = { type?: string; payload?: Record<string, unknown> } & Record<s
 
 async function subscribe(stub: DurableObjectStub<ProjectData>, chatSessionId: string) {
   const response = await stub.fetch(`https://do/ws?sessionId=${chatSessionId}`, {
-    headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': 'test-user' },
+    headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': await socketMember(stub) },
   });
   expect(response.status).toBe(101);
   const ws = response.webSocket!;

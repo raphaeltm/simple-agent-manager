@@ -46,27 +46,56 @@ export async function closeRevokedMemberSockets(
   }
 }
 
+/** Memberships read per D1 query, and close RPCs in flight at once, while suspending. */
+const SUSPENSION_MEMBERSHIP_PAGE_SIZE = 100;
+const SUSPENSION_CLOSE_CONCURRENCY = 10;
+
+const PARTIAL_SUSPENSION_MESSAGE =
+  'The account is suspended, but some open project connections could not be closed. Suspend it again to retry.';
+
 /**
- * Close a suspended user's sockets on every project they were an active member of. Admin
- * suspension is rare and a user's memberships number in the tens, so the RPCs run in parallel.
+ * Close a suspended user's sockets on every project they are an active member of. Memberships are
+ * read a page at a time (seeking by `project_id`) and closed a bounded batch at a time; every page
+ * is processed even when a close fails, then any failure answers a retryable 503. Suspending again
+ * is idempotent and re-runs the closes.
  */
 export async function closeSuspendedUserSockets(env: Env, userId: string): Promise<void> {
-  const rows = await env.DATABASE.prepare(
-    `SELECT project_id FROM project_members WHERE user_id = ? AND status = 'active'`
-  )
-    .bind(userId)
-    .all<{ project_id: unknown }>();
-  const projectIds = (rows.results ?? []).flatMap((row) =>
-    typeof row.project_id === 'string' ? [row.project_id] : []
-  );
-  const results = await Promise.all(
-    projectIds.map((projectId) =>
-      closeRevokedMemberSockets(env, projectId, userId, 'account_suspended')
-    )
-  );
-  if (results.includes(false)) {
-    throw errors.serviceUnavailable(
-      'The account is suspended, but some open project connections could not be closed. Suspend it again to retry.'
-    );
+  let failed = false;
+  let after = '';
+  for (;;) {
+    let projectIds: string[];
+    try {
+      const rows = await env.DATABASE.prepare(
+        `SELECT project_id FROM project_members
+          WHERE user_id = ? AND status = 'active' AND project_id > ?
+          ORDER BY project_id LIMIT ?`
+      )
+        .bind(userId, after, SUSPENSION_MEMBERSHIP_PAGE_SIZE)
+        .all<{ project_id: unknown }>();
+      projectIds = (rows.results ?? []).flatMap((row) =>
+        typeof row.project_id === 'string' ? [row.project_id] : []
+      );
+    } catch (err) {
+      log.error('project_sockets.suspension_membership_read_failed', {
+        userId,
+        after,
+        action: 'left_open',
+        ...serializeError(err),
+      });
+      throw errors.serviceUnavailable(PARTIAL_SUSPENSION_MESSAGE);
+    }
+    for (let start = 0; start < projectIds.length; start += SUSPENSION_CLOSE_CONCURRENCY) {
+      const batch = projectIds.slice(start, start + SUSPENSION_CLOSE_CONCURRENCY);
+      const results = await Promise.all(
+        batch.map((projectId) =>
+          closeRevokedMemberSockets(env, projectId, userId, 'account_suspended')
+        )
+      );
+      if (results.includes(false)) failed = true;
+    }
+    const last = projectIds.at(-1);
+    if (projectIds.length < SUSPENSION_MEMBERSHIP_PAGE_SIZE || last === undefined) break;
+    after = last;
   }
+  if (failed) throw errors.serviceUnavailable(PARTIAL_SUSPENSION_MESSAGE);
 }

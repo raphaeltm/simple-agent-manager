@@ -13,21 +13,21 @@ vi.mock('../../../src/services/project-data', () => ({ closeBrowserSocketsForAct
 const { closeSuspendedUserSockets } =
   await import('../../../src/services/project-socket-revocation');
 
-function envWithMemberships(projectIds: string[]): Env {
-  const bound: unknown[] = [];
+/** A D1 stub that answers the paged membership query from a sorted list, like the real seek. */
+function envWithMemberships(projectIds: string[], opts: { failRead?: boolean } = {}): Env {
+  const sorted = [...projectIds].sort();
   return {
     DATABASE: {
       prepare: (sql: string) => ({
-        bind: (...values: unknown[]) => {
-          bound.push(...values);
-          return {
-            all: async () => {
-              expect(sql).toContain("status = 'active'");
-              expect(bound).toEqual(['user-1']);
-              return { results: projectIds.map((project_id) => ({ project_id })) };
-            },
-          };
-        },
+        bind: (userId: string, after: string, limit: number) => ({
+          all: async () => {
+            if (opts.failRead) throw new Error('D1 unavailable');
+            expect(sql).toContain("status = 'active'");
+            expect(userId).toBe('user-1');
+            const page = sorted.filter((id) => id > after).slice(0, limit);
+            return { results: page.map((project_id) => ({ project_id })) };
+          },
+        }),
       }),
     },
   } as unknown as Env;
@@ -62,5 +62,23 @@ describe('project socket revocation', () => {
       closeSuspendedUserSockets(envWithMemberships(['project-a', 'project-b']), 'user-1')
     ).resolves.toBeUndefined();
     expect(closeBrowserSocketsForActor).toHaveBeenCalledTimes(2);
+  });
+
+  it('closes on every page of memberships, past the page size', async () => {
+    closeBrowserSocketsForActor.mockResolvedValue(0);
+    const projects = Array.from({ length: 205 }, (_, i) => `project-${String(i).padStart(3, '0')}`);
+
+    await closeSuspendedUserSockets(envWithMemberships(projects), 'user-1');
+
+    const closed = closeBrowserSocketsForActor.mock.calls.map((call) => call[1]);
+    expect(closed).toHaveLength(205);
+    expect(new Set(closed)).toEqual(new Set(projects));
+  });
+
+  it('answers 503 when the membership read fails, without closing anything', async () => {
+    await expect(
+      closeSuspendedUserSockets(envWithMemberships(['project-a'], { failRead: true }), 'user-1')
+    ).rejects.toMatchObject({ statusCode: 503 });
+    expect(closeBrowserSocketsForActor).not.toHaveBeenCalled();
   });
 });

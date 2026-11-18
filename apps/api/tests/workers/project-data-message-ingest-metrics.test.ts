@@ -5,6 +5,8 @@ import type { RowUsage } from '@simple-agent-manager/project-data/internal/do/ro
 import { env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { socketMember } from './helpers/socket-member';
+
 const source = {
   workspaceId: 'metrics-workspace',
   callbackGeneration: null,
@@ -113,7 +115,7 @@ describe('content-free message ingestion counters through real workerd', () => {
       const { stub, session } = await setup();
       const response = await stub.fetch(
         new Request(`https://test/ws${sessionScoped ? `?sessionId=${session}` : ''}`, {
-          headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': 'test-user' },
+          headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': await socketMember(stub) },
         })
       );
       expect(response.status).toBe(101);
@@ -164,7 +166,7 @@ describe('content-free message ingestion counters through real workerd', () => {
       const capability = reader === 'capable reader' ? '&messageAppend=message-append-v1' : '';
       const response = await stub.fetch(
         new Request(`https://test/ws?sessionId=${watched}${capability}`, {
-          headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': 'test-user' },
+          headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': await socketMember(stub) },
         })
       );
       expect(response.status).toBe(101);

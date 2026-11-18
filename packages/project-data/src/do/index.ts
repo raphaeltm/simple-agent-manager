@@ -137,6 +137,7 @@ import {
   broadcastToBrowserSockets,
   BROWSER_SOCKET_ACTOR_HEADER,
   closeBrowserSocketsForActor as closeActorSockets,
+  closeIfAccessRevoked,
   closeQuietly,
   countLegacySockets,
 } from './session-sockets';
@@ -3870,11 +3871,25 @@ export class ProjectData extends DurableObject<Env> {
       if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket')
         return new Response('Expected WebSocket upgrade', { status: 426 });
       const actorId = request.headers.get(BROWSER_SOCKET_ACTOR_HEADER);
-      return admitBrowserSocket(this.ctx, this.sql, url, actorId, () => {
-        const metrics = emptyMessageIngestMetrics();
-        metrics.toolSealedSessions = 1;
-        this.rowUsage.recordMessageIngest(metrics);
-      });
+      const projectId = this.getProjectId();
+      return admitBrowserSocket(
+        this.ctx,
+        this.sql,
+        url,
+        actorId,
+        () => {
+          const metrics = emptyMessageIngestMetrics();
+          metrics.toolSealedSessions = 1;
+          this.rowUsage.recordMessageIngest(metrics);
+        },
+        (ws, admittedActor) => {
+          if (!projectId) {
+            log.warn('websocket.admission_recheck_skipped_no_project', { action: 'kept_open' });
+            return;
+          }
+          this.ctx.waitUntil(closeIfAccessRevoked(this.env.DATABASE, projectId, admittedActor, ws));
+        }
+      );
     }
     return new Response('Not found', { status: 404 });
   }

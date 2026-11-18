@@ -73,7 +73,8 @@ export function admitBrowserSocket(
   sql: SqlStorage,
   url: URL,
   actorId: string | null,
-  onToolSeal?: () => void
+  onToolSeal?: () => void,
+  onAdmitted?: (ws: WebSocket, actorId: string) => void
 ): Response {
   // Without the authenticated user the socket could not be closed when their access ends.
   if (!isValidActorId(actorId)) {
@@ -114,6 +115,7 @@ export function admitBrowserSocket(
   }
   const pair = new WebSocketPair();
   ctx.acceptWebSocket(pair[1], tags);
+  onAdmitted?.(pair[1], actorId);
   return new Response(null, { status: 101, webSocket: pair[0] });
 }
 
@@ -171,6 +173,41 @@ export function closeBrowserSocketsForActor(ctx: DurableObjectState, actorId: st
     closeQuietly(ws, BROWSER_SOCKET_ACCESS_REVOKED_CLOSE_CODE, 'project access revoked');
   }
   return closed;
+}
+
+/** Access the upgrade route checked: an active membership on an account that is not suspended. */
+const ACTIVE_PROJECT_ACCESS_SQL = `SELECT 1 AS ok FROM project_members pm
+  JOIN users u ON u.id = pm.user_id
+  WHERE pm.project_id = ? AND pm.user_id = ? AND pm.status = 'active' AND u.status <> 'suspended'
+  LIMIT 1`;
+
+/**
+ * Re-check a socket's access after it was accepted. The upgrade route checks membership before
+ * forwarding, so a revocation that commits and closes the user's sockets between that check and
+ * this admission would find nothing to close. Reading after acceptance covers both orders: a close
+ * that runs later finds the socket, and a close that ran earlier committed its D1 write first, so
+ * this read sees it. One D1 read per socket opened, never per frame. A failed read keeps the socket:
+ * the route's check passed a moment earlier.
+ */
+export async function closeIfAccessRevoked(
+  db: D1Database,
+  projectId: string,
+  actorId: string,
+  ws: WebSocket
+): Promise<void> {
+  try {
+    const row = await db.prepare(ACTIVE_PROJECT_ACCESS_SQL).bind(projectId, actorId).first();
+    if (row) return;
+    log.warn('websocket.admitted_after_revocation', { projectId, actorId, action: 'closed' });
+    closeQuietly(ws, BROWSER_SOCKET_ACCESS_REVOKED_CLOSE_CODE, 'project access revoked');
+  } catch (err) {
+    log.warn('websocket.admission_recheck_failed', {
+      projectId,
+      actorId,
+      error: err instanceof Error ? err.message : String(err),
+      action: 'kept_open',
+    });
+  }
 }
 
 /** Close a socket that may already be closing (server-initiated resync, or the peer's close). */

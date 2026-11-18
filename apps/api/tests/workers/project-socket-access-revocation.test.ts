@@ -53,7 +53,10 @@ async function connect(
 ): Promise<BrowserSocket> {
   const response = await openSocket(projectId, userId, session);
   expect(response.status).toBe(101);
-  const ws = response.webSocket!;
+  return adopt(response.webSocket!);
+}
+
+function adopt(ws: WebSocket): BrowserSocket {
   ws.accept();
   const frames: Array<{ type: string }> = [];
   let code: number | null = null;
@@ -183,7 +186,8 @@ describe('project sockets close when project access is revoked', () => {
 
     // A suspended account cannot open a new socket.
     const reconnect = await openSocket(PROJECT_B, SUSPENDED);
-    expect(reconnect.status).toBeGreaterThanOrEqual(400);
+    expect(reconnect.status).toBe(403);
+    expect(await reconnect.json()).toMatchObject({ message: 'Your account has been suspended' });
     expect(reconnect.webSocket).toBeNull();
   });
 
@@ -234,5 +238,25 @@ describe('project sockets close when project access is revoked', () => {
     );
     expect(untaggedStillOpen).toBe(0);
     await expectStillServed(staying, 'tagged member of another user');
+  });
+
+  it('an upgrade that reaches the object after the revocation closed everything is closed too', async () => {
+    // The upgrade route checked membership before the offboarding committed; the forwarded
+    // upgrade arrives at the object after the close ran, so there was nothing to close yet.
+    const stub = testEnv.PROJECT_DATA.get(testEnv.PROJECT_DATA.idFromName(PROJECT_A));
+    const lateUpgrade = await stub.fetch('https://project-data/ws', {
+      headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': REMOVED },
+    });
+    expect(lateUpgrade.status).toBe(101);
+    const late = adopt(lateUpgrade.webSocket!);
+    // Control: a current member admitted the same way stays connected.
+    const memberUpgrade = await stub.fetch('https://project-data/ws', {
+      headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': STAYING },
+    });
+    const member = adopt(memberUpgrade.webSocket!);
+
+    await settle(() => late.closeCode() !== null, 'late socket close');
+    expect(late.closeCode()).toBe(ACCESS_REVOKED_CLOSE_CODE);
+    await expectStillServed(member, 'member admitted directly');
   });
 });
