@@ -7,7 +7,7 @@
  * still binds the header, and the wrapped blob records the exact key version (`kid`) so a KEK
  * rotation (new key version) leaves old bundles unwrappable until they are resealed.
  *
- * Tested against a fake only (scripts/selfhost/key-provider-fakes.ts), never the real service.
+ * Tested against a fake only (scripts/selfhost/fixtures/key-provider-fakes.ts), never the real service.
  */
 import { field, jsonCall, type KeyProvider, KeyProviderError, requireSetting } from './provider.ts';
 

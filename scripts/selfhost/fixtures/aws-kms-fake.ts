@@ -11,7 +11,7 @@ import { createCipheriv, createDecipheriv, randomBytes, timingSafeEqual } from '
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { signRequest } from '../../deploy/selfhost/key-agent/aws-sigv4.ts';
+import { signRequest } from '../../../deploy/selfhost/key-agent/aws-sigv4.ts';
 
 export const FAKE_AWS_REGION = 'eu-west-1';
 export const FAKE_AWS_ACCOUNT = '123456789012';
