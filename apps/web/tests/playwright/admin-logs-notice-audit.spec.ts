@@ -84,50 +84,69 @@ const SURFACES = [
   },
 ] as const;
 
-for (const surface of SURFACES) {
-  test.describe(`Admin ${surface.slug} — self-hosted notice`, () => {
-    for (const theme of ['dark', 'light'] as const) {
-      test(`shows where to read logs (${theme})`, async ({ page }) => {
-        await seedTheme(page, theme);
-        const { logRequests } = await setupMocks(page, SELF_HOSTED);
+/**
+ * The project's own viewport (CI runs a mobile project) plus an explicit desktop layout, so both
+ * mobile and desktop evidence come from every run.
+ */
+const LAYOUTS = [
+  { name: 'project viewport', slug: 'mobile', use: undefined },
+  {
+    name: 'desktop 1280x800',
+    slug: 'desktop',
+    use: { viewport: { width: 1280, height: 800 }, isMobile: false, hasTouch: false },
+  },
+] as const;
+
+for (const layout of LAYOUTS) {
+  for (const surface of SURFACES) {
+    test.describe(`Admin ${surface.slug} — self-hosted notice (${layout.name})`, () => {
+      if (layout.use) test.use(layout.use);
+      for (const theme of ['dark', 'light'] as const) {
+        test(`shows where to read logs (${theme})`, async ({ page }) => {
+          await seedTheme(page, theme);
+          const { logRequests } = await setupMocks(page, SELF_HOSTED);
+          await page.goto(surface.path);
+
+          const notice = page.getByTestId('box-logs-notice');
+          await expect(notice).toBeVisible();
+          await expect(notice).toContainText(surface.heading);
+          await expect(notice).toContainText('docker compose logs -f --since 30m celld');
+          await expect(notice).toContainText('Errors that SAM records itself');
+          await expectTheme(page, theme);
+
+          // The command block scrolls inside itself; it must not widen the page.
+          const pre = notice.locator('pre');
+          const [preBox, noticeBox] = await Promise.all([pre.boundingBox(), notice.boundingBox()]);
+          expect(preBox).not.toBeNull();
+          expect(noticeBox).not.toBeNull();
+          expect(preBox!.x + preBox!.width).toBeLessThanOrEqual(
+            noticeBox!.x + noticeBox!.width + 1
+          );
+          expect(await pre.evaluate((el) => getComputedStyle(el).overflowX)).toBe('auto');
+
+          // Nothing is asked of a log backend the box does not have.
+          expect(logRequests).toEqual([]);
+
+          await screenshot(page, `admin-${surface.slug}-notice-${theme}-${layout.slug}`);
+          await assertNoOverflow(page);
+        });
+      }
+    });
+
+    test.describe(`Admin ${surface.slug} — Cloudflare control (${layout.name})`, () => {
+      if (layout.use) test.use(layout.use);
+      test('keeps the real viewer when the installation has it', async ({ page }) => {
+        await seedTheme(page, 'dark');
+        await setupMocks(page, CLOUDFLARE);
         await page.goto(surface.path);
 
-        const notice = page.getByTestId('box-logs-notice');
-        await expect(notice).toBeVisible();
-        await expect(notice).toContainText(surface.heading);
-        await expect(notice).toContainText('docker compose logs -f --since 30m celld');
-        await expect(notice).toContainText('Errors that SAM records itself');
-        await expectTheme(page, theme);
+        // Liveness: the real viewer rendered, and the notice did not.
+        await expect(page.getByLabel(surface.viewerLabel)).toBeVisible();
+        await expect(page.getByTestId('box-logs-notice')).toHaveCount(0);
 
-        // The command block scrolls inside itself; it must not widen the page.
-        const pre = notice.locator('pre');
-        const [preBox, noticeBox] = await Promise.all([pre.boundingBox(), notice.boundingBox()]);
-        expect(preBox).not.toBeNull();
-        expect(noticeBox).not.toBeNull();
-        expect(preBox!.x + preBox!.width).toBeLessThanOrEqual(noticeBox!.x + noticeBox!.width + 1);
-        expect(await pre.evaluate((el) => getComputedStyle(el).overflowX)).toBe('auto');
-
-        // Nothing is asked of a log backend the box does not have.
-        expect(logRequests).toEqual([]);
-
-        await screenshot(page, `admin-${surface.slug}-notice-${theme}`);
+        await screenshot(page, `admin-${surface.slug}-cloudflare-${layout.slug}`);
         await assertNoOverflow(page);
       });
-    }
-  });
-
-  test.describe(`Admin ${surface.slug} — Cloudflare control`, () => {
-    test('keeps the real viewer when the installation has it', async ({ page }) => {
-      await seedTheme(page, 'dark');
-      await setupMocks(page, CLOUDFLARE);
-      await page.goto(surface.path);
-
-      // Liveness: the real viewer rendered, and the notice did not.
-      await expect(page.getByLabel(surface.viewerLabel)).toBeVisible();
-      await expect(page.getByTestId('box-logs-notice')).toHaveCount(0);
-
-      await screenshot(page, `admin-${surface.slug}-cloudflare`);
-      await assertNoOverflow(page);
     });
-  });
+  }
 }
