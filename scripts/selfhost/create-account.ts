@@ -96,6 +96,14 @@ async function main(): Promise<void> {
     values['state-dir'] ?? box.SAM_SELFHOST_STATE_DIR ?? '.state'
   );
   const owner = readSecretsFile(join(stateDir, 'secrets.env')).BOOTSTRAP_OWNER_EMAIL?.trim();
+  // The Worker treats a present but empty owner email as configured and admits no one
+  // (bootstrap-owner.ts); refuse rather than write accounts nobody can use.
+  if (owner === '') {
+    throw new Error(
+      'BOOTSTRAP_OWNER_EMAIL is set but empty in secrets.env: SAM would admit no one. Set the ' +
+        "owner's address or remove the line, then deploy, before creating accounts."
+    );
+  }
   const plan = {
     email,
     superadmin: values.superadmin ?? false,
