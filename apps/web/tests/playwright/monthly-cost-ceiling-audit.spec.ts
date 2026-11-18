@@ -34,9 +34,12 @@ interface Scenario {
   ceilingUsd: number | null;
   available: boolean;
   monthCostUsd: number;
+  dailyInputTokens?: number;
+  dailyOutputTokens?: number;
 }
 
-function budget({ userCap, ceilingUsd, available, monthCostUsd }: Scenario) {
+function budget({ userCap, ceilingUsd, available, monthCostUsd,
+  dailyInputTokens = 120_000, dailyOutputTokens = 40_000 }: Scenario) {
   const caps = [userCap, ceilingUsd].filter((c): c is number => c !== null && c > 0);
   const effectiveCapUsd = available && caps.length ? Math.min(...caps) : null;
   const pct = effectiveCapUsd ? Math.min(100, (monthCostUsd / effectiveCapUsd) * 100) : null;
@@ -48,12 +51,16 @@ function budget({ userCap, ceilingUsd, available, monthCostUsd }: Scenario) {
       alertThresholdPercent: 80,
     },
     isCustom: userCap !== null,
-    dailyUsage: { inputTokens: 120_000, outputTokens: 40_000 },
+    dailyUsage: { inputTokens: dailyInputTokens, outputTokens: dailyOutputTokens },
     effectiveLimits: { dailyInputTokenLimit: 500_000, dailyOutputTokenLimit: 200_000 },
     monthCostUsd,
     monthlyCostCap: { available, ceilingUsd, effectiveCapUsd },
-    utilization: { dailyInputPercent: 24, dailyOutputPercent: 20, monthlyCostPercent: pct },
-    exceeded: pct !== null && pct >= 100,
+    utilization: {
+      dailyInputPercent: Math.round((dailyInputTokens / 500_000) * 1000) / 10,
+      dailyOutputPercent: Math.round((dailyOutputTokens / 200_000) * 1000) / 10,
+      monthlyCostPercent: pct,
+    },
+    exceeded: (pct !== null && pct >= 100) || dailyInputTokens >= 500_000 || dailyOutputTokens >= 200_000,
   };
 }
 
@@ -157,7 +164,7 @@ async function shot(page: Page, name: string) {
     : page.getByText('Current Utilization', { exact: true });
   await target.scrollIntoViewIfNeeded();
   await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/monthly-ceiling-${name}.png`,
+    path: `../../.tmp/playwright-screenshots/monthly-ceiling-${name}.png`,
   });
 }
 
@@ -169,6 +176,56 @@ function viewportName(page: Page): string {
 for (const desktop of [false, true]) {
   test.describe(desktop ? 'monthly cost ceiling (1280x800)' : 'monthly cost ceiling', () => {
     if (desktop) test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
+    for (const administrator of [true, false]) {
+      test(`monthly-only warning scopes paused requests (${administrator ? 'administrator ceiling' : 'personal cap'})`, async ({ page }) => {
+        await setup(page, {
+          userCap: administrator ? null : 10, ceilingUsd: 25, available: true, monthCostUsd: 31,
+        });
+        const alert = page.getByRole('alert');
+        await expect(alert).toContainText(
+          'AI requests counted toward this cap are paused until it resets on the 1st (UTC).'
+        );
+        await expect(alert).not.toContainText('AI requests are paused');
+        await expect(alert).not.toContainText('Daily limits reset');
+        if (administrator) await expect(alert).toContainText('set by your administrator');
+        else await expect(alert).not.toContainText('set by your administrator');
+        await alert.scrollIntoViewIfNeeded();
+        await checkLayout(page);
+        await page.waitForTimeout(600);
+        await page.screenshot({ path: `../../.tmp/playwright-screenshots/monthly-warning-${administrator ? 'administrator' : 'personal'}-${viewportName(page)}.png` });
+      });
+    }
+    for (const monthly of [false, true]) {
+      for (const input of [true, false]) {
+        test(`daily warning takes precedence (${monthly ? 'both limits' : 'daily only'}, ${input ? 'input' : 'output'})`, async ({ page }) => {
+          await setup(page, {
+            userCap: null, ceilingUsd: 25, available: true, monthCostUsd: monthly ? 31 : 5,
+            dailyInputTokens: input ? 500_000 : 120_000,
+            dailyOutputTokens: input ? 40_000 : 200_000,
+          });
+          const alert = page.getByRole('alert');
+          await expect(alert).toContainText(
+            'AI requests are paused until the limit resets. Daily limits reset at midnight UTC.'
+          );
+          await expect(alert).not.toContainText('on the 1st');
+          await expect(alert).not.toContainText('counted toward this cap');
+          await alert.scrollIntoViewIfNeeded();
+          await checkLayout(page);
+          await page.waitForTimeout(600);
+          await page.screenshot({ path: `../../.tmp/playwright-screenshots/daily-warning-${monthly ? 'both' : 'only'}-${input ? 'input' : 'output'}-${viewportName(page)}.png` });
+        });
+      }
+    }
+    test('monthly-only warning survives rounded daily utilization of 100 percent', async ({ page }) => {
+      await setup(page, {
+        userCap: null, ceilingUsd: 25, available: true, monthCostUsd: 31,
+        dailyInputTokens: 499_800,
+      });
+      await expect(page.getByRole('meter', { name: 'Daily Input Tokens' })).toHaveAttribute('aria-valuenow', '100');
+      await expect(page.getByRole('alert')).toContainText('AI requests counted toward this cap');
+      await expect(page.getByRole('alert')).not.toContainText('Daily limits reset');
+      await checkLayout(page);
+    });
     test('ceiling binds when the user set no cap', async ({ page }) => {
       await setup(page, { userCap: null, ceilingUsd: 25, available: true, monthCostUsd: 18.4 });
       const bar = page.getByRole('meter', { name: 'Monthly Cost Cap (administrator limit)' });

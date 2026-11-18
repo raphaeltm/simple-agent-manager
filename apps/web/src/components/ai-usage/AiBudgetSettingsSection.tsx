@@ -132,7 +132,11 @@ export function BudgetSettingsSection() {
   // Equal caps remain administrator-bound: removing the personal cap cannot raise the limit.
   const savedCapUsd = budget?.settings.monthlyCostCapUsd ?? null;
   const capFromCeiling = ceilingUsd !== null && (savedCapUsd === null || savedCapUsd >= ceilingUsd);
-  const monthlyExceeded = (budget?.utilization.monthlyCostPercent ?? 0) >= 100;
+  const dailyExceeded = budget !== null && (
+    budget.dailyUsage.inputTokens >= budget.effectiveLimits.dailyInputTokenLimit ||
+    budget.dailyUsage.outputTokens >= budget.effectiveLimits.dailyOutputTokenLimit
+  );
+  const monthlyExceeded = !dailyExceeded && (budget?.utilization.monthlyCostPercent ?? 0) >= 100;
 
   if (loading) {
     return (
@@ -219,7 +223,7 @@ export function BudgetSettingsSection() {
                 <Body className="text-danger text-sm font-medium m-0">Budget Exceeded</Body>
                 <Body className="text-fg-muted text-sm mt-1 m-0">
                   {monthlyExceeded
-                    ? `You reached the monthly cost limit${capFromCeiling ? ' set by your administrator' : ''}. AI requests are paused until it resets on the 1st (UTC).`
+                    ? `You reached the monthly cost limit${capFromCeiling ? ' set by your administrator' : ''}. AI requests counted toward this cap are paused until it resets on the 1st (UTC).`
                     : 'AI requests are paused until the limit resets. Daily limits reset at midnight UTC.'}
                 </Body>
               </div>
