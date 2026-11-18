@@ -1,0 +1,21 @@
+{
+  "mode": "hybrid: linked-accounts response intercepted; no email-only staging principal exists; coordinator-approved",
+  "checks": [
+    "token-login",
+    "session",
+    "secondary-linked-fixture",
+    "missing-proof",
+    "forged-proof",
+    "google-refused",
+    "health",
+    "hybrid-linked-accounts",
+    "connected-accounts-375",
+    "connected-accounts-1280",
+    "real-stepup-request",
+    "links-unchanged",
+    "stored-session-ip",
+    "no-new-errors",
+    "signout"
+  ],
+  "faults": []
+}
