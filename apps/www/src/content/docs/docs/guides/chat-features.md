@@ -456,7 +456,8 @@ rather than guessing.
   history is preserved. Refused reports mark the totals as incomplete: token counts show **+**,
   spend estimates say **At least**, and a run with no accepted usage says **Incomplete**.
   Raising the cap later does not clear this disclosure of previously lost usage.
-  Insights Accounts also marks affected reporting windows as incomplete. Complete measurements
+  Insights Accounts marks affected reporting windows as incomplete; Agent setups warns when
+  a selected run has incomplete token totals or comparisons. Complete measurements
   from SAM’s AI proxy take precedence over incomplete harness reports.
 
 - **CPU**: the run's CPU per minute, with a marker on each minute in which the agent started tool

@@ -13,7 +13,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { createOperationPorts } from '../../../src/operation-ports';
-import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import {
+  createAllSchemaTables,
+  createDeclaredIndexes,
+  createSqliteD1,
+} from '../../helpers/sqlite-d1';
+import { invalidateAdminSettings } from '../../../src/services/admin-settings';
+import { recordHarnessRunUsage, recordProxyRunUsage } from '../../../src/services/agent-run-usage';
 
 const NOW = Date.parse('2026-11-16T12:00:00.000Z');
 const DAY = 86_400_000;
@@ -192,6 +198,112 @@ describe('projectSetups', () => {
     env = { DATABASE: createSqliteD1(sqlite), BASE_DOMAIN: 'example.test' } as unknown as Env;
   });
   afterEach(() => sqlite.close());
+
+  it('discloses rejected usage for a picked run while keeping proxy measurements complete', async () => {
+    createDeclaredIndexes(sqlite, [schema.agentRunUsage, schema.agentRunUsageAdmissionHits]);
+    sqlite.exec(
+      "INSERT INTO platform_settings(key,value,updated_at) VALUES ('insights.runUsageMaxRowsPerSession','1','2026-11-16T12:00:00.000Z')"
+    );
+    invalidateAdminSettings(env);
+    run('limited');
+    const scope = {
+      projectId: 'p',
+      chatSessionId: 'chat-limited',
+      workspaceId: 'w-limited',
+      agentSessionId: 's-limited',
+      agentType: 'claude-code',
+      credentialReference: null,
+      credentialSource: null,
+    };
+    const model = {
+      model: 'claude-opus-5-5',
+      inputTokens: 10,
+      outputTokens: 1,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reasoningTokens: null,
+    };
+    await recordHarnessRunUsage(env, scope, 'accepted', [model], NOW);
+    await recordHarnessRunUsage(env, scope, 'refused', [model], NOW);
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage').get()).toEqual({ n: 1 });
+    expect(
+      sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage_admission_hits').get()
+    ).toEqual({ n: 1 });
+    sqlite.exec('UPDATE agent_run_usage_admission_hits SET last_rejected_at=0');
+    const partial = await projectSetups(ctx(), { projectId: 'p', nowMs: NOW });
+    expect(partial.groups[0]?.tokens).toMatchObject({ state: 'reported', total: 11 });
+    expect(partial).toHaveProperty('usageAdmissionLimited', true);
+    await recordProxyRunUsage(
+      env,
+      scope,
+      model.model,
+      { ...model, inputTokens: 90, outputTokens: 9 },
+      NOW
+    );
+    const complete = await projectSetups(ctx(), { projectId: 'p', nowMs: NOW });
+    expect(complete.groups[0]?.tokens).toMatchObject({ state: 'reported', total: 99 });
+    expect(complete).toHaveProperty('usageAdmissionLimited', false);
+  });
+
+  it('ignores a foreign marker with the same chat id and keeps the owner run exact', async () => {
+    run('scope');
+    usage('chat-scope', 11);
+    insert('agent_run_usage_admission_hits', {
+      project_id: 'foreign',
+      chat_session_id: 'chat-scope',
+      last_rejected_at: NOW,
+    });
+    const complete = await projectSetups(ctx(), { projectId: 'p', nowMs: NOW });
+    expect(complete.groups[0]?.tokens).toMatchObject({ state: 'reported', total: 11 });
+    expect(complete).toHaveProperty('usageAdmissionLimited', false);
+  });
+
+  it('discloses marker-only usage only for the selected project and run window', async () => {
+    createDeclaredIndexes(sqlite, [schema.agentRunUsage, schema.agentRunUsageAdmissionHits]);
+    sqlite.exec(
+      "INSERT INTO platform_settings(key,value,updated_at) VALUES ('insights.runUsageMaxRowsPerSession','1','2026-11-16T12:00:00.000Z')"
+    );
+    invalidateAdminSettings(env);
+    run('empty-usage');
+    const scope = {
+      projectId: 'p',
+      chatSessionId: 'chat-empty-usage',
+      workspaceId: 'w-empty-usage',
+      agentSessionId: 's-empty-usage',
+      agentType: 'claude-code',
+      credentialReference: null,
+      credentialSource: null,
+    };
+    const model = {
+      model: 'claude-opus-5-5',
+      inputTokens: 10,
+      outputTokens: 1,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reasoningTokens: null,
+    };
+    await recordHarnessRunUsage(
+      env,
+      scope,
+      'refused',
+      [model, { ...model, model: 'claude-sonnet-5-5' }],
+      NOW
+    );
+    const partial = await projectSetups(ctx(), { projectId: 'p', range: '7d', nowMs: NOW });
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage').get()).toEqual({ n: 0 });
+    expect(partial.groups[0]?.tokens).toMatchObject({ state: 'not_reported' });
+    expect(partial).toHaveProperty('usageAdmissionLimited', true);
+    expect(
+      await projectSetups(ctx('outsider'), { projectId: 'foreign', nowMs: NOW })
+    ).toHaveProperty('usageAdmissionLimited', false);
+    sqlite
+      .prepare('UPDATE tasks SET created_at=?, completed_at=? WHERE id=?')
+      .run(iso(9 * DAY), iso(8 * DAY), 'empty-usage');
+    expect(await projectSetups(ctx(), { projectId: 'p', range: '7d', nowMs: NOW })).toHaveProperty(
+      'usageAdmissionLimited',
+      false
+    );
+  });
 
   it('groups runs by profile with each measure, and names only what the viewer may see', async () => {
     profile('prof-proj', 'Opus Chat', 'p');

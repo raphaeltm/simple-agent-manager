@@ -201,6 +201,21 @@ test.describe('Insights', () => {
     await capture(page, 'insights-setups-realistic');
   });
 
+  for (const theme of ['dark', 'light'] as const) {
+    test(`agent setups discloses refused token usage (${theme})`, async ({ page }) => {
+      await seedTheme(page, theme);
+      await setupScene(page, 'realistic', [], 'realistic', 'admission-hit');
+      await page.goto(`${BASE}/agent-setups`);
+      await expect(
+        page.getByText(
+          'Some token usage is incomplete. Token totals and comparisons may be understated.'
+        )
+      ).toBeVisible();
+      await expect(page.getByTestId('insights-section-setups')).toBeVisible();
+      await capture(page, `insights-setups-admission-${theme}`);
+    });
+  }
+
   test('agent setups at a tablet width uses cards, not a squeezed table', async ({
     page,
   }, testInfo) => {

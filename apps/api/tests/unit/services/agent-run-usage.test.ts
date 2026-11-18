@@ -56,7 +56,7 @@ describe('agent_run_usage writers and reads', () => {
     applySqliteMigration(sqlite, MIGRATION);
     applySqliteMigration(
       sqlite,
-      new URL('../../../src/db/migrations/0260_agent_run_usage_admission_hits.sql', import.meta.url)
+      new URL('../../../src/db/migrations/0261_agent_run_usage_admission_hits.sql', import.meta.url)
     );
     sqlite.exec(
       'CREATE TABLE platform_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT, updated_by TEXT)'
