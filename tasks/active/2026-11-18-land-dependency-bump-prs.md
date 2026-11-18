@@ -20,8 +20,17 @@ once its gates pass, or close it with a reason.
   5.0.81, matching ai 7.0.173. Fix: bump mastra to 1.84.0 in #2877 (commit 1f327b790).
 - #2878 execa: declared by apps/api and packages/providers but imported nowhere. The worker
   bundle's execa comes from `@mastra/core` (its own 9.6.1). Expected: no bundle change.
-- #2875 yaml: consumers are packages/cloud-init and packages/shared, so a real VM boot is the
-  consumer check.
+- #2875 yaml: the runtime consumer is `packages/shared/src/compose-parser/parse.ts`
+  (`parseCompose`), used by `POST /api/projects/:id/environments/:envId/releases`
+  (`apps/api/src/routes/deployment-releases.ts`). In packages/cloud-init yaml is a test-only
+  devDependency, so a VM boot does not exercise it (corrected after task-completion-validator F1).
+  Live check: POST a 51-service compose that uses anchors/aliases and a folded quoted string; it must
+  parse and stop at the image-count limit (400 naming 51 services, no release created), and an alias
+  bomb must return 400 COMPOSE_PARSE_FAILED.
+- #2800/#2801 consumers run only in vm-agent build-context collection (`internal/publish/contextcollect`)
+  and `internal/builder` (sam-builder). Live publish would provision a deployment node; covered instead
+  by consumer tests on amd64 and under arm64 emulation (both PASS) and a zstd probe whose compressed
+  output is byte-identical on amd64 and arm64 with SAM's options. Real-VM check per Raphaël's bar.
 - #2800/#2801/#2802: vm-agent Go modules; need the real-VM check. #2800 and #2801 edit
   adjacent go.mod lines, so the second to merge needs main merged in.
 - Consumers of the JS AI stack: `apps/api/src/services/tts-text.ts` (Workers AI via Mastra)
@@ -33,11 +42,14 @@ once its gates pass, or close it with a reason.
 
 - [x] Fix #2877 type break (mastra 1.84.0 pairing)
 - [x] Build integration branch (this branch) with all eight bumps for one staging run
-- [ ] Local reviewers (task-completion, cloudflare, go, security for keyfunc)
+- [x] Local reviewers: cloudflare PASS, go PASS, security PASS, task-completion WARN (F1/F2 addressed here)
 - [ ] Primary staging: deploy integration branch; TTS + operator agent + real VM
       (provision, heartbeat, terminal access, cleanup); noise before/after
+- [x] #2878 merged 74e14df (no runtime change)
 - [ ] Merge sequence: #2878, #2796, #2797, #2877, #2875, #2800, #2801, #2802, merging main
-      into each branch first if it conflicts and waiting for green CI on that head
+      into each branch first if it conflicts and waiting for green CI on that head. When #2877
+      takes main after #2797: keep `@mastra/core` 1.84.0, regenerate the lockfile, confirm exactly one
+      `@ai-sdk/provider@4.0.38`, and typecheck apps/api on the merged head.
 - [ ] Fix PR Evidence bodies with only reviews that happened
 - [ ] Monitor production deploys; basic production smoke
 
