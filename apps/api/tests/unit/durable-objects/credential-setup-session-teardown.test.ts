@@ -772,6 +772,156 @@ describe('CredentialSetupSession teardown — recovery alarm', () => {
     expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0, cleanup_attempts: 1 });
   });
 
+  it.each(['d1', 'pool'])(
+    'bounds an alarm joining stalled inline %s without duplicating cleanup',
+    async (step) => {
+      const fixture = createFixture();
+      const handle = await startSession(fixture, true);
+      let openGate!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        openGate = resolve;
+      });
+      let held = false;
+      if (step === 'pool') {
+        vi.mocked(releaseSetupSlot).mockImplementationOnce(() => {
+          held = true;
+          return gate;
+        });
+      } else {
+        const realDb = fixture.env.DATABASE;
+        fixture.env.DATABASE = {
+          ...realDb,
+          prepare(query: string) {
+            const statement = realDb.prepare(query);
+            if (held || !query.includes('completed_at') || query.includes('IN (')) return statement;
+            held = true;
+            return {
+              ...statement,
+              bind: (...args: unknown[]) => {
+                const bound = statement.bind(...args);
+                return { ...bound, run: async () => (await gate, bound.run()) };
+              },
+            };
+          },
+        } as Env['DATABASE'];
+      }
+      const config = await import('../../../src/services/credential-setup-config');
+      const budget = vi
+        .spyOn(config, 'getSetupSessionCleanupRecoveryStepTimeoutMs')
+        .mockResolvedValue(750);
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const cancel = handle.instance.cancel();
+      try {
+        await vi.waitFor(() => expect(held).toBe(true));
+        let finished = false;
+        const alarm = handle.instance.alarm().then(() => {
+          finished = true;
+        });
+        await vi.advanceTimersByTimeAsync(749);
+        expect(finished).toBe(false);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(finished).toBe(true);
+        expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1, cleanup_attempts: 0 });
+        const row = fixture.doDb.prepare('SELECT expires_at FROM setup_session').get() as {
+          expires_at: number;
+        };
+        expect(await handle.storage.getAlarm()).toBe(row.expires_at);
+        // The original inline owner remains responsible; the alarm never starts another run.
+        expect(destroySandboxInstance).toHaveBeenCalledTimes(step === 'pool' ? 1 : 0);
+        openGate();
+        await Promise.all([cancel, alarm]);
+        expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+        expect(releaseSetupSlot).toHaveBeenCalledTimes(1);
+        expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0, cleanup_attempts: 0 });
+      } finally {
+        openGate();
+        await cancel;
+        budget.mockRestore();
+      }
+    }
+  );
+
+  it('settlement during watchdog scheduling restores the earlier recovery wake', async () => {
+    const fixture = createFixture();
+    const handle = await startSession(fixture, true);
+    let failPool!: (error: Error) => void;
+    const poolGate = new Promise<void>((_resolve, reject) => {
+      failPool = reject;
+    });
+    vi.mocked(releaseSetupSlot).mockImplementationOnce(() => poolGate);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const cancel = handle.instance.cancel();
+    await vi.waitFor(() => expect(releaseSetupSlot).toHaveBeenCalledTimes(1));
+    const row = fixture.doDb.prepare('SELECT expires_at FROM setup_session').get() as {
+      expires_at: number;
+    };
+    let scheduleWatchdog!: () => void;
+    const scheduleGate = new Promise<void>((resolve) => {
+      scheduleWatchdog = resolve;
+    });
+    const setAlarm = handle.storage.setAlarm.getMockImplementation()!;
+    let watchdogStarted = false;
+    handle.storage.setAlarm.mockImplementation(async (at: number) => {
+      if (at === row.expires_at) {
+        watchdogStarted = true;
+        await scheduleGate;
+      }
+      await setAlarm(at);
+    });
+    const alarm = handle.instance.alarm();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(watchdogStarted).toBe(true);
+    failPool(new Error('pool unavailable'));
+    await cancel;
+    expect(await handle.storage.getAlarm()).toBe(Date.now() + POLL_MS);
+    scheduleWatchdog();
+    await alarm;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await handle.storage.getAlarm()).toBe(Date.now() + POLL_MS);
+    expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1, cleanup_attempts: 0 });
+    expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+    await handle.instance.alarm();
+    // Proven destruction needs only successful metadata reconciliation, before the failure budget.
+    expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0, cleanup_attempts: 0 });
+  });
+
+  it('quarantines a permanently stalled inline owner at its immutable watchdog without repeated work', async () => {
+    const fixture = createFixture();
+    fixture.env.OBSERVABILITY_DATABASE = fixture.env.DATABASE;
+    const handle = await startSession(fixture, true);
+    let releasePool!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releasePool = resolve;
+    });
+    vi.mocked(releaseSetupSlot).mockImplementationOnce(() => gate);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const cancel = handle.instance.cancel();
+    await vi.waitFor(() => expect(releaseSetupSlot).toHaveBeenCalledTimes(1));
+    const alarm = handle.instance.alarm();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await alarm;
+    const row = fixture.doDb.prepare('SELECT expires_at FROM setup_session').get() as {
+      expires_at: number;
+    };
+    expect(await handle.storage.getAlarm()).toBe(row.expires_at);
+    vi.setSystemTime(row.expires_at);
+    await handle.instance.alarm();
+    await handle.instance.alarm();
+    expect(doRow(fixture.doDb)).toMatchObject({
+      cleanup_pending: 1,
+      cleanup_attempts: DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS + 1,
+    });
+    expect(persistError).toHaveBeenCalledTimes(1);
+    expect(await handle.storage.getAlarm()).toBeNull();
+    expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+    expect(releaseSetupSlot).toHaveBeenCalledTimes(1);
+    handle.storage.setAlarm.mockClear();
+    releasePool();
+    await cancel;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(handle.storage.setAlarm).not.toHaveBeenCalled();
+  });
+
   it('an alarm that fires during the claim-time D1 write joins the teardown, not a second cleanup', async () => {
     const fixture = createFixture();
     const handle = await startSession(fixture, true);

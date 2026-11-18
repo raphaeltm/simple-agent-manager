@@ -1179,6 +1179,12 @@ D1/pool reconciliation after proven destruction adds at most 20 seconds (10 seco
 default), making the conservative episode limits 500 and 110 seconds respectively. Only recovery reads these settings; inline cancellation keeps the
 interactive sandbox timeout.
 
+An alarm joining cleanup already owned by an inline cancellation waits at most one
+recovery-step timeout. If that owner is still blocked in D1 or pool bookkeeping, the
+alarm preserves its ownership and schedules the same immutable uncertainty watchdog.
+Settlement wakes recovery sooner when cleanup is still owed; a permanent stall reaches
+quarantine without starting duplicate sandbox work or repeatedly polling the blocked RPC.
+
 A deadline stops waiting; it does not cancel an SDK operation. Cleanup cannot record
 successful destruction or release its pool slot while earlier sandbox work may still start
 the container. Unfinished cleanup remains marked pending. If an isolate dies before that

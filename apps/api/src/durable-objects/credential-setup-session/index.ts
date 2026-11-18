@@ -63,6 +63,7 @@ import {
   cleanupAttemptLimit,
   deferPendingCleanup,
   ensureCleanupWake,
+  joinCleanupFlight,
   snapshotCleanupPolicy,
 } from './cleanup-recovery';
 import { type SetupSessionD1Extra, updateSetupSessionD1Status } from './d1-status';
@@ -685,8 +686,8 @@ export class CredentialSetupSession extends DurableObject<Env> {
     if (inline) {
       // The recovery alarm fires one poll interval after the claim, usually while this
       // isolate's own cleanup is still awaiting sandbox I/O. Join it rather than run a
-      // second destroy and release (rule 45). Every step of it is bounded.
-      await inline;
+      // second destroy and release (rule 45), but inline D1/pool I/O can stall.
+      await joinCleanupFlight(this.ctx, this.env, this.sql, row, inline);
       return;
     }
     // cap + 1 is a durable quarantine marker. Keep cleanup_pending=1 as evidence

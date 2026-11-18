@@ -4,9 +4,10 @@ import { log } from '../../lib/logger';
 import {
   DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS,
   getSetupSessionCleanupRecoveryConfig,
+  getSetupSessionCleanupRecoveryStepTimeoutMs,
 } from '../../services/credential-setup-config';
 import { persistError } from '../../services/observability-errors';
-import { getSandboxConfig } from '../../services/sandbox';
+import { getSandboxConfig, withTimeout } from '../../services/sandbox';
 import type { SetupSessionRow } from './schema';
 
 /** Snapshot prevents later setting changes from reviving a quarantined episode. */
@@ -47,6 +48,64 @@ function pendingDeadline(env: Env, row: SetupSessionRow): number | null {
     return null;
   const deadline = Math.max(row.expires_at, completedAt + timeout + row.capture_poll_ms);
   return Number.isFinite(new Date(deadline).getTime()) ? deadline : null;
+}
+
+/** Join the existing owner briefly; a stalled inline D1/pool RPC must not pin an alarm.
+ * The original flight keeps ownership until settlement, with the same immutable
+ * uncertainty watchdog as SDK work rather than a hot polling/retry loop.
+ */
+export async function joinCleanupFlight(
+  ctx: DurableObjectState,
+  env: Env,
+  sql: SqlStorage,
+  row: SetupSessionRow,
+  flight: Promise<void>
+): Promise<void> {
+  if ((row.cleanup_attempts ?? 0) > cleanupAttemptLimit(row)) return;
+  const deadline = pendingDeadline(env, row);
+  if (deadline === null || Date.now() >= deadline) {
+    await quarantineCleanup(ctx, env, sql, row, 'inline_cleanup_watchdog');
+    return;
+  }
+  const timeout = Math.min(
+    getSandboxConfig(env).execTimeoutMs,
+    await getSetupSessionCleanupRecoveryStepTimeoutMs(env),
+    Math.max(1, deadline - Date.now())
+  );
+  try {
+    await withTimeout(flight, timeout, 'Setup inline cleanup join timed out');
+    return;
+  } catch {
+    // A failure or timeout retains the original owner and durable obligation.
+  }
+  const current = readCleanupRow(sql, row.id);
+  if (
+    !current ||
+    current.cleanup_pending !== 1 ||
+    (current.cleanup_attempts ?? 0) > cleanupAttemptLimit(current)
+  )
+    return;
+  try {
+    await ctx.storage.setAlarm(deadline);
+  } catch {
+    // alarm()'s final ensureCleanupWake refuses to acknowledge without a wake.
+    log.error('credential_setup.cleanup_alarm_failed', { sessionId: row.id });
+  }
+  // Attach after scheduling: settlement during setAlarm must win with an earlier wake.
+  const settled = async () => {
+    const latest = readCleanupRow(sql, row.id);
+    if (
+      latest?.cleanup_pending === 1 &&
+      (latest.cleanup_attempts ?? 0) <= cleanupAttemptLimit(latest)
+    ) {
+      try {
+        await ctx.storage.setAlarm(Date.now() + latest.capture_poll_ms);
+      } catch {
+        log.error('credential_setup.cleanup_alarm_failed', { sessionId: row.id });
+      }
+    }
+  };
+  ctx.waitUntil(flight.then(settled, settled));
 }
 
 async function deleteRecoveryAlarm(ctx: DurableObjectState): Promise<void> {
