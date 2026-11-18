@@ -58,11 +58,14 @@ Live no-gateway metering/ceiling proof is owed to the self-host box with L22 (ex
 ## Takeover completion evidence
 
 Takeover task `01M7NBJWNJMHYZ8RY30M54PZP6` continues the same branch and PR #2839.
-The initial normal main merge included #2841. The final sync includes main `5e3f31f7f` (#2838 Insights MCP tool, after the #2876
-Claude Action version update). The L13 application/package feature patch remains byte-for-byte
-identical to the staged patch. A bounded carryover review found no interaction with L13 budget,
-ceiling or inference behavior: new Insights settings/tool registration and telemetry indexes are
-separate. This carries the staged L13 behavior evidence; it does not claim an exact-head deploy.
+The initial normal main merge included #2841. The final sync includes main b7502ba96
+(#2859 L17b reverse-tunnel gateway, following #2838 Insights and #2876 Claude Action).
+The L13 feature patch before/after each main sync is byte-for-byte identical; the late P1/P2
+corrections below are additional locally tested no-gateway changes relative to the staged head.
+Bounded carryover reviews found no change to Gateway budgets, ceiling settings or credential
+selection. L17b's shared node routing preserves the Cloudflare container route and imports no
+self-host implementation into the Worker. Focused container/transport checks and fresh CI cover
+the merged wiring. This carries staged L13 behavior evidence; it does not claim an exact-head deploy.
 
 - Full staged-head CI 44193579523 succeeded; E2E, CodSpeed and Sonar passed. All 10 automated
   findings are resolved. Original security, UI, performance and completion findings are ADDRESSED;

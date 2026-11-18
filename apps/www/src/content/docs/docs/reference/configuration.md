@@ -2173,10 +2173,11 @@ predicate shared by the gate, `GET /api/usage/ai/budget` and budget validation).
 their cap is still held to the ceiling, and `PUT /api/usage/ai/budget` refuses a cap above it. The
 ceiling is per user, not a total across users. It is read from the per-isolate admin settings
 cache (a change applies within 60 seconds), only on the no-gateway path, so a gateway
-installation's `/ai/v1` reads are unchanged. While settings are unreadable an isolate keeps using
-the last ceiling it read (`services/ai-proxy-ports.ts`); only an isolate that has never read it
-applies no ceiling, logged as `ai_proxy.monthly_cost_ceiling_unreadable` (daily token budgets
-still apply). Once a ceiling is set, every gated call on such an installation reads the month's
+installation's `/ai/v1` reads are unchanged. If the settings snapshot cannot be read after its cache expires,
+locally metered platform-funded inference is refused with a retryable `503 SERVICE_UNAVAILABLE`,
+logged as `ai_proxy.monthly_cost_ceiling_unreadable`. The same protection applies on a cold
+isolate; no extra last-known ceiling is reused during an outage (`services/ai-proxy-ports.ts`).
+Gateway calls and locally own-funded calls do not read this ceiling. Once a ceiling is set, every gated call on such an installation reads the month's
 priced total (one Durable Object call), not only calls by users with their own cap. Passthrough
 calls served by a platform-owned credential are priced too; a user's or project's own credential
 is their own spend. Spend is priced after each response, so calls
