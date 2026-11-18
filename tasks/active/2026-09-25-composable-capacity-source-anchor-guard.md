@@ -165,6 +165,8 @@ archived as fully verified. The canonical idea remains open while the fix is unm
   authority currently reaches the global HTTP 500 handler. The prepared live check does
   not count a 5xx as a designed refusal. This behavior was **not exercised live** here;
   allocation/reuse and negative HTTP behavior remain explicit staging gaps.
+  Tracked as `tasks/backlog/2026-11-18-pinned-workspace-stale-allocation-plan-returns-500.md`
+  (deferred: pre-existing, outside this fix's scope; the guard still refuses).
 
 No production deployment, readiness action, merge or GitHub issue creation occurred.
 
