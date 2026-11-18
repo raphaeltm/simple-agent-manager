@@ -262,8 +262,8 @@ importers:
         specifier: 0.6.1
         version: 0.6.1(hono@4.13.4)(valibot@1.5.0(typescript@5.9.3))
       '@mastra/core':
-        specifier: 1.81.0
-        version: 1.81.0(@grpc/grpc-js@1.14.6)(@opentelemetry/api@1.10.0)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(ai@7.0.173(zod@4.5.4))(express@5.2.1)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4)
+        specifier: 1.84.0
+        version: 1.84.0(@grpc/grpc-js@1.14.6)(@opentelemetry/api@1.10.0)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(ai@7.0.173(zod@4.5.4))(express@5.2.1)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4)
       '@modelcontextprotocol/server':
         specifier: 2.3.1
         version: 2.3.1
@@ -1376,9 +1376,9 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/provider-utils@5.0.69':
-    resolution: {integrity: sha512-oGCXIoBKLpNrrAzJvltFHdBl20FJMyT+7edD9D4nwxoI8Scbj3y1EgKzjoF2XFhNYkMTcv1oTFDgUzLxdjqSKg==}
-    engines: {node: '>=22'}
+  '@ai-sdk/provider-utils@4.0.66':
+    resolution: {integrity: sha512-tITCIYBJlxD4PmDIAI2VXb67yEbWRepvJBJrv2pIY5vMRUta51AFRxLlxm0IexRGdIBGuQ10+ClClZMXtawkbA==}
+    engines: {node: '>=18.17'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
@@ -1395,10 +1395,6 @@ packages:
   '@ai-sdk/provider@3.0.19':
     resolution: {integrity: sha512-5lWq7zSfRaU5ylDESn3sDQjgGl2AI1vjZKO/6JY3aFW70ct4zcP1kN+ZUYOuTXr28fVsYbyu2YFhddLdIgQFZQ==}
     engines: {node: '>=18'}
-
-  '@ai-sdk/provider@4.0.34':
-    resolution: {integrity: sha512-Ip7ZQBq/FiGpM1mmOVseTtX9PBjnzo0bLC41WTgBSBBRUBz6LhNFGbYaNUzI6hPm6ll1oNSPOAZc/q/z+3QZEQ==}
-    engines: {node: '>=22'}
 
   '@ai-sdk/provider@4.0.38':
     resolution: {integrity: sha512-GElz70UUCuDFFyD6m6aQJFgRY0HEABQzB5otzgkrisYaF5mnss7o0upAmbBTSD6KWiM9h7lZm1ls2c7xzHR8CA==}
@@ -3352,14 +3348,18 @@ packages:
     resolution: {integrity: sha512-qC72D4+CDdjGqJvkFMMEAtancHUQ7/d/tAiHf64z8MopFDmcrtbcJuerDtFceuAfQJ2pDSfCKCtbqoGBNnwg0w==}
     engines: {node: '>=8'}
 
-  '@mastra/core@1.81.0':
-    resolution: {integrity: sha512-K04zX5VxjaZbodrZsQIfVWWNWjfEfTXMthAVRCNsTbz4SMee5gpEJoAB4oEcZPVgZR/HEzoOl8JVQ9TXQm445w==}
+  '@mastra/core@1.84.0':
+    resolution: {integrity: sha512-0Ko51xP2R5BN5QBSzdMX5b2IKthElMzgKYfmTzumPqnHYcP1I5PoSRuHj/u8wx9m5UKl0ECc6dHpkjiOYO3OxQ==}
     engines: {node: '>=22.13.0'}
     peerDependencies:
+      '@json-render/chat': ^0.22.0
       zod: ^3.25.0 || ^4.0.0
+    peerDependenciesMeta:
+      '@json-render/chat':
+        optional: true
 
-  '@mastra/schema-compat@1.3.17':
-    resolution: {integrity: sha512-8tuRZkVL7JE5A7pH2/GV3khYM+R8xHa+WPSjykq4OjKT2O4s9mNpPl8174dEN8TZUYetUAtxZM0HVM24ON0UQg==}
+  '@mastra/schema-compat@1.4.0':
+    resolution: {integrity: sha512-td/x/hfCxY1/3w44FNMNv/qQ/ydNke5tFIP1FLxqGtO33wwtfDR801dQwSSLa8MA3z02D9RkNTb2ynLWuqX88A==}
     engines: {node: '>=22.13.0'}
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
@@ -9448,10 +9448,6 @@ packages:
     resolution: {integrity: sha512-RYONW2MeafgYlkVOKYKkA/Ag7BmXqgIWCa8t1m0JcxrQg9pI9lEqRhAOruOBCbAohOa/gkCF+iPi9hrgvTzu6Q==}
     engines: {node: '>=20.18.1'}
 
-  undici@7.30.2:
-    resolution: {integrity: sha512-mLyPQnHwUxaM/rideoK/+KL8DaAJLRl4aBCfmX444aCSLnIaomqPLtNRe2jdCYcsk5wZzXrDIQC8ZeYNRAYyIA==}
-    engines: {node: '>=20.18.1'}
-
   unenv@2.0.0-rc.24:
     resolution: {integrity: sha512-i7qRCmY42zmCwnYlh9H2SvLEypEFGye5iRmEMKjcGi7zk9UquigRjFtTLz0TYqr0ZGLZhaMHl/foy1bZR+Cwlw==}
 
@@ -10188,13 +10184,12 @@ snapshots:
       undici: 6.29.1
       zod: 4.5.4
 
-  '@ai-sdk/provider-utils@5.0.69(zod@4.5.4)':
+  '@ai-sdk/provider-utils@4.0.66(zod@4.5.4)':
     dependencies:
-      '@ai-sdk/provider': 4.0.34
+      '@ai-sdk/provider': 3.0.19
       '@standard-schema/spec': 1.1.0
-      '@workflow/serde': 4.1.0
       eventsource-parser: 3.1.1
-      undici: 7.30.2
+      undici: 6.29.1
       zod: 4.5.4
 
   '@ai-sdk/provider-utils@5.0.81(zod@4.5.4)':
@@ -10210,10 +10205,6 @@ snapshots:
       json-schema: 0.4.0
 
   '@ai-sdk/provider@3.0.19':
-    dependencies:
-      json-schema: 0.4.0
-
-  '@ai-sdk/provider@4.0.34':
     dependencies:
       json-schema: 0.4.0
 
@@ -11977,18 +11968,18 @@ snapshots:
     dependencies:
       '@lukeed/csprng': 1.1.0
 
-  '@mastra/core@1.81.0(@grpc/grpc-js@1.14.6)(@opentelemetry/api@1.10.0)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(ai@7.0.173(zod@4.5.4))(express@5.2.1)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4)':
+  '@mastra/core@1.84.0(@grpc/grpc-js@1.14.6)(@opentelemetry/api@1.10.0)(@valibot/to-json-schema@1.3.0(valibot@1.5.0(typescript@5.9.3)))(ai@7.0.173(zod@4.5.4))(express@5.2.1)(valibot@1.5.0(typescript@5.9.3))(zod-to-json-schema@3.25.2(zod@4.5.4))(zod@4.5.4)':
     dependencies:
       '@a2a-js/sdk-v0_3': '@a2a-js/sdk@0.3.14(@grpc/grpc-js@1.14.6)(express@5.2.1)'
       '@a2a-js/sdk-v1': '@a2a-js/sdk@1.0.1(@grpc/grpc-js@1.14.6)(express@5.2.1)'
-      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.62(zod@4.5.4)'
-      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.69(zod@4.5.4)'
+      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.66(zod@4.5.4)'
+      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.81(zod@4.5.4)'
       '@ai-sdk/provider-v5': '@ai-sdk/provider@2.0.5'
       '@ai-sdk/provider-v6': '@ai-sdk/provider@3.0.19'
-      '@ai-sdk/provider-v7': '@ai-sdk/provider@4.0.34'
+      '@ai-sdk/provider-v7': '@ai-sdk/provider@4.0.38'
       '@isaacs/ttlcache': 2.1.5
       '@lukeed/uuid': 2.0.1
-      '@mastra/schema-compat': 1.3.17(zod@4.5.4)
+      '@mastra/schema-compat': 1.4.0(zod@4.5.4)
       '@standard-schema/spec': 1.1.0
       chat: 4.44.0(ai@7.0.173(zod@4.5.4))(zod@4.5.4)
       croner: 10.0.1
@@ -12030,7 +12021,7 @@ snapshots:
       - zod-openapi
       - zod-to-json-schema
 
-  '@mastra/schema-compat@1.3.17(zod@4.5.4)':
+  '@mastra/schema-compat@1.4.0(zod@4.5.4)':
     dependencies:
       json-schema-to-zod: 2.8.1
       zod: 4.5.4
@@ -19141,8 +19132,6 @@ snapshots:
   undici@7.28.0: {}
 
   undici@7.29.1: {}
-
-  undici@7.30.2: {}
 
   unenv@2.0.0-rc.24:
     dependencies:
