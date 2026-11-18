@@ -69,6 +69,7 @@ describe('resolveR2PresignConfig', () => {
   it.each([
     ['no bucket', { R2_S3_BUCKET: '' }],
     ['no key prefix', { R2_S3_KEY_PREFIX: '' }],
+    ['no signing region', { R2_S3_REGION: '' }],
     ['absolute key prefix', { R2_S3_KEY_PREFIX: '/r2/sam-assets/' }],
     ['escaping key prefix', { R2_S3_KEY_PREFIX: 'r2/../deploy/' }],
     ['non-HTTP endpoint', { R2_S3_ENDPOINT: 'ftp://store' }],

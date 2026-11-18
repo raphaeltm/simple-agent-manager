@@ -18,10 +18,13 @@
  * rows older than the admin setting analytics.d1.retentionDays (default 90, the longest admin
  * period) and the oldest rows above analytics.d1.maxRows (default 500,000; ~650 MB worst case).
  *
- * No secrets: rows hold the fields Analytics Engine receives, minus URL detail: the page is stored
- * without query string or fragment, and the referrer as its origin only, so tokens in links
- * (query strings, invite paths) are never kept.
+ * No secrets: rows hold the fields Analytics Engine receives, minus detail: the page is stored
+ * without query string or fragment and with sensitive segments redacted, the referrer as its
+ * origin only, and an anonymous visitor's IP as its network prefix, so tokens in links (query
+ * strings, invite paths) and full client addresses are never kept.
  */
+import { isSensitiveAnalyticsPathSegment } from '@simple-agent-manager/shared';
+
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { resolveAdminSettingDetailsMany } from '../../services/admin-settings-resolution';
@@ -56,10 +59,47 @@ export function analyticsD1Sink(db: D1Database): AnalyticsSink {
   return { write: (points) => writeAnalyticsPointsToD1(db, points) };
 }
 
-/** Strip query string and fragment: a link can carry a token, the path cannot. */
+/** Strip query string and fragment: a link can carry a token there. */
 function withoutQuery(value: string): string {
   const cut = value.search(/[?#]/);
   return cut === -1 ? value : value.slice(0, cut);
+}
+
+const REDACTED_SEGMENT = '[redacted]';
+
+/**
+ * The page path without query or fragment, with sensitive segments redacted by the same rule the
+ * web tracker applies (`isSensitiveAnalyticsPathSegment`, packages/shared/src/analytics-path.ts).
+ * `/api/t` accepts any page value, so the server cannot rely on the tracker having normalized it.
+ * Route-pattern parameters (`:projectId`, from the request middleware) are kept: they are names,
+ * not values, and admin queries group by them.
+ */
+function redactedPath(value: string): string {
+  const segments = withoutQuery(value).split('/');
+  return segments
+    .map((segment, index) => {
+      if (!segment || segment.startsWith(':')) return segment;
+      const previous = index > 0 ? segments[index - 1] : undefined;
+      return isSensitiveAnalyticsPathSegment(segment, previous) ? REDACTED_SEGMENT : segment;
+    })
+    .join('/');
+}
+
+/**
+ * The ingest route indexes anonymous browser events as `anon-<client IP>`. The D1 sink keeps only
+ * the network prefix (IPv4 /24, IPv6 /48), enough to count distinct visitors roughly without
+ * storing a full address. Any other index (a user id) is stored as is.
+ */
+function maskedIndex(value: string): string {
+  if (!value.startsWith('anon-')) return value;
+  const ip = value.slice('anon-'.length);
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\d{1,3}$/.exec(ip);
+  if (v4) return `anon-${v4[1]}.${v4[2]}.${v4[3]}.0/24`;
+  if (ip.includes(':')) {
+    const groups = (ip.split('::')[0] ?? '').split(':').filter(Boolean);
+    return `anon-${groups.slice(0, 3).join(':') || '0'}::/48`;
+  }
+  return 'anon';
 }
 
 function originOnly(value: string): string {
@@ -76,7 +116,7 @@ function blobAt(point: AnalyticsEngineDataPoint, index: number): string {
   let text = raw === null || raw === undefined ? '' : typeof raw === 'string' ? raw : '';
   // blob3 (page / route pattern): path only. The web tracker already redacts id- and
   // token-shaped segments (apps/web/src/lib/analytics.ts normalizeAnalyticsPath).
-  if (index === 2) text = withoutQuery(text);
+  if (index === 2) text = redactedPath(text);
   // blob4 (referrer): origin only. For API requests it is the browser's Referer, the full app
   // URL, whose path can carry a token (invite links); no admin query reads more than the origin.
   if (index === 3) text = originOnly(text);
@@ -103,7 +143,10 @@ export async function writeAnalyticsPointsToD1(
 ): Promise<void> {
   if (points.length === 0) return;
   const statements = points.map((point) => {
-    const index = String(point.indexes?.[0] ?? '').slice(0, ANALYTICS_D1_MAX_BLOB_LENGTH);
+    const index = maskedIndex(String(point.indexes?.[0] ?? '')).slice(
+      0,
+      ANALYTICS_D1_MAX_BLOB_LENGTH
+    );
     const blobs = Array.from({ length: BLOB_COUNT }, (_, i) => blobAt(point, i));
     const doubles = Array.from({ length: DOUBLE_COUNT }, (_, i) => doubleAt(point, i));
     return db.prepare(INSERT_SQL).bind(index, ...blobs, ...doubles);
@@ -173,8 +216,13 @@ const DEFAULT_RETENTION: RetentionSettings = {
   tickBudgetMs: DEFAULT_ANALYTICS_D1_PURGE_TICK_BUDGET_MS,
 };
 
-/** Retention bounds in one settings read; an unreadable store keeps the defaults (still bounded). */
-async function resolveRetention(env: Env): Promise<RetentionSettings> {
+/**
+ * Retention bounds in one settings read, or null when the settings store cannot be read. A
+ * default must not stand in for the operator's policy here: with retention set to 180 days, a
+ * 90-day fallback would permanently delete rows the policy keeps. The purge skips that tick and
+ * the next one retries.
+ */
+async function resolveRetention(env: Env): Promise<RetentionSettings | null> {
   try {
     const [days, maxRows, batchRows, tickBudgetMs] = await resolveAdminSettingDetailsMany(env, [
       ANALYTICS_D1_RETENTION_DAYS_SETTING,
@@ -189,10 +237,11 @@ async function resolveRetention(env: Env): Promise<RetentionSettings> {
       tickBudgetMs: positiveInteger(tickBudgetMs?.value, DEFAULT_RETENTION.tickBudgetMs),
     };
   } catch (err) {
-    log.warn('analytics.d1_retention_settings_unavailable', {
+    log.warn('analytics.d1_purge_skipped', {
+      reason: 'retention_settings_unreadable',
       error: err instanceof Error ? err.message : String(err),
     });
-    return DEFAULT_RETENTION;
+    return null;
   }
 }
 
@@ -228,7 +277,8 @@ async function deleteInBatches(
 }
 
 /**
- * Retention and row cap for the D1 sink. A no-op (no D1 call) unless the sink is enabled.
+ * Retention and row cap for the D1 sink. A no-op (no D1 call) unless the sink is enabled, and
+ * skipped (null, logged) when the retention settings cannot be read.
  *
  * Bounded by time, not by count (rule 81): batches of `analytics.d1.purgeBatchRows` (default
  * 5,000) repeat until done or `analytics.d1.purgeTickBudgetMs` (default 10 s) is spent, and the
@@ -241,7 +291,9 @@ async function deleteInBatches(
 export async function purgeAnalyticsEvents(env: Env): Promise<AnalyticsPurgeResult | null> {
   if (!isAnalyticsD1SinkEnabled(env)) return null;
   const db = env.OBSERVABILITY_DATABASE;
-  const { days, maxRows, batchRows, tickBudgetMs } = await resolveRetention(env);
+  const retention = await resolveRetention(env);
+  if (!retention) return null;
+  const { days, maxRows, batchRows, tickBudgetMs } = retention;
   const deadline = Date.now() + tickBudgetMs;
 
   const byAge = await deleteInBatches(

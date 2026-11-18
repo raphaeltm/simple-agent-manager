@@ -1819,8 +1819,10 @@ Upload links (attachments, session snapshots, compose image artifacts and build 
 signed by one client, `getR2PresignTarget()` in `apps/api/src/services/r2-s3-client.ts`. On
 Cloudflare it addresses `https://<CF_ACCOUNT_ID>.r2.cloudflarestorage.com` with `R2_ACCESS_KEY_ID`,
 `R2_SECRET_ACCESS_KEY` and `R2_BUCKET_NAME`. A runtime whose R2 binding keeps objects in its own S3
-store sets `R2_S3_ENDPOINT`, `R2_S3_BUCKET` and `R2_S3_KEY_PREFIX` (plus optional `R2_S3_REGION`,
-default `auto`, and `R2_S3_FORCE_PATH_STYLE`, default path style); links then target
+store sets `R2_S3_ENDPOINT`, `R2_S3_BUCKET`, `R2_S3_KEY_PREFIX` and `R2_S3_REGION` (its SigV4
+signing region, for example `auto` for Google Cloud Storage or `us-west-2` for AWS S3; there is no
+default, because a wrong region makes every signed URL fail), plus optional
+`R2_S3_FORCE_PATH_STYLE` (default path style); links then target
 `<R2_S3_BUCKET>/<R2_S3_KEY_PREFIX><key>` (`resolveR2PresignConfig()` in
 `apps/api/src/services/r2-presign-config.ts`). A partially configured store disables presigning
 rather than falling back to Cloudflare, and attachment requests then answer `403`.

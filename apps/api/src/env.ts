@@ -1296,7 +1296,7 @@ export interface Env
   R2_S3_ENDPOINT?: string;
   R2_S3_BUCKET?: string;
   R2_S3_KEY_PREFIX?: string;
-  R2_S3_REGION?: string; // Signing region (default: "auto"; MinIO-style stores usually "us-east-1")
+  R2_S3_REGION?: string; // Signing region of that store; required with R2_S3_ENDPOINT ("auto" for GCS/R2, e.g. "us-east-1" for MinIO or AWS)
   R2_S3_FORCE_PATH_STYLE?: string; // "false" for virtual-host addressing (default with R2_S3_ENDPOINT: path style)
   // Task attachment upload limits (all configurable per constitution Principle XI)
   ATTACHMENT_UPLOAD_MAX_BYTES?: string;

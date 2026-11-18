@@ -1,18 +1,25 @@
 import { createHash, createHmac } from 'node:crypto';
 import { createServer, type IncomingHttpHeaders, request } from 'node:http';
 
+import { S3Client } from '@aws-sdk/client-s3';
 import { describe, expect, it } from 'vitest';
 
 import { createBuildContextUpload } from '../../src/build-context-upload';
-import type { AppDeploymentEnv as Env } from '../../src/env';
+import type { ComposeImageArtifactPresignTarget } from '../../src/compose-image-artifacts';
 
 const secret = 'fake-secret';
-const env = {
-  CF_ACCOUNT_ID: 'fake-account',
-  R2_ACCESS_KEY_ID: 'fake-access',
-  R2_SECRET_ACCESS_KEY: secret,
-  R2_BUCKET_NAME: 'fake-bucket',
-} as Env;
+// The worker's shared R2 client (apps/api/src/services/r2-s3-client.ts) as it is configured on
+// Cloudflare for build contexts: WHEN_REQUIRED checksums, the account endpoint, unprefixed keys.
+const target: ComposeImageArtifactPresignTarget = {
+  client: new S3Client({
+    region: 'auto',
+    endpoint: 'https://fake-account.r2.cloudflarestorage.com',
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    credentials: { accessKeyId: 'fake-access', secretAccessKey: secret },
+  }),
+  bucket: 'fake-bucket',
+  objectKey: (key) => key,
+};
 
 // Independent SigV4 verification, deliberately not the SDK signer under test.
 // Only dummy credentials are used, and the HTTP destination is localhost.
@@ -71,7 +78,6 @@ describe('real SDK context presigner', () => {
     const body = Buffer.from('nonempty compressed-context stand-in');
     const sha256 = createHash('sha256').update(body).digest('hex');
     const slot = await createBuildContextUpload(
-      env,
       {
         id: 'job',
         projectId: 'project',
@@ -81,7 +87,8 @@ describe('real SDK context presigner', () => {
         attempt: 3,
       },
       { sizeBytes: body.length, sha256 },
-      300
+      300,
+      target
     );
     const url = new URL(slot.uploadUrl);
     expect(url.pathname).toContain('/compose-build-contexts/project/env/job/3.tar.zst');

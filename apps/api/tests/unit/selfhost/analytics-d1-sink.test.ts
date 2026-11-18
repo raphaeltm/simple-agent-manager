@@ -96,7 +96,9 @@ function app() {
   a.use('*', analyticsMiddleware());
   a.use('*', async (c, next) => {
     // The real auth middleware sets this; the analytics middleware reads it after the handler.
-    c.set('auth' as never, { user: { id: c.req.header('x-test-user') ?? '' } } as never);
+    // No header means an anonymous request, as on the real ingest route.
+    const userId = c.req.header('x-test-user');
+    if (userId) c.set('auth' as never, { user: { id: userId } } as never);
     await next();
   });
   a.get('/api/projects/:projectId', (c) => c.json({ ok: true }));
@@ -186,7 +188,10 @@ describe('D1 analytics sink (self-host)', () => {
     // No query string or fragment survives into a stored row.
     expect(JSON.stringify(stored)).not.toContain('sekret');
     const pageView = stored.find((r) => r.blob1 === 'page_view')!;
-    expect(pageView.blob3).toBe('/projects/p1');
+    // The project id after the `projects` marker is redacted, as the web tracker would.
+    expect(pageView.blob3).toBe('/projects/[redacted]');
+    // Request rows keep their route pattern: parameter names are not values.
+    expect(stored.find((r) => r.index1 === 'user-b')!.blob3).toBe('/api/projects/:projectId');
     expect(pageView.blob4).toBe('https://mail.example');
 
     const dau = await call('/api/admin/analytics/dau');
@@ -237,6 +242,41 @@ describe('D1 analytics sink (self-host)', () => {
     // Both rows past the 90-day default are gone by age; the cap then keeps the newest three
     // by insertion (ids 5..7 of 7).
     expect(left.map((r) => r.id)).toEqual([5, 6, 7]);
+  });
+
+  it('stores anonymous visitors by network prefix and redacts sensitive page segments', async () => {
+    const post = (ip: string, page: string) =>
+      call('/api/t', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          origin: 'https://app.box.example',
+          'cf-connecting-ip': ip,
+        },
+        body: JSON.stringify({ events: [{ event: 'page_view', page }] }),
+      });
+    expect((await post('203.0.113.77', '/invite/sk-live-0123456789abcdefABCDEF')).status).toBe(204);
+    expect((await post('2001:db8:85a3:1:2:3:4:5', '/docs/getting-started')).status).toBe(204);
+
+    const stored = rows().filter((r) => r.blob1 === 'page_view');
+    expect(stored.map((r) => r.index1)).toEqual(['anon-203.0.113.0/24', 'anon-2001:db8:85a3::/48']);
+    expect(JSON.stringify(stored)).not.toContain('203.0.113.77');
+    expect(JSON.stringify(stored)).not.toContain('2001:db8:85a3:1:2');
+    expect(stored.map((r) => r.blob3)).toEqual(['/invite/[redacted]', '/docs/getting-started']);
+  });
+
+  it('skips the purge, deleting nothing, when the retention settings cannot be read', async () => {
+    obsDb
+      .prepare(
+        "INSERT INTO analytics_events (timestamp, index1, blob1) VALUES (datetime('now', '-120 days'), 'u', 'e')"
+      )
+      .run();
+    // The settings store fails while the observability database is healthy.
+    settingsDb.exec('DROP TABLE platform_settings');
+
+    expect(await purgeAnalyticsEvents(env)).toBeNull();
+    // A 90-day default would have deleted this row under a 180-day policy; it stays.
+    expect(rows()).toHaveLength(1);
   });
 
   it('purges more rows than one batch holds in a single tick, oldest first (rule 81)', async () => {
