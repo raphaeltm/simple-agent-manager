@@ -14,9 +14,9 @@ Connecting a second way of signing in to an existing account is called **account
 
 ## Why an email account needs GitHub
 
-When you give a SAM agent work on a repository, SAM clones it, pushes a branch and opens a pull request using **your own** GitHub authorization, an OAuth token GitHub issues to SAM on your behalf. Until now the only way to have that token was to sign in with GitHub.
+When you give a SAM agent work on a repository, the agent needs a GitHub credential to clone it, push a branch and open a pull request. Before handing one out, SAM checks **your own** GitHub authorization, an OAuth token GitHub issues to SAM on your behalf, to confirm that you can reach that repository. Only then does it give the agent a short-lived token from SAM's GitHub App. Until now the only way to have that personal token was to sign in with GitHub.
 
-SAM also offers sign-in by emailed code, and with Google. Those accounts had no GitHub token, so the first time they tried to start work on a GitHub project they hit a dead end. Now that failure has its own error (`GITHUB_NOT_CONNECTED`, HTTP 403) that points to a new **Connected accounts** card in Settings.
+SAM also offers sign-in by emailed code, and with Google. Those accounts had no personal GitHub token, so the first time they tried to start work on a GitHub project they hit a dead end. Now that failure has its own error (`GITHUB_NOT_CONNECTED`, HTTP 403) that points to a new **Connected accounts** card in Settings.
 
 <figure>
   <img class="shot-dark" src="/images/blog/sams-journal-connecting-github-to-an-email-account/request-dark.png" width="375" height="310" alt="The Connected accounts card in Settings. It explains that SAM uses your own GitHub or GitLab authorization to start work on a repository. An info notice reads: Check your account email to confirm connecting GitHub. Open the link in this browser. Below, GitHub and GitLab both show Not connected, each with a Connect button." loading="lazy" decoding="async" />
@@ -59,10 +59,10 @@ sequenceDiagram
 A few details make it hold up:
 
 - **The token is bound to three things**: your user ID, your current session ID and the provider. The database row is keyed `account-link:<user>:<session>:<provider>`, so there is at most one outstanding token per session and provider, and a token issued to one session is useless in another.
-- **Only a hash is stored.** SAM keeps the SHA-256 of the token in the `verifications` table in **D1** (Cloudflare's SQLite database), never the token itself.
+- **Only a hash is stored.** SAM keeps the SHA-256 hash (a one-way fingerprint) of the token in the `verifications` table in **D1** (Cloudflare's SQLite database), never the token itself.
 - **It expires quickly.** The default is 5 minutes, and an admin can set it from 1 to 15 minutes in SAM's admin settings (`security.accountLinkProofTtlSeconds`).
 - **The token travels in the URL fragment**, the part after `#`. Browsers never send the fragment to a server, so it does not end up in access logs, and the Settings page removes it from the address bar as soon as it loads.
-- **Agent sessions cannot link.** SAM has a sign-in path for agents. A session created that way, or one that is expired or suspended, is refused before any email is sent.
+- **Agent sessions cannot link.** SAM has a sign-in path for agents. A session created that way, an expired session, or one belonging to a suspended account is refused before any email is sent. So is an account whose email is not yet verified.
 
 Opening the link brings you back to the same card, now asking you to confirm:
 
@@ -93,7 +93,7 @@ When it succeeds, the plugin writes a small proof (user, session, provider, dead
 
 ## Checking again when GitHub answers
 
-The GitHub callback can arrive minutes later, and a lot can change in that time. You might have signed out, or the session might have been revoked. So when GitHub answers, SAM checks again. A hook called `validateLinkUserInfo` reads the proof back out of the OAuth state and compares it with the **live** session: same user, same session, same provider, deadline not passed. If anything differs, the link is refused with "Connection confirmation expired; start again in Settings".
+The GitHub callback can arrive minutes later, and a lot can change in that time. You might have signed out, or the session might have been revoked. So when GitHub answers, SAM checks again. A hook called `validateLinkUserInfo` reads the proof back out of the OAuth state and compares it with the **live** session: same user, same session, same provider, deadline not passed. If anything differs, or the session is gone, the link is refused and Settings asks you to request a new confirmation email.
 
 That same hook is also what blocks the email-match trap. Inside Better Auth, an implicit link on an ordinary sign-in goes through the same "link account" validation step. An ordinary sign-in never carries a proof, so the hook turns it away. One check covers both cases.
 
@@ -105,15 +105,15 @@ GitHub sign-in in SAM refreshes your name, avatar and email from GitHub each tim
 
 ## Being told, and being able to undo it
 
-- **You get an email** whenever a GitHub or GitLab sign-in is linked to your account, with a link to Connected accounts so you can disconnect anything you don't recognize.
+- **You get an email** (sent on a best-effort basis) whenever a GitHub or GitLab sign-in is linked to your account, with a link to Connected accounts so you can disconnect anything you don't recognize.
 - **Disconnecting is protected from lockout.** You can remove a GitHub or GitLab link only if your account email is verified and email sign-in is enabled, so you always keep a way back in.
-- **Error messages tell you what to do next.** "Not connected" (403) sends you to Connect GitHub. "Authorization expired" (401) asks you to sign in again. "GitHub is unavailable" (503) is a plain retry, and it is never reported as an expired login.
+- **Errors tell you what to do next.** A missing link (403) sends you to Connect GitHub. Expired authorization (401) asks you to sign in again. If GitHub, or SAM's own check of your link, is unavailable (503), the error says to retry, and it is never reported as an expired login.
 
 ## How it was tested
 
 The tests run the real Better Auth 1.7.14 against a real SQLite database. Only the HTTP calls to GitHub and the outgoing email are faked. They cover a forged, stolen, replayed or expired token, a session revoked before the callback, two users competing for the same GitHub account, refusal of Google and of implicit same-email linking, and a returning sign-in that keeps the verified email. The one-time consume and the callback recheck were each removed once to confirm their tests failed without them.
 
-One honest gap: GitHub's real consent screen and real email delivery were not exercised on staging for this change, because no test GitHub identity was available there. On staging, the Settings card, sending the confirmation request, refusing a link with no proof and refusing Google were all checked live.
+One honest gap: GitHub's real consent screen, delivery of the confirmation and alert emails, and disconnecting a real link were not exercised on staging. Staging had no email-only test account, and creating a GitHub account just for the test was ruled out. On staging, the Settings card (shown with an altered account list), the confirmation request, refusing a link with no proof and refusing Google were all checked live.
 
 ## If you are building this yourself
 
