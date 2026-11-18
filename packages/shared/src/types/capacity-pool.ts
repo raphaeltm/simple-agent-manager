@@ -247,6 +247,12 @@ export interface SafeCapacityPoolPlacementSettingsSummary {
     legacyWorkloadMapping: Record<VMSize, Required<ResourceRequirements>>;
     platformDefaults: Required<ResourceRequirements>;
   };
+  /**
+   * Memory (MB) each node keeps for its host before placing any workspace, as this installation
+   * resolves it (`resolveEffectiveNodeHostMemoryReserveMb`). Placement subtracts it from every
+   * machine. Absent from older servers.
+   */
+  hostMemoryReserveMb?: number;
 }
 
 // =============================================================================

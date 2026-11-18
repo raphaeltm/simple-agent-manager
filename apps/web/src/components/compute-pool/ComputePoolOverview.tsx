@@ -1,7 +1,11 @@
-import type { DefaultCapacityPoolSummary } from '@simple-agent-manager/shared';
+import type {
+  DefaultCapacityPoolSummary,
+  SafeCapacityPoolPlacementSettingsSummary,
+} from '@simple-agent-manager/shared';
 import {
   DEFAULT_CAPACITY_POOL_DEPLOYMENT_STRATEGY,
   DEFAULT_CAPACITY_POOL_MAX_NODES,
+  isCapacitySourceExcluded,
 } from '@simple-agent-manager/shared';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
@@ -13,6 +17,7 @@ import {
   POOL_STATE_WARNINGS,
   WORKSPACE_STRATEGY_COPY,
 } from '../../lib/compute-pool-copy';
+import { defaultWorkspaceFitWarning } from '../../lib/compute-pool-default-fit';
 import {
   type MachineGroup,
   type MachineTypeRow,
@@ -160,6 +165,8 @@ interface ComputePoolOverviewProps {
   sources: OrderableSource[];
   projectId: string | null;
   notice?: ReactNode;
+  /** The installation's resolved placement settings, from the same pool response. */
+  placementSettings?: SafeCapacityPoolPlacementSettingsSummary;
 }
 
 /** Read-only view: what the pool allows, in plain words. */
@@ -169,6 +176,7 @@ export function ComputePoolOverview({
   sources,
   projectId,
   notice,
+  placementSettings,
 }: ComputePoolOverviewProps) {
   const { pool } = summary;
   const scopeCopy = POOL_SCOPE_COPY[pool.scope];
@@ -178,7 +186,32 @@ export function ComputePoolOverview({
   const allowedCount = allowedGroups.reduce((total, { rows }) => total + rows.length, 0);
   const warning =
     (summary.effectiveState ? POOL_STATE_WARNINGS[summary.effectiveState] : undefined) ??
-    (allowedCount === 0 ? POOL_STATE_WARNINGS['configured-empty'] : undefined);
+    (allowedCount === 0 ? POOL_STATE_WARNINGS['configured-empty'] : undefined) ??
+    // Placement needs an active, currently available candidate on an enabled account.
+    defaultWorkspaceFitWarning(
+      groups
+        .filter(
+          (group) =>
+            summary.sources.some(
+              (source) => source.id === group.key && source.status === 'active'
+            ) && !isCapacitySourceExcluded(pool, group.key)
+        )
+        .flatMap((group) =>
+          group.rows.filter((row) =>
+            row.cells.some((cell) =>
+              cell.candidates.some(
+                (candidate) => candidate.status === 'active' && candidate.addable
+              )
+            )
+          )
+        )
+        .map((row) => ({
+          vcpu: row.vcpu,
+          memoryMb: row.ramGb === null ? null : row.ramGb * 1024,
+          diskGb: row.diskGb,
+        })),
+      placementSettings
+    );
   const sentence = allowedMachinesSentence(groups);
   const strategy = WORKSPACE_STRATEGY_COPY[pool.strategy];
   const exhaustion = EXHAUSTION_POLICY_COPY[pool.exhaustionPolicy];
