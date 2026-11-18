@@ -23,6 +23,7 @@ import { log } from '../lib/logger';
 import {
   attachUpstreamTokenUsageAccounting,
   estimateInputTokensFromMessages,
+  estimateInputTokensFromRequest,
   optionalExecutionContext,
 } from '../services/ai-token-usage-accounting';
 import { copyCredentialLimitHeaders } from '../services/credential-limit-events';
@@ -205,7 +206,10 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
       env: c.env,
       userId,
       format: 'anthropic',
-      fallbackInputTokens: estimateInputTokensFromMessages(body.messages),
+      fallbackInputTokens:
+        upstream.credentialSource === 'platform' && hasLocalAiCostMetering(c.env)
+          ? estimateInputTokensFromRequest(body)
+          : estimateInputTokensFromMessages(body.messages),
       provider: upstream.provider,
       costModelId: platformCostModelId(upstream, modelId),
       estimateMissingUsage:
@@ -392,7 +396,10 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
       env: c.env,
       userId,
       format: 'openai',
-      fallbackInputTokens: estimateInputTokensFromMessages(body.messages),
+      fallbackInputTokens:
+        upstream.credentialSource === 'platform' && hasLocalAiCostMetering(c.env)
+          ? estimateInputTokensFromRequest(body)
+          : estimateInputTokensFromMessages(body.messages),
       provider: upstream.provider,
       costModelId: platformCostModelId(upstream, modelId),
       estimateMissingUsage:

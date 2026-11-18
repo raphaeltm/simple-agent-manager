@@ -208,6 +208,15 @@ export function estimateInputTokensFromMessages(messages: unknown): number {
   return Math.ceil(totalChars / 4);
 }
 
+/**
+ * Missing-usage estimate for a parsed passthrough request. Include system prompts, schemas,
+ * names and structured tool history, not only message text. Serialized control fields add
+ * small overhead; their numeric values never multiply the estimate. Measured usage wins.
+ */
+export function estimateInputTokensFromRequest(body: Record<string, unknown>): number {
+  return Math.ceil(utf8ByteLength(JSON.stringify(body)) / 4);
+}
+
 export async function collectStreamTokenUsage(
   stream: ReadableStream<Uint8Array>,
   format: TokenUsageFormat,

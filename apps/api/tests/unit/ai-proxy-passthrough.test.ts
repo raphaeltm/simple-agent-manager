@@ -1118,6 +1118,7 @@ describe('L13: platform-owned passthrough credentials count toward the monthly c
       stream?: boolean;
       missingUsage?: boolean;
       gateway?: boolean;
+      requestBody?: Record<string, unknown>;
     } = {}
   ) {
     const model = options.model ?? PRICED.id;
@@ -1168,6 +1169,7 @@ describe('L13: platform-owned passthrough credentials count toward the monthly c
       {
         ...(options.anthropic ? anthropicMessagesBody(model) : openaiChatBody(model)),
         stream: options.stream ?? false,
+        ...options.requestBody,
       },
       {},
       options.gateway ? {} : NO_GATEWAY
@@ -1226,6 +1228,46 @@ describe('L13: platform-owned passthrough credentials count toward the monthly c
     expect(args[3]).toBeGreaterThan(0);
     expect(args[4]).toBeGreaterThan(0);
     expect(args[6]).toBeGreaterThan(0);
+  });
+
+  it.each([
+    [false, false], [false, true], [true, false], [true, true],
+  ])('includes tool schemas and structured history in input fallback, anthropic=%s stream=%s', async (anthropic, stream) => {
+    const description = 'Detailed schema information. '.repeat(200);
+    const argumentsJson = JSON.stringify({ query: 'long historical tool input '.repeat(200) });
+    const requestBody = anthropic
+      ? {
+          system: description,
+          tools: [{ name: 'lookup', description, input_schema: { type: 'object' } }],
+          messages: [{ role: 'assistant', content: [{ type: 'tool_use', id: 'call', name: 'lookup', input: { query: argumentsJson } }] }],
+        }
+      : {
+          tools: [{ type: 'function', function: { name: 'lookup', description, parameters: { type: 'object' } } }],
+          messages: [{ role: 'assistant', content: null, tool_calls: [{ id: 'call', type: 'function', function: { name: 'lookup', arguments: argumentsJson } }] }],
+        };
+    const model = anthropic
+      ? PLATFORM_AI_MODELS.find((m) => m.provider === 'anthropic')!.id
+      : PRICED.id;
+    expect((await callWithSource('platform', { model, anthropic, stream, missingUsage: true, requestBody })).status).toBe(200);
+    const usage = mockIncrementProviderUsage.mock.calls[0]!;
+    expect(usage[3]).toBeGreaterThanOrEqual(Math.ceil(JSON.stringify(requestBody).length / 4));
+  });
+
+  it.each(['user-attachment', 'project-attachment', 'gateway'])(
+    'preserves previous streaming input estimation for %s', async (source) => {
+      await callWithSource(source === 'gateway' ? 'platform' : source, {
+        gateway: source === 'gateway', stream: true, missingUsage: true,
+        requestBody: { tools: [{ description: 'large tool schema '.repeat(200) }] },
+      });
+      expect(mockIncrementProviderUsage.mock.calls[0]?.[3]).toBe(1);
+    }
+  );
+
+  it('keeps measured input authoritative even with a larger tool schema', async () => {
+    await callWithSource('platform', {
+      requestBody: { tools: [{ description: 'large tool schema '.repeat(1000) }] },
+    });
+    expect(mockIncrementProviderUsage.mock.calls[0]?.[3]).toBe(1000);
   });
 
   it('prices a call served by a platform credential, with its catalog model', async () => {

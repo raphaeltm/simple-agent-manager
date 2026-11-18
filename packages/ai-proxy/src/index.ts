@@ -80,6 +80,7 @@ export {
   attachTokenUsageAccounting,
   attachUpstreamTokenUsageAccounting,
   estimateInputTokensFromMessages,
+  estimateInputTokensFromRequest,
   type MeasuredTokenUsage,
   measuredTokenUsage,
   optionalExecutionContext,

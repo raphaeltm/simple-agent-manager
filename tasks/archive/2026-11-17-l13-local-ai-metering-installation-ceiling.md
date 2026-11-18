@@ -107,3 +107,17 @@ The coordinator lifted the #2841 production hold in event
 - Independent security/completion delta review PASS: inference cannot proceed with unknown
   ceiling state. These changes affect only no-gateway local metering; prior accepted Gateway
   staging evidence carries unchanged. Fault-path live proof is also owed to self-host L22.
+
+## Complete request fallback and ceiling validation follow-up
+- Missing-usage input estimates now cover the full serialized request (system prompts, tool
+  schemas, structured history and names) for locally metered platform-funded passthrough calls.
+  Four JSON/SSE regressions across Anthropic/OpenAI went RED with zero input before the fix and
+  GREEN afterward; Gateway/user/project-funded controls retain their prior estimate and measured
+  usage retains precedence.
+- Removed the arbitrary $1M ceiling validation maximum. Admin remains the business limit; only
+  nonnegative safe-integer whole USD is required for exact numeric representation. Two cases
+  above the old maximum went RED before the fix; all seven validation cases now pass.
+- Combined Worker settings/ports/real-SQLite/passthrough tests: 88 PASS; package187 PASS. The
+  configuration reference describes both behaviors; all53pages have zero broken internal links.
+- The fixes affect no-gateway local metering/validation. Accepted Gateway staging evidence
+  carries unchanged; self-host missing-usage/ceiling live proof remains owed to L22.

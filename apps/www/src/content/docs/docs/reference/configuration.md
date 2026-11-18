@@ -2171,7 +2171,9 @@ Without a gateway, the cap each call is checked against is the lower of the user
 `aiProxy.perUserMonthlyCostCeilingUsd` (`ai-monthly-cost-cap.ts:effectiveMonthlyCostCapUsd`, the one cap
 predicate shared by the gate, `GET /api/usage/ai/budget` and budget validation). A user who clears
 their cap is still held to the ceiling, and `PUT /api/usage/ai/budget` refuses a cap above it. The
-ceiling is per user, not a total across users. It is read from the per-isolate admin settings
+ceiling is per user, not a total across users. The operator chooses its amount in Admin; validation
+requires nonnegative whole USD within numeric precision, with no separate business maximum.
+It is read from the per-isolate admin settings
 cache (a change applies within 60 seconds), only on the no-gateway path, so a gateway
 installation's `/ai/v1` reads are unchanged. If the settings snapshot cannot be read after its cache expires,
 locally metered platform-funded inference is refused with a retryable `503 SERVICE_UNAVAILABLE`,
@@ -2189,6 +2191,8 @@ day breakdowns on installations without a gateway (`packages/ai-proxy/src/ai-mod
 
 Locally metered passthrough calls using an installation-owned credential must use a model in
 SAM's pricing catalog; unknown models are refused before forwarding. Missing provider usage is
-estimated, including generated output. User- and project-owned credentials remain usable after
+estimated from serialized request bytes (including tool schemas, system prompts and structured
+tool history) and generated output. Provider-reported usage takes precedence over these fallback
+estimates. User- and project-owned credentials remain usable after
 platform-funded monthly spend reaches its limit; daily token budgets still apply to all calls.
 An administrator ceiling denial directs the user to their administrator or the next month.

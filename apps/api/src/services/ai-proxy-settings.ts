@@ -10,9 +10,6 @@ export const AI_PROXY_PER_USER_MONTHLY_COST_CEILING_SETTING =
 export type AiProxySettingName =
   typeof AI_PROXY_DIRECT_UPSTREAM_SETTING | typeof AI_PROXY_PER_USER_MONTHLY_COST_CEILING_SETTING;
 
-/** Largest installation ceiling an admin can enter, in whole USD (input sanity bound only). */
-export const MAX_AI_PROXY_PER_USER_MONTHLY_COST_CEILING_USD = 1_000_000;
-
 export const AI_PROXY_SETTINGS: readonly AdminSettingDefinition[] = [
   {
     name: AI_PROXY_DIRECT_UPSTREAM_SETTING,
@@ -35,11 +32,12 @@ export const AI_PROXY_SETTINGS: readonly AdminSettingDefinition[] = [
       'Monthly AI spend ceiling for each user (not a total across users), in whole USD (0 = none). Applies where SAM prices AI calls itself, that is an installation without Cloudflare AI Gateway: no user can spend more than this in a UTC month, whatever monthly cap they set, and clearing their own cap does not remove it. Users cannot set a cap above it. Calls to a model with no catalog price count $0, so daily token limits remain the bound for those. Ignored where an AI Gateway exists (caps there are priced from gateway logs).',
     secret: false,
     risky: false,
-    range: { min: 0, max: MAX_AI_PROXY_PER_USER_MONTHLY_COST_CEILING_USD },
+    // Representation bound only: the operator chooses the business limit in this setting.
+    range: { min: 0, max: Number.MAX_SAFE_INTEGER },
     validate: (value) =>
       typeof value === 'number' &&
-      Number.isInteger(value) &&
+      Number.isSafeInteger(value) &&
       value >= 0 &&
-      value <= MAX_AI_PROXY_PER_USER_MONTHLY_COST_CEILING_USD,
+      value <= Number.MAX_SAFE_INTEGER,
   },
 ];
