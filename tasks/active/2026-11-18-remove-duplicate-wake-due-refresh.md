@@ -25,7 +25,7 @@ Narrow audit: markSchedulerSuccess still writes failure reset/diagnostics; capac
 - [x] Read supplied measurement notes and trace both refreshes and all readers/writers
 - [x] Verify current-main workerd counts, add budget and behavior tests
 - [x] Remove only explicit post-claim refresh
-- [ ] Prove cost and scheduler/delivery tests discriminating
+- [x] Prove cost and scheduler/delivery tests discriminating
 - [ ] Run lint/typecheck/tests/build and local specialist reviews
 - [ ] Deploy staging and verify Instant subscription -> channel event -> agent wake; clean up/release
 - [ ] CI and best-effort CodeRabbit; merge and monitor production deploy
@@ -34,3 +34,11 @@ Narrow audit: markSchedulerSuccess still writes failure reset/diagnostics; capac
 ## Acceptance criteria
 
 Real workerd productive core cost falls exactly 8 writes per batch for one/burst events; due state correctly clears or retains remaining matches. Real scheduler/pass loop preserves exact fire times, occupancy, cooldown, retry and delivered events. Staging wake works end to end. All gates pass; production measurement states coverage and uncontrolled-traffic limitation.
+
+## Local validation and discrimination
+
+Current main measured: N1=69, N8=111, N20=183; new budget tests RED by exactly 8 each. After deletion: 61/103/175 (55+6N), production RowUsage and cursor counts agree. Focused regression 4 files/51 tests PASS; final strengthened test + actual steer delivery alarm 2 files/8 tests PASS. Scheduler loop asserts exact t0+1000, t0+65000, t0+126000 and null after draining. Split batch retains earliest pending due; final claim clears it.
+
+Discrimination: suppress only retained helper refresh in cloned actual compiled production module -> scheduler test fails at final due NULL assertion (timestamp remains). Restore refresh, suppress only retry checkpoint -> same test fails at persisted retry attempt assertion (expected retry/busy/completed_at, got empty). Clone missing dependency setup caused one earlier collection failure, which is not discrimination evidence; corrected run collected all4 and failed the intended1. No mutant committed.
+
+Root lint23/typecheck38/build19 tasks PASS; root tests ongoing. Reviewers found no runtime correctness issue; medium test-discrimination/assertion findings addressed above. PR2882 draft. Staging primary reservation44262292426 succeeded, own turn until09:22Z, no migration added. Runtime .codex/config.toml pre-existing modification excluded.

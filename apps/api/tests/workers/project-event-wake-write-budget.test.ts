@@ -145,6 +145,27 @@ describe('project-event materializer write budget', () => {
           expect(remainingDue).toBeTypeOf('number');
           // Pending delivery owns occupancy; a busy retry cannot create another batch.
           await retryWakeBehindBusyTurn(f, first.id, t0 + 2_000);
+          expect(
+            await sqlRows(
+              f.stub,
+              `SELECT state, error_code, completed_at FROM project_event_delivery_attempts
+             WHERE batch_id = ? AND attempt_number > 0`,
+              first.id
+            )
+          ).toEqual([{ state: 'retry', error_code: 'busy', completed_at: t0 + 2_000 }]);
+          expect(
+            await sqlRows(
+              f.stub,
+              'SELECT state, updated_at, terminal_reason FROM project_event_delivery_batches WHERE id = ?',
+              first.id
+            )
+          ).toEqual([
+            {
+              state: 'pending',
+              updated_at: t0 + 2_000,
+              terminal_reason: 'Target VM is currently processing a prompt',
+            },
+          ]);
           expect(await wakeDueAt(f, t0 + 3_000)).toBeNull();
           expect(await materialize(f, t0 + 3_000)).toMatchObject({ status: 'no_due_work' });
           expect(await wakeBatches(f, f.a.sessionId)).toHaveLength(1);
