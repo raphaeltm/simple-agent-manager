@@ -67,7 +67,8 @@ coordinator review) and missing CI (F12).
 - [x] Review fixes: sam-mx strict alignment default, DKIM-only replay binding (signed To/Cc + Date window + single To/Cc/Date), conn-bound gateway ctx + timeout ordering, shutdown drain; SMTP envelope validation; sanitized agent-visible SMTP errors; create-account empty owner refusal; compose passthrough (#2888)
 - [x] Deferred MEDIUM/LOW review items tracked in idea 01M7QHHKBJP5D57Z9DQF25X2GP
 - [ ] Staging: Cloudflare email sign-in and inbound agent email unchanged
-- [ ] BOX: SMTP sign-in, inbound mail via sam-mx + gateway, F13 fixes, with real mail
+- [x] BOX: SMTP sign-in, inbound mail via sam-mx + gateway, F13 fixes, with real mail (evidence below)
+- [x] BOX restore and cleanup (box back on ba35d4905, .env and secrets.env byte-identical, temp resources removed; BOX FREE posted)
 
 ## Acceptance criteria
 
