@@ -365,15 +365,25 @@ test.describe('Insights', () => {
       await seedTheme(page, theme);
       await setupScene(page, 'empty', [], 'admission-hit');
       await page.goto(`${BASE}/accounts`);
-      await expect(
-        page.getByText(
-          'Token usage is incomplete for this range. Some usage could not be recorded; shown token and spend totals are lower bounds.'
-        )
-      ).toBeVisible();
+      await expect(page.getByText('Token usage is incomplete for this range.')).toBeVisible();
       await expect(page.getByTestId('insights-accounts-empty')).toBeVisible();
       await capture(page, `insights-accounts-admission-${theme}`);
     });
   }
+
+  test('accounts keeps complete totals exact beside another run admission warning', async ({
+    page,
+  }) => {
+    await setupScene(page, 'realistic', [], 'admission-other-account');
+    await page.goto(`${BASE}/accounts`);
+    await expect(page.getByText(/Token usage is incomplete/)).toBeVisible();
+    const key = page.getByTestId('insights-account-cred:cc-key');
+    await expect(key.getByTestId('insights-usage-tokens')).toContainText('21.6M');
+    await expect(key.getByTestId('insights-usage-tokens')).not.toContainText('+');
+    await expect(key.getByTestId('insights-usage-spend')).toContainText('41.27');
+    await expect(key.getByTestId('insights-usage-spend')).not.toContainText('At least');
+    await capture(page, 'insights-accounts-unaffected-account');
+  });
 
   test('accounts for an empty project', async ({ page }) => {
     await setupScene(page, 'realistic', [], 'empty');

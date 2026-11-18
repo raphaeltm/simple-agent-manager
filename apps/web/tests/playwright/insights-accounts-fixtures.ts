@@ -14,7 +14,13 @@ import type {
 } from '@simple-agent-manager/shared';
 
 export type AccountsScene =
-  'realistic' | 'stress' | 'empty' | 'partial' | 'tokens-failed' | 'admission-hit';
+  | 'realistic'
+  | 'stress'
+  | 'empty'
+  | 'partial'
+  | 'tokens-failed'
+  | 'admission-hit'
+  | 'admission-other-account';
 
 const DAY = 86_400_000;
 const MIN = 60_000;
@@ -139,6 +145,9 @@ export function makeAccounts(
     unavailable: [],
     generatedAt: new Date(now).toISOString(),
   };
+  if (scene === 'admission-other-account') {
+    return { ...makeAccounts(projectId, range, 'realistic', now), usageAdmissionLimited: true };
+  }
   if (scene === 'partial') {
     // The stall reads failed this time: the accounts still show, the stall list says so.
     const realistic = makeAccounts(projectId, range, 'realistic', now);
@@ -164,7 +173,7 @@ export function makeAccounts(
   if (scene === 'empty' || scene === 'admission-hit') {
     return {
       ...base,
-      usageLimited: scene === 'admission-hit',
+      usageAdmissionLimited: scene === 'admission-hit',
       accounts: [],
       stallEpisodes: { items: [], total: 0, listed: 10, truncated: false },
       totals: { runs: 0, merged: 0 },

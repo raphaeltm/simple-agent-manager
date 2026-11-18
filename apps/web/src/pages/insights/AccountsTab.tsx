@@ -76,11 +76,8 @@ export function AccountsBody({ data }: { data: ProjectAccountsResponse }) {
         </Notice>
       )}
 
-      {data.usageLimited && (
-        <Notice>
-          Token usage is incomplete for this range. Some usage could not be recorded; shown token
-          and spend totals are lower bounds.
-        </Notice>
+      {(data.usageLimited || data.usageAdmissionLimited) && (
+        <Notice>Token usage is incomplete for this range.</Notice>
       )}
 
       {data.accounts.length === 0 && !runsFailed ? (

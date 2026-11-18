@@ -392,7 +392,8 @@ export async function projectAccounts(
       runs: list.reduce((sum, account) => sum + account.runs, 0),
       merged: list.reduce((sum, account) => sum + account.merged, 0),
     },
-    usageLimited: usage.limited || hasRunUsageAdmissionHit(rows.usageAdmission),
+    usageLimited: usage.limited,
+    usageAdmissionLimited: hasRunUsageAdmissionHit(rows.usageAdmission),
     unavailable: [...unavailable],
     generatedAt: new Date().toISOString(),
   };
