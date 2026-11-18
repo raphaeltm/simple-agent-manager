@@ -119,7 +119,10 @@ import {
 } from './provider-limit-attention';
 import * as questionAsks from './question-asks';
 import * as reconciliation from './reconciliation';
-import { releaseQuestionHold } from './reconciliation-candidate-state';
+import {
+  holdReconciliationAfterArchive,
+  releaseQuestionHold,
+} from './reconciliation-candidate-state';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import { instrumentRowUsage, RowUsage } from './row-usage';
 import { countRunNudges } from './run-nudges';
@@ -1087,7 +1090,9 @@ export class ProjectData extends DurableObject<Env> {
         sessionId,
       }),
     ]);
-    if (closed > 0 && releaseQuestionHold(this.sql, sessionId)) await this.recalculateAlarm();
+    // Any person's message releases a question hold, including the one an archive leaves when
+    // no question is open any more (`holdReconciliationAfterArchive`).
+    if (releaseQuestionHold(this.sql, sessionId)) await this.recalculateAlarm();
     return closed;
   }
 
@@ -3006,6 +3011,36 @@ export class ProjectData extends DurableObject<Env> {
         reason: input.reason,
         options: input.options,
       },
+      input.sessionId
+    );
+  }
+
+  /**
+   * The person archived a question in this chat: open chat views stop showing it, and SAM's
+   * check-ins stay off the chat until `holdCheckinsUntil` or until the person writes in it
+   * (`holdReconciliationAfterArchive`), so archiving does not nudge the agent (archive tells the
+   * agent nothing; Raphaël, 2026-11-17).
+   *
+   * The archive closed its record before this call, so a person's message can land in between;
+   * its persistence released a hold that did not exist yet. A message newer than `archivedAt`
+   * therefore means no hold. `archivedAt` is absent only from an earlier build's call.
+   */
+  async recordQuestionArchived(input: {
+    sessionId: string;
+    askId: string;
+    holdCheckinsUntil: number;
+    archivedAt?: number;
+  }): Promise<void> {
+    const wroteSince =
+      input.archivedAt !== undefined &&
+      questionAsks.humanMessageSince(this.sql, input.sessionId, input.archivedAt);
+    if (!wroteSince) {
+      holdReconciliationAfterArchive(this.sql, input.sessionId, input.holdCheckinsUntil);
+      await this.recalculateAlarm();
+    }
+    this.broadcastEvent(
+      'attention.resolved',
+      { sessionId: input.sessionId, markerId: input.askId, reason: 'archived' },
       input.sessionId
     );
   }

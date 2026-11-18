@@ -169,8 +169,9 @@ or archived, and reads the comments at those wakes.
 
 A teammate who cannot read the agent's chat still sees the task, its steps, links and discussion,
 never the chat transcript. Task discussion also appears on the project's Comments page for the
-people who can read the task. If you leave the project, your open tasks go to the team and the agent
-is told. If the agent's chat is archived or its work has finished, the task stays open for you; the
+people who can read the task; for everyone else it neither takes a place on the page nor counts in
+its total (`listProjectCommentInbox`, `packages/project-data/src/do/project-comment-inbox.ts`).
+If you leave the project, your open tasks go to the team and the agent is told. If the agent's chat is archived or its work has finished, the task stays open for you; the
 changes are recorded but no longer wake that chat.
 
 Implementation: `assignAgentTask` (`packages/operations/src/inbox-agent-tasks.ts`), the task
@@ -210,9 +211,12 @@ item closes by itself. An item you archived stays archived while the thing keeps
 
 ## Archive
 
-**Archive** (the box at the top) means you will not act on the item: it closes, and the agent is
-told. A permission is denied, a secret declined and an approval denied. A Problem has no agent, so
-archiving it tells no one. For a few seconds the
+**Archive** (the box at the top) means you will not act on the item: it closes. Archiving a
+question, review or result does not tell the agent; it stays where it is until you answer something or
+write in its chat. SAM's automatic check-ins also stay off that chat until you write in it (for up
+to `inbox.archiveCheckinHoldHours`, a week by default), so nothing nudges the agent. A permission is denied, a secret declined and an approval denied, and the agent
+hears that. Archiving a task tells the chats watching it. A Problem has no agent, so archiving it
+tells no one. For a few seconds the
 receipt offers **Undo**; nothing is sent until that time is up. If you leave the page or close the
 tab first, the archive is sent then.
 

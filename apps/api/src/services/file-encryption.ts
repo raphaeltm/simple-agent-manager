@@ -77,6 +77,9 @@ const DEFAULT_KEY_VERSION = '1';
  *
  * @param keyVersion — KEK version identifier (configurable via LIBRARY_KEY_VERSION env var)
  */
+/** Web Crypto AES-GCM default tag length: stored ciphertext is plaintext plus this. */
+export const AES_GCM_TAG_BYTES = 16;
+
 export async function encryptFile(
   data: ArrayBuffer,
   kekBase64: string,

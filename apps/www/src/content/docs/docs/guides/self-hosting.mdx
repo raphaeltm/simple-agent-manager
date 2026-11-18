@@ -33,7 +33,20 @@ instance owns session replacement. Its Login plugin must apply the server-select
 with `unchange: false`, and every subsequent operation checks that session against the lease.
 Credential-key rotation recovery is tracked separately. Changing the root key rejects stale
 resume derivation and old session IDs, but a credential matching the stored lease hash can
-still log in and obtain the new session ID; root-key rotation alone does not revoke that lease. Cloud-init and installer packaging follow this foundation.
+still log in and obtain the new session ID; root-key rotation alone does not revoke that lease. Installer packaging follows this foundation.
+
+The node boot document for this transport comes from `@simple-agent-manager/cloud-init`. A
+non-empty `reverseTunnelCredential` selects reverse-tunnel mode (`isReverseTunnelMode` in
+`packages/cloud-init/src/reverse-tunnel.ts`). The node then gets the Cloudflare Tunnel firewall
+(no public agent or SSH ingress), no Origin CA certificate and no cloudflared. It installs a
+pinned frpc release, checked against a per-architecture sha256, and runs it as the unprivileged
+`sam-frpc` unit (`packages/cloud-init/src/template-reverse-tunnel.ts`). frpc dials the control
+plane host over `wss` on its public HTTPS port, verifies its certificate against the system CA
+store, and exposes only the agent's loopback tunnel listener as one TCP proxy on the leased port.
+The credential is written only to the root-only `/etc/sam/frpc/credential.env`; `frpc.toml`
+reads it through frp's environment template. A failed frpc install reports the
+`frpc_install` boot-failure reason. Cloudflare nodes never set these variables and render
+exactly as before.
 
 The self-host entry wraps the shared Worker with `withReverseTunnel(worker, render)` from
 `apps/api/src/selfhost/reverse-tunnel/entry.ts`. That call installs the transport driver, serves

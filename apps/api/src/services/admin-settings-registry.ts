@@ -7,6 +7,7 @@ import { FEATURE_SETTINGS } from './admin-settings-features-definitions';
 import { GCP_CATALOG_SETTINGS } from './admin-settings-gcp-catalog-definitions';
 import { INFOMANIAK_SETTINGS } from './admin-settings-infomaniak-definitions';
 import { INSTRUCTION_BUDGET_SETTINGS } from './admin-settings-instructions-definitions';
+import { LIBRARY_MULTIPART_SETTINGS } from './admin-settings-library-definitions';
 import { LIFECYCLE_LATENCY_SETTINGS } from './admin-settings-lifecycle-latency-definitions';
 import { MESSAGE_MERGE_SETTINGS } from './admin-settings-message-merge-definitions';
 import { NODE_TUNNEL_SETTINGS } from './admin-settings-node-tunnel-definitions';
@@ -35,6 +36,7 @@ export {
   OPERATOR_DEFAULTS,
 } from './admin-setting-definitions';
 const definitions = [
+  ...LIBRARY_MULTIPART_SETTINGS,
   ...ACCOUNT_LINKING_SETTINGS,
   ...llmEndpointSettingDefinitions(),
   ...AI_PROXY_SETTINGS,

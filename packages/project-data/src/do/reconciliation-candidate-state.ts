@@ -201,6 +201,30 @@ export function deferReconciliationCandidateUntil(
   });
 }
 
+/**
+ * A person archived a question in this chat: hold SAM's check-ins off it until `until`, or until
+ * the person writes in the chat (`releaseQuestionHold`). Archive tells the agent nothing
+ * (Raphaël, 2026-11-17), and without this hold the archive would make an idle chat a check-in
+ * candidate at once. Never shortens a longer hold, and keeps a permanent task exclusion and a
+ * pending check-in intent.
+ */
+export function holdReconciliationAfterArchive(
+  sql: SqlStorage,
+  sessionId: string,
+  until: number
+): void {
+  if (!Number.isFinite(until)) return;
+  const key = gateKey(sessionId);
+  const existing = parseGate(readMeta(sql, key));
+  if (existing?.excludedTaskId) return;
+  writeMeta(sql, key, {
+    ...(existing?.checkinIntent ? { checkinIntent: existing.checkinIntent } : {}),
+    attempts: existing?.attempts ?? 0,
+    nextAttemptAt: Math.max(existing?.nextAttemptAt ?? 0, until),
+    questionHold: true,
+  });
+}
+
 /** Create once and then reuse the same VM receipt and transcript identities. */
 export function getOrCreateReconciliationCheckinIntent(
   sql: SqlStorage,

@@ -2,12 +2,15 @@
  * MCP tool `replace_library_file`: replace a library file's content with a workspace file.
  * Split from `library-tools.ts` (rule 18); `library-tools.ts` re-exports the handler.
  */
+import { AppError } from '@simple-agent-manager/worker-core';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { releaseArrayBuffer } from '../../lib/release-array-buffer';
 import { getFile, getMaxTagsPerFile, replaceFile, updateTags } from '../../services/file-library';
+import { withLibraryMemory } from '../../services/library-memory';
 import {
   downloadFromWorkspace,
   resolveWorkspaceVmUrl,
@@ -86,34 +89,39 @@ export async function handleReplaceLibraryFile(
       return jsonRpcError(requestId, INTERNAL_ERROR, vmResult.error);
     }
 
-    // Download new file from workspace
-    const { data, contentType } = await downloadFromWorkspace(
-      env,
-      vmResult.vmBaseUrl,
-      vmResult.nodeId,
-      tokenData.workspaceId,
-      tokenData.userId,
-      filePath.trim()
-    );
+    const updated = await withLibraryMemory(async () => {
+      // Download new file from workspace
+      const { data, contentType } = await downloadFromWorkspace(
+        env,
+        vmResult.vmBaseUrl,
+        vmResult.nodeId,
+        tokenData.workspaceId,
+        tokenData.userId,
+        filePath.trim()
+      );
+      try {
+        // Extract filename from path
+        const filename = filePath.trim().split('/').pop() || existingFile.file.filename;
+        const mimeType = contentType;
 
-    // Extract filename from path
-    const filename = filePath.trim().split('/').pop() || existingFile.file.filename;
-    const mimeType = contentType;
-
-    // Replace file in library
-    const updated = await replaceFile(
-      db,
-      env.R2,
-      encryptionKey,
-      env,
-      tokenData.projectId,
-      fileId,
-      tokenData.userId,
-      filename,
-      mimeType,
-      data,
-      { description }
-    );
+        // Replace file in library
+        return await replaceFile(
+          db,
+          env.R2,
+          encryptionKey,
+          env,
+          tokenData.projectId,
+          fileId,
+          tokenData.userId,
+          filename,
+          mimeType,
+          data,
+          { description }
+        );
+      } finally {
+        releaseArrayBuffer(data);
+      }
+    });
 
     // Merge new tags with existing (additive)
     if (tags && tags.length > 0) {
@@ -139,6 +147,12 @@ export async function handleReplaceLibraryFile(
       ],
     });
   } catch (err) {
+    if (err instanceof AppError && err.statusCode === 429) {
+      return jsonRpcError(requestId, INTERNAL_ERROR, err.message, {
+        httpStatus: 429,
+        retryable: true,
+      });
+    }
     log.error('mcp.replace_library_file.error', {
       projectId: tokenData.projectId,
       fileId,

@@ -57,6 +57,16 @@ import type { ProjectBriefSettingName } from './project-brief-settings-definitio
 import type { OperationProjectDataPort } from './project-data-port';
 import type { OperationContext } from './types';
 
+/**
+ * SAM's check-in hold after an archive. `archivedAt` is read before the closing write, so a
+ * person's chat message persisted after it (which ends the hold) is never undone by the hold
+ * being installed late. `holdCheckinsUntil` is when check-ins may resume regardless.
+ */
+export interface ArchiveCheckinHold {
+  archivedAt: number;
+  holdCheckinsUntil: number;
+}
+
 export type {
   AttentionMarker,
   IdeaUpdate,
@@ -471,12 +481,16 @@ export interface OperationInboxPort {
     askedAt: number;
     userId: string;
   }): Promise<InboxItemContext | null>;
-  /** Resolve a question with reason `archived` and tell the agent the person will not act. */
+  /**
+   * Resolve a question with reason `archived`; the agent is not told, and SAM's check-ins stay
+   * off the chat until `hold.holdCheckinsUntil` or until the person writes in it.
+   */
   archiveAttention(
     userId: string,
     projectId: string,
     sessionId: string,
-    markerId: string
+    markerId: string,
+    hold: ArchiveCheckinHold
   ): Promise<{ agentNotified: boolean }>;
   fulfilSecret(
     userId: string,
@@ -526,6 +540,14 @@ export interface OperationInboxPort {
   announceAsk(input: InboxAskAnnouncement): Promise<{ notificationScheduled: boolean }>;
   /** The agent cancelled a blocking question: its chat stops showing it as paused. Never throws. */
   withdrawQuestion(input: { projectId: string; sessionId: string; askId: string }): Promise<void>;
+  /**
+   * The person archived a question: open chat views stop showing it, and SAM's check-ins stay off
+   * the chat until `holdCheckinsUntil` or until the person writes in it. Tells the agent nothing.
+   * Never throws.
+   */
+  questionArchived(
+    input: { projectId: string; sessionId: string; askId: string } & ArchiveCheckinHold
+  ): Promise<void>;
   /**
    * Whether each link names a thing of this project, in input order: null when it does, else
    * a short reason the agent can act on. Read with the platform's access; nothing is copied.

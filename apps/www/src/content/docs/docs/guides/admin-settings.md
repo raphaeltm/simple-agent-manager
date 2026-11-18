@@ -276,27 +276,28 @@ where it says so and the app continues from there.
 Listed under **Chat**. Bounds for the [inbox](/docs/reference/api/#inbox) list and for the inbox
 items agents file (`packages/operations/src/inbox-settings-definition.ts`).
 
-| Setting                            | Default | Range      | What it limits                                                                            |
-| ---------------------------------- | ------- | ---------- | ----------------------------------------------------------------------------------------- |
-| `inbox.listPageSize`               | 25      | 1–200      | Items one list page returns when the app does not ask for a number                        |
-| `inbox.listPageMax`                | 100     | 1–200      | Most items one list page returns                                                          |
-| `inbox.titleMaxChars`              | 200     | 40–1,000   | Characters of an item title; longer titles are refused when the item is filed             |
-| `inbox.bodyMaxChars`               | 4,000   | 200–20,000 | Characters of an item body (the agent's reason)                                           |
-| `inbox.linksMax`                   | 20      | 0–100      | Links one item may carry                                                                  |
-| `inbox.openItemsPerChat`           | 20      | 1–500      | Open items one chat may have at once; filing past it is refused                           |
-| `inbox.answerMaxChars`             | 4,000   | 100–20,000 | Characters of a typed answer or comment                                                   |
-| `inbox.similarMatchesMax`          | 3       | 0–20       | Similar open items an agent is shown when it files an ask, review or result; 0 turns it off |
-| `inbox.similarScanMax`             | 50      | 1–500      | Newest open items of the project compared when an agent files (rows read per filing)      |
-| `inbox.noticeRetryMinutes`         | 60      | 5–1,440    | Minutes the sweep retries telling an agent its item was answered, archived or expired     |
-| `inbox.automationFailureThreshold` | 2       | 1–20       | Failed runs in a row that file an inbox error item for an automation's owner              |
-| `inbox.errorSweepBatchSize`        | 10      | 1–50       | Error items one five-minute sweep files at most (failed tasks, automations, lost answers) |
-| `inbox.errorLookbackMinutes`       | 30      | 5–1,440    | How far back that sweep looks for failures with no error item yet                         |
-| `inbox.sweepBatchSize`             | 10      | 1–50       | Items each step of the five-minute sweep handles (reminders, expiries, notice retries)    |
-| `inbox.openTasksPerChat`           | 20      | 1–200      | Open human tasks one chat may have assigned; assigning past it is refused                 |
-| `inbox.taskStepsMax`               | 20      | 1–50       | Steps one human task may list                                                             |
-| `inbox.watchersPerItemMax`         | 10      | 1–50       | Chats that may watch one task (the one that assigned it plus chats that attached)         |
-| `inbox.taskActivityMax`            | 100     | 10–500     | Lifecycle rows a task view returns, newest kept; the view says when older ones exist      |
-| `inbox.closedTaskWatchHours`       | 168     | 1–2,160    | Hours a finished, archived or cancelled task still wakes the chats watching it            |
+| Setting                            | Default | Range      | What it limits                                                                                                          |
+| ---------------------------------- | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `inbox.listPageSize`               | 25      | 1–200      | Items one list page returns when the app does not ask for a number                                                      |
+| `inbox.listPageMax`                | 100     | 1–200      | Most items one list page returns                                                                                        |
+| `inbox.titleMaxChars`              | 200     | 40–1,000   | Characters of an item title; longer titles are refused when the item is filed                                           |
+| `inbox.bodyMaxChars`               | 4,000   | 200–20,000 | Characters of an item body (the agent's reason)                                                                         |
+| `inbox.linksMax`                   | 20      | 0–100      | Links one item may carry                                                                                                |
+| `inbox.openItemsPerChat`           | 20      | 1–500      | Open items one chat may have at once; filing past it is refused                                                         |
+| `inbox.answerMaxChars`             | 4,000   | 100–20,000 | Characters of a typed answer or comment                                                                                 |
+| `inbox.similarMatchesMax`          | 3       | 0–20       | Similar open items an agent is shown when it files an ask, review or result; 0 turns it off                             |
+| `inbox.similarScanMax`             | 50      | 1–500      | Newest open items of the project compared when an agent files (rows read per filing)                                    |
+| `inbox.noticeRetryMinutes`         | 60      | 5–1,440    | Minutes the sweep retries telling an agent its item was answered or expired, or a task archived                         |
+| `inbox.automationFailureThreshold` | 2       | 1–20       | Failed runs in a row that file an inbox error item for an automation's owner                                            |
+| `inbox.errorSweepBatchSize`        | 10      | 1–50       | Error items one five-minute sweep files at most (failed tasks, automations, lost answers)                               |
+| `inbox.errorLookbackMinutes`       | 30      | 5–1,440    | How far back that sweep looks for failures with no error item yet                                                       |
+| `inbox.sweepBatchSize`             | 10      | 1–50       | Items each step of the five-minute sweep handles (reminders, expiries, notice retries)                                  |
+| `inbox.openTasksPerChat`           | 20      | 1–200      | Open human tasks one chat may have assigned; assigning past it is refused                                               |
+| `inbox.taskStepsMax`               | 20      | 1–50       | Steps one human task may list                                                                                           |
+| `inbox.watchersPerItemMax`         | 10      | 1–50       | Chats that may watch one task (the one that assigned it plus chats that attached)                                       |
+| `inbox.taskActivityMax`            | 100     | 10–500     | Lifecycle rows a task view returns, newest kept; the view says when older ones exist                                    |
+| `inbox.archiveCheckinHoldHours`    | 168     | 1–2,160    | Hours SAM's automatic check-ins stay off a chat after its question is archived, unless someone writes in the chat first |
+| `inbox.closedTaskWatchHours`       | 168     | 1–2,160    | Hours a finished, archived or cancelled task still wakes the chats watching it                                          |
 
 A question an agent asks with `request_human_input` is an inbox item, and these settings set its
 schedule (`apps/api/src/services/inbox/sweep.ts`, every five minutes):
@@ -1208,3 +1209,14 @@ background login driver may already have started. A late successful scrub or a s
 can finish its current attempt once; it never reopens quarantined cleanup. Once destruction
 is proven, successful D1/pool bookkeeping clears pending cleanup before the failure budget
 is checked; failed bookkeeping still spends the bounded budget.
+
+## Library browser uploads
+
+Search for **library.multipart** in **Admin → Settings** to lower the browser file
+ceiling or adjust multipart overhead, part/header limits and ingress time. The default
+file ceiling is 50 MiB and cannot be raised above that memory-safe ceiling. Existing
+`LIBRARY_UPLOAD_MAX_BYTES` overrides may lower it further. Library writes, downloads/previews and agent transfers share a 50 MiB memory budget
+per Worker isolate. Small uploads and previews run together; a transfer that does not fit
+receives `429` (or an MCP retry error); retry after the active transfer finishes. HTTP reads hold their reservation through response
+consumption/cancellation and use the existing download timeout for their egress deadline. See [Browser Library upload limits](/docs/reference/configuration/#browser-library-upload-limits)
+for defaults and throughput.
