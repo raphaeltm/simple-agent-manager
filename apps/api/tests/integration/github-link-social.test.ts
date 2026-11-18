@@ -605,6 +605,101 @@ describe('Connect GitHub for an email-signed account (vertical slice)', () => {
     expect(githubLinks()).toEqual([{ account_id: '777', user_id: 'email-user' }]);
   });
 
+  it.each(['missing', 'forged'] as const)(
+    'existing GitHub sign-in survives %s link proof and repeated session/account reads',
+    async (kind) => {
+      // Historical production-shaped link; the session itself must come from the real OAuth callback.
+      sqlite
+        .prepare(
+          `INSERT INTO accounts (id, account_id, provider_id, user_id, scope, created_at, updated_at)
+        VALUES ('historical-github', '777', 'github', 'email-user', 'read:user,user:email', 1, 1)`
+        )
+        .run();
+      const callback = await signInWithGitHub();
+      expect(callback.headers.get('location')).toBe(RETURN_TO);
+      const cookie = cookieHeader(callback);
+      expect(cookie).toContain('session_token=');
+      const sessionsBefore = sqlite
+        .prepare("SELECT id, token FROM sessions WHERE user_id = 'email-user' ORDER BY id")
+        .all();
+      expect(sessionsBefore).toHaveLength(1);
+      const accountsBefore = sqlite
+        .prepare(
+          "SELECT id, account_id, access_token FROM accounts WHERE user_id = 'email-user' ORDER BY id"
+        )
+        .all();
+
+      async function assertReadsWork() {
+        for (const suffix of ['/get-session', '/list-accounts']) {
+          const response = await app.request(
+            `${API_ORIGIN}/api/auth${suffix}`,
+            {
+              headers: { cookie, origin: APP_ORIGIN },
+            },
+            env
+          );
+          const body: unknown = await response.json();
+          expect(response.status, JSON.stringify({ suffix, body })).toBe(200);
+          if (suffix === '/get-session')
+            expect(body).toMatchObject({
+              user: { id: 'email-user', email: SAM_EMAIL, emailVerified: true },
+            });
+          else
+            expect(body).toEqual(
+              expect.arrayContaining([
+                expect.objectContaining({ providerId: 'github', accountId: '777' }),
+              ])
+            );
+        }
+      }
+      await assertReadsWork();
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const refused = await startLink(
+          cookie,
+          kind === 'forged' ? 'attacker-forged-proof' : undefined,
+          {
+            serverContext: {
+              samAccountLink: {
+                userId: 'email-user',
+                provider: 'github',
+                expiresAt: Date.now() + 300000,
+              },
+            },
+          }
+        );
+        expect(refused.status, await refused.clone().text()).toBe(403);
+        expect(await refused.json()).toMatchObject({ code: 'LINK_STEP_UP_REQUIRED' });
+        expect(refused.headers.getSetCookie().some((value) => /max-age=0/i.test(value))).toBe(
+          false
+        );
+        await assertReadsWork();
+      }
+      // Concurrent route requests traverse production readAuthSession/withAuthReadDeadline;
+      // get-session is not called through a raw auth.handler shortcut in this harness.
+      await Promise.all(Array.from({ length: 3 }, () => assertReadsWork()));
+      const afterCacheExpiry = Date.now() + 61000;
+      vi.spyOn(Date, 'now').mockReturnValue(afterCacheExpiry);
+      try {
+        await assertReadsWork();
+      } finally {
+        vi.restoreAllMocks();
+      }
+      expect(
+        sqlite
+          .prepare("SELECT id, token FROM sessions WHERE user_id = 'email-user' ORDER BY id")
+          .all()
+      ).toEqual(sessionsBefore);
+      expect(
+        sqlite
+          .prepare(
+            "SELECT id, account_id, access_token FROM accounts WHERE user_id = 'email-user' ORDER BY id"
+          )
+          .all()
+      ).toEqual(accountsBefore);
+      expect(emailUser()).toEqual({ email: SAM_EMAIL, verified: 1 });
+    }
+  );
+
   it('refuses implicit same-email GitHub linking during ordinary social sign-in', async () => {
     github.state.sameEmail = true;
     const response = await signInWithGitHub();
