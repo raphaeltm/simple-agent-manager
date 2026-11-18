@@ -380,12 +380,18 @@ export async function archiveAttention(
   if (prepared.status === 'conflicting_answer' || prepared.status === 'invalid_option')
     throw markRejectedBeforeEffects(errors.conflict('An answer is already being delivered'));
   // `ready` (this request claimed it) and `in_flight` (an archive claim already staged) both end
-  // in the same resolution; no prompt is sent, so there is nothing outcome-unknown to protect.
+  // in the same resolution. An `in_flight` claim is usually one an earlier build left stranded
+  // when its archive prompt's outcome was unknown, so completing it unsticks the item. An
+  // earlier build still sending at this moment (a rolling deploy) may tell the agent anyway,
+  // which is the pre-change behaviour; the claim carries no owner or time to tell the two apart.
+  const ownsClaim = prepared.status === 'ready';
   try {
     await projectDataService.completeAttentionArchive(env, projectId, sessionId, markerId);
   } catch (cause) {
-    // Nothing was sent, so releasing is always safe; a staged claim would block every answer.
-    await projectDataService.releaseAttentionArchive(env, projectId, sessionId, markerId);
+    // Release only a claim this request staged: nothing was sent, and a staged claim would block
+    // every answer. A claim found already staged may belong to a request still in progress.
+    if (ownsClaim)
+      await projectDataService.releaseAttentionArchive(env, projectId, sessionId, markerId);
     throw cause;
   }
   // The resolved marker no longer keeps SAM's check-ins off this chat; hold them until the
