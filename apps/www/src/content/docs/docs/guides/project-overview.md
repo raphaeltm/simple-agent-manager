@@ -59,7 +59,7 @@ Administrators control it in **Admin → Settings → AI models** (`overviewBrie
 ### Needs you
 
 The first items of this project's [Inbox](/docs/guides/inbox/): the questions, permission requests,
-secrets, approvals, reviews, tasks and problems waiting for you, in the same order as the Inbox. A phone
+secrets, approvals, reviews, results, tasks and problems waiting for you, in the same order as the Inbox. A phone
 shows three, a desktop five; the number next to the heading counts them all, and **All**, followed by
 that number, opens the project Inbox.
 

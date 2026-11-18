@@ -69,11 +69,13 @@ export {
   AgentCancelInputSchema,
   type AgentFileResult,
   type AgentLinkInput,
+  type AgentResultInput,
   type AgentReviewInput,
   AgentReviewInputSchema,
   AgentUpdateInputSchema,
   cancelAgentAsk,
   fileAgentAsk,
+  fileAgentResult,
   fileAgentReview,
   updateAgentAsk,
 } from './inbox-agent-core';

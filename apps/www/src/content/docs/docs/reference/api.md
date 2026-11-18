@@ -543,7 +543,7 @@ The list returns `{ pending, settled, cursor }` and needs `task:read` on the pro
 Everything agents are waiting on from you, one item per ask, across projects
 (`apps/api/src/routes/inbox.ts`, operations in `packages/operations/src/inbox-*.ts`). The list reads
 each ask where it is stored: inbox asks (questions agents ask with `request_human_input`, and the
-reviews and tasks they file), permission requests from the chat index (`session_summaries`),
+reviews, results and tasks they file), permission requests from the chat index (`session_summaries`),
 [secret requests](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret) and Operations
 approvals. Nothing is copied.
 
@@ -590,7 +590,7 @@ from the chat index (`attention:` ref, the newest one per chat) until it is answ
 
 Each item has a `ref` naming its store (`ask:<id>`, `attention:<sessionId>:<markerId>`,
 `secret:<id>`, `approval:<id>`), `kind` (`question`, `permission`, `form`, `url`, `secret`,
-`approval`, `review`, `task`, `error`), project and chat, `title` and `body` (agent text, untrusted),
+`approval`, `review`, `result`, `task`, `error`), project and chat, `title` and `body` (agent text, untrusted),
 `blocking`, `agentState` (`waiting`, `working`, `finished`, `not_started`, `unknown`), `status`,
 `createdAt`, `updatedAt`, `failureCount` (error items only, otherwise `null`), `expiresAt`, `dueAt`,
 `links`, `canAct`, and `answerSpec`, which says what an answer
@@ -610,8 +610,11 @@ the same right to wake that chat's agent as answering in the chat.
 Archive closes an item for every kind: an inbox ask (a question too) becomes `archived`, a
 question asked before that change is resolved with reason `archived`, a permission or approval is denied, and a secret request is declined. Each
 tells the agent you will not act. Both writes return `{ ref, outcome, agentNotified }`;
-`agentNotified: false` on an ask means its notice was not queued yet, and SAM retries it for
-`inbox.noticeRetryMinutes`. Writes must come from the app's own origin with
+`agentNotified: false` on an ask usually means its notice was not queued yet, and SAM retries it
+for `inbox.noticeRetryMinutes`. The exception is **Got it** on a result (an empty `acknowledge`
+answer): it closes the item without telling the agent, by design, so nothing is retried. A
+non-empty reply to a review or result whose agent has finished returns `400`, because it could not
+be delivered. Writes must come from the app's own origin with
 `Content-Type: application/json`, like the other answer routes. A missing item and one in another
 project both return `404`; an item that is already closed returns `409`, and one you cannot act
 on returns `403`. The transcript context is returned only to a member who can read the source chat.

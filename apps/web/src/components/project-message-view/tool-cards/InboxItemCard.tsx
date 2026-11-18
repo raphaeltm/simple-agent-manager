@@ -8,12 +8,13 @@ import { Link } from 'react-router';
 
 import { useQueryScope } from '../../../hooks/useQueryScope';
 import { ApiClientError } from '../../../lib/api/client';
-import { inboxItemQueryOptions,inboxQueryKeys } from '../../../lib/query-options/inbox';
+import { inboxItemQueryOptions, inboxQueryKeys } from '../../../lib/query-options/inbox';
 import { useInboxPermissionDetail } from '../../inbox/inbox-actions';
 import { KIND_META } from '../../inbox/inbox-model';
 import { InboxAnswerControls } from '../../inbox/InboxAnswerControls';
 import { inboxPath } from '../../inbox/InboxButton';
 import { InboxLinkChips } from '../../inbox/InboxItemView';
+import { RenderedMarkdown } from '../../MarkdownRenderer';
 import { extractInboxItemRef } from './inbox-item-card-data';
 
 export interface InboxItemCardProps {
@@ -46,16 +47,31 @@ const BADGE_CLASS: Record<Tone, string> = {
   muted: 'bg-surface text-fg-muted',
 };
 
+/** Card heading and status words per kind; anything else reads as a question. */
+const CARD_COPY: Record<
+  'review' | 'result' | 'question',
+  { heading: string; open: string | null; closed: string }
+> = {
+  review: { heading: 'Review requested', open: 'Waiting for your review', closed: 'Reviewed' },
+  result: { heading: 'Result for you', open: 'New result', closed: 'Done' },
+  // A question's open label depends on whether the agent is paused on it.
+  question: { heading: 'Question for you', open: null, closed: 'Answered' },
+};
+
+function cardCopy(item: InboxItem) {
+  return CARD_COPY[item.kind === 'review' || item.kind === 'result' ? item.kind : 'question'];
+}
+
 function statusFor(item: InboxItem): { label: string; tone: Tone } {
-  const review = item.kind === 'review';
+  const copy = cardCopy(item);
   switch (item.status) {
     case 'open':
       // Amber means waiting on you; a blocking ask also has the agent stopped on it.
-      if (review) return { label: 'Waiting for your review', tone: 'open' };
+      if (copy.open) return { label: copy.open, tone: 'open' };
       return { label: item.blocking ? 'Agent paused on this' : 'Needs your answer', tone: 'open' };
     case 'answered':
     case 'done':
-      return { label: review ? 'Reviewed' : 'Answered', tone: 'done' };
+      return { label: copy.closed, tone: 'done' };
     case 'archived':
       return { label: 'Archived', tone: 'muted' };
     case 'cancelled':
@@ -79,10 +95,10 @@ function Body({ text }: { text: string }) {
   return (
     <div>
       <div
-        className={`min-w-0 text-sm whitespace-pre-wrap text-fg-secondary [overflow-wrap:anywhere] ${collapsible && !expanded ? 'max-h-40 overflow-hidden [mask-image:linear-gradient(to_bottom,black_65%,transparent)]' : ''}`}
+        className={`min-w-0 text-sm text-fg-secondary [overflow-wrap:anywhere] ${collapsible && !expanded ? 'max-h-40 overflow-hidden [mask-image:linear-gradient(to_bottom,black_65%,transparent)]' : ''}`}
       >
-        {/* Agent-written and untrusted: plain text, as the Inbox shows it. */}
-        {text}
+        {/* Agent-written markdown, as the Inbox shows it: no raw HTML, sanitized links. */}
+        <RenderedMarkdown content={text} inline />
       </div>
       {collapsible && (
         <Button
@@ -111,7 +127,7 @@ function OpenInboxLink({ item }: { item: InboxItem }) {
     </Link>
   );
 }
-/** The loaded item: its question or review, links, and the same controls as the Inbox. */
+/** The loaded item: its question, review or result, links, and the same controls as the Inbox. */
 function LoadedCard({ item, onChanged }: { item: InboxItem; onChanged: () => void }) {
   const permission = useInboxPermissionDetail(item);
   const [receipt, setReceipt] = useState<string | null>(null);
@@ -130,7 +146,7 @@ function LoadedCard({ item, onChanged }: { item: InboxItem; onChanged: () => voi
             className={`shrink-0 ${status.tone === 'open' ? 'text-warning-fg' : 'text-fg-muted'}`}
             aria-hidden="true"
           />
-          {item.kind === 'review' ? 'Review requested' : 'Question for you'}
+          {cardCopy(item).heading}
         </span>
         <span
           className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${BADGE_CLASS[status.tone]}`}
@@ -176,7 +192,7 @@ function LoadedCard({ item, onChanged }: { item: InboxItem; onChanged: () => voi
 }
 
 /**
- * Renders an `inbox_write` ask or review as the inbox item it filed, so the person can answer it
+ * Renders an `inbox_write` ask, review or result as the inbox item it filed, so the person can answer it
  * in the conversation as well as from the Inbox. The card and the inbox item are two views of one
  * `asks` record: everything shown is read from the inbox, the transcript supplies only the
  * reference, and an answer in either place closes both.

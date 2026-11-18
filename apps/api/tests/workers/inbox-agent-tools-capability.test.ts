@@ -153,6 +153,67 @@ describe('agent inbox tools through the real entry points', () => {
     expect(await deliveriesFor(s, item.id)).toHaveLength(1);
   });
 
+  it('result: filed through inbox_write, shown in Needs you, "Got it" leaves the chat asleep, a reply wakes it once', async () => {
+    const s = await seed();
+    const filed = await callTool(s.token, 'inbox_write', {
+      method: 'result',
+      title: 'The flaky login test is fixed',
+      why: 'It was racing the session cookie. The fix is in the linked PR; CI is green.',
+      links: [{ kind: 'chat', id: s.chatSessionId, label: 'This chat' }],
+    });
+    const item = filed.inboxItem as { ref: string; id: string; kind: string; blocking: boolean };
+    expect(item).toMatchObject({ kind: 'result', blocking: false });
+    expect(String(filed.message)).toContain('"Got it" does not wake you');
+
+    const inbox = await get<ListBody>(`/api/projects/${s.projectId}/inbox`, s.ownerCookie);
+    expect(inbox.body.items).toEqual([
+      expect.objectContaining({ ref: item.ref, kind: 'result', blocking: false }),
+    ]);
+    // Not a review: the Reviews chip does not list it.
+    const reviews = await get<ListBody>(
+      `/api/projects/${s.projectId}/inbox?filter=reviews`,
+      s.ownerCookie
+    );
+    expect(reviews.body.items).toEqual([]);
+    // A result never pauses the chat.
+    const sessions = await s.project.listSessions(null, 20, 0, null, null);
+    expect(
+      sessions.sessions.find((session) => session.id === s.chatSessionId)?.attention ?? null
+    ).toBeNull();
+
+    // "Got it": closed, nothing delivered to the sleeping chat.
+    expect(await s.project.sleepSession(s.chatSessionId)).toBe(true);
+    const gotIt = await post(
+      `/api/projects/${s.projectId}/inbox/items/${encodeURIComponent(item.ref)}/answer`,
+      s.ownerCookie,
+      {}
+    );
+    expect(gotIt.status).toBe(200);
+    expect(gotIt.body).toMatchObject({ outcome: 'answered', agentNotified: false });
+    expect(await deliveriesFor(s, item.id)).toEqual([]);
+    const read = await callTool(s.token, 'inbox_read', { method: 'get', ref: item.ref });
+    expect(read.item).toMatchObject({ status: 'answered', fromThisChat: true });
+
+    // A second result answered with a reply reaches the agent exactly once.
+    const second = await callTool(s.token, 'inbox_write', {
+      method: 'result',
+      title: 'Staging is on the new database',
+    });
+    const secondItem = second.inboxItem as { ref: string; id: string };
+    const replied = await post(
+      `/api/projects/${s.projectId}/inbox/items/${encodeURIComponent(secondItem.ref)}/answer`,
+      s.ownerCookie,
+      { answer: 'Thanks. Do production next week.' }
+    );
+    expect(replied.body).toMatchObject({ outcome: 'answered', agentNotified: true });
+    expect(await deliveriesFor(s, secondItem.id)).toEqual([
+      expect.objectContaining({ sourceKind: 'inbox_ask', sourceTaskId: s.taskId }),
+    ]);
+    const notices = await agentMessages(s, 'The person replied to your inbox item');
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.content).toContain('Do production next week.');
+  });
+
   it('archive: the agent is told the person will not act, once', async () => {
     const s = await seed();
     const filed = await callTool(s.token, 'inbox_write', {
@@ -238,11 +299,19 @@ describe('agent inbox tools through the real entry points', () => {
       const payload = await res.json<{ result: { content: { text: string }[] } }>();
       const lines = JSON.parse(payload.result.content[0]!.text).instructions as string[];
       expect(
-        lines.filter((line) =>
-          line.startsWith('People do not watch chats; they read their inbox.')
-        ),
+        lines.filter((line) => line.startsWith('Nobody reads this chat.')),
         token
       ).toHaveLength(1);
+      const rule = lines.find((line) => line.startsWith('Nobody reads this chat.'))!;
+      // Finished work goes to the inbox as a result, written for a person, and only when it
+      // matters (inbox Result items).
+      expect(rule).toContain('method `result`');
+      expect(rule).toContain('another agent dispatched this task');
+      expect(rule).toContain('Write like a short note to a colleague, in clear, simple language');
+      // Every item gets brief, easy-to-read markdown context (Raphaël, 2026-11-18).
+      expect(rule).toContain('`why` always gives brief, easy-to-read context in markdown');
+      // Nothing tells the agent to answer only in the chat.
+      expect(lines.some((line) => line.includes('Respond to their messages directly'))).toBe(false);
     }
     const response = await SELF.fetch(`https://api.${testEnv.BASE_DOMAIN}/mcp`, {
       method: 'POST',
@@ -256,10 +325,6 @@ describe('agent inbox tools through the real entry points', () => {
     });
     const body = await response.json<{ result: { content: { text: string }[] } }>();
     const instructions = JSON.parse(body.result.content[0]!.text).instructions as string[];
-    expect(
-      instructions.some((line) =>
-        line.startsWith('People do not watch chats; they read their inbox.')
-      )
-    ).toBe(true);
+    expect(instructions.some((line) => line.startsWith('Nobody reads this chat.'))).toBe(true);
   });
 });
