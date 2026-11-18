@@ -34,3 +34,7 @@ Baseline reproduced via Library exec_with_secrets job sx-22f00d8c45c14b053e5a703
 - [x] New real workerd case: CI in_progress, request workflow completes and wakes while CI pending; delivered/read/acked first batch leaves subscription active; CI failure completes60s later and produces a distinct second delivered batch with same one subscription and two readable terminal events.
 - [x] Pin retention wording in both instruction-content entry points. Focused units33/33 and workerd4/4 pass; affected ESLint and context-budget checks pass. Original full-root test/lint/typecheck/build evidence remains valid for prior candidate; added case checked directly.
 - [x] All local reviewers rechecked delta. Docs/completion LOW ambiguity about cancelling fallback on mere progress addressed: cancel when wait ends, not first workflow completion. No runtime changes; staging exception still applies.
+
+## Sonar duplication correction
+
+Current-head Sonar check134669719389 blocked on11.9% duplication. Public duplication API identified only two repeated15-line fixture/subscription setup blocks in the new workerd test (lines21/128). Extracted one small withCiSubscription helper without changing assertions or runtime code. Workerd4/4 and affected ESLint pass after extraction. Test-engineer/Cloudflare and task-completion reviewers rechecked PASS; all4cases and full producer-to-delivery path remain. Fresh CI/Sonar required on corrected head; no exclusion or gate bypass.

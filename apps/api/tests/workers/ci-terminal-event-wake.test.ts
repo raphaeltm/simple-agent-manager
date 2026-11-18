@@ -9,34 +9,46 @@ import {
   twoAgentProject,
   withAgentMessageChannels,
 } from './helpers/agent-message-channels';
-import { materialize, withQuietAlarms } from './helpers/event-wake-harness';
+import { materialize, type WakeFixture, withQuietAlarms } from './helpers/event-wake-harness';
 import { expectSteeredOnce, mockSteered } from './helpers/steer-wake-harness';
 
 const SHA = '1234567890123456789012345678901234567890';
 const OTHER_SHA = 'abcdefabcdefabcdefabcdefabcdefabcdefabcd';
 
+async function withCiSubscription(
+  eventType: string | string[],
+  run: (f: WakeFixture, repository: string, subscription: { id: string }) => Promise<void>
+) {
+  return withAgentMessageChannels(async () => {
+    const f = await twoAgentProject();
+    const repository = `terminal-ci/${f.projectId}`;
+    await env.DATABASE.prepare('UPDATE projects SET repository=? WHERE id=?')
+      .bind(repository, f.projectId)
+      .run();
+    return withQuietAlarms(f, async () => {
+      const { subscription } = okBody<{ subscription: { id: string } }>(
+        await f.a.tool('create_project_event_subscription', {
+          idempotencyKey: 'terminal-ci',
+          filter: {
+            version: 1,
+            source: 'github',
+            subjectType: 'commit',
+            subjectId: SHA,
+            eventType,
+          },
+        })
+      );
+      return run(f, repository, subscription);
+    });
+  });
+}
+
 describe('terminal CI subscription guidance semantics', () => {
   afterEach(() => vi.restoreAllMocks());
   it('keeps one subscription active for two workflows on the same SHA and wakes twice', async () => {
-    await withAgentMessageChannels(async () => {
-      const f = await twoAgentProject();
-      const repository = `multi-workflow-ci/${f.projectId}`;
-      await env.DATABASE.prepare('UPDATE projects SET repository=? WHERE id=?')
-        .bind(repository, f.projectId)
-        .run();
-      await withQuietAlarms(f, async () => {
-        const { subscription } = okBody<{ subscription: { id: string } }>(
-          await f.a.tool('create_project_event_subscription', {
-            idempotencyKey: 'multiple-workflows',
-            filter: {
-              version: 1,
-              source: 'github',
-              subjectType: 'commit',
-              subjectId: SHA,
-              eventType: ['check_suite.completed', 'workflow_run.completed'],
-            },
-          })
-        );
+    await withCiSubscription(
+      ['check_suite.completed', 'workflow_run.completed'],
+      async (f, repository, subscription) => {
         const publish = (id: number, name: string, action: string, conclusion: string | null) =>
           admitGitHubWebhookProjectEvents(testEnv, {
             deliveryId: `${id}-${action}`,
@@ -119,34 +131,17 @@ describe('terminal CI subscription guidance semantics', () => {
             })
           ).events
         ).toHaveLength(2);
-      });
-    });
+      }
+    );
   });
   it.each(['check_suite', 'workflow_run', 'check_run'])(
     'wakes for failed %s on the full SHA, with explicit job opt-in',
     async (eventType) => {
-      await withAgentMessageChannels(async () => {
-        const f = await twoAgentProject();
-        const repository = `terminal-ci/${f.projectId}`;
-        await env.DATABASE.prepare('UPDATE projects SET repository=? WHERE id=?')
-          .bind(repository, f.projectId)
-          .run();
-        await withQuietAlarms(f, async () => {
-          const { subscription } = okBody<{ subscription: { id: string } }>(
-            await f.a.tool('create_project_event_subscription', {
-              idempotencyKey: 'terminal-ci',
-              filter: {
-                version: 1,
-                source: 'github',
-                subjectType: 'commit',
-                subjectId: SHA,
-                eventType:
-                  eventType === 'check_run'
-                    ? 'check_run.completed'
-                    : ['check_suite.completed', 'workflow_run.completed'],
-              },
-            })
-          );
+      await withCiSubscription(
+        eventType === 'check_run'
+          ? 'check_run.completed'
+          : ['check_suite.completed', 'workflow_run.completed'],
+        async (f, repository, subscription) => {
           const deliver = (type: string, sha: string, deliveryId: string) =>
             admitGitHubWebhookProjectEvents(testEnv, {
               deliveryId,
@@ -204,8 +199,8 @@ describe('terminal CI subscription guidance semantics', () => {
             conclusion: 'failure',
             headSha: SHA,
           });
-        });
-      });
+        }
+      );
     }
   );
 });
