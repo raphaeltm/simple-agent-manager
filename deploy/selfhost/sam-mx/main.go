@@ -10,6 +10,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"log/slog"
@@ -66,7 +67,13 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-stop
-		_ = server.Close()
+		// Let in-flight deliveries finish (the Worker may already have committed one) before
+		// closing what is left, within the grace docker gives a stopping container.
+		ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownGrace)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			_ = server.Close()
+		}
 	}()
 	if err := server.Serve(newLimitedListener(listener, cfg)); err != nil && !errors.Is(err, smtp.ErrServerClosed) {
 		slog.Error("sam-mx: server stopped", "error", err.Error())

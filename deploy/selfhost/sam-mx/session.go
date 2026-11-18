@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/emersion/go-smtp"
 )
@@ -16,10 +17,12 @@ type Backend struct {
 	cfg      *Config
 	resolver Resolver
 	gateway  *Gateway
+	// now is the clock the DKIM freshness check reads; time.Now unless a test sets it.
+	now func() time.Time
 }
 
 func NewBackend(cfg *Config, resolver Resolver, gateway *Gateway) *Backend {
-	return &Backend{cfg: cfg, resolver: resolver, gateway: gateway}
+	return &Backend{cfg: cfg, resolver: resolver, gateway: gateway, now: time.Now}
 }
 
 func (b *Backend) NewSession(c *smtp.Conn) (smtp.Session, error) {
@@ -110,7 +113,12 @@ func (s *Session) Data(r io.Reader) error {
 
 	dnsCtx, cancel := context.WithTimeout(context.Background(), cfg.DNSTimeout)
 	defer cancel()
-	verdict, err := Authenticate(dnsCtx, s.backend.resolver, s.ip, s.conn.Hostname(), s.mailFrom, raw, cfg.IsTrusted(s.ip))
+	verdict, err := Authenticate(dnsCtx, s.backend.resolver, s.ip, s.conn.Hostname(), s.mailFrom, raw, cfg.IsTrusted(s.ip), AuthPolicy{
+		RelaxedAlignment: cfg.RelaxedAlignment,
+		DKIMMaxAge:       cfg.DKIMMaxAge,
+		Recipient:        s.rcptTo,
+		Now:              s.backend.now,
+	})
 	if err != nil {
 		var authErr *AuthError
 		if errors.As(err, &authErr) && authErr.Temporary {
@@ -122,7 +130,20 @@ func (s *Session) Data(r io.Reader) error {
 	}
 	logCtx = append(logCtx, "auth", verdict.Result, "spf", verdict.SPF, "dkim", verdict.DKIM)
 
-	result, err := s.backend.gateway.Deliver(context.Background(), Delivery{
+	// Bound to the connection: a client that hangs up, the session lifetime or a shutdown stops
+	// the gateway call instead of leaving it to run to its own timeout.
+	gatewayCtx, cancelGateway := context.WithCancel(context.Background())
+	defer cancelGateway()
+	if done := connDone(s.conn.Conn()); done != nil {
+		go func() {
+			select {
+			case <-done:
+				cancelGateway()
+			case <-gatewayCtx.Done():
+			}
+		}()
+	}
+	result, err := s.backend.gateway.Deliver(gatewayCtx, Delivery{
 		MailFrom: s.mailFrom,
 		RcptTo:   s.rcptTo,
 		Auth:     verdict,

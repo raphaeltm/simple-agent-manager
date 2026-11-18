@@ -23,11 +23,13 @@ import {
   type EmailTransportEnv,
   emailTransportKind,
   type SmtpConnect,
+  SmtpError,
   systemEmailTransportFor,
 } from '@simple-agent-manager/agent-email/definitions';
 import { AGENT_EMAIL_LOCAL_PART } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
+import { log } from '../../lib/logger';
 
 /**
  * Must equal `MIN_REVERSE_TUNNEL_GATEWAY_SECRET_LENGTH` in selfhost/reverse-tunnel/config.ts
@@ -70,12 +72,23 @@ export function selfHostAgentEmailSender(
   const transport = systemEmailTransportFor(env, options);
   if (transport?.kind !== 'smtp') return null;
   return {
-    send(message) {
-      return transport.sender.send({
-        ...message,
-        from: { email: transport.systemFrom(AGENT_EMAIL_LOCAL_PART), name: message.from.name },
-        replyTo: message.from.email,
-      });
+    async send(message) {
+      try {
+        return await transport.sender.send({
+          ...message,
+          from: { email: transport.systemFrom(AGENT_EMAIL_LOCAL_PART), name: message.from.name },
+          replyTo: message.from.email,
+        });
+      } catch (error) {
+        // The failure text reaches the agent (reply_to_email). A relay refusal names only the
+        // step and reply code; a transport failure can name the relay host or TLS details, so the
+        // agent gets a fixed text and the operator log keeps the detail.
+        if (error instanceof SmtpError && error.replyCode !== null) throw error;
+        log.error('agent_email.smtp_transport_failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw new SmtpError('SMTP relay unavailable');
+      }
     },
   };
 }
