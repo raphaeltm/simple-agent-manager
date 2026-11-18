@@ -977,6 +977,42 @@ describe('Admin Observability Routes', () => {
       const doRequest = mockDoStub.fetch.mock.calls[0][0] as Request;
       expect(new URL(doRequest.url).pathname).toBe('/ws');
     });
+
+    function streamNamespace() {
+      const stub = { fetch: vi.fn().mockResolvedValue(new Response(null, { status: 200 })) };
+      const namespace = { idFromName: vi.fn().mockReturnValue('do-id'), get: vi.fn(() => stub) };
+      return { stub, namespace: namespace as unknown as DurableObjectNamespace };
+    }
+
+    it('refuses the stream with FEATURE_UNAVAILABLE when no tail worker feeds it (self-host)', async () => {
+      const { stub, namespace } = streamNamespace();
+
+      const res = await app.request(
+        '/api/admin/observability/logs/stream',
+        { headers: { Upgrade: 'websocket' } },
+        createEnv({ ADMIN_LOGS: namespace, LOG_TAIL_AVAILABLE: 'false' })
+      );
+
+      expect(res.status).toBe(404);
+      const body = await res.json();
+      expect(body.error).toBe('FEATURE_UNAVAILABLE');
+      expect(body.message).toContain('live log stream is not available');
+      expect(stub.fetch).not.toHaveBeenCalled();
+    });
+
+    it('opens the stream for the production shape (LOG_TAIL_AVAILABLE unset or not "false")', async () => {
+      for (const value of [undefined, 'true']) {
+        const { stub, namespace } = streamNamespace();
+
+        await app.request(
+          '/api/admin/observability/logs/stream',
+          { headers: { Upgrade: 'websocket' } },
+          createEnv({ ADMIN_LOGS: namespace, LOG_TAIL_AVAILABLE: value })
+        );
+
+        expect(stub.fetch, `LOG_TAIL_AVAILABLE=${String(value)}`).toHaveBeenCalledTimes(1);
+      }
+    });
   });
 
   // ===========================================================================

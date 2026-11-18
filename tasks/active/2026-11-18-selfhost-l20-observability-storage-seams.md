@@ -52,25 +52,53 @@ lands them on `main` without changing any Cloudflare behaviour. Plan row: idea
 
 ## Implementation Checklist
 
-- [ ] Shared seam `services/analytics-sink.ts` (AE default, installable local sink)
-- [ ] `selfhost/analytics/` D1 sink, SQL translation, purge, settings, install point
-- [ ] Move migration to `selfhost/migrations/observability/` + projection list
-- [ ] Wire middleware, ingest, admin query/gate, purge, forward skip reason, dataset name
-- [ ] Capabilities: analyticsQuery, workersObservability (logSearch), liveLogStream; public logSearch/liveLogStream
-- [ ] Log stream and log search refusals (FEATURE_UNAVAILABLE)
-- [ ] R2 presign config + shared client; attachments, snapshots, compose, build context, upload route
-- [ ] app-deployment package takes a presign target
-- [ ] ASSETS serving for app.* when bound
-- [ ] Web: BoxLogsNotice on Admin → Logs / Stream
-- [ ] Env declarations + runtime-tunables bootstrap exceptions
-- [ ] Docs: configuration reference / env example
-- [ ] Tests pinning Cloudflare branches (production capture) + self-host branches
+- [x] Shared seam `services/analytics-sink.ts` (AE default, installable local sink)
+- [x] `selfhost/analytics/` D1 sink, SQL translation, purge, settings, install point
+- [x] Move migration to `selfhost/migrations/observability/` + projection list
+- [x] Wire middleware, ingest, admin query/gate, purge, forward skip reason, dataset name
+- [x] Capabilities: analyticsQuery, workersObservability (logSearch), liveLogStream; public logSearch/liveLogStream
+- [x] Log stream and log search refusals (FEATURE_UNAVAILABLE)
+- [x] R2 presign config + shared client; attachments, snapshots, compose, build context, upload route
+- [x] app-deployment package takes a presign target
+- [x] ASSETS serving for app.* when bound
+- [x] Web: BoxLogsNotice on Admin → Logs / Stream
+- [x] Env declarations + runtime-tunables bootstrap exceptions
+- [x] Docs: configuration reference / env example
+- [x] Tests pinning Cloudflare branches (production capture) + self-host branches
 
 ## Acceptance Criteria
 
-- [ ] Cloudflare: analytics writes go to Analytics Engine, admin analytics queries the SQL API,
+- [x] Cloudflare: analytics writes go to Analytics Engine, admin analytics queries the SQL API,
       presigned URLs are `https://<account>.r2.cloudflarestorage.com/<bucket>/<key>`, app.* still
       proxies to Pages, log search and stream unchanged. Pinned by tests using the production shape.
-- [ ] The analytics_events migration is not in any Cloudflare `migrations_dir`.
-- [ ] Self-host settings are installed only by the self-host install point.
+- [x] The analytics_events migration is not in any Cloudflare `migrations_dir`.
+- [x] Self-host settings are installed only by the self-host install point.
 - [ ] STG: admin analytics, attachment upload and session snapshot all work unchanged on Cloudflare.
+
+## Notes
+
+- PR #2889. Main is branch-protected, so this task file rides in the PR instead of a direct commit.
+- Reviews: cloudflare-specialist, performance-reviewer and task-completion-validator found no
+  CRITICAL/HIGH. Fixed: row-cap purge uses `MAX(id)` instead of an OFFSET scan; purge deletes run
+  in batches under a per-tick time budget (`analytics.d1.purgeBatchRows`,
+  `analytics.d1.purgeTickBudgetMs`, self-host settings); error and analytics purges isolated both
+  ways; `ASSETS` presence check consistent; `quality:migration-safety` now also scans
+  `apps/api/src/selfhost/migrations/**`; `appendSelfhostObservabilityMigrations()` added
+  (`scripts/selfhost/`), sharing one projection helper with the reverse-tunnel list; route tests for
+  the live-stream refusal; registry and projection tests.
+- Deferred MEDIUM: machine traffic in the self-host sink ->
+  `tasks/backlog/2026-11-18-selfhost-analytics-sink-machine-traffic.md`.
+- Integration-branch follow-up for the next M-merge: delete
+  `apps/api/src/db/migrations/observability/0002_analytics_events.sql` there, call
+  `appendSelfhostObservabilityMigrations()` from `scripts/selfhost/celld-project.ts` for the
+  observability projection, and call `installAnalyticsD1Sink()` from the generated celld entry.
+  Its `operations.analyticsD1*` settings are replaced by `analytics.d1.*`.
+- Workspace has no Chromium system libraries (no apt allowed): visual audit screenshots come from
+  the CI Playwright Visual Tests artifact; staging checks use the API with a workload-identity
+  session cookie.
+
+## Remaining
+
+- [ ] Staging2 verification (admin analytics, attachment upload via presigned PUT, session snapshot)
+- [ ] Screenshot evidence for `admin-logs-notice-audit.spec.ts`
+- [ ] CodeRabbit request and wait

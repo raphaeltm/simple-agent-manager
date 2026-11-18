@@ -9,13 +9,16 @@
  * The Cloudflare side of the same seam (nothing installed: Analytics Engine writes, the SQL API,
  * no D1 call, no analytics table) is pinned at the end of this file.
  */
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { appendSelfhostObservabilityMigrations } from '../../../../../scripts/selfhost/observability-migrations';
 import type { Env } from '../../../src/env';
 import { analyticsMiddleware } from '../../../src/middleware/analytics';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
@@ -23,11 +26,20 @@ import { adminAnalyticsRoutes } from '../../../src/routes/admin-analytics';
 import { analyticsIngestRoutes } from '../../../src/routes/analytics-ingest';
 import { runObservabilityPurge } from '../../../src/scheduled/observability-purge';
 import { installAnalyticsD1Sink } from '../../../src/selfhost/analytics';
+import { purgeAnalyticsEvents } from '../../../src/selfhost/analytics/d1-sink';
 import { translateAnalyticsSql } from '../../../src/selfhost/analytics/d1-sink';
-import { ANALYTICS_D1_MAX_ROWS_SETTING } from '../../../src/selfhost/analytics/settings';
+import {
+  ANALYTICS_D1_MAX_ROWS_SETTING,
+  ANALYTICS_D1_PURGE_BATCH_ROWS_SETTING,
+  ANALYTICS_D1_PURGE_TICK_BUDGET_MS_SETTING,
+  ANALYTICS_D1_SETTINGS,
+} from '../../../src/selfhost/analytics/settings';
 import { SELFHOST_OBSERVABILITY_MIGRATIONS } from '../../../src/selfhost/observability-migrations';
 import { updateAdminSettings } from '../../../src/services/admin-settings-mutations';
-import { resetInstalledAdminSettingDefinitionsForTests } from '../../../src/services/admin-settings-registry';
+import {
+  adminSettingsRegistry,
+  resetInstalledAdminSettingDefinitionsForTests,
+} from '../../../src/services/admin-settings-registry';
 import { resetLocalAnalyticsSinkExtensionForTests } from '../../../src/services/analytics-sink';
 import { resolvePlatformCapabilities } from '../../../src/services/platform-capabilities';
 import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
@@ -225,6 +237,107 @@ describe('D1 analytics sink (self-host)', () => {
     // Both rows past the 90-day default are gone by age; the cap then keeps the newest three
     // by insertion (ids 5..7 of 7).
     expect(left.map((r) => r.id)).toEqual([5, 6, 7]);
+  });
+
+  it('purges more rows than one batch holds in a single tick, oldest first (rule 81)', async () => {
+    const insert = obsDb.prepare(
+      "INSERT INTO analytics_events (timestamp, index1, blob1) VALUES (datetime('now', ?), 'u', 'e')"
+    );
+    for (let i = 0; i < 5; i += 1) insert.run(`-${200 + i} days`); // ids 1..5, past retention
+    for (let i = 0; i < 12; i += 1) insert.run(`-${i} minutes`); // ids 6..17
+    await updateAdminSettings(env, {
+      changes: [
+        { name: ANALYTICS_D1_PURGE_BATCH_ROWS_SETTING, value: 2 },
+        { name: ANALYTICS_D1_MAX_ROWS_SETTING, value: 4 },
+      ],
+      actorUserId: 'admin-1',
+    });
+
+    const result = await purgeAnalyticsEvents(env);
+
+    // 5 aged rows and 8 over-cap rows, each larger than the 2-row batch, in one call.
+    expect(result).toEqual({ deletedByAge: 5, deletedByCount: 8, complete: true });
+    expect(rows().map((r) => r.id)).toEqual([14, 15, 16, 17]);
+  });
+
+  it('stops at the tick budget and the next tick resumes, so a purge is bounded by time', async () => {
+    const insert = obsDb.prepare(
+      "INSERT INTO analytics_events (timestamp, index1, blob1) VALUES (datetime('now', '-200 days'), 'u', 'e')"
+    );
+    for (let i = 0; i < 6; i += 1) insert.run();
+    await updateAdminSettings(env, {
+      changes: [
+        { name: ANALYTICS_D1_PURGE_BATCH_ROWS_SETTING, value: 2 },
+        { name: ANALYTICS_D1_PURGE_TICK_BUDGET_MS_SETTING, value: 1 },
+      ],
+      actorUserId: 'admin-1',
+    });
+    // Every clock read moves 1 s on, so the 1 ms budget is spent after the first batch.
+    let now = Date.parse('2026-11-18T12:00:00Z');
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => (now += 1_000));
+
+    try {
+      expect(await purgeAnalyticsEvents(env)).toMatchObject({ deletedByAge: 2, complete: false });
+      expect(rows()).toHaveLength(4);
+      expect(await purgeAnalyticsEvents(env)).toMatchObject({ deletedByAge: 2, complete: false });
+      expect(await purgeAnalyticsEvents(env)).toMatchObject({ deletedByAge: 2 });
+      expect(await purgeAnalyticsEvents(env)).toEqual({
+        deletedByAge: 0,
+        deletedByCount: 0,
+        complete: true,
+      });
+    } finally {
+      clock.mockRestore();
+    }
+    expect(rows()).toHaveLength(0);
+  });
+
+  it('still bounds analytics when the error purge fails, and still reports that failure', async () => {
+    const insert = obsDb.prepare(
+      "INSERT INTO analytics_events (timestamp, index1, blob1) VALUES (datetime('now', '-200 days'), 'u', 'e')"
+    );
+    insert.run();
+    obsDb.exec('DROP TABLE platform_errors');
+
+    await expect(runObservabilityPurge(env)).rejects.toThrow();
+    expect(rows()).toHaveLength(0);
+  });
+
+  it('registers its settings only through the self-host install point', () => {
+    const names = adminSettingsRegistry().map((definition) => definition.name);
+    for (const definition of ANALYTICS_D1_SETTINGS) expect(names).toContain(definition.name);
+    resetInstalledAdminSettingDefinitionsForTests();
+    const cloudflareNames = adminSettingsRegistry().map((definition) => definition.name);
+    for (const definition of ANALYTICS_D1_SETTINGS) {
+      expect(cloudflareNames).not.toContain(definition.name);
+    }
+    // Liveness: the shared registry is still populated.
+    expect(cloudflareNames.length).toBeGreaterThan(10);
+  });
+
+  it('the self-host packager projects the table into the observability database', () => {
+    const scratch = mkdtempSync(join(tmpdir(), 'sam-obs-projection-'));
+    try {
+      const flat = join(scratch, 'flat');
+      mkdirSync(flat);
+      for (const file of sharedObservabilityMigrationFiles()) {
+        symlinkSync(fileURLToPath(new URL(file, MIGRATIONS)), join(flat, file));
+      }
+      const apiDir = fileURLToPath(new URL('../../../', import.meta.url));
+      appendSelfhostObservabilityMigrations(apiDir, flat);
+      appendSelfhostObservabilityMigrations(apiDir, flat); // idempotent
+      const db = new Database(':memory:');
+      for (const file of readdirSync(flat).sort()) db.exec(readFileSync(join(flat, file), 'utf8'));
+      const tables = (
+        db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{
+          name: string;
+        }>
+      ).map((t) => t.name);
+      expect(tables).toEqual(expect.arrayContaining(['platform_errors', 'analytics_events']));
+      db.close();
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
   });
 
   it('refuses Analytics Engine SQL it cannot translate instead of returning wrong numbers', () => {

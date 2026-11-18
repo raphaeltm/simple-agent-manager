@@ -222,7 +222,7 @@ app.use('*', async (c, next) => {
     baseDomain,
     appPagesProjectName: c.env.PAGES_PROJECT_NAME,
     wwwPagesProjectName: c.env.WWW_PAGES_PROJECT_NAME,
-    hasWebAssets: c.env.ASSETS !== undefined,
+    hasWebAssets: Boolean(c.env.ASSETS),
   });
 
   // Self-hosted deployments bind the apps/web build as ASSETS and serve app.* from it.

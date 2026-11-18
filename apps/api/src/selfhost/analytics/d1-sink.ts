@@ -28,8 +28,12 @@ import { resolveAdminSettingDetailsMany } from '../../services/admin-settings-re
 import type { AnalyticsSink } from '../../services/analytics-sink';
 import {
   ANALYTICS_D1_MAX_ROWS_SETTING,
+  ANALYTICS_D1_PURGE_BATCH_ROWS_SETTING,
+  ANALYTICS_D1_PURGE_TICK_BUDGET_MS_SETTING,
   ANALYTICS_D1_RETENTION_DAYS_SETTING,
   DEFAULT_ANALYTICS_D1_MAX_ROWS,
+  DEFAULT_ANALYTICS_D1_PURGE_BATCH_ROWS,
+  DEFAULT_ANALYTICS_D1_PURGE_TICK_BUDGET_MS,
   DEFAULT_ANALYTICS_D1_RETENTION_DAYS,
 } from './settings';
 
@@ -155,53 +159,124 @@ function positiveInteger(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
-/** Retention days and row cap; an unreadable settings store keeps the defaults (still bounded). */
-async function resolveRetention(env: Env): Promise<[number, number]> {
+interface RetentionSettings {
+  days: number;
+  maxRows: number;
+  batchRows: number;
+  tickBudgetMs: number;
+}
+
+const DEFAULT_RETENTION: RetentionSettings = {
+  days: DEFAULT_ANALYTICS_D1_RETENTION_DAYS,
+  maxRows: DEFAULT_ANALYTICS_D1_MAX_ROWS,
+  batchRows: DEFAULT_ANALYTICS_D1_PURGE_BATCH_ROWS,
+  tickBudgetMs: DEFAULT_ANALYTICS_D1_PURGE_TICK_BUDGET_MS,
+};
+
+/** Retention bounds in one settings read; an unreadable store keeps the defaults (still bounded). */
+async function resolveRetention(env: Env): Promise<RetentionSettings> {
   try {
-    const [days, maxRows] = await resolveAdminSettingDetailsMany(env, [
+    const [days, maxRows, batchRows, tickBudgetMs] = await resolveAdminSettingDetailsMany(env, [
       ANALYTICS_D1_RETENTION_DAYS_SETTING,
       ANALYTICS_D1_MAX_ROWS_SETTING,
+      ANALYTICS_D1_PURGE_BATCH_ROWS_SETTING,
+      ANALYTICS_D1_PURGE_TICK_BUDGET_MS_SETTING,
     ]);
-    return [
-      positiveInteger(days?.value, DEFAULT_ANALYTICS_D1_RETENTION_DAYS),
-      positiveInteger(maxRows?.value, DEFAULT_ANALYTICS_D1_MAX_ROWS),
-    ];
+    return {
+      days: positiveInteger(days?.value, DEFAULT_RETENTION.days),
+      maxRows: positiveInteger(maxRows?.value, DEFAULT_RETENTION.maxRows),
+      batchRows: positiveInteger(batchRows?.value, DEFAULT_RETENTION.batchRows),
+      tickBudgetMs: positiveInteger(tickBudgetMs?.value, DEFAULT_RETENTION.tickBudgetMs),
+    };
   } catch (err) {
     log.warn('analytics.d1_retention_settings_unavailable', {
       error: err instanceof Error ? err.message : String(err),
     });
-    return [DEFAULT_ANALYTICS_D1_RETENTION_DAYS, DEFAULT_ANALYTICS_D1_MAX_ROWS];
+    return DEFAULT_RETENTION;
   }
 }
 
 export interface AnalyticsPurgeResult {
   deletedByAge: number;
   deletedByCount: number;
+  /** False when the tick budget ran out first; the next 5-minute run continues. */
+  complete: boolean;
 }
 
-/** Retention and row cap for the D1 sink. A no-op (no D1 call) unless the sink is enabled. */
+/**
+ * Deletes the rows `selectIds` names, one batch per statement, until a batch comes back short
+ * or the deadline passes. At least one batch runs per call, so every tick makes progress.
+ */
+async function deleteInBatches(
+  db: D1Database,
+  selectIds: string,
+  binds: unknown[],
+  batchRows: number,
+  deadline: number
+): Promise<{ deleted: number; complete: boolean }> {
+  const statement = db.prepare(
+    `DELETE FROM ${ANALYTICS_EVENTS_TABLE} WHERE id IN (${selectIds} LIMIT ?)`
+  );
+  let deleted = 0;
+  do {
+    const result = await statement.bind(...binds, batchRows).run();
+    const changes = result.meta?.changes ?? 0;
+    deleted += changes;
+    if (changes < batchRows) return { deleted, complete: true };
+  } while (Date.now() < deadline);
+  return { deleted, complete: false };
+}
+
+/**
+ * Retention and row cap for the D1 sink. A no-op (no D1 call) unless the sink is enabled.
+ *
+ * Bounded by time, not by count (rule 81): batches of `analytics.d1.purgeBatchRows` (default
+ * 5,000) repeat until done or `analytics.d1.purgeTickBudgetMs` (default 10 s) is spent, and the
+ * next 5-minute tick resumes. Both batch shapes use an index (timestamp for age, the rowid range
+ * for the cap), so a batch costs its own rows, not the table. At a conservative 250 ms per
+ * object-store-backed statement that is ~200,000 rows per tick (~57.6M a day) against an
+ * inflow of one row per recorded request; the worst backlog the settings allow (cap lowered
+ * from 10,000,000 to 1) clears in about 50 ticks, roughly 4 hours.
+ */
 export async function purgeAnalyticsEvents(env: Env): Promise<AnalyticsPurgeResult | null> {
   if (!isAnalyticsD1SinkEnabled(env)) return null;
   const db = env.OBSERVABILITY_DATABASE;
-  const [days, maxRows] = await resolveRetention(env);
+  const { days, maxRows, batchRows, tickBudgetMs } = await resolveRetention(env);
+  const deadline = Date.now() + tickBudgetMs;
 
-  const byAge = await db
-    .prepare(`DELETE FROM ${ANALYTICS_EVENTS_TABLE} WHERE timestamp < datetime('now', ?)`)
-    .bind(`-${days} days`)
-    .run();
-  // Keep the newest maxRows by id (ids grow with insertion order). Deletes nothing when under cap.
-  const byCount = await db
-    .prepare(
-      `DELETE FROM ${ANALYTICS_EVENTS_TABLE} WHERE id <= (SELECT id FROM ${ANALYTICS_EVENTS_TABLE} ORDER BY id DESC LIMIT 1 OFFSET ?)`
-    )
-    .bind(maxRows)
-    .run();
+  const byAge = await deleteInBatches(
+    db,
+    `SELECT id FROM ${ANALYTICS_EVENTS_TABLE} WHERE timestamp < datetime('now', ?)`,
+    [`-${days} days`],
+    batchRows,
+    deadline
+  );
+  // Keep at most the newest maxRows. Ids grow with insertion order, so every id at or below
+  // MAX(id) - maxRows goes; gaps left by earlier deletes only make this keep fewer rows. One
+  // primary-key lookup finds the boundary instead of an OFFSET walk over the table.
+  let byCount = { deleted: 0, complete: true };
+  if (byAge.complete) {
+    const top = await db
+      .prepare(`SELECT MAX(id) AS maxId FROM ${ANALYTICS_EVENTS_TABLE}`)
+      .first<{ maxId: number | null }>();
+    const boundary = (top?.maxId ?? 0) - maxRows;
+    if (boundary > 0) {
+      byCount = await deleteInBatches(
+        db,
+        `SELECT id FROM ${ANALYTICS_EVENTS_TABLE} WHERE id <= ? ORDER BY id`,
+        [boundary],
+        batchRows,
+        deadline
+      );
+    }
+  }
   const result = {
-    deletedByAge: byAge.meta?.changes ?? 0,
-    deletedByCount: byCount.meta?.changes ?? 0,
+    deletedByAge: byAge.deleted,
+    deletedByCount: byCount.deleted,
+    complete: byAge.complete && byCount.complete,
   };
-  if (result.deletedByAge > 0 || result.deletedByCount > 0) {
-    log.info('analytics.d1_purge', { ...result, retentionDays: days, maxRows });
+  if (result.deletedByAge > 0 || result.deletedByCount > 0 || !result.complete) {
+    log.info('analytics.d1_purge', { ...result, retentionDays: days, maxRows, batchRows });
   }
   return result;
 }

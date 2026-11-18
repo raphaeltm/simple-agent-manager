@@ -2023,7 +2023,9 @@ with `ANALYTICS_SINK="d1"` it records and reads the same events in the `analytic
 `OBSERVABILITY_DATABASE`. That table is created by a self-host-only migration
 (`apps/api/src/selfhost/observability-migrations.ts`), never on Cloudflare, and its retention is
 bounded by the self-host admin settings `analytics.d1.retentionDays` (default 90) and
-`analytics.d1.maxRows` (default 500,000), applied by the 5-minute observability purge. The
+`analytics.d1.maxRows` (default 500,000), applied by the 5-minute observability purge in batches
+of `analytics.d1.purgeBatchRows` (default 5,000) for at most `analytics.d1.purgeTickBudgetMs`
+(default 10,000) per run; unfinished deletes continue on the next run. The
 Cloudflare Worker does not install the sink, so `ANALYTICS_SINK` has no effect there.
 
 Admin → Logs search reads Workers Observability with the same account API (`queryWorkerLogs()`),
