@@ -14,6 +14,7 @@ Generates cloud-init YAML templates for VM provisioning. Produces the user-data 
 | `src/variables.ts` / `src/validate.ts` | `CloudInitVariables` and their validation |
 | `src/template-resources.ts` | Slice hierarchy and Docker headroom write_files, interpolated into the template |
 | `src/template-ingress.ts` / `src/tunnel.ts` | Ingress-mode blocks (Origin CA direct vs Cloudflare Tunnel) and tunnel validation; each node renders only its own mode |
+| `src/reverse-tunnel.ts` / `src/template-reverse-tunnel.ts` | Self-host reverse-tunnel (frpc) mode: validation, pinned release, replacements and connector blocks. Cloudflare nodes never set its variables; `tests/cloudflare-output-snapshot.test.ts` pins their output byte for byte |
 
 ## Commands
 
