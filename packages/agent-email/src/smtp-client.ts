@@ -135,9 +135,12 @@ function authPlain(username: string, password: string): string {
   return btoa(binary);
 }
 
-export interface SmtpDelivery {
+export interface SmtpEnvelope {
   envelopeFrom: string;
   envelopeTo: string;
+}
+
+export interface SmtpDelivery extends SmtpEnvelope {
   /** The message without dot-stuffing or terminator (smtp-message.ts). */
   data: string;
 }
@@ -150,10 +153,10 @@ export interface SmtpSendOptions {
   connectSocket?: SmtpConnect;
 }
 
-async function converse(
+/** Greeting, EHLO, STARTTLS when configured, and AUTH when configured. */
+async function openSession(
   connection: SmtpConnection,
   config: SmtpConfig,
-  delivery: SmtpDelivery,
   heloName: string
 ): Promise<void> {
   expect(await connection.reply(), [220], 'greeting');
@@ -171,6 +174,15 @@ async function converse(
     const { username, password } = config.credentials;
     await connection.command(`AUTH PLAIN ${authPlain(username, password)}`, [235], 'AUTH');
   }
+}
+
+async function converse(
+  connection: SmtpConnection,
+  config: SmtpConfig,
+  delivery: SmtpDelivery,
+  heloName: string
+): Promise<void> {
+  await openSession(connection, config, heloName);
   await connection.command(`MAIL FROM:<${delivery.envelopeFrom}>`, [250], 'MAIL FROM');
   await connection.command(`RCPT TO:<${delivery.envelopeTo}>`, [250, 251], 'RCPT TO');
   await connection.command('DATA', [354], 'DATA');
@@ -180,11 +192,29 @@ async function converse(
   await connection.command('QUIT', [221], 'QUIT').catch(() => undefined);
 }
 
-/** Sends one message. Throws `SmtpError` on refusal, transport failure or the deadline. */
-export async function sendSmtpMessage(
+/**
+ * Everything a delivery does except DATA: the relay must accept the connection, TLS, the
+ * credentials, the sender and the recipient. RSET then abandons the transaction, so nothing is
+ * sent. It cannot prove the mailbox receives the message, only that the relay would take it.
+ */
+async function probe(
+  connection: SmtpConnection,
   config: SmtpConfig,
-  delivery: SmtpDelivery,
-  options: SmtpSendOptions
+  envelope: SmtpEnvelope,
+  heloName: string
+): Promise<void> {
+  await openSession(connection, config, heloName);
+  await connection.command(`MAIL FROM:<${envelope.envelopeFrom}>`, [250], 'MAIL FROM');
+  await connection.command(`RCPT TO:<${envelope.envelopeTo}>`, [250, 251], 'RCPT TO');
+  await connection.command('RSET', [250], 'RSET');
+  await connection.command('QUIT', [221], 'QUIT').catch(() => undefined);
+}
+
+/** One connection with one deadline for `exchange`; every failure becomes an `SmtpError`. */
+async function withSmtpConnection(
+  config: SmtpConfig,
+  options: SmtpSendOptions,
+  exchange: (connection: SmtpConnection) => Promise<void>
 ): Promise<void> {
   const open = options.connectSocket ?? connect;
   const socket = open(
@@ -203,7 +233,7 @@ export async function sendSmtpMessage(
     );
   });
   try {
-    await Promise.race([converse(connection, config, delivery, options.heloName), deadline]);
+    await Promise.race([exchange(connection), deadline]);
   } catch (error) {
     if (error instanceof SmtpError) throw error;
     // Socket and TLS errors (refused, unreachable, certificate) carry no secrets.
@@ -212,4 +242,29 @@ export async function sendSmtpMessage(
     if (timer !== undefined) clearTimeout(timer);
     connection.close();
   }
+}
+
+/** Sends one message. Throws `SmtpError` on refusal, transport failure or the deadline. */
+export async function sendSmtpMessage(
+  config: SmtpConfig,
+  delivery: SmtpDelivery,
+  options: SmtpSendOptions
+): Promise<void> {
+  await withSmtpConnection(config, options, (connection) =>
+    converse(connection, config, delivery, options.heloName)
+  );
+}
+
+/**
+ * Checks that the relay would accept a message from `envelopeFrom` to `envelopeTo`, without
+ * sending one (`probe`). Throws `SmtpError` like `sendSmtpMessage`.
+ */
+export async function probeSmtpRelay(
+  config: SmtpConfig,
+  envelope: SmtpEnvelope,
+  options: SmtpSendOptions
+): Promise<void> {
+  await withSmtpConnection(config, options, (connection) =>
+    probe(connection, config, envelope, options.heloName)
+  );
 }

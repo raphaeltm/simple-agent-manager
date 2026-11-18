@@ -63,9 +63,11 @@ export {
 } from './setup-changes';
 export { AgentEmailMainDomainChangedError, AgentEmailSetupRefusedError } from './setup-errors';
 export {
+  probeSmtpRelay,
   sendSmtpMessage,
   type SmtpConnect,
   type SmtpDelivery,
+  type SmtpEnvelope,
   SmtpError,
   type SmtpSendOptions,
 } from './smtp-client';

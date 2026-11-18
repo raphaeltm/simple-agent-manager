@@ -191,6 +191,10 @@ export async function startFakeSmtpServer(options: FakeSmtpOptions): Promise<Fak
       } else if (verb === 'RCPT') {
         to.push(/<(.*)>/.exec(line)?.[1] ?? '');
         write(`${options.rcptCode ?? 250} 2.1.5 recipient`);
+      } else if (verb === 'RSET') {
+        from = '';
+        to = [];
+        write('250 2.0.0 reset');
       } else if (verb === 'DATA') {
         inData = true;
         dataLines = [];
