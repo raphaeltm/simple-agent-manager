@@ -216,11 +216,14 @@
     },
     {
       "classification": "code-identifier",
-      "reason": "Self-host inbound email (L21, #2887): deploy/selfhost/sam-mx config.go agentAddressKeyChars is the public agent-address alphabet (Crockford-style base32 characters), not key material. Exact current finding only.",
+      "reason": "Self-host inbound email (L21, #2887): deploy/selfhost/sam-mx config.go agentAddressKeyChars is the public agent-address alphabet (Crockford-style base32 characters), not key material. Exact findings only: the current line and the same line at its earlier position in the port commit 1c023420a.",
       "owner": "security",
       "reviewedAt": "2026-11-18T15:45:00.000Z",
       "expiresAt": "2026-12-18T15:45:00.000Z",
-      "digests": ["9129fd74cffbdc8442feed3af75699051839080524f42afdafdcbaedc227ef56"]
+      "digests": [
+        "9129fd74cffbdc8442feed3af75699051839080524f42afdafdcbaedc227ef56",
+        "eab7bddde682c4104f263aefb4b6004bff8ce1ba7a01c73787b347142fa7241d"
+      ]
     },
     {
       "classification": "synthetic-test-fixture",
