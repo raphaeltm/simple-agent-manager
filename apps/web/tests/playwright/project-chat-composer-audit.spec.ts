@@ -557,6 +557,37 @@ test.describe('Project chat composer audit', () => {
     );
   });
 
+  test('quick start refreshes cached Instant availability before creating the profile', async ({
+    page,
+  }, testInfo) => {
+    await openMockedChat(page, 'single-wizard');
+    await expect(page.getByText(/that runs in an Instant container/)).toBeVisible();
+    expect(createdProfiles).toHaveLength(0);
+    instantRuntimeEnabled = false;
+    const freshAvailability = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === '/api/config/instant-runtime'
+    );
+
+    await page
+      .getByRole('button', { name: /Start chatting with OpenAI Codex With A Long Friendly Name/ })
+      .click();
+
+    expect(await (await freshAvailability).json()).toEqual({ enabled: false });
+    const textarea = page.locator('textarea[role="combobox"]');
+    await expect(textarea).toBeEnabled();
+    await expect(textarea).toBeFocused();
+    expect(createdProfiles).toHaveLength(1);
+    expect(createdProfiles[0]).toMatchObject({
+      runtime: 'vm',
+      name: 'OpenAI Codex With A Long Friendly Name Chat',
+      taskMode: 'conversation',
+    });
+    await captureComposerAudit(
+      page,
+      `project-chat-refreshed-instant-${getProjectSuffix(testInfo.project.name)}`
+    );
+  });
+
   test('without Instant, one click makes a Cloud VM profile and the wizard disables Instant', async ({
     page,
   }, testInfo) => {

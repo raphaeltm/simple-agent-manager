@@ -1870,6 +1870,43 @@ describe('ProjectChat profile setup wizard', () => {
     );
   });
 
+  it.each([false, true])(
+    'refreshes cached Instant availability at click time (%s)',
+    async (enabled) => {
+      mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+      mocks.getInstantRuntimeEnabled.mockResolvedValue(true);
+      renderProjectChat();
+
+      await screen.findByText(/that runs in an Instant container/);
+      expect(mocks.getInstantRuntimeEnabled).toHaveBeenCalledTimes(1);
+      expect(mocks.createAgentProfile).not.toHaveBeenCalled();
+      mocks.getInstantRuntimeEnabled.mockResolvedValue(enabled);
+      mocks.listAgentProfiles.mockResolvedValue([
+        makeAgentProfile({
+          id: 'created-profile',
+          name: 'Claude Code Chat',
+          runtime: enabled ? 'cf-container' : 'vm',
+        }),
+      ]);
+
+      fireEvent.click(screen.getByRole('button', { name: /Start chatting with Claude Code/ }));
+
+      await waitFor(() => expect(mocks.createAgentProfile).toHaveBeenCalledTimes(1));
+      expect(mocks.getInstantRuntimeEnabled).toHaveBeenCalledTimes(2);
+      expect(mocks.createAgentProfile).toHaveBeenCalledWith(
+        PROJECT_ID,
+        expect.objectContaining({
+          name: 'Claude Code Chat',
+          runtime: enabled ? 'cf-container' : 'vm',
+          taskMode: 'conversation',
+        })
+      );
+      expect(
+        await screen.findByPlaceholderText('Describe what you want the agent to do...')
+      ).not.toBeDisabled();
+    }
+  );
+
   it('a double click creates one profile', async () => {
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
     renderProjectChat();

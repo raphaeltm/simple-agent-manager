@@ -174,9 +174,10 @@ export function useProfileChoice({
   const createDefaultChatProfile = useCallback(async () => {
     const soleAgent = configuredAgents.length === 1 ? configuredAgents[0] : null;
     if (!soleAgent) return null;
-    const instantEnabled = await queryClient.fetchQuery(
-      instantRuntimeEnabledQueryOptions(queryScope)
-    );
+    const instantEnabled = await queryClient.fetchQuery({
+      ...instantRuntimeEnabledQueryOptions(queryScope),
+      staleTime: 0,
+    });
     const runtime = resolveWizardRuntime('conversation', null, instantEnabled);
     return createProfile({
       name: suggestProfileName(soleAgent.id, 'conversation'),
