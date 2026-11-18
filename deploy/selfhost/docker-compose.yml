@@ -332,6 +332,8 @@ services:
     mem_limit: ${SAM_MX_MEM_LIMIT:-512m}
     pids_limit: 128
     depends_on: [celld]
+    # Room for SAM_MX_SHUTDOWN_GRACE (8 s) to drain in-flight deliveries before SIGKILL.
+    stop_grace_period: 10s
     # REVERSE_TUNNEL_GATEWAY_SECRET, the gateway route's shared secret. Written by
     # `pnpm selfhost:deploy --init`.
     env_file:
@@ -351,6 +353,12 @@ services:
       SAM_MX_CONNECTIONS_PER_IP_PER_MINUTE: ${SAM_MX_CONNECTIONS_PER_IP_PER_MINUTE:-}
       SAM_MX_MESSAGES_PER_CONNECTION: ${SAM_MX_MESSAGES_PER_CONNECTION:-}
       SAM_MX_GATEWAY_TIMEOUT: ${SAM_MX_GATEWAY_TIMEOUT:-}
+      # Strict SPF/DKIM alignment unless `true` (deploy/selfhost/sam-mx/config.go RelaxedAlignment).
+      SAM_MX_RELAXED_ALIGNMENT: ${SAM_MX_RELAXED_ALIGNMENT:-}
+      # Oldest Date a message authenticated by DKIM alone may carry (default 168h).
+      SAM_MX_DKIM_MAX_AGE: ${SAM_MX_DKIM_MAX_AGE:-}
+      # Drain time for in-flight deliveries on stop; keep it below stop_grace_period.
+      SAM_MX_SHUTDOWN_GRACE: ${SAM_MX_SHUTDOWN_GRACE:-}
       # Loopback CIDRs whose mail skips SPF/DKIM/DMARC (smoke tests from the box itself). Empty
       # by default; the receiver refuses any non-loopback network here.
       SAM_MX_TRUSTED_NETWORKS: ${SAM_MX_TRUSTED_NETWORKS:-}
