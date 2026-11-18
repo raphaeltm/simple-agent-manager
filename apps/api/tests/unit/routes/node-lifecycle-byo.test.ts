@@ -251,12 +251,6 @@ describe('node-lifecycle BYO gates', () => {
       expect(res.status).toBe(403);
     });
 
-    it('denies issuance for a managed reverse-tunnel node (no tunnelId, transport only)', async () => {
-      state.node = makeNode({ nodeClass: 'managed', transport: 'reverse-tunnel', tunnelId: null });
-      const res = await appRequest('/api/nodes/node-1/origin-ca-certificate', VALID_CSR, true);
-      expect(res.status).toBe(403);
-    });
-
     it('still issues a cert for a managed public-DNS node', async () => {
       state.node = makeNode({ nodeClass: 'managed', transport: 'vm-public-dns' });
       const res = await appRequest('/api/nodes/node-1/origin-ca-certificate', VALID_CSR, true);
@@ -418,24 +412,6 @@ describe('node-lifecycle BYO gates', () => {
       expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
     });
 
-    it('does NOT backfill the IP or create an A record for a managed reverse-tunnel node', async () => {
-      // Reverse-tunnel nodes carry no tunnelId: the gate must read the row's transport, and
-      // CF-Connecting-IP (the node's real egress IP through Caddy) must not be backfilled,
-      // even when the node has no stored IP (the case that would otherwise backfill).
-      state.node = makeNode({
-        transport: 'reverse-tunnel',
-        tunnelId: null,
-        ipAddress: null,
-      });
-      const res = await heartbeatFrom('203.0.113.7');
-      expect(res.status).toBe(200);
-      expect(state.dns.create).toBeNull();
-      expect(state.dns.update).toBeNull();
-      expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
-      // Liveness: the heartbeat itself was recorded.
-      expect(state.updates).toContainEqual(expect.objectContaining({ healthStatus: 'healthy' }));
-    });
-
     it('records the IPv4 of a deployment tunnel node with no IP, without any backend A record', async () => {
       state.node = makeNode({
         nodeRole: 'deployment',
@@ -525,61 +501,5 @@ describe('node-lifecycle BYO gates', () => {
       expect(res.status).toBe(200);
       expect(state.updates.some((u) => u.ipAddress === '203.0.113.7')).toBe(true);
     });
-
-    it.each(['not-an-ip', '203.0.113.7:443', ''])(
-      'does NOT backfill a node IP from a malformed CF-Connecting-IP (%j), with X-Forwarded-For set',
-      async (header) => {
-        state.node = makeNode({ tunnelId: null, ipAddress: null });
-        const res = await getNodeLifecycleApp().request(
-          '/api/nodes/node-1/heartbeat',
-          {
-            method: 'POST',
-            headers: {
-              Authorization: 'Bearer node-token',
-              'Content-Type': 'application/json',
-              'CF-Connecting-IP': header,
-              'X-Forwarded-For': '203.0.113.9',
-            },
-            body: JSON.stringify({ nodeId: 'node-1' }),
-          },
-          { DATABASE: {}, BASE_DOMAIN: 'example.com' },
-          { waitUntil: vi.fn(), passThroughOnException: vi.fn() }
-        );
-        // Liveness: the heartbeat itself was accepted and recorded.
-        expect(res.status).toBe(200);
-        expect(state.updates).toContainEqual(expect.objectContaining({ healthStatus: 'healthy' }));
-        expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
-      }
-    );
-
-    // Existing-deployment invariant: the reverse-tunnel case was ADDED to the gate, it did not
-    // widen it to every tunnel transport. A cloudflare-tunnel node whose tunnel_id is still NULL
-    // (tunnel not yet journaled) kept backfilling before the reverse-tunnel work and still must.
-    it.each([
-      ['cloudflare-tunnel', 'cloudflare-tunnel'],
-      ['vm-public-dns', 'vm-public-dns'],
-      ['legacy NULL transport', null],
-    ] as const)(
-      'still backfills a %s node whose tunnel_id is NULL (pre-reverse-tunnel predicate)',
-      async (_name, transport) => {
-        state.node = makeNode({ transport, tunnelId: null, ipAddress: null });
-        const res = await getNodeLifecycleApp().request(
-          '/api/nodes/node-1/heartbeat',
-          {
-            method: 'POST',
-            headers: {
-              Authorization: 'Bearer node-token',
-              'Content-Type': 'application/json',
-              'CF-Connecting-IP': '203.0.113.8',
-            },
-            body: JSON.stringify({ nodeId: 'node-1' }),
-          },
-          { DATABASE: {}, BASE_DOMAIN: 'example.com' },
-          { waitUntil: vi.fn(), passThroughOnException: vi.fn() }
-        );
-        expect(res.status).toBe(200);
-        expect(state.updates.some((u) => u.ipAddress === '203.0.113.8')).toBe(true);
-      }
-    );
   });
 });

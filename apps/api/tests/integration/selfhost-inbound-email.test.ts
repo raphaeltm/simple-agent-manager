@@ -24,8 +24,10 @@ import type { Env } from '../../src/env';
 import { handleAppError } from '../../src/middleware/app-error-handler';
 import { adminAgentEmailRoutes } from '../../src/routes/admin-agent-email';
 import { mcpRoutes } from '../../src/routes/mcp';
+import { MIN_REVERSE_TUNNEL_GATEWAY_SECRET_LENGTH } from '../../src/selfhost/reverse-tunnel/config';
 import { createSelfHostGatewayRoutes } from '../../src/selfhost/reverse-tunnel/gateway';
 import { __resetAdminSettingsCacheForTest } from '../../src/services/admin-settings';
+import { MIN_GATEWAY_SECRET_LENGTH } from '../../src/services/agent-email/self-host-inbound';
 import { agentEmailConfig } from '../../src/services/agent-email/setup-state';
 import { type McpTokenData, storeMcpToken } from '../../src/services/mcp-token';
 import { resolvePlatformCapabilities } from '../../src/services/platform-capabilities';
@@ -395,6 +397,10 @@ describe('self-hosted inbound agent email', () => {
     );
     expect(loopback.status).toBe(409);
     expect(smtp.messages).toHaveLength(0);
+  });
+
+  it('gates on the same minimum gateway-secret length the self-host gateway enforces', () => {
+    expect(MIN_GATEWAY_SECRET_LENGTH).toBe(MIN_REVERSE_TUNNEL_GATEWAY_SECRET_LENGTH);
   });
 
   it('turns agent email and the inbound capability on only when the receiver is configured', async () => {

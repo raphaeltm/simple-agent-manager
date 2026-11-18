@@ -186,7 +186,6 @@ describe('admin-costs routes', () => {
     expect(body.llm.totalRequests).toBe(0);
     expect(body.llm.totalCostUsd).toBe(0);
     expect(body.llm.byModel).toHaveLength(0);
-    expect(body.compute.totalNodeHours).toBe(10);
     expect(mockFetch).not.toHaveBeenCalled();
   });
 

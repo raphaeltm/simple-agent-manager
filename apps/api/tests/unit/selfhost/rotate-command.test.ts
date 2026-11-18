@@ -163,6 +163,13 @@ beforeEach(async () => {
   stateDir = mkdtempSync(join(tmpdir(), 'sam-rotate-'));
   sqlite = new Database(':memory:');
   createSchemaTables(sqlite, ALL_TABLES);
+  // The lease table exists only on a self-host box (self-host migration, not the shared schema).
+  sqlite.exec(
+    readFileSync(
+      new URL('../../../src/selfhost/migrations/0255_node_reverse_tunnel_leases.sql', import.meta.url),
+      'utf8'
+    )
+  );
   sqlite
     .prepare(`INSERT INTO users (id, email, status) VALUES ('u1', 'u1@example.com', 'active')`)
     .run();

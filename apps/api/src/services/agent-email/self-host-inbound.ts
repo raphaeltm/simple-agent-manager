@@ -29,6 +29,12 @@ import { AGENT_EMAIL_LOCAL_PART } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
 
+/**
+ * Must equal `MIN_REVERSE_TUNNEL_GATEWAY_SECRET_LENGTH` in selfhost/reverse-tunnel/config.ts
+ * (pinned by tests/integration/selfhost-inbound-email.test.ts).
+ */
+export const MIN_GATEWAY_SECRET_LENGTH = 32;
+
 export type SelfHostInboundEnv = EmailTransportEnv &
   Pick<Env, 'AGENT_EMAIL_INBOUND_SMTP' | 'REVERSE_TUNNEL_GATEWAY_SECRET'>;
 
@@ -37,9 +43,11 @@ export function isSelfHostInboundEmailConfigured(env: SelfHostInboundEnv): boole
   if (env.AGENT_EMAIL || !env.BASE_DOMAIN?.trim()) return false;
   if (env.AGENT_EMAIL_INBOUND_SMTP?.trim().toLowerCase() !== 'true') return false;
   // The box gateway that hands mail over (selfhost/reverse-tunnel/gateway.ts, self-host build
-  // only) answers 404 without its secret and enforces its minimum length itself; this
-  // Worker-loaded check only needs to know the secret is configured.
-  if (!env.REVERSE_TUNNEL_GATEWAY_SECRET?.trim()) return false;
+  // only) refuses a missing or short secret; mirror its rule without importing the self-host
+  // module into Worker-loaded code.
+  if ((env.REVERSE_TUNNEL_GATEWAY_SECRET?.trim().length ?? 0) < MIN_GATEWAY_SECRET_LENGTH) {
+    return false;
+  }
   return emailTransportKind(env) === 'smtp';
 }
 

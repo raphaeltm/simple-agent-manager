@@ -10,6 +10,7 @@
  * a real SQLite engine; only the node record write and provisioning start are stubbed, and they
  * record what the route asked for.
  */
+import { generateCloudInit } from '@simple-agent-manager/cloud-init';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -17,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import { AppError } from '../../../src/middleware/error';
+import { installReverseTunnelTransport } from '../../../src/selfhost/reverse-tunnel/transport';
 import { updateDefaultCapacityPool } from '../../../src/services/default-capacity-pool-updates';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
 import { offering } from '../../helpers/capacity-pool-offerings';
@@ -46,6 +48,8 @@ vi.mock('../../../src/services/telemetry', () => ({ recordNodeRoutingMetric: vi.
 let sqlite: Database.Database | null = null;
 
 beforeEach(async () => {
+  // A box is a reverse-tunnel installation only with the self-host transport installed (L17a/b).
+  installReverseTunnelTransport(generateCloudInit);
   created.length = 0;
   sqlite = new Database(':memory:');
   createAllSchemaTables(sqlite, schema);

@@ -111,41 +111,8 @@ describe('forwardToOpenAI upstream URL', () => {
   });
 });
 
-describe('forwardToOpenAI stream usage (overnight B3 A2)', () => {
-  const STREAM_BODY = { ...OPENAI_BODY, stream: true };
-  const sentBody = () =>
-    JSON.parse(String((mockFetch.mock.calls[0]![1] as RequestInit).body)) as Record<string, unknown>;
-
-  it('asks OpenAI for stream usage on a direct call, so SAM can meter it', async () => {
-    mockFetch.mockResolvedValueOnce(okResponse());
-    await forwardToOpenAI(env({ AI_GATEWAY_ID: '' }), STREAM_BODY, 'gpt-4o', AIG_METADATA, 'sk-openai');
-    expect(sentBody().stream_options).toEqual({ include_usage: true });
-  });
-
-  it('overrides a client that turned stream usage off on a direct call', async () => {
-    mockFetch.mockResolvedValueOnce(okResponse());
-    await forwardToOpenAI(
-      env({ AI_GATEWAY_ID: '' }),
-      { ...STREAM_BODY, stream_options: { include_usage: false } },
-      'gpt-4o',
-      AIG_METADATA,
-      'sk-openai'
-    );
-    expect(sentBody().stream_options).toEqual({ include_usage: true });
-  });
-
-  it('sends the body unchanged through the gateway (Cloudflare control)', async () => {
-    mockFetch.mockResolvedValueOnce(okResponse());
-    await forwardToOpenAI(
-      env({ AI_GATEWAY_ID: 'sam', CF_ACCOUNT_ID: 'acct-1' }),
-      STREAM_BODY,
-      'gpt-4o',
-      AIG_METADATA,
-      'sk-openai'
-    );
-    expect(sentBody()).toEqual({ ...STREAM_BODY, model: 'gpt-4o' });
-  });
-});
+// Forcing stream usage on direct OpenAI calls was the branch's pre-L13 shape; main's L13 estimates
+// missing usage instead (tests/unit/routes/direct-upstream-metering.test.ts).
 
 describe('forwardToOpenAIResponses upstream URL', () => {
   it('uses the AI Gateway when both a gateway id and an account id are configured (Cloudflare)', async () => {

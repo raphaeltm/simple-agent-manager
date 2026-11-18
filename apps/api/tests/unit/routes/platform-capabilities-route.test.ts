@@ -51,7 +51,8 @@ describe('GET /api/config/platform-capabilities', () => {
     const { res, body } = await getCapabilities(cloudflareEnv());
 
     expect(res.status).toBe(200);
-    expect(body).toEqual({ speechToText: true, textToSpeech: true, agentModelCalls: true });
+    // The integration branch adds more public capabilities (unlanded); main's three are pinned.
+    expect(body).toMatchObject({ speechToText: true, textToSpeech: true, agentModelCalls: true });
     // Public config: cacheable by the browser like the other /api/config answers.
     expect(res.headers.get('Cache-Control')).toMatch(/max-age=\d+/);
   });
@@ -60,7 +61,8 @@ describe('GET /api/config/platform-capabilities', () => {
     const { res, body } = await getCapabilities(cloudflareEnv({ AI: undefined }));
 
     expect(res.status).toBe(200);
-    expect(body).toEqual({ speechToText: false, textToSpeech: false, agentModelCalls: false });
+    // The integration branch adds more public capabilities (unlanded); main's three are pinned.
+    expect(body).toMatchObject({ speechToText: false, textToSpeech: false, agentModelCalls: false });
     expect(res.headers.get('Cache-Control')).toContain('no-store');
   });
 

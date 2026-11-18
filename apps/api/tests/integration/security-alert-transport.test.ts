@@ -152,7 +152,8 @@ describe('owner security alerts over SMTP (self-hosted box, no AGENT_EMAIL)', ()
       { waitUntil: (promise) => background.push(promise) }
     );
     await Promise.all(background);
-    expect(smtp.messages).toHaveLength(2);
+    // Main's L9/L10: an account-link alert goes to the affected account only.
+    expect(smtp.messages).toHaveLength(1);
     expect(smtp.messages[0]!.data).toContain(
       'Subject: SAM security alert: a GitLab sign-in was linked to a superadmin account'
     );
