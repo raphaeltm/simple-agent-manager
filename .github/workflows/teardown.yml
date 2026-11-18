@@ -347,9 +347,12 @@ jobs:
       # ================================================================
       - name: Delete Managed Apex Single Redirect
         if: ${{ inputs.include_marketing }}
+        # Like the Page Rule cleanup: a missing token scope must not stop the
+        # Pages and DNS teardown that follows. The step still shows as failed.
+        continue-on-error: true
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          CF_ZONE_ID: ${{ steps.names.outputs.secondary == 'true' && (steps.zone.outputs.zone_id || 'unresolved-zone') || secrets.CF_ZONE_ID }}
           BASE_DOMAIN: ${{ steps.names.outputs.base_domain }}
         run: |
           if [ "$INPUT_DRY_RUN" = "true" ]; then

@@ -39,6 +39,9 @@ jobs:
         run: node scripts/deploy/workflow-resource-names.mjs marketing
 
       - name: Remove Managed Apex Single Redirect
+        # Like the Page Rule cleanup: a missing token scope must not stop the
+        # Pages and DNS teardown that follows. The step still shows as failed.
+        continue-on-error: true
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}

@@ -19,10 +19,12 @@ The final implementation uses one Single Redirect in the supported Rulesets `htt
 - [x] Regression tests: missing/existing/disabled/duplicate/foreign-owned rules, API failures, wrong zone, DNS preflight, HTTP+HTTPS path/query configuration, unrelated routing preserved, narrow teardown.
 - [x] Relevant local validation and independent final-design specialist reviews.
 - [x] Open draft PR and report concrete design for Astra review.
-- [ ] CI and remaining review gates, including Astra and CodeRabbit when otherwise ready.
+- [ ] CI and remaining review gates, including CodeRabbit (requested 2026-11-18 when the PR was marked ready).
 - [x] Resolve existing-credential access blocker without unauthorized permission/credential changes (Raphaël updated the token 2026-11-18; read-only plan 44291125123 passes).
 - [x] Coordinate shared deployment lease before any apply (apply uses the `www-infra` concurrency group; no staging lease is involved because the marketing zone exists only in production).
-- [ ] Apply only after gates/required approval; public smoke apex/www/app/API; keep task active until verified.
+- [ ] Post-merge: dispatch `provision-www.yml` `apply-redirect` from `main`; record the run ID on the PR.
+- [ ] Post-merge: re-run `plan-redirect` from `main` and confirm `method: null` (no further change).
+- [ ] Post-merge: public smoke recorded on the PR: HTTP and HTTPS apex with a path and query return 301 to `https://www.<domain>` keeping both; www, app and api `/health` unaffected.
 
 ## Validation and review evidence
 
@@ -30,7 +32,10 @@ Local final config suite: 81 tests across apex-redirect, deployment-workflow-har
 
 Fresh final-design Cloudflare/security/constitution review PASS for safe preparation; tests/docs/completion review PASS after this task record correction. Exact owned-rule Single Redirect is ordinary public routing configuration, not an auth/security boundary change. Full provisioning is outside the repair scope. Deployment and final completion are explicitly pending.
 
-## Application blocker and exact approval boundary
+## Application blocker and exact approval boundary (superseded 2026-11-18)
+
+> Superseded: Raphaël granted the permission on 2026-11-18 and the read-only plan passes. Kept as history; see the 2026-11-18 section below.
+
 
 Supported read-only plan https://github.com/raphaeltm/simple-agent-manager/actions/runs/39173865292 at2fbf1b7b7cd9cf5531060ddb811bb2550d348d60 passed production zone and proxied-apex checks, then failed GET /zones/<production CF_ZONE_ID>/rulesets with HTTP403/code10000. DNS/Pages provisioning steps were skipped. No live mutation occurred. Existing deployment credential cannot inspect the required Rulesets surface.
 
@@ -50,7 +55,7 @@ Shared staging: recovery owner01M58JARRQQ01A3DB9JEDA2E9G has the next bounded va
 
 ## Safety and completion
 
-No paid browser runs. Authenticated journeys are staging only; production gets basic public smoke only. No held PR mutations, raw production DB repair, new credentials, permission grants, sensitive network settings or financial commitments. User requested draft PR early, so draft precedes application. SAM isolated checkout/assigned branch reused; task record stays in this PR to avoid concurrent direct-main release writes. Keep .do-state.md and PR current; do not archive or complete task before verified outcome.
+No paid browser runs. Authenticated journeys are staging only; production gets basic public smoke only. No held PR mutations, raw production DB repair, new credentials, permission grants, sensitive network settings or financial commitments. User requested draft PR early, so draft precedes application. SAM isolated checkout/assigned branch reused; task record stays in this PR to avoid concurrent direct-main release writes. Keep .do-state.md and PR current. (2026-11-18: archived at /do Phase 4 because only the initial task file may go directly to main; the post-merge apply and public smoke are tracked in the checklist below and recorded on the PR and in the SAM task completion.)
 
 ## Sonar review follow-up
 
@@ -63,3 +68,4 @@ Sonar's initial quality gate passed but reported six maintainability issues: rec
 - Public baseline 2026-11-18: HTTPS apex `/docs/?routing_probe=1` 301 → `https://www.simple-agent-manager.org/docs/?routing_probe=1`; HTTP apex 522; www, app 200; api `/health` 200.
 - Staging: not exercised. The marketing zone and its redirect phase exist only in production and the changed workflows are manual production-only operations; no staging deploy runs them. The live read-only plan against the real zone plus the post-merge apply and public smoke are the verification.
 - Post-merge (recorded on the PR): dispatch `provision-www.yml` with `apply-redirect` from `main`, then curl HTTP and HTTPS apex (path and query kept), www, app and api.
+- Review round (2026-11-18): security auditor, Cloudflare specialist and task-completion validator found no CRITICAL/HIGH. Addressed: the plan prints only ref/action/enabled/mentionsApex for other rules (no expressions or descriptions, since logs are public); the zone id is replaced by `<zone>` in printed paths and errors; non-JSON responses fail without quoting the body; a mutation result without `rules` fails with the intended message; post-write confirmation compares unrelated rules by definition and order (id, ref, expression, action, action_parameters, enabled), not Cloudflare-managed fields; both teardown redirect steps are `continue-on-error` like the Page Rule cleanup, and the `teardown.yml` step uses the secondary-zone expression main now requires. Each guard was removed once and its test went red. Docs: `provision-www.yml` runs only in the canonical repository, so self-hosting docs need no token note.

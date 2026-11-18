@@ -43,6 +43,26 @@ function sameRule(actual, desired) {
   );
 }
 
+// Compare unrelated rules by definition and order only; Cloudflare-managed fields
+// such as version or last_updated are not part of what this script promises to keep.
+function ruleDefinitions(rules) {
+  return (rules ?? [])
+    .filter((rule) => rule.ref !== APEX_REDIRECT_REF)
+    .map(({ id, ref, expression, action, action_parameters, enabled }) => ({
+      id,
+      ref,
+      expression,
+      action,
+      action_parameters,
+      enabled,
+    }));
+}
+
+// Zone IDs are stored as a GitHub secret; keep them out of printed paths.
+function redactZone(path) {
+  return path.replace(/^\/zones\/[a-f0-9]{32}/u, '/zones/<zone>');
+}
+
 function buildPlan({ zonePath, entry, before, desired, remove }) {
   let method = 'POST';
   if (remove) method = before ? 'DELETE' : null;
@@ -111,35 +131,36 @@ export async function reconcileApexRedirect({
   ) {
     throw new Error('Unmanaged apex redirect exists; inspect before applying.');
   }
-  // Report the other rules in the phase so overlaps are visible before an apply;
-  // they are never modified. Rule definitions are routing config, not secrets.
+  // Summarize the other rules in the phase so overlaps are visible before an apply;
+  // they are never modified. Expressions and descriptions are not printed: the
+  // run log is public and an operator may have put private values in them.
+  // The bare host, not a subdomain of it (app.<domain> does not count).
+  const apexPattern = new RegExp(`(?<![\\w.-])${domain.replaceAll('.', '\\.')}(?![\\w-])`, 'u');
   const unrelatedRules = (entry?.rules ?? [])
     .filter((rule) => rule.ref !== APEX_REDIRECT_REF)
-    .map(({ ref, description, expression, action, enabled }) => ({
+    .map(({ ref, action, enabled, expression }) => ({
       ref,
-      description,
-      expression,
       action,
       enabled,
+      mentionsApex: typeof expression === 'string' && apexPattern.test(expression),
     }));
   const plan = { ...buildPlan({ zonePath, entry, before, desired, remove }), unrelatedRules };
-  report(plan);
+  report({ ...plan, path: redactZone(plan.path) });
   if (apply && plan.method) {
     const result = await request(plan.path, {
       method: plan.method,
       ...(plan.after ? { body: plan.after } : {}),
     });
-    const confirmed = result?.rules?.filter((rule) => rule.ref === APEX_REDIRECT_REF) ?? [];
+    const resultRules = Array.isArray(result?.rules) ? result.rules : [];
+    const confirmed = resultRules.filter((rule) => rule.ref === APEX_REDIRECT_REF);
     if (
+      !Array.isArray(result?.rules) ||
       result?.phase !== REDIRECT_PHASE ||
       result?.kind !== 'zone' ||
       (remove
         ? confirmed.length !== 0
         : confirmed.length !== 1 || !sameRule(confirmed[0], desired)) ||
-      !isDeepStrictEqual(
-        result.rules.filter((rule) => rule.ref !== APEX_REDIRECT_REF),
-        (entry?.rules ?? []).filter((rule) => rule.ref !== APEX_REDIRECT_REF)
-      )
+      !isDeepStrictEqual(ruleDefinitions(resultRules), ruleDefinitions(entry?.rules))
     ) {
       throw new Error(
         'Cloudflare did not confirm the requested apex redirect; inspect before retrying.'
@@ -157,7 +178,15 @@ export function cloudflareRequest(token, fetcher = fetch) {
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
-    const data = await response.json();
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      // The parser's message can quote the body; report only the status.
+      throw new Error(
+        `Cloudflare ${method} ${redactZone(path)} failed (HTTP ${response.status}; non-JSON response).`
+      );
+    }
     if (
       allowMissing &&
       method === 'GET' &&
@@ -173,7 +202,7 @@ export function cloudflareRequest(token, fetcher = fetch) {
         ? data.errors.map((error) => error.code).filter((code) => Number.isSafeInteger(code))
         : [];
       throw new Error(
-        `Cloudflare ${method} ${path} failed (HTTP ${response.status}; codes ${codes.join(',') || 'none'}).`
+        `Cloudflare ${method} ${redactZone(path)} failed (HTTP ${response.status}; codes ${codes.join(',') || 'none'}).`
       );
     }
     return data.result;

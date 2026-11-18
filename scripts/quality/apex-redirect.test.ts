@@ -109,13 +109,7 @@ describe('managed apex Single Redirect', () => {
       path: `/zones/${zoneId}/rulesets/${rulesetId}/rules`,
       after: desired,
       unrelatedRules: [
-        {
-          ref: 'other',
-          description: undefined,
-          expression: '(http.host eq "app.example.com")',
-          action: 'redirect',
-          enabled: undefined,
-        },
+        { ref: 'other', action: 'redirect', enabled: undefined, mentionsApex: false },
       ],
     });
     expect(before.rules).toEqual([unrelated]);
@@ -237,6 +231,106 @@ describe('managed apex Single Redirect', () => {
       phase: REDIRECT_PHASE,
       rules: [desired],
     });
+  });
+
+  it('summarizes coexisting rules without printing their expressions or the zone id', async () => {
+    const template = {
+      id: 'e'.repeat(32),
+      ref: 'f'.repeat(32),
+      description: 'private-description',
+      expression: '(http.request.full_uri wildcard r"https://example.com/*")',
+      action: 'redirect',
+      enabled: true,
+    };
+    const appRule = {
+      id: 'd'.repeat(32),
+      ref: 'other',
+      expression: '(http.host eq "app.example.com")',
+      action: 'redirect',
+      enabled: true,
+    };
+    const report = vi.fn();
+    await reconcileApexRedirect({
+      domain,
+      zoneId,
+      request: api(entry([template, appRule])),
+      report,
+    });
+    const printed = JSON.stringify(report.mock.calls[0][0]);
+    expect(report.mock.calls[0][0]).toMatchObject({
+      method: 'POST',
+      path: `/zones/<zone>/rulesets/${rulesetId}/rules`,
+      unrelatedRules: [
+        { ref: template.ref, action: 'redirect', enabled: true, mentionsApex: true },
+        { ref: 'other', action: 'redirect', enabled: true, mentionsApex: false },
+      ],
+    });
+    // Exact keys: toMatchObject alone would accept an extra expression field.
+    expect(report.mock.calls[0][0].unrelatedRules.map(Object.keys)).toEqual([
+      ['ref', 'action', 'enabled', 'mentionsApex'],
+      ['ref', 'action', 'enabled', 'mentionsApex'],
+    ]);
+    for (const hidden of [zoneId, 'private-description', template.expression, appRule.expression])
+      expect(printed).not.toContain(JSON.stringify(hidden).slice(1, -1));
+  });
+
+  it('confirms by rule definition, ignoring Cloudflare-managed fields on unrelated rules', async () => {
+    const unrelated = {
+      id: 'd'.repeat(32),
+      ref: 'other',
+      expression: '(http.host eq "app.example.com")',
+      action: 'redirect',
+      enabled: true,
+      version: '1',
+      last_updated: '2026-01-01T00:00:00Z',
+    };
+    const respondWith = (other: Record<string, unknown>) =>
+      vi.fn(async (path: string, options?: { method?: string }) => {
+        if (options?.method) return entry([other, { id: ruleId, ...desired }]);
+        return api(entry([unrelated]))(path, options);
+      });
+    await expect(
+      reconcileApexRedirect({
+        domain,
+        zoneId,
+        request: respondWith({ ...unrelated, version: '2', last_updated: '2026-11-18T00:00:00Z' }),
+        apply: true,
+      })
+    ).resolves.toMatchObject({ method: 'POST' });
+    await expect(
+      reconcileApexRedirect({
+        domain,
+        zoneId,
+        request: respondWith({ ...unrelated, expression: '(http.host eq "changed.example.com")' }),
+        apply: true,
+      })
+    ).rejects.toThrow(/did not confirm/);
+  });
+
+  it('reports non-JSON responses and rule-less mutation results without bodies or zone ids', async () => {
+    const canary = 'secret-canary-value';
+    const fetcher = vi.fn(async () => ({
+      ok: false,
+      status: 502,
+      json: async () => {
+        throw new SyntaxError(`Unexpected token '<', "<html>${canary}"... is not valid JSON`);
+      },
+    }));
+    const error = await reconcileApexRedirect({
+      domain,
+      zoneId,
+      request: cloudflareRequest('test-token', fetcher),
+    }).catch((caught: Error) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      'Cloudflare GET /zones/<zone> failed (HTTP 502; non-JSON response).'
+    );
+    const owned = api(entry([{ id: ruleId, ...desired }]));
+    const noRules = async (path: string, options?: { method?: string; body?: unknown }) =>
+      options?.method ? { kind: 'zone', phase: REDIRECT_PHASE } : owned(path, options);
+    await expect(
+      reconcileApexRedirect({ domain, zoneId, request: noRules, apply: true, remove: true })
+    ).rejects.toThrow(/did not confirm/);
   });
 
   it('treats only the exact redirect entrypoint404/code10003 as absent', async () => {
