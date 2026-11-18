@@ -252,6 +252,9 @@ export async function runInboxAskSweep(env: Env, now = Date.now()): Promise<Inbo
     const unnotified = await env.DATABASE.prepare(
       `SELECT ${NOTICE_COLUMNS} FROM asks
         WHERE notified_at IS NULL AND status IN ('answered', 'done', 'archived', 'expired')
+          -- Archiving a question, review or result tells the agent nothing (2026-11-17). New archives
+          -- set notified_at; this also covers rows an earlier build archived with no notice.
+          AND NOT (status = 'archived' AND kind IN ('question', 'review', 'result'))
           AND resolved_at > ? AND resolved_at <= ?
         ORDER BY resolved_at LIMIT ?`
     )
