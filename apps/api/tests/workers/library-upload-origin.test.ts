@@ -66,7 +66,10 @@ describe('POST /library/upload origin boundary', () => {
   });
 
   it('stores an upload from the app origin', async () => {
-    const response = await upload('from-app', { Origin: APP_ORIGIN, 'Sec-Fetch-Site': 'same-site' });
+    const response = await upload('from-app', {
+      Origin: APP_ORIGIN,
+      'Sec-Fetch-Site': 'same-site',
+    });
 
     expect(response.status).toBe(201);
     expect(await storedNames()).toContain('from-app.txt');
@@ -77,5 +80,42 @@ describe('POST /library/upload origin boundary', () => {
 
     expect(response.status).toBe(201);
     expect(await storedNames()).toContain('from-cli.txt');
+  });
+});
+
+/**
+ * The other two multipart sinks, through their real mounts. The guard runs before session
+ * lookup, node proxying, rate limiting and Workers AI, so only the guard can answer 403 here.
+ */
+describe('other cookie-authenticated multipart sinks refuse a same-site workspace page', () => {
+  const forged = { Origin: WORKSPACE_ORIGIN, 'Sec-Fetch-Site': 'same-site' };
+
+  it('chat-session workspace file upload', async () => {
+    const form = new FormData();
+    form.append('files', new File(['forged'], 'forged.txt'));
+    const response = await SELF.fetch(
+      `${API}/api/projects/${projectId}/sessions/forged-session/files/upload`,
+      { method: 'POST', headers: { Cookie: sessionCookie, ...forged }, body: form }
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      message: 'Untrusted workspace file upload write origin',
+    });
+  });
+
+  it('transcription', async () => {
+    const form = new FormData();
+    form.append('audio', new Blob(['forged-audio'], { type: 'audio/webm' }), 'clip.webm');
+    const response = await SELF.fetch(`${API}/api/transcribe`, {
+      method: 'POST',
+      headers: { Cookie: sessionCookie, ...forged },
+      body: form,
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      message: 'Untrusted transcription write origin',
+    });
   });
 });

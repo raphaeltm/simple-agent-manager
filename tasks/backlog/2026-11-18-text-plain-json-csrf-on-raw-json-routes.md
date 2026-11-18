@@ -16,8 +16,14 @@ Example found while finishing PR #2865 (multipart variant):
 (`apps/api/src/routes/deployment-environment-config.ts`) calls
 `parseConfigRequest(await c.req.json())` behind `requireAuth()` and `secret:write`.
 
-Other candidates to check: `c.req.json()` and `c.req.text()` in `apps/api/src/routes/`
-(`grep -rn "c\.req\.\(json\|text\)()" apps/api/src/routes`), excluding bearer/callback-only routes.
+Other candidates to check, excluding bearer/callback-only routes:
+
+- `c.req.json()` and `c.req.text()` in `apps/api/src/routes/`
+- `parseOptionalBody` (`apps/api/src/schemas/_validator.ts`), which calls `req.json()` without a
+  content-type check, used on cookie routes such as `chat.ts`, `chat-prompt-route.ts` and
+  `chat-ideas.ts`
+- `readRequestJsonRecord` and any other body helper that skips the content-type check
+- `application/x-www-form-urlencoded` bodies, which are CORS-simple too
 
 ## Context
 

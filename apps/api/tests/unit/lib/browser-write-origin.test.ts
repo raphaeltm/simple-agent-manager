@@ -27,6 +27,8 @@ const rejectedBrowserWrites: Array<{ label: string; headers: Record<string, stri
   },
   { label: 'opaque origin', headers: { Origin: 'null' } },
   { label: 'missing origin', headers: { 'Sec-Fetch-Site': 'same-site' } },
+  { label: 'same-origin metadata without Origin', headers: { 'Sec-Fetch-Site': 'same-origin' } },
+  { label: 'user-initiated metadata without Origin', headers: { 'Sec-Fetch-Site': 'none' } },
 ];
 
 function makeApp(next = vi.fn()) {
@@ -78,5 +80,37 @@ describe('trusted write origin', () => {
 
     expect(response.status).toBe(200);
     expect(next).toHaveBeenCalledOnce();
+  });
+
+  it('admits the local Vite app only when BASE_DOMAIN is local', async () => {
+    const localEnv = { BASE_DOMAIN: 'localhost:8787' } as Env;
+    const fromVite = { Origin: 'http://localhost:5173', 'Sec-Fetch-Site': 'same-site' };
+
+    const next = vi.fn();
+    const local = await makeApp(next).request(
+      '/write',
+      { method: 'POST', headers: fromVite },
+      localEnv
+    );
+    expect(local.status).toBe(200);
+    expect(next).toHaveBeenCalledOnce();
+
+    const notLoopback = vi.fn();
+    const spoofed = await makeApp(notLoopback).request(
+      '/write',
+      { method: 'POST', headers: { Origin: 'http://evil.localhost.example.test:5173' } },
+      localEnv
+    );
+    expect(spoofed.status).toBe(403);
+    expect(notLoopback).not.toHaveBeenCalled();
+
+    const deployed = vi.fn();
+    const response = await makeApp(deployed).request(
+      '/write',
+      { method: 'POST', headers: fromVite },
+      env
+    );
+    expect(response.status).toBe(403);
+    expect(deployed).not.toHaveBeenCalled();
   });
 });
