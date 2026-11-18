@@ -36,14 +36,20 @@ normal staging lease queue.
 
 ## Implementation Checklist
 
-- [ ] #2865: verify, finish, test through the real worker, review, staging, merge, deploy
-- [ ] #2866: verify against main, then finish or close with evidence
-- [ ] #2867: verify against main, then finish or close with evidence
-- [ ] #2868: verify against main, then finish or close with evidence
-- [ ] Post results on channel `maintenance.pr-shepherd`
+- [x] #2865: real; fixed (origin guard on the three multipart POST sinks, local-dev loopback, empty Origin); merged 5bef3097c after staging pass
+- [x] #2866: real; fixed (readable-task predicate in the ranking/count SQL via json_each); merged d28fe525b after staging before/after reproduction
+- [x] #2867: viewer-write half already fixed on main; post-revocation half real; fixed (actor-tagged sockets, close on offboarding/suspension, post-admission D1 re-check); merged 779f77aa9 after staging pass
+- [x] #2868: already fixed on main by 0fef1146d; closed with evidence (draft's race tests run against main)
+- [x] Post results on channel `maintenance.pr-shepherd`
 
 ## Acceptance Criteria
 
-- [ ] Each PR is either merged and deployed to production, or closed with evidence
-- [ ] Each merged fix has a test that fails with the guard removed and passes with it
-- [ ] Each merged fix passed security-auditor review and leased staging verification
+- [x] Each PR is either merged and deployed to production, or closed with evidence (production deploy: see completion summary)
+- [x] Each merged fix has a test that fails with the guard removed and passes with it
+- [x] Each merged fix passed security-auditor review and leased staging verification
+
+## Follow-ups filed
+
+- `tasks/backlog/2026-11-18-text-plain-json-csrf-on-raw-json-routes.md` (via #2865)
+- `tasks/backlog/2026-11-18-project-socket-access-reconcile.md` (via #2867)
+- `tasks/backlog/2026-11-18-mission-cancel-mid-cycle-orphan-session.md` (via #2867)
