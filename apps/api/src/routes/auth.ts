@@ -6,6 +6,7 @@ import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
+import { emailTransportKind } from '../services/agent-email/provider';
 import { isAgentSignInSession, isPastHardExpiry } from '../services/agent-sign-in/session-cap';
 import {
   assertCodeAttemptBudget,
@@ -16,7 +17,6 @@ import {
   SEND_CODE_PATH,
   withinEmailBudget,
 } from '../services/email-sign-in';
-import { emailTransportKind } from '../services/agent-email/provider';
 import { readAuthSession } from '../services/read-auth-session';
 import { assertUserNotSuspended } from '../services/signup-approval';
 import { accountLinkingRoutes } from './account-linking';
