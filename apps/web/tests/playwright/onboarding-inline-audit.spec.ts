@@ -13,7 +13,13 @@
  */
 import { expect, type Page, type Route, test } from '@playwright/test';
 
-import { assertNoOverflow, jsonResponse, makeMockUser, screenshot } from './audit-helpers';
+import {
+  assertNoClippedOverflow,
+  assertNoOverflow,
+  jsonResponse,
+  makeMockUser,
+  screenshot,
+} from './audit-helpers';
 
 const MOCK_USER = makeMockUser({
   email: 'demo@example.com',
@@ -62,7 +68,7 @@ interface Recorded {
 
 async function setupMocks(page: Page, state: Installation): Promise<Recorded> {
   const recorded: Recorded = { projects: [], profiles: [] };
-  await page.route('**/api/**', async (route: Route) => {
+  await page.route(new RegExp('^https?://[^/]+/api/'), async (route: Route) => {
     const p = new URL(route.request().url()).pathname;
     const method = route.request().method();
     const isGet = method === 'GET';
@@ -412,3 +418,29 @@ test('dashboard empty state offers a new project, not a GitHub import', async ({
   await assertNoOverflow(page);
   await screenshot(page, 'onboarding-dashboard-empty-projects');
 });
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`account linking onboarding gate ${theme} navigates to Settings`, async ({ page }) => {
+    await page.addInitScript((value) => localStorage.setItem('sam-theme', value), theme);
+    await setupMocks(page, { hasAgent: true, hasCloud: true });
+    await page.route('**/api/auth/list-accounts', (route) => jsonResponse(route, 200, []));
+    await page.route('**/api/config/login-providers', (route) =>
+      jsonResponse(route, 200, { github: true, gitlab: false, google: false, email: true })
+    );
+    const wizard = await begin(page);
+    const gate = wizard.getByTestId('onboarding-connect-github');
+    await expect(gate).toBeVisible();
+    await expect(wizard.getByRole('button', { name: 'Install the GitHub app' })).toHaveCount(0);
+    const link = gate.getByRole('link', { name: 'Connect GitHub' });
+    await expect(link).toHaveAttribute('href', '/settings/github');
+    await viewportScreenshot(page, `account-linking-onboarding-${theme}`);
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await link.click();
+    await expect(page).toHaveURL(/settings\/github/);
+    await expect(page.getByTestId('onboarding-wizard')).toHaveCount(0);
+    await expect(
+      page.getByTestId('connected-provider-github').getByRole('button', { name: 'Connect GitHub' })
+    ).toBeVisible();
+  });
+}

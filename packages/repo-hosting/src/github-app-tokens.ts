@@ -174,7 +174,7 @@ export async function generateAppJWT(env: Env): Promise<string> {
   const config = await repoHostingPorts().platformConfig.githubApp(env);
   if (!config) {
     throw new AppError(
-      500,
+      409,
       'GITHUB_APP_NOT_CONFIGURED',
       'GitHub App credentials are not configured'
     );
