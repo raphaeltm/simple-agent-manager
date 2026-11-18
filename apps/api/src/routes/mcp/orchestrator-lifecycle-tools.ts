@@ -100,7 +100,7 @@ export async function handleCancelMission(
   if (!ok) return jsonRpcError(requestId, INVALID_PARAMS, 'Mission not found');
 
   return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: JSON.stringify({ success: true, missionId, status: 'cancelled' }) }],
+    content: [{ type: 'text', text: JSON.stringify({ success: true, missionId, status: 'cancellation_requested' }) }],
   });
 }
 

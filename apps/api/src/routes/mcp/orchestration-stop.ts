@@ -9,6 +9,8 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { sendPromptToAgentOnNode, stopAgentSessionOnNode } from '../../services/node-agent';
+import { retireTaskCancellationPrompts } from '../../services/task-cancellation-prompts';
+import { taskRecoveryCancellationStatement } from '../../services/task-recovery-cancellation';
 import { cleanupTerminalTaskResources } from '../../services/task-terminal-cleanup';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import {
@@ -132,12 +134,18 @@ export async function handleStopSubtask(
   let preservedTerminalStatus: string | null = null;
   try {
     const cancelFromStatus = async (fromStatus: string): Promise<boolean> => {
+      await retireTaskCancellationPrompts(env, {
+        ...task,
+        userId: tokenData.userId,
+        chatSessionId: workspace.chatSessionId,
+      });
       const [transition] = await env.DATABASE.batch([
         env.DATABASE.prepare(
           `UPDATE tasks
               SET status = 'cancelled', error_message = ?, completed_at = ?, updated_at = ?
-            WHERE id = ? AND status = ?`
-        ).bind(stopReason, now, now, taskId, fromStatus),
+            WHERE id = ? AND project_id = ? AND status = ?`
+        ).bind(stopReason, now, now, taskId, task.projectId, fromStatus),
+        taskRecoveryCancellationStatement(env.DATABASE, task, now),
         env.DATABASE.prepare(
           `INSERT INTO task_status_events
              (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)

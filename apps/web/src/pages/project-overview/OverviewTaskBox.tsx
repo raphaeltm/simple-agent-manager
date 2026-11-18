@@ -177,6 +177,7 @@ export function OverviewTaskBox({
       onCloseProfileWizard={profileChoice.closeProfileWizard}
       onUpdateProfileWizard={profileChoice.updateProfileWizard}
       onCreateProfileFromWizard={profileChoice.createProfileFromWizard}
+      onCreateDefaultChatProfile={profileChoice.createDefaultChatProfile}
       suggestProfileName={profileChoice.suggestProfileName}
       slashCommands={slashCommands}
       attachments={attachments.chatAttachments}

@@ -112,6 +112,7 @@ import { runStandingWatchAlarm } from './project-standing-watches-runner';
 import * as standingWatches from './project-standing-watches-storage';
 import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from './prompt-delivery';
 import * as promptDelivery from './prompt-delivery';
+import { cancelUnissuedSessionPrompts } from './prompt-delivery-cancellation';
 import {
   type ProviderLimitAttentionResult,
   syncProviderLimitAttention,
@@ -519,9 +520,27 @@ export class ProjectData extends DurableObject<Env> {
    */
   async stopSession(
     sessionId: string,
-    options: { deferAlarm?: boolean; source?: 'workspace_eviction_finalization' } = {}
+    options: {
+      deferAlarm?: boolean;
+      source?: 'workspace_eviction_finalization';
+      guard?: sessions.SessionIdentityGuard;
+    } = {}
   ): Promise<boolean> {
-    const result = sessions.stopSession(this.sql, sessionId, undefined, options);
+    let result: ReturnType<typeof sessions.stopSession>;
+    try {
+      result = sessions.stopSession(this.sql, sessionId, options.guard, options);
+    } catch (error) {
+      // An expected owner change is a refused stop, not a failed RPC. Keep the
+      // decision at the DO mutation boundary so no successor mirror is touched.
+      if (
+        options.guard &&
+        error instanceof Error &&
+        (error.message.startsWith(`Session ${sessionId} cannot stopped: expected `) ||
+          error.message === `Session ${sessionId} not found`)
+      )
+        return false;
+      throw error;
+    }
     if (result) {
       attention.resolveAttentionMarkersByKind(
         this.sql,
@@ -941,6 +960,37 @@ export class ProjectData extends DurableObject<Env> {
         }
       );
     });
+  }
+
+  /** Retire only unissued prompts of the exact cancelled task; later messages stay eligible. */
+  async cancelUnissuedSessionPrompts(
+    sessionId: string,
+    taskId: string,
+    options?: { acceptedBefore: number }
+  ): Promise<import('./prompt-delivery-cancellation').CancelUnissuedSessionPromptsResult> {
+    const cancelled = await this.withArchiveTranscriptLock(() => {
+      messages.assertTranscriptWriteAllowed(this.sql, sessionId, 'cancelUnissuedSessionPrompts');
+      return this.meteredStorage.transactionSync(() =>
+        cancelUnissuedSessionPrompts(
+          this.sql,
+          sessionId,
+          taskId,
+          this.getProjectId(),
+          options?.acceptedBefore
+        )
+      );
+    });
+    // An uncertain retry can settle a wake batch without increasing the cancelled count.
+    if (cancelled.matched) {
+      this.recalculateAlarm().catch((error) =>
+        log.warn('prompt_delivery.cancel_recalculate_alarm_failed', {
+          sessionId,
+          taskId,
+          ...serializeError(error),
+        })
+      );
+    }
+    return cancelled;
   }
 
   async acceptPromptDelivery(input: AcceptPromptDeliveryInput): Promise<AcceptedPromptDelivery> {

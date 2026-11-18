@@ -350,6 +350,17 @@ setups, Accounts and People tabs (`packages/operations/src/insights-page-setting
 | `insights.peopleWaitingItemsListed`      | 10      | 1–50       | Open items listed per person under "Waiting on" (each person still shows how many are open)                                                       |
 | `insights.peopleReviewScanCap`           | 2,000   | 100–20,000 | Review requests in the range, newest first, examined for "Review pickup"; the page says when the cap cut it short                                 |
 
+## Insights for agents
+
+Listed under **Operations**. The per-chat rate limit of the sam-mcp `project_insights` tool
+(`packages/operations/src/insights-agent-settings.ts`, enforced by
+`apps/api/src/routes/mcp/project-insights-tool.ts` on the `McpRateCounter` Durable Object).
+
+| Setting                            | Default | Range     | What it limits                                                         |
+| ---------------------------------- | ------- | --------- | ---------------------------------------------------------------------- |
+| `insights.agentToolCallsPerWindow` | 30      | 1–1,000   | Calls one agent chat may make to `project_insights` per window         |
+| `insights.agentToolWindowSeconds`  | 600     | 10–86,400 | Length of that window in seconds; later calls wait for the next window |
+
 ## Node provisioning
 
 This **Operations** setting bounds one durable node-provisioning attempt
@@ -905,7 +916,7 @@ attempts count).
 | `operations.opsAnomalyTerminalTaskGraceMs`    | 900,000    | 0–7 days      | Time after a task ends before its still-running workspace is reported                                                                                                                                           |
 | `operations.opsAnomalyIdleTaskMinutes`        | 60         | 1–10,080      | Minutes without task or workspace activity before an in-progress task is reported                                                                                                                               |
 | `operations.opsAnomalyDestroyingNodeHours`    | 6          | 1–720         | Hours a node may stay destroying, counted from its last heartbeat, before its unfinished teardown is reported with any recorded cleanup refusal                                                                 |
-| `operations.opsAnomalyWakingMinutes`          | 60         | 1–43,200      | Minutes a sleeping chat may stay waking, counted from its wake claim, before the wake is reported (`session_wake_stalled`), with no lookback limit                                                              |
+| `operations.opsAnomalyWakingMinutes`          | 60         | 1–43,200      | Minutes a sleeping chat may stay waking, counted from its wake claim, before the wake is reported (`session_wake_stalled`), with no lookback limit; a provider-limit hold is reported only past its deadline    |
 | `operations.opsAnomalyLookbackHours`          | 24         | 1–720         | Hours of snapshot failures and deletion-quarantine reports the anomaly check looks at                                                                                                                           |
 | `operations.opsAnomalyMaxPerClass`            | 25         | 1–200         | Findings returned per anomaly type; each type still reports its total                                                                                                                                           |
 | `operations.opsNodeLogMaxLines`               | 200        | 1–1,000       | Most log lines one `ops_node_logs` call returns                                                                                                                                                                 |

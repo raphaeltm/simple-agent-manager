@@ -175,6 +175,13 @@ reset SAM wakes it with a message telling the agent the wait is over. The agent 
 already done before it carries on, so it doesn't blindly repeat the step that hit the limit. SAM
 never switches to another model, profile, or credential to get around a limit.
 
+**A message you send while it waits is kept.** SAM doesn't report **Wake failed** for a chat that
+is waiting for a limit reset, and it doesn't drop your message after the usual hour: it holds the
+message until the reset (plus that hour), then delivers it when the chat wakes. Don't send it
+again. While a task shows **Needs you** (below), a message doesn't wake the chat; SAM holds it
+until you resume the task, for as long as the saved workspace is kept, and delivers it then. If a
+message you sent can't be delivered in that time, the chat reports **Wake failed** as usual.
+
 - **If Claude Code or Codex didn't say when its limit resets**, the message reads **Waiting for provider
   limit reset (time unknown); bounded retry 1/3 at 14:05 UTC.** SAM tries again after 5 minutes,
   then 10, then 20. Repeated rejections before one retry do not use extra waits. If three separate unknown-reset waits don't get the work going, the task shows **Needs you**.
@@ -192,6 +199,17 @@ never switches to another model, profile, or credential to get around a limit.
   SAM records your choice for the account selected at that moment; if the task's account changes
   before it starts, it stops at **Needs you** instead. If the provider really does refuse the
   prompt, SAM pauses the task the usual way.
+
+**Already started, then went to sleep at the limit?** The owner can choose **Resume anyway**
+on the waiting notice after resetting the same account's limit or enabling extra usage. SAM
+restores the saved session and delivers its queued message using the same account and profile,
+including an account chosen specifically for that run. If no message is queued, the restored
+session waits for your next message; SAM does not replay an earlier prompt.
+Your choice applies to the current wait only and can use extra credits. If the account or profile
+changed, review the selection first. If the provider rejects again, SAM pauses again. An expired
+or unavailable saved workspace cannot be forced to restore. If recovery cannot get started or
+confirmed within its bounded repair window, SAM keeps the saved work and asks you to review it
+before resuming. A recovery already underway can finish under its original deadline.
 
 **Needs you**, with a reason starting **Blocked:**, means SAM stopped waiting. The task won't carry on by itself, and a reply in
 the chat doesn't restart it:
@@ -334,7 +352,8 @@ When SAM has scheduled its next attempt, the status adds **Next try at** and the
 only **Waiting for server capacity...**, SAM has not recorded a reason yet. SAM keeps trying; if
 the wait drags on, delete machines you no longer need from the **Nodes** page. A message you sent is held for an
 hour: if the wake is still waiting then, the chat reports **Wake failed: Session is waking** (see
-[Wake failed](#wake-failed)).
+[Wake failed](#wake-failed)). A wake held for a provider limit reset is the exception (see
+[Waiting for a provider limit reset](#waiting-for-a-provider-limit-reset)).
 
 Until a **Wake failed** message appears, SAM still holds your message and keeps retrying the wake,
 even if the status is gone when you reopen the chat. Don't send the message again: a second copy

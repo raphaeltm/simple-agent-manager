@@ -25,10 +25,12 @@ import type { StartTaskInput, TaskRunner } from '../../src/durable-objects/task-
 import type { Env } from '../../src/env';
 import type { McpTokenData } from '../../src/routes/mcp/_helpers';
 import { handleDispatchTask } from '../../src/routes/mcp/dispatch-tool';
+import { handleRetrySubtask } from '../../src/routes/mcp/orchestration-tools';
 import * as projectHelpers from '../../src/routes/projects/_helpers';
 import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
 import * as projectDataService from '../../src/services/project-data';
 import { getOrchestratorStatus, startOrchestration } from '../../src/services/project-orchestrator';
+import * as taskTitleService from '../../src/services/task-title';
 import * as vmAgentContainer from '../../src/services/vm-agent-container';
 import * as workspaceBranch from '../../src/services/workspace-branch';
 import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
@@ -194,7 +196,7 @@ async function seedMissionFixture(label: string) {
     workspaceId: `workspace-${parentTaskId}`,
     createdAt: now,
   };
-  return { userId, projectId, missionId, token };
+  return { userId, projectId, missionId, token, installationId };
 }
 
 async function dispatchMissionTask(
@@ -641,6 +643,49 @@ describe('mission dispatch has exactly one starter', () => {
     expect((await taskRow(dispatched.taskId))?.chat_session_id).toBe(claimedSessionId);
   });
 
+  it('MCP retry owns its mission task while session creation is suspended', async () => {
+    const fixture = await seedMissionFixture('mcp-retry-session-midpoint');
+    const retry = await admissionAction(fixture, 'mcp-retry', fixture.missionId);
+    const entered = deferred<{ taskId: string; sessionId: string }>();
+    const release = deferred<void>();
+    const createSession = projectDataService.createSession;
+    let firstCreation = true;
+    vi.spyOn(projectDataService, 'createSession').mockImplementation(async (...args) => {
+      if (!firstCreation) return createSession(...args);
+      firstCreation = false;
+      entered.resolve({ taskId: args[4]!, sessionId: args[6]! });
+      await release.promise;
+      return createSession(...args);
+    });
+    const pending = retry();
+    const claim = await entered.promise;
+    try {
+      expect(await sessionIdsForTask(fixture.projectId, claim.taskId)).toEqual([]);
+      // Exercise the competing production starter before inspecting the reservation.
+      const status = await runOrchestratorCycleOver(fixture.projectId, fixture.missionId);
+      expect(status.recentDecisions.filter((d) => d.taskId === claim.taskId)).toEqual([]);
+      expect(await taskRunnerStub(claim.taskId).getStatus()).toBeNull();
+      expect(await sessionIdsForTask(fixture.projectId, claim.taskId)).toEqual([]);
+      expect(await taskRow(claim.taskId)).toMatchObject({
+        status: 'queued',
+        chat_session_id: claim.sessionId,
+      });
+      expect(claim.sessionId).toEqual(expect.any(String));
+    } finally {
+      release.resolve();
+      await pending;
+    }
+    expect(((await pending) as { error?: unknown }).error).toBeUndefined();
+    expect(await sessionIdsForTask(fixture.projectId, claim.taskId)).toEqual([claim.sessionId]);
+    expect(await taskRunnerStub(claim.taskId).getStatus()).toMatchObject({
+      currentStep: 'node_selection',
+      stepResults: { chatSessionId: claim.sessionId },
+    });
+    const status = await runOrchestratorCycleOver(fixture.projectId, fixture.missionId);
+    expect(status.recentDecisions.filter((d) => d.taskId === claim.taskId)).toEqual([]);
+    expect(await sessionIdsForTask(fixture.projectId, claim.taskId)).toEqual([claim.sessionId]);
+  });
+
   it('the /sam dispatch_task and retry_subtask creators own their mission tasks from the insert', async () => {
     const fixture = await seedMissionFixture('mission-sam-creators');
     vi.spyOn(projectHelpers, 'requireRepositoryOwnerAccess').mockResolvedValue(undefined);
@@ -680,5 +725,162 @@ describe('mission dispatch has exactly one starter', () => {
       expect((await taskRow(task.taskId))?.chat_session_id).toBe(task.sessionId);
       expect(status.recentDecisions.filter((d) => d.taskId === task.taskId)).toEqual([]);
     }
+  });
+});
+
+/** Public creator variants share placement but persist task rows through three distinct writers. */
+const admissionCreators = [
+  'mcp-explicit',
+  'mcp-inherited',
+  'mcp-retry',
+  'sam-explicit',
+  'sam-retry',
+] as const;
+type AdmissionCreator = (typeof admissionCreators)[number];
+async function admissionAction(
+  f: Awaited<ReturnType<typeof seedMissionFixture>>,
+  creator: AdmissionCreator,
+  missionId: string | null
+) {
+  const heldEnv = envWithHeldRunnerAlarms();
+  const ctx = { env: heldEnv as unknown as Record<string, unknown>, userId: f.userId };
+  if (creator === 'mcp-inherited')
+    await env.DATABASE.prepare('UPDATE tasks SET mission_id=? WHERE id=?')
+      .bind(missionId, f.token.taskId)
+      .run();
+  if (creator === 'sam-retry' || creator === 'mcp-retry') {
+    const original = `retry-source-${f.missionId}`;
+    await seedTask(original, f.projectId, f.userId, { status: 'failed' });
+    await env.DATABASE.prepare('UPDATE tasks SET mission_id=?, description=? WHERE id=?')
+      .bind(missionId, 'Admission retry source', original)
+      .run();
+    if (creator === 'mcp-retry') {
+      await env.DATABASE.prepare('UPDATE tasks SET parent_task_id=? WHERE id=?')
+        .bind(f.token.taskId, original)
+        .run();
+      return () => handleRetrySubtask(1, { taskId: original }, f.token, heldEnv);
+    }
+    return () => samRetrySubtask({ taskId: original }, ctx);
+  }
+  if (creator === 'sam-explicit')
+    return () =>
+      samDispatchTask(
+        {
+          projectId: f.projectId,
+          description: 'Admission fence audit',
+          ...(missionId ? { missionId } : {}),
+        },
+        ctx
+      );
+  return () =>
+    handleDispatchTask(
+      1,
+      {
+        description: 'Admission fence audit',
+        ...(creator === 'mcp-explicit' && missionId ? { missionId } : {}),
+      },
+      f.token,
+      heldEnv
+    );
+}
+async function projectTaskCount(projectId: string) {
+  return (await env.DATABASE.prepare('SELECT count(*) AS n FROM tasks WHERE project_id=?')
+    .bind(projectId)
+    .first<{ n: number }>())!.n;
+}
+
+describe('mission admission is atomic with task insertion', () => {
+  it.each(
+    admissionCreators.flatMap((creator) =>
+      ['cancelled', 'completed', 'failed'].map((status) => ({ creator, status }))
+    )
+  )(
+    '$creator refuses a mission that becomes $status while title generation is suspended',
+    async ({ creator, status }) => {
+      const f = await seedMissionFixture(`admission-${creator}-${status}`);
+      await runInDurableObject(orchestratorStub(f.projectId), async (instance) => {
+        await instance.ctx.storage.deleteAlarm();
+      });
+      vi.spyOn(projectHelpers, 'requireRepositoryOwnerAccess').mockResolvedValue(undefined);
+      const action = await admissionAction(f, creator, f.missionId);
+      const before = await projectTaskCount(f.projectId);
+      const entered = deferred<void>(),
+        release = deferred<void>();
+      vi.spyOn(taskTitleService, 'generateTaskTitle').mockImplementation(async () => {
+        entered.resolve();
+        await release.promise;
+        return 'Admission fence audit';
+      });
+      const pending = action();
+      await entered.promise;
+      try {
+        // The real public creator has passed admission reads, but no INSERT exists yet.
+        expect(await projectTaskCount(f.projectId)).toBe(before);
+        await env.DATABASE.batch([
+          env.DATABASE.prepare("UPDATE tasks SET status='cancelled' WHERE id=?").bind(
+            f.token.taskId
+          ),
+          env.DATABASE.prepare('UPDATE missions SET status=? WHERE id=?').bind(status, f.missionId),
+        ]);
+      } finally {
+        release.resolve();
+      }
+      const result = (await pending) as { error?: unknown };
+      expect(result.error).toBeDefined();
+      expect(await projectTaskCount(f.projectId)).toBe(before);
+      expect(
+        (
+          await env.DATABASE.prepare('SELECT status FROM missions WHERE id=?')
+            .bind(f.missionId)
+            .first()
+        )?.status
+      ).toBe(status);
+    }
+  );
+
+  it.each(
+    admissionCreators.flatMap((creator) =>
+      ['planning', 'active', 'paused', 'missionless'].map((status) => ({ creator, status }))
+    )
+  )('$creator preserves $status admission', async ({ creator, status }) => {
+    const f = await seedMissionFixture(`admission-control-${creator}-${status}`);
+    await runInDurableObject(orchestratorStub(f.projectId), async (instance) => {
+      await instance.ctx.storage.deleteAlarm();
+    });
+    vi.spyOn(projectHelpers, 'requireRepositoryOwnerAccess').mockResolvedValue(undefined);
+    vi.spyOn(taskTitleService, 'generateTaskTitle').mockResolvedValue('Admission positive control');
+    if (status !== 'missionless')
+      await env.DATABASE.prepare('UPDATE missions SET status=? WHERE id=?')
+        .bind(status, f.missionId)
+        .run();
+    const action = await admissionAction(f, creator, status === 'missionless' ? null : f.missionId);
+    const before = await projectTaskCount(f.projectId);
+    const result = (await action()) as { error?: unknown };
+    expect(result.error).toBeUndefined();
+    expect(await projectTaskCount(f.projectId)).toBe(before + 1);
+    const created = await env.DATABASE.prepare(
+      'SELECT mission_id FROM tasks WHERE project_id=? AND id NOT IN (?,?)'
+    )
+      .bind(f.projectId, f.token.taskId, `retry-source-${f.missionId}`)
+      .first();
+    expect(created?.mission_id).toBe(status === 'missionless' ? null : f.missionId);
+  });
+
+  it.each(admissionCreators)('%s rejects a mission from another project', async (creator) => {
+    const f = await seedMissionFixture(`admission-scope-${creator}`);
+    await runInDurableObject(orchestratorStub(f.projectId), async (instance) => {
+      await instance.ctx.storage.deleteAlarm();
+    });
+    vi.spyOn(projectHelpers, 'requireRepositoryOwnerAccess').mockResolvedValue(undefined);
+    vi.spyOn(taskTitleService, 'generateTaskTitle').mockResolvedValue('Admission scope control');
+    const otherProject = `other-${f.projectId}`;
+    await seedProject(otherProject, f.userId, f.installationId);
+    await env.DATABASE.prepare('UPDATE missions SET project_id=? WHERE id=?')
+      .bind(otherProject, f.missionId)
+      .run();
+    const action = await admissionAction(f, creator, f.missionId);
+    const before = await projectTaskCount(f.projectId);
+    expect(((await action()) as { error?: unknown }).error).toBeDefined();
+    expect(await projectTaskCount(f.projectId)).toBe(before);
   });
 });
