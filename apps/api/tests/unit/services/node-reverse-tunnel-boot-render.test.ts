@@ -78,8 +78,8 @@ describe('reverse-tunnel node boot document', () => {
 
     const doc = YAML.parse(userData) as BootDoc;
     const frpc = file(doc, '/etc/sam/frpc/frpc.toml');
-    expect(frpc.content).toContain(`remotePort = ${lease.port}`);
-    expect(frpc.content).toContain('localPort = 8444');
+    expect(frpc.content).toMatch(new RegExp(`^remotePort = ${lease.port}$`, 'm'));
+    expect(frpc.content).toMatch(/^localPort = 8444$/m);
     expect(frpc.content).toContain(`user = "${node.id}"`);
     expect(frpc.content).toContain(
       'metadatas.credential = "{{ .Envs.SAM_REVERSE_TUNNEL_CREDENTIAL }}"'
@@ -102,12 +102,14 @@ describe('reverse-tunnel node boot document', () => {
   });
 
   it('control: a Cloudflare node never reaches the reverse-tunnel renderer', async () => {
-    setEnv(tunnelEnv({ VM_AGENT_TRANSPORT: undefined }));
+    setEnv(tunnelEnv({ VM_AGENT_TRANSPORT: 'cloudflare-tunnel' }));
     const node = await freshNode();
     await provisionNode(node.id, env);
 
     expect(rendered).toHaveLength(0);
     expect(mocks.cloudInitVars).toHaveLength(1);
     expect(mocks.cloudInitVars[0]).not.toHaveProperty('reverseTunnelCredential');
+    // Liveness: this really is the Cloudflare Tunnel provisioning path.
+    expect(mocks.cloudInitVars[0]).toMatchObject({ cloudflareTunnelToken: expect.any(String) });
   });
 });

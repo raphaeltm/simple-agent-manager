@@ -90,19 +90,28 @@ export function validateReverseTunnelVariables(
   if (!validPort(remote)) {
     errors.push(`reverseTunnelRemotePort: must be numeric 1-65535 (got ${JSON.stringify(remote)})`);
   }
+  // frpc dials the control plane's host. The shared URL check is a character allowlist, so an
+  // unparseable URL (for example port 65536) would otherwise render an empty serverAddr.
+  if (!reverseTunnelServerAddress(variables.controlPlaneUrl)) {
+    errors.push(
+      'controlPlaneUrl: must be an HTTPS URL with a host and a valid port in reverse-tunnel mode'
+    );
+  }
 }
 
-/** Host and port frpc dials: the control plane's own public HTTPS endpoint. */
-export function reverseTunnelServerAddress(controlPlaneUrl: string): {
-  host: string;
-  port: string;
-} {
+/**
+ * Host and port frpc dials: the control plane's own public HTTPS endpoint. Null when the URL is
+ * not an HTTPS URL with a host; validateReverseTunnelVariables rejects that case in reverse mode.
+ */
+export function reverseTunnelServerAddress(
+  controlPlaneUrl: string
+): { host: string; port: string } | null {
   try {
     const url = new URL(controlPlaneUrl);
+    if (url.protocol !== 'https:' || !url.hostname) return null;
     return { host: url.hostname, port: url.port || '443' };
   } catch {
-    // validateCloudInitVariables already rejected an unparseable control plane URL.
-    return { host: '', port: '443' };
+    return null;
   }
 }
 
@@ -110,7 +119,8 @@ export function reverseTunnelServerAddress(controlPlaneUrl: string): {
 export function reverseTunnelReplacements(variables: CloudInitVariables): Record<string, string> {
   const reverse = isReverseTunnelMode(variables);
   const release = FRPC_RELEASES[DEFAULT_FRPC_VERSION];
-  const server = reverseTunnelServerAddress(variables.controlPlaneUrl);
+  // Inert for non-reverse nodes, whose controlPlaneUrl this mode does not validate.
+  const server = reverseTunnelServerAddress(variables.controlPlaneUrl) ?? { host: '', port: '443' };
   return {
     '{{ reverse_tunnel_credential }}': reverse ? (variables.reverseTunnelCredential ?? '') : '',
     '{{ reverse_tunnel_remote_port }}': reverse ? (variables.reverseTunnelRemotePort ?? '') : '',

@@ -28,7 +28,11 @@ export const REVERSE_TUNNEL_BOOTSTRAP_RUNCMD = `  - 'logger -t sam-boot "PHASE S
       /usr/local/sbin/sam-boot-failure frpc_install
       exit 1
     fi
-    install -m 0755 "$FRP_DIR/$FRP_NAME/frpc" /usr/local/bin/frpc
+    if ! install -m 0755 "$FRP_DIR/$FRP_NAME/frpc" /usr/local/bin/frpc; then
+      rm -rf "$FRP_TMP" "$FRP_DIR"
+      /usr/local/sbin/sam-boot-failure frpc_install
+      exit 1
+    fi
     rm -rf "$FRP_TMP" "$FRP_DIR"
     id sam-frpc >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin sam-frpc
     if ! /etc/sam/firewall/setup-firewall.sh; then

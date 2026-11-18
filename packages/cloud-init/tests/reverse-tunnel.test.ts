@@ -89,6 +89,31 @@ describe('reverse-tunnel variable validation', () => {
     expect(() => validateCloudInitVariables(reverse(overrides))).toThrow(/validation failed/);
   });
 
+  it('rejects a control plane URL that frpc could not dial (no empty serverAddr)', () => {
+    const url = 'https://api.box.example.org:65536';
+    expect(() => validateCloudInitVariables(reverse({ controlPlaneUrl: url }))).toThrow(
+      'controlPlaneUrl: must be an HTTPS URL with a host and a valid port in reverse-tunnel mode'
+    );
+    // Control: the same URL is not this mode's concern on other nodes.
+    let message = '';
+    try {
+      validateCloudInitVariables(variables({ controlPlaneUrl: url }));
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).not.toContain('reverse-tunnel mode');
+  });
+
+  it('keeps an explicit control plane port and defaults to 443', () => {
+    const toml = (url: string) =>
+      file(
+        parse(reverse({ controlPlaneUrl: url, jwksUrl: `${url}/jwks` })),
+        '/etc/sam/frpc/frpc.toml'
+      ).content;
+    expect(toml('https://api.box.example.org:8443')).toMatch(/^serverPort = 8443$/m);
+    expect(toml('https://api.box.example.org')).toMatch(/^serverPort = 443$/m);
+  });
+
   it('never echoes the credential in validation errors', () => {
     let message = '';
     try {
@@ -254,7 +279,7 @@ function runBootScript(vars: CloudInitVariables, env: Record<string, string> = {
   while [ "$#" -gt 0 ]; do if [ "$1" = -fsSLo ]; then shift; cp "$TEST_DIR/frp.tar.gz" "$1"; fi; shift; done; exit 0 ;; esac
 while [ "$#" -gt 0 ]; do if [ "$1" = -fLo ] || [ "$1" = -fsSLo ]; then shift; printf 'binary' > "$1"; fi; shift; done`,
     sha256sum: `echo "\${FAKE_SHA:-${RELEASE.amd64}}  $1"`,
-    install: 'true',
+    install: 'case "$*" in *frpc*) exit "${FRPC_INSTALL_EXIT:-0}" ;; esac',
     id: 'exit 1',
     useradd: 'true',
     chown: 'true',
@@ -319,6 +344,15 @@ describe('executed reverse-tunnel boot sequence', () => {
     expect(calls).not.toContain('systemctl start vm-agent');
     expect(calls).not.toContain('sam-frpc.service');
     if (reason === 'frpc_install') expect(calls).not.toMatch(/^install /m);
+  });
+
+  it('fails closed when the verified frpc cannot be installed', () => {
+    const { result, calls } = runBootScript(reverse(), { FRPC_INSTALL_EXIT: '1' });
+    expect(result.status).toBe(1);
+    expect(calls).toMatch(/^install -m 0755 \S+\/frpc /m);
+    expect(calls).toContain('sam-boot-failure frpc_install');
+    expect(calls).not.toContain('systemctl start vm-agent');
+    expect(calls).not.toContain('sam-frpc.service');
   });
 
   it('reports a connector that cannot start', () => {
