@@ -18,8 +18,10 @@ import {
 } from '../services/email-sign-in';
 import { readAuthSession } from '../services/read-auth-session';
 import { assertUserNotSuspended } from '../services/signup-approval';
+import { accountLinkingRoutes } from './account-linking';
 
 const authRoutes = new Hono<{ Bindings: Env }>();
+authRoutes.route('/', accountLinkingRoutes);
 
 /**
  * GET /api/auth/me - Get current authenticated user

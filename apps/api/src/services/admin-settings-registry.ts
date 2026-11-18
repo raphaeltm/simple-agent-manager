@@ -1,4 +1,5 @@
 import type { AdminSettingDefinition } from './admin-setting-definitions';
+import { ACCOUNT_LINKING_SETTINGS } from './admin-settings-account-linking-definitions';
 import { CORE_SETTINGS } from './admin-settings-core-definitions';
 import { CREDENTIAL_SETUP_SETTINGS } from './admin-settings-credential-setup-definitions';
 import { DEPLOYMENT_PUBLISH_SETTINGS } from './admin-settings-deployment-publish-definitions';
@@ -32,6 +33,7 @@ export {
   OPERATOR_DEFAULTS,
 } from './admin-setting-definitions';
 const definitions = [
+  ...ACCOUNT_LINKING_SETTINGS,
   ...llmEndpointSettingDefinitions(),
   ...AI_PROXY_SETTINGS,
   ...MESSAGE_MERGE_SETTINGS,
