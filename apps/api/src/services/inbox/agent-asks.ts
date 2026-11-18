@@ -13,6 +13,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import * as notificationService from '../notification';
 import * as projectDataService from '../project-data';
+import { stripMarkdown } from '../task-title';
 import { linkQuestionNotification } from './question-asks';
 
 /**
@@ -58,13 +59,20 @@ export async function announceAgentAsk(
       projectId: input.projectId,
       projectName,
       taskId: input.taskId,
-      taskTitle: task?.title ?? input.title,
-      context: input.body,
+      // A result's push leads with its outcome, not the task's name.
+      taskTitle: input.kind === 'result' ? input.title : (task?.title ?? input.title),
+      // `why` is markdown in the inbox; a push shows plain text.
+      context: stripMarkdown(input.body),
       category,
       options: input.options.length > 0 ? input.options : null,
       sessionId: input.sessionId,
       attentionMarkerId: input.askId,
       label: input.kind === 'review' ? 'Review' : undefined,
+      heading: input.kind === 'result' ? 'Result ready' : undefined,
+      // A review or result opens its inbox item; a question keeps its chat link.
+      ...(input.kind === 'question'
+        ? {}
+        : { inboxKind: input.kind, inboxRef: `ask:${input.askId}` }),
     });
     const scheduled = notification.id !== 'suppressed';
     if (scheduled && input.kind === 'question') {
