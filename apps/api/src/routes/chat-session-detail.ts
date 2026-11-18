@@ -24,6 +24,7 @@ import { errors } from '../middleware/error';
 import { operationDeps } from '../operation-ports';
 import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as projectDataService from '../services/project-data';
+import { canResumeProviderLimitTaskAnyway } from '../services/provider-limit-force-resume';
 import { canStartProviderLimitTaskAnyway } from '../services/provider-limit-recovery';
 import { publicPlacementExplanationJson } from '../services/public-placement-explanation';
 import { isTaskStatus } from '../services/task-status';
@@ -38,6 +39,7 @@ import {
 } from './chat-message-query';
 import { getChatSessionRouteContext } from './chat-route-context';
 import { enrichSessionWithAccess } from './chat-session-ownership';
+import { readChatToolChanges } from './chat-tool-changes';
 
 export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env }>): void {
   /**
@@ -71,6 +73,7 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
       throw errors.notFound('Chat session');
     }
 
+    const toolChanges = await readChatToolChanges(c, projectId, sessionId);
     const limit = getSessionMessageLimit(c.env, c.req.query('limit'));
     const before = getMessageCursor('before', c.req.query('before'));
     const after = getMessageCursor('after', c.req.query('after'));
@@ -184,6 +187,13 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
                 taskRow,
                 parseProviderLimitWait(taskRow.providerLimitWaitJson)
               ),
+            providerLimitCanResumeAnyway:
+              taskRow.userId === userId &&
+              sessionRecord.status === 'sleeping' &&
+              canResumeProviderLimitTaskAnyway(
+                taskRow,
+                parseProviderLimitWait(taskRow.providerLimitWaitJson)
+              ),
             status: isTaskStatus(taskRow.status) ? taskRow.status : 'draft',
             executionStep: isTaskExecutionStep(taskRow.executionStep)
               ? taskRow.executionStep
@@ -245,6 +255,7 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
         { access: loaded.access, grants: loaded.grants, undelivered: loaded.undelivered }
       ),
       messages: messagesResult.messages,
+      ...(toolChanges ? { toolChanges } : {}),
       hasMore: messagesResult.hasMore,
       state: stateWithRecovery,
     });

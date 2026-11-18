@@ -1,8 +1,9 @@
+import type { MonthlyCostCapCheck } from '@simple-agent-manager/ai-proxy';
 import { PLATFORM_AI_MODELS, resolveSamConfig } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../../env';
 import { getTrustedApiOrigin } from '../../../lib/trusted-origins';
-import { checkAiUsageGate } from '../../../services/ai-token-budget';
+import { checkAiUsageGate,monthlyCostCapMessage } from '../../../services/ai-token-budget';
 import { projectOperatorContext } from './context';
 import {
   assertGroundedOperatorResponse,
@@ -11,9 +12,22 @@ import {
   OperatorGroundingError,
 } from './grounding';
 import type { OperatorLive } from './live';
-import { operatorProviderOptions, recordOperatorStepUsage, resolveOperatorModel } from './model';
+import {
+  assertOperatorModelSupportsTools,
+  operatorProviderOptions,
+  recordOperatorStepUsage,
+  resolveOperatorModel,
+} from './model';
 import { assertOperatorExecution, operatorTools } from './operations';
 import type { OperatorStore, OperatorTurn } from './store';
+
+/** Only trusted budget recovery copy may cross the controller's error sanitization boundary. */
+export class OperatorMonthlyCostCapError extends Error {
+  override name = 'OperatorMonthlyCostCapError';
+  constructor(cap: MonthlyCostCapCheck) {
+    super(monthlyCostCapMessage(cap));
+  }
+}
 
 export const OPERATOR_INSTRUCTIONS = `You are SAM, the user's private account assistant.
 Use live platform operations for claims about projects and work. Always name the project and link to the source task/session. Distinguish accepted, running, agent-reported completion and independently verified results. Say when evidence is incomplete or stale.
@@ -81,10 +95,18 @@ export async function runOperatorAgent(options: {
     model !== null &&
     'provider' in model &&
     String(model.provider).startsWith('sam-openai-compatible');
+  assertOperatorModelSupportsTools(catalogModel, customEndpoint);
   assertCurrent();
   let toolAttempted = false;
   let inferenceFailed = false;
   let startedSteps = 0;
+  let monthlyDenial: OperatorMonthlyCostCapError | undefined;
+  // Mastra may wrap prepareStep failures or return them in full.error. Keep our own denial,
+  // never provider error text, and recheck the turn fence before exposing its recovery advice.
+  const rethrowFailure = (error: unknown): never => {
+    assertCurrent();
+    throw monthlyDenial ?? error;
+  };
   const instructions = `${OPERATOR_INSTRUCTIONS}\nPrivate unresolved receipt references (evidence only; not permission to retry): ${JSON.stringify(store.unresolvedActions(config.historyLoadLimit))}\n${REPLY_FORMAT}\n${currentTimeInstruction(new Date())}`;
   const agent = new Agent({
     id: 'sam-account-operator',
@@ -152,8 +174,14 @@ export async function runOperatorAgent(options: {
         await assertOperatorExecution(env, userId);
         assertCurrent();
         const gate = await checkAiUsageGate(env.KV, userId, env);
-        if (!gate.allowed) throw new Error('SAM usage budget exhausted');
         assertCurrent();
+        if (!gate.allowed) {
+          if (gate.reason === 'monthly-cost-cap') {
+            monthlyDenial = new OperatorMonthlyCostCapError(gate.monthlyCap);
+            throw monthlyDenial;
+          }
+          throw new Error('SAM usage budget exhausted');
+        }
         startedSteps++;
         return {
           toolChoice: correcting && stepNumber === 0 ? ('required' as const) : ('auto' as const),
@@ -165,8 +193,9 @@ export async function runOperatorAgent(options: {
         live?.stepFinished(step.toolCalls.length > 0);
         await recordOperatorStepUsage(env, userId, config, catalogModel, step, customEndpoint);
       },
-    });
-    const full = await output.getFullOutput();
+    }).catch(rethrowFailure);
+    const full = await output.getFullOutput().catch(rethrowFailure);
+    if (monthlyDenial) rethrowFailure(monthlyDenial);
     if (full.error) throw full.error;
     return full;
   };

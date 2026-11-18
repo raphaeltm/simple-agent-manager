@@ -116,9 +116,10 @@ jobs:
       base_domain: ${{ steps.target.outputs.base_domain }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # The lease is keyed by installation. A secondary installation (staging2) has no secrets of
-      # its own: its jobs run with the environment the allowlist names (scripts/deploy/
-      # staging-installations.mjs) and it is deployed to its own domain, stack and prefix.
+      # The lease is keyed by installation. A secondary installation (staging2) has no GitHub
+      # Environment secrets of its own: its jobs run with the environment the allowlist names
+      # (scripts/deploy/staging-installations.mjs), whose AGENT_SIGN_IN_TRUST_STAGING2 secret is its
+      # sign-in trust, and it is deployed to its own domain, stack and prefix.
       - name: Resolve installation target
         id: target
         env:
@@ -246,16 +247,40 @@ jobs:
           echo '::error::SMOKE_TEST_TOKEN is required for the requested staging performance audit'
           exit 1
 
+      # Deploys never register the smoke token on a secondary installation: that needs the
+      # installation's ENCRYPTION_KEY in the runner (policy 795e72a6). Where it was registered by
+      # earlier deploys or by hand it works; where the installation refuses it, skip with a warning.
+      # The token goes from the GitHub secret straight to the request body on stdin.
+      - name: Check smoke token on a secondary installation
+        id: smoke_token
+        # `installation` is empty for the primary installation (workflowTargetFor), so this never
+        # runs there: on the primary a refused token must fail the smoke tests, not skip them.
+        if: ${{ needs.lease.outputs.installation != '' && !inputs.github_trigger_audit_send_only && env.SMOKE_TEST_TOKEN != '' }}
+        run: |
+          status="$(node -e 'process.stdout.write(JSON.stringify({ token: process.env.SMOKE_TEST_TOKEN }))' |
+            curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' \
+              --data-binary @- "$SMOKE_TEST_API_URL/api/auth/token-login")" || status="request failed"
+          # Only a refusal skips: any other failure (5xx, network) still runs the tests, which then
+          # report the broken installation.
+          if [ "$status" = "401" ]; then
+            echo "::warning::The smoke token is not registered on $INSTALLATION; smoke tests skipped (see 'Two Staging Installations')."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Smoke token check on $INSTALLATION: HTTP $status"
+          fi
+        env:
+          INSTALLATION: ${{ needs.lease.outputs.installation }}
+
       - name: Run smoke tests
-        if: ${{ !inputs.github_trigger_audit_send_only && !inputs.performance_audit_only && env.SMOKE_TEST_TOKEN != '' }}
+        if: ${{ !inputs.github_trigger_audit_send_only && !inputs.performance_audit_only && env.SMOKE_TEST_TOKEN != '' && steps.smoke_token.outputs.skip != 'true' }}
         run: node node_modules/@playwright/test/cli.js test --config=tests/smoke/playwright.config.ts
 
       - name: Run current-deployment performance audit only
-        if: ${{ inputs.performance_audit && inputs.performance_audit_only && env.SMOKE_TEST_TOKEN != '' }}
+        if: ${{ inputs.performance_audit && inputs.performance_audit_only && env.SMOKE_TEST_TOKEN != '' && steps.smoke_token.outputs.skip != 'true' }}
         run: node node_modules/@playwright/test/cli.js test --config=tests/smoke/playwright.config.ts admin-runtime-performance.spec.ts
 
       - name: Upload bounded performance audit
-        if: ${{ always() && inputs.performance_audit }}
+        if: ${{ always() && inputs.performance_audit && steps.smoke_token.outputs.skip != 'true' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: admin-runtime-performance-${{ github.run_id }}

@@ -15,9 +15,9 @@ import {
   invalidStoredSettingDetails,
 } from './admin-settings-invalid-stored';
 import {
-  ADMIN_SETTINGS_REGISTRY,
   type AdminSettingDefinition,
   type AdminSettingName,
+  adminSettingsRegistry,
   type AdminSettingValue,
   findAdminSetting,
   publicAdminSettingDefinition,
@@ -458,7 +458,7 @@ export async function readAdminSettings(env: Env, options: { fresh?: boolean } =
       DEFAULT_CONFIG_READ_TIMEOUT_MS
     );
     const kvReads = new Map<string, Promise<{ value: string | null } | { error: unknown }>>();
-    for (const def of ADMIN_SETTINGS_REGISTRY) {
+    for (const def of adminSettingsRegistry()) {
       const key = operationalKvKey(env, def);
       if (key && !kvReads.has(key))
         kvReads.set(
@@ -473,7 +473,7 @@ export async function readAdminSettings(env: Env, options: { fresh?: boolean } =
     if (snapshot.revision === undefined) throw new AdminSettingsUnavailableError();
     const { rows, credentials } = snapshot;
     const settings = await Promise.all(
-      ADMIN_SETTINGS_REGISTRY.map(async (def) => {
+      adminSettingsRegistry().map(async (def) => {
         const definition = publicAdminSettingDefinition(def);
         try {
           return {

@@ -7,7 +7,11 @@
  *
  * @see docs/notes/2026-03-17-chat-message-duplication-report.md
  */
-import { type ChatMessageAppend, compareMessagePositions } from '@simple-agent-manager/shared';
+import {
+  type ChatMessageAppend,
+  compareMessagePositions,
+  toolMessageRevision,
+} from '@simple-agent-manager/shared';
 
 import type { ChatMessageResponse } from './api';
 
@@ -18,6 +22,15 @@ function longerAssistantPrefix(
   current: ChatMessageResponse,
   incoming: ChatMessageResponse
 ): ChatMessageResponse | null {
+  if (
+    current.role === 'tool' &&
+    incoming.role === 'tool' &&
+    current.sessionId === incoming.sessionId
+  ) {
+    const before = toolMessageRevision(current.toolMetadata);
+    const after = toolMessageRevision(incoming.toolMetadata);
+    if (before || after) return after > before ? incoming : current;
+  }
   if (
     current.role !== 'assistant' ||
     incoming.role !== 'assistant' ||

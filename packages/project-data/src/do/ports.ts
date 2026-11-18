@@ -288,7 +288,12 @@ export interface VmPromptDeliveryTarget {
 /** Source-task authority carried by a delivery; a wake it causes must honor it. */
 export type VmPromptDeliverySourceTaskGuard = Pick<
   SessionRecoverySourceTaskGuard,
-  'taskId' | 'projectId' | 'chatSessionId' | 'projectEventWake' | 'requiredProjectMemberId'
+  | 'taskId'
+  | 'projectId'
+  | 'chatSessionId'
+  | 'projectEventWake'
+  | 'requireSourceProjectMember'
+  | 'requiredProjectMemberId'
 >;
 
 export interface VmPromptDeliveryAdapterInput {
@@ -443,6 +448,7 @@ export interface StalledTaskClassifierConfig {
 }
 
 export interface OperationsPort {
+  skipUnsubscribedGitHubCi?(env: Env): Promise<boolean>;
   messageMergeConfig?(env: Env): Promise<import('./message-stream-ingest').MessageMergeConfig>;
   /** Cached admin setting, refreshed only at object initialization and usage-window flush. */
   rowUsageIntervalMs?(env: Env): Promise<number>;

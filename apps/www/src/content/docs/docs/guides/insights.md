@@ -1,14 +1,13 @@
 ---
 title: Insights
-description: See how work moves from idea to merged in a project — merge times, CI on the first try, why runs stop, flaky checks, the ideas that have waited longest, which agent setups work best, and which accounts carried the work.
+description: See how work moves from idea to merged in a project — merge times, CI on the first try, why runs stop, flaky checks, the ideas that have waited longest, which agent setups work best, which accounts carried the work, and where work waits on people.
 ---
 
 **Insights** is a project page, in the project's navigation on desktop and on a phone. It shows how
 work moves from idea to merged pull request, over the last **7**, **30** or **90 days** (the range
 control at the top right; the range stays in the page's address, so a link keeps it).
 
-It has four tabs. **Flow**, **Agent setups** and **Accounts** are described below. **People** is
-coming; until then it says what it will show.
+It has four tabs, all described below: **Flow**, **Agent setups**, **Accounts** and **People**.
 
 Every number is worked out from what SAM already records about tasks, ideas, pull requests and
 their checks. Nothing is estimated: when SAM has no record for something, the page says so.
@@ -146,9 +145,23 @@ whose agent session recorded no credential appear as **Account not recorded**.
   long in total (**Paused now** while one is still going).
 - **Limits now** (your own accounts): the provider's last-reported windows, the same chip as the chat
   header. Open it for every window and when it resets.
-- **Spend** (API keys): **Not reported** for now: this tab does not add up spend yet. Each run's
-  tokens per model, and an estimated spend for runs on an API key, are on its chat's
+- **Tokens** (every account): the tokens the account's runs used in the range (input, output,
+  cache reads and cache writes), and that total divided by the account's merged pull requests. A run
+  through SAM's AI proxy is counted once, from the proxy's own measurement, even though the agent
+  reports the same calls. Agents that report no token counts contribute nothing, so a total can be
+  low rather than wrong.
+- **Spend** (API keys only): an **estimate** at SAM's model catalog prices, never a bill, with the
+  estimate per merged pull request beside it. Subscriptions and SAM's platform credential show tokens
+  only. A model SAM has no price for, or a custom OpenAI-compatible endpoint, is named under the
+  figure and makes the total partial (**At least**); when none of the key's usage has a price, the
+  figure reads **No estimate**. SAM never guesses a price. A key with no
+  measured usage in the range shows **Not reported**. A teammate's personal key shows its tokens but
+  its spend is **Private**: only the key's owner sees it, as with its name. Shared project keys show
+  spend to every member. Each run's own tokens per model are on its chat's
   [Receipt](/docs/guides/chat-features/#run-receipt).
+
+Tokens and spend cover usage SAM recorded since the range began, while **Merged** counts runs that
+ended in the range, so a run that spans the range's start counts its later usage only.
 
 The ring around each account's icon is its colour in the chart below.
 
@@ -175,6 +188,62 @@ its own length. Another member's personal accounts contribute their runs' waits,
 provider windows they reported, as on the project's other limit views. If a section can't be read,
 the tab says so rather than showing it empty.
 
+## People
+
+Where work is waiting on people right now, and how quickly people pick it up. It never counts how
+much anyone did: there is no per-person tally of answers, reviews or merges anywhere on the tab.
+
+### The four figures
+
+- **Waiting on people now**: open questions, review asks and human tasks agents filed in the
+  Inbox (not GitHub pull request reviews; those are under Review pickup). System error items are
+  left out.
+- **Longest wait**: how long the oldest of them has been open.
+- **Review pickup, median**: on the project's GitHub pull requests, the time from a review being
+  requested to the first review. Per project, never per reviewer.
+- **Answered by the first person asked**: of the questions, review asks and tasks first given to
+  one person and closed in the range, the share that person answered without handing it on.
+
+### Waiting on
+
+Open items grouped by who they wait on, the longest wait first: each person, then **Not taken
+yet** for team tasks nobody has taken. A team task one member took waits on that member. Someone
+who has left the project shows as **A former member**. Each group says how many are open, how old
+the oldest is and how many have an agent waiting on them, and lists the oldest ten (an
+administrator can change how many).
+
+You see an item only if you could open it in your own Inbox: your own items, team tasks, and tasks
+your runs filed. Any other item shows only how long it has waited, as **An item you cannot open**;
+its title, kind and flags are not sent to your browser. The group's counts still include it.
+
+**Reassign** appears on a human task you are allowed to hand on: one assigned to you, one your run
+filed, or a team task nobody has taken or that you took, if your project role can change tasks.
+Choose a member or **Back to the team** (whoever has the task now is not offered), then **Hand it
+on**. It is the same action as handing a task on from the Inbox, with the same checks: the new
+person must be an active member of the project. Questions cannot be reassigned.
+
+### Review pickup
+
+The median time from a review request to the first review, the time 9 in 10 requests were picked
+up within, and how many requests made in the range are still waiting. SAM records review requests
+from the GitHub App's webhooks, so pickup starts from when this was first recorded for the project
+(the panel says since when); earlier requests read **Not recorded**, never estimated. Until a
+request in the range has been picked up, the panel says so instead of showing a time.
+
+- A request to a person ends at that person's first review (a comment review counts).
+- A request to a team ends at the first review by anyone except the pull request's author.
+- A request that is withdrawn, or still open when the pull request is merged or closed, is not a
+  pickup and is left out. Requests to and reviews by bots are ignored.
+- Asking the same person again after they reviewed starts a new request.
+
+### Answered by the first person asked
+
+Counts questions, review asks and human tasks that were answered or marked done in the range. An item first
+given to the team is left out, since no single person was asked. An item counts as answered by the
+first person when it was never handed on and the person it was given to answered it. Handing a task
+on, including the automatic hand-back to the team when its assignee leaves the project, means it
+was not.
+
 ## On the Overview
 
 The [Project Overview](/docs/guides/project-overview/) shows a small **This week** pane for the last 7 days: pull requests **Merged**, **Idea → merged**
@@ -185,7 +254,9 @@ whichever affected more work.
 ## For administrators
 
 How many ideas "idea to merged" looks at, how many flaky checks and waiting ideas are listed, the
-rework window, how many limit waits the Accounts tab examines and how many stalls it lists, and
-how many runs Agent setups examines and when it makes a suggestion, are runtime settings under
-**Admin → Settings → Operations** (`insights.flow*`, `insights.accounts*`, `insights.setups*`).
+rework window, how many limit waits the Accounts tab examines, how many stalls it lists and how
+many token usage rows it reads, how many runs Agent setups examines and when it makes a suggestion,
+and how many items People lists per person and how many review requests it examines are runtime
+settings under **Admin → Settings → Operations** (`insights.flow*`, `insights.accounts*`,
+`insights.setups*`, `insights.people*`).
 See [Admin settings](/docs/guides/admin-settings/).

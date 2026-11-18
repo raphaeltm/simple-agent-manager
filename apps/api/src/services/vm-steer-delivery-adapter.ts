@@ -104,7 +104,8 @@ async function resolveSteerTarget(
     env,
     resolution.target,
     input.requestTimeoutMs,
-    input.sourceTaskGuard
+    input.sourceTaskGuard,
+    true
   );
   if (!capabilities)
     return fallback('capability_probe_failed', 'Target VM capability probe did not complete');
@@ -349,7 +350,8 @@ export async function reconcileSteerDelivery(
     env,
     resolution.target,
     input.requestTimeoutMs,
-    input.sourceTaskGuard
+    input.sourceTaskGuard,
+    true
   );
   if (!capabilities?.steering?.lookup) {
     return ambiguous(

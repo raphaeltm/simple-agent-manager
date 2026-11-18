@@ -12,6 +12,7 @@ import git from 'isomorphic-git';
 import http from 'isomorphic-git/http/web';
 
 import type { Env } from '../env';
+import { repoHostingPorts } from '../ports';
 import { MemoryFS } from './memory-fs';
 import type { RepoBrowser } from './types';
 import { basename, guessContentType, isBinaryBytes, maxCompareFiles, maxInlineBytes } from './util';
@@ -163,7 +164,8 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
   private async info(): Promise<ArtifactsRepoInfo> {
     if (!this.infoPromise) {
       this.infoPromise = (async () => {
-        const binding = this.env.ARTIFACTS;
+        // The binding as before; otherwise the backend a self-host build registered.
+        const binding = this.env.ARTIFACTS ?? repoHostingPorts().artifacts.resolve(this.env);
         if (!binding) throw errors.badRequest('Artifacts is not enabled on this deployment');
         const repo = await binding.get(this.repoId);
         const ttl =

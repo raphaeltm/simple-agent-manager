@@ -81,8 +81,10 @@ describe('SettingsNotifications', () => {
       expect(screen.getByText('Task Complete')).toBeInTheDocument();
     });
     const switches = screen.getAllByRole('switch');
-    expect(switches).toHaveLength(NOTIFICATION_TYPES.length);
-    expect(switches).toHaveLength(12);
+    // Every type SAM still sends; `session_ended` is retired and has no toggle.
+    expect(switches).toHaveLength(NOTIFICATION_TYPES.length - 1);
+    expect(switches).toHaveLength(11);
+    expect(screen.queryByText('Session Ended')).not.toBeInTheDocument();
     expect(screen.getByText('Operational Failure')).toBeInTheDocument();
     expect(screen.getByText('Mentions')).toBeInTheDocument();
     expect(screen.getByText('Comments on your sessions')).toBeInTheDocument();
