@@ -7,7 +7,11 @@
  * shapes. The response keeps message, file and inbox-item threads apart because the clients
  * map them with different mappers.
  */
-import { hydrateThreadRecordsByIds, listProjectThreadCandidates } from './anchored-comment-store';
+import {
+  countReadableProjectThreads,
+  hydrateThreadRecordsByIds,
+  listProjectThreadCandidates,
+} from './anchored-comment-store';
 import type {
   ListProjectCommentThreadsInput,
   ProjectCommentInboxResult,
@@ -30,8 +34,9 @@ import type { Env } from './types';
  * were unified). The ranking is `updated_at DESC, id ASC`, a total order, so repeated calls
  * return the same sequence. Candidates are read in windows of `limit + 1`; a thread that would
  * overflow the RPC payload budget is skipped and the next window is read, so oversized recent
- * threads cannot empty the page while older ones fit. `totalCount` is a real `COUNT(*)`, so
- * the UI can say how much it is not showing (.claude/rules/65).
+ * threads cannot empty the page while older ones fit. Inbox-item authorization is applied before
+ * either selection or counting, so private task activity cannot leak through pagination metadata
+ * or crowd visible threads out of the page.
  */
 export function listProjectCommentInbox(
   sql: SqlStorage,
@@ -41,16 +46,16 @@ export function listProjectCommentInbox(
   const limit = resolveProjectCommentListLimit(env, input.limit);
   const maxBytes = resolveProjectCommentListMaxBytes(env);
   const status = input.status ?? null;
+  // Omitted means no task thread is readable: fail closed.
+  const readableInboxItemIds = input.readableInboxItemIds ?? [];
 
   const selectedIds: string[] = [];
   let selectedBytes = 0;
-  let totalCount = 0;
   let after: ProjectCommentThreadCandidate | null = null;
   // Each window is `limit + 1` rows of ids and sizes. Every pass either fills the page or
   // advances the cursor, so the loop ends after at most totalCount / (limit + 1) + 1 windows.
   for (;;) {
-    const window = listProjectThreadCandidates(sql, { status, limit, after });
-    if (after === null) totalCount = window.totalCount;
+    const window = listProjectThreadCandidates(sql, { status, limit, readableInboxItemIds, after });
     for (const candidate of window.candidates) {
       if (selectedIds.length >= limit) break;
       const nextBytes = selectedBytes + candidate.estimatedBytes;
@@ -69,6 +74,7 @@ export function listProjectCommentInbox(
   const inboxItemThreads = records.flatMap((record) => toInboxItemCommentThread(record) ?? []);
   const returnedCount = messageThreads.length + fileThreads.length + inboxItemThreads.length;
   const sessionIds = [...new Set(messageThreads.map((thread) => thread.sessionId))];
+  const totalCount = countReadableProjectThreads(sql, status, readableInboxItemIds);
 
   return {
     messageThreads,

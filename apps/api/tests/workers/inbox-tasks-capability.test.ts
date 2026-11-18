@@ -504,9 +504,14 @@ describe('human tasks through the real entry points', () => {
     await post(itemPath(s, team.inboxItem.ref, '/comments'), s.colleagueCookie, {
       body: 'Tuesday?',
     });
+    await post(itemPath(s, mine.inboxItem.ref, '/comments'), s.colleagueCookie, {
+      body: 'This newer private thread must not consume the bystander page.',
+    });
     type Comments = {
       inboxItemThreads: { itemId: string; body: string }[];
       inboxItems: { ref: string; title: string }[];
+      totalCount: number;
+      hasMore: boolean;
     };
     const assignee = await get<Comments>(
       `/api/projects/${s.projectId}/comments`,
@@ -514,14 +519,20 @@ describe('human tasks through the real entry points', () => {
     );
     expect(assignee.body.inboxItemThreads.map((thread) => thread.body).sort()).toEqual([
       'Signed copy?',
+      'This newer private thread must not consume the bystander page.',
       'Tuesday?',
     ]);
-    const other = await get<Comments>(`/api/projects/${s.projectId}/comments`, bystander.cookie);
+    const other = await get<Comments>(
+      `/api/projects/${s.projectId}/comments?limit=1`,
+      bystander.cookie
+    );
     expect(other.status).toBe(200);
     expect(other.body.inboxItemThreads.map((thread) => thread.body)).toEqual(['Tuesday?']);
     expect(other.body.inboxItems).toEqual([
       { ref: team.inboxItem.ref, id: team.inboxItem.id, title: 'Pick the launch date' },
     ]);
+    expect(other.body.totalCount).toBe(1);
+    expect(other.body.hasMore).toBe(false);
   });
 
   it('reassign: to a member (notified, claim released), back to the team; a non-member is refused and nothing changes', async () => {

@@ -22,6 +22,7 @@ import {
   UpdateSignupApprovalConfigSchema,
 } from '../schemas';
 import { getRuntimeLimits } from '../services/limits';
+import { closeSuspendedUserSockets } from '../services/project-socket-revocation';
 import { getSignupApprovalConfig, setSignupApprovalConfig } from '../services/signup-approval';
 import { getVmAdmissionDiagnostics } from '../services/vm-admission-control';
 import { adminObservabilityRoutes } from './admin/observability';
@@ -133,6 +134,9 @@ adminRoutes.patch('/users/:userId', jsonValidator(AdminUserActionSchema), async 
       updatedAt: new Date(),
     })
     .where(eq(schema.users.id, userId));
+
+  // Requests stop at the account-status check; open project sockets must be closed too.
+  if (newStatus === 'suspended') await closeSuspendedUserSockets(c.env, userId);
 
   return c.json({ id: userId, status: newStatus });
 });

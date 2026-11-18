@@ -48,7 +48,13 @@ const env = { DATABASE: {}, BASE_DOMAIN: 'example.test' } as Env;
 
 function app() {
   const api = new Hono<{ Bindings: Env }>();
-  api.onError((err, c) => c.json({ error: err.message }, 500));
+  api.onError((err, c) => {
+    const appError = err as { statusCode?: number; error?: string; message?: string };
+    if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
+      return c.json({ error: appError.error, message: appError.message }, appError.statusCode);
+    }
+    return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
+  });
   api.route('/projects', fileProxyRoutes);
   return api;
 }
@@ -83,10 +89,42 @@ describe('authenticated file-proxy multipart forwarding', () => {
       return Response.json({ files: [{ name: file.name }] });
     });
 
-    const response = await app().request(route, { method: 'POST', body: form }, env);
+    const response = await app().request(
+      route,
+      {
+        method: 'POST',
+        headers: {
+          Origin: 'https://app.example.test',
+          'Sec-Fetch-Site': 'same-site',
+        },
+        body: form,
+      },
+      env
+    );
     expect(response.status).toBe(200);
     expect(mocks.fetchNodeAgent).toHaveBeenCalledOnce();
     expect(mocks.fetchNodeAgent.mock.calls[0]![0]).toBe('NODE-LOCAL');
+  });
+
+  it('rejects a same-site workspace upload before contacting the node', async () => {
+    const form = new FormData();
+    form.set('files', new File(['forged'], 'forged.txt'));
+
+    const response = await app().request(
+      route,
+      {
+        method: 'POST',
+        headers: {
+          Origin: 'https://ws-attacker--3000.example.test',
+          'Sec-Fetch-Site': 'same-site',
+        },
+        body: form,
+      },
+      env
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.fetchNodeAgent).not.toHaveBeenCalled();
   });
 
   it('shows a transport exception reaches the global error handler without a node HTTP response', async () => {
