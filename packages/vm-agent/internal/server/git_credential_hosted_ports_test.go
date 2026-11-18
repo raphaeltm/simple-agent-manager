@@ -32,7 +32,7 @@ func TestHostedArtifactsCredentialPorts(t *testing.T) {
 			{"response mismatch", "api.sam.example", "api.sam.example:443", "evil.example", 204, 1},
 		} {
 			t.Run(mode+"/"+tc.name, func(t *testing.T) {
-				assertHostedArtifactsCredentialPort(t, mode, "https", tc.bound, tc.request, tc.resolved, tc.status, tc.calls)
+				assertHostedArtifactsCredentialPort(t, mode, "https", tc.bound, tc.request, tc.resolved, hostedCredentialExpectation{tc.status, tc.calls})
 			})
 		}
 	}
@@ -49,13 +49,17 @@ func TestHostedArtifactsCredentialProtocols(t *testing.T) {
 				if protocol == "https" {
 					status, calls = 200, 1
 				}
-				assertHostedArtifactsCredentialPort(t, mode, protocol, "api.sam.example", "api.sam.example", "api.sam.example", status, calls)
+				assertHostedArtifactsCredentialPort(t, mode, protocol, "api.sam.example", "api.sam.example", "api.sam.example", hostedCredentialExpectation{status, calls})
 			})
 		}
 	}
 }
 
-func assertHostedArtifactsCredentialPort(t *testing.T, mode, protocol, bound, requested, resolved string, status, calls int) {
+type hostedCredentialExpectation struct {
+	status, calls int
+}
+
+func assertHostedArtifactsCredentialPort(t *testing.T, mode, protocol, bound, requested, resolved string, expected hostedCredentialExpectation) {
 	t.Helper()
 	var fetched atomic.Int32
 	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -92,10 +96,10 @@ func assertHostedArtifactsCredentialPort(t *testing.T, mode, protocol, bound, re
 	} else {
 		s.handleGitCredential(rec, req)
 	}
-	if rec.Code != status || int(fetched.Load()) != calls {
-		t.Fatalf("status %d, callback calls %d; want %d/%d", rec.Code, fetched.Load(), status, calls)
+	if rec.Code != expected.status || int(fetched.Load()) != expected.calls {
+		t.Fatalf("status %d, callback calls %d; want %d/%d", rec.Code, fetched.Load(), expected.status, expected.calls)
 	}
-	if status == http.StatusOK {
+	if expected.status == http.StatusOK {
 		if !strings.Contains(rec.Body.String(), "username=x\npassword=hosted-token\n") {
 			t.Fatal("matching authority did not receive the resolved credential")
 		}
