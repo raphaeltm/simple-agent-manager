@@ -741,13 +741,19 @@ describe('an answer whose agent notice the inbox sweep gave up on', () => {
       updated_at: 1,
     });
     const resolvedAt = Date.now() - 61 * 60_000;
-    const closedQuestion = (id: string, title: string, status: string, at: number) =>
+    const closedQuestion = (
+      id: string,
+      title: string,
+      status: string,
+      at: number,
+      kind = 'question'
+    ) =>
       insert('asks', {
         id,
         project_id: P1,
         assignee_kind: 'user',
         assignee_user_id: 'owner',
-        kind: 'question',
+        kind,
         blocking: 1,
         title,
         status,
@@ -763,6 +769,8 @@ describe('an answer whose agent notice the inbox sweep gave up on', () => {
     // A question an earlier build archived without a notice: archiving tells the agent nothing,
     // so no notice was lost and no delivery item may name it.
     closedQuestion('q-archived', 'Which bucket?', 'archived', resolvedAt);
+    // The same for a result an earlier build archived (it then told the agent).
+    closedQuestion('r-archived', 'The bucket is ready', 'archived', resolvedAt, 'result');
     // Control: one still inside its retry window is left to the notice sweep.
     closedQuestion('q-retrying', 'Which zone?', 'answered', Date.now() - 5 * 60_000);
 
@@ -774,6 +782,7 @@ describe('an answer whose agent notice the inbox sweep gave up on', () => {
       links: expect.arrayContaining([{ kind: 'ask', id: 'q-lost', label: null }]),
     });
     expect(item!.links).not.toContainEqual(expect.objectContaining({ id: 'q-archived' }));
+    expect(item!.links).not.toContainEqual(expect.objectContaining({ id: 'r-archived' }));
     expect((await runInboxSystemErrorSweep(env)).filed).toBe(0);
     expect(errorAsks()).toHaveLength(1);
     expect(errorAsks()[0]!.failure_count).toBe(1);
