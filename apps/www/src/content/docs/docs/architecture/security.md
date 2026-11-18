@@ -114,6 +114,12 @@ Where the deploy prepared Email Sending, BetterAuth's email OTP plugin also sign
 
 Code requests and code redemptions are limited per IP address. Requests and redemption guesses are also limited per recipient, across all IP addresses (`agentEmail.signInCodesPerIpPerHour`, `agentEmail.signInCodesPerEmailPerHour`, `agentEmail.signInCodeAttemptsPerEmailPerHour`). Each code also allows only 3 guesses. The plugin's password-reset, verification and email-change routes return 404.
 
+### Session cookie write origin
+
+Workspace port pages (`ws-<id>--<port>.<BASE_DOMAIN>`) are same-site with the API, so a browser sends them the session cookie. Credentialed CORS only stops requests that need a preflight, such as a PUT, or a POST sent with `Content-Type: application/json`. A JSON body sent as `text/plain` needs no preflight. Multipart uploads are CORS-simple requests and skip the preflight. Every cookie-authenticated multipart POST therefore checks the request's origin first: library upload (`routes/library.ts`), chat-session workspace file upload (`routes/projects/files.ts`) and transcription (`routes/transcribe.ts`). Library file replacement is a PUT, so CORS covers it. A request that carries `Origin` or `Sec-Fetch-Site` must come from exactly `https://app.<BASE_DOMAIN>` (any loopback origin when `BASE_DOMAIN` is itself local, for `pnpm dev`) and must not say `cross-site`. A request with neither header, such as the CLI, passes; browsers send `Origin` on every POST. See `requireTrustedWriteOrigin` in `apps/api/src/lib/browser-write-origin.ts`. Answering an agent interaction and supplying a requested secret always require the app origin (`requireExactBrowserOrigin`).
+
+POST routes that read a JSON body without rejecting a non-JSON content type do not yet have this protection. That includes raw `c.req.json()`, `parseOptionalBody`, and `jsonValidator` when its schema accepts `{}`, because Hono hands the schema `{}` for a non-JSON content type. Tracked in `tasks/backlog/2026-11-18-text-plain-json-csrf-on-raw-json-routes.md`.
+
 ### Token Types
 
 | Token           | Lifetime             | Purpose                          | Validated By            |

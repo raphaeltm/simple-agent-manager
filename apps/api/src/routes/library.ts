@@ -12,6 +12,7 @@ import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { requireTrustedWriteOrigin } from '../lib/browser-write-origin';
 import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
@@ -58,7 +59,11 @@ const libraryRoutes = new Hono<{ Bindings: Env }>();
 // POST /upload — multipart file upload
 // ---------------------------------------------------------------------------
 
-libraryRoutes.post('/upload', requireAuth(), requireApproved(), async (c) => {
+// Multipart is a CORS-simple request, so a same-site workspace page could post it with the
+// session cookie and no preflight. See lib/browser-write-origin.ts.
+const uploadOrigin = requireTrustedWriteOrigin('library upload');
+
+libraryRoutes.post('/upload', requireAuth(), requireApproved(), uploadOrigin, async (c) => {
   const auth = getAuth(c);
   const userId = auth.user.id;
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
