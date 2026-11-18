@@ -24,10 +24,10 @@ import {
   releaseTunnelBeforeVm,
   truncateNodeErrorMessage,
 } from './node-provisioning-predicates';
+import { recordRejectedAllocationAbsence } from './node-rejection-proof';
 import type { NodeTunnelProvisioningPhase } from './node-tunnel-provisioning';
 import { recordTunnelProvisioningFailure } from './node-tunnel-provisioning-failure';
 import { persistError } from './observability';
-import { recordRejectedAllocationAbsence } from './node-rejection-proof';
 
 interface NodeProvisioningFailureInput {
   env: Env;

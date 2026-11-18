@@ -15,21 +15,20 @@ import { GcpApiError } from './gcp-errors';
 import {
   fetchWithTimeout,
   gcpOperationSchema,
-  iamBindingSchema,
   IAM_URL,
+  iamBindingSchema,
   pollOperation,
   requireOperationName,
   SERVICE_USAGE_URL,
 } from './gcp-setup-transport';
 import { createOidcProvider, createWifPool, grantWifUserOnSa } from './gcp-wif-setup';
+export { fetchWithTimeout, pollOperation } from './gcp-setup-transport';
 export {
   createOidcProvider,
   createWifPool,
   grantWifUserOnSa,
   updateOidcProvider,
 } from './gcp-wif-setup';
-
-export { fetchWithTimeout, pollOperation } from './gcp-setup-transport';
 
 const RESOURCE_MANAGER_URL = 'https://cloudresourcemanager.googleapis.com/v1';
 

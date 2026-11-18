@@ -728,6 +728,43 @@ describe('terminal GCP failures before the provider create was dispatched', () =
     expect(readNode(node.id)).toMatchObject({ status: 'error', proof: null });
   });
 
+  it.each(['proof', 'placement'] as const)(
+    'does not overwrite a changed %s after recording absence but before recording failure',
+    async (changed) => {
+      const node = await freshNode();
+      mocks.createProvider.mockResolvedValue({ ...provider, providerName: 'gcp' });
+      mocks.createVM.mockRejectedValueOnce(
+        markProviderCreateNotDispatched(
+          new GcpApiError({ step: 'sts_exchange', statusCode: 400, message: 'STS refused' })
+        )
+      );
+      const { persistError } = await import('../../../src/services/observability');
+      let proofBefore: string | null = null;
+      vi.mocked(persistError).mockImplementationOnce(async () => {
+        // Production awaits this durable error report between the two real D1 writes.
+        // Mutate only the field the final guard must protect; keep the original incarnation.
+        proofBefore = readNode(node.id)!.proof;
+        expect(proofBefore).toEqual(expect.any(String));
+        if (changed === 'proof') {
+          sqlite
+            .prepare('UPDATE nodes SET runtime_termination_confirmed_at=NULL WHERE id=?')
+            .run(node.id);
+        } else {
+          sqlite
+            .prepare('UPDATE nodes SET placement_credential_fingerprint=? WHERE id=?')
+            .run('sha256:concurrent', node.id);
+        }
+      });
+      await provisionNode(node.id, env);
+      expect(proofBefore).toEqual(expect.any(String));
+      expect(mocks.createVM).toHaveBeenCalledTimes(1);
+      expect(readNode(node.id)).toMatchObject({
+        status: 'creating',
+        proof: changed === 'proof' ? null : proofBefore,
+      });
+    }
+  );
+
   it('an unmarked STS 400 remains uncertain despite matching error text', async () => {
     const node = await freshNode();
     mocks.createProvider.mockResolvedValue({ ...provider, providerName: 'gcp' });
