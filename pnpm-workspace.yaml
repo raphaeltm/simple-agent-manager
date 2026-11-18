@@ -62,7 +62,7 @@ catalog:
   yaml: 2.9.0
   # One jose copy: the API worker and repo-hosting both sign and verify JWTs.
   jose: 6.2.3
-  execa: 9.6.1
+  execa: 10.2.1
   prism-react-renderer: 2.4.1
   react-markdown: 10.1.0
   react-virtuoso: 4.18.13
