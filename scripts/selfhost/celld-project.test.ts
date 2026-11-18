@@ -53,7 +53,8 @@ describe('prepareCelldProject', () => {
       prepareCelldProject({ apiDir: API_DIR, projectDir, plan: plan(), runtimeSecrets });
       const main = readFileSync(join(projectDir, CELLD_MAIN), 'utf8');
       expect(main).toContain('resumeSharedFlightJoinsOnOwnTimer();');
-      expect(main.includes('wrapWorker(worker)')).toBe(runtimeSecrets);
+      expect(main.includes('wrapWorker(withSelfHostBuild(worker))')).toBe(runtimeSecrets);
+      expect(main).toContain('withSelfHostBuild(worker)');
     }
   });
 

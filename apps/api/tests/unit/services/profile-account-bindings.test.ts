@@ -5,7 +5,6 @@
  * credential a run would actually be seeded with. Another member's rows sit in the same tables as
  * the attack fixture.
  */
-import { readFileSync } from 'node:fs';
 
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
@@ -21,7 +20,7 @@ import {
   resolveProfileAccountBindings,
   SAM_AI_PROXY_POOL_ID,
 } from '../../../src/services/profile-account-bindings';
-import { createMemoryKv, createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const KEY = Buffer.alloc(32, 7).toString('base64');
 

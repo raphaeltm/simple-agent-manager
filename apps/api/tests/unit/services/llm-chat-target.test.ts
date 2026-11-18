@@ -1,3 +1,4 @@
+import { buildBudgetKey } from '@simple-agent-manager/ai-proxy/internal/ai-token-budget';
 import type { SamConfig } from '@simple-agent-manager/shared';
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,7 +9,6 @@ import {
   __resetAdminSettingsCacheForTest,
   updateAdminSettings,
 } from '../../../src/services/admin-settings';
-import { buildBudgetKey } from '@simple-agent-manager/ai-proxy/internal/ai-token-budget';
 import { estimateTokensFromText } from '../../../src/services/ai-token-usage-accounting';
 import {
   chatTargetHeaders,

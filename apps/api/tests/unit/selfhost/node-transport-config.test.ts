@@ -11,12 +11,12 @@ import { REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS } from '@simple-agent-manager/
 import { describe, expect, it } from 'vitest';
 
 import * as box from '../../../../../scripts/selfhost/box-settings';
+import { FRPS_PLUGIN_OPS } from '../../../src/selfhost/reverse-tunnel/authz';
+import * as config from '../../../src/selfhost/reverse-tunnel/config';
 import {
   GATEWAY_ORIGINAL_HOST_HEADER,
   GATEWAY_SECRET_HEADER,
 } from '../../../src/selfhost/reverse-tunnel/gateway';
-import { FRPS_PLUGIN_OPS } from '../../../src/selfhost/reverse-tunnel/authz';
-import * as config from '../../../src/selfhost/reverse-tunnel/config';
 import { GATEWAY_HEADER } from '../../../src/services/node-websocket-gateway';
 
 const root = join(import.meta.dirname, '../../../../../deploy/selfhost');

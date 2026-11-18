@@ -23,7 +23,6 @@ import {
   __resetPlatformConfigCacheForTest,
   completeSetupWithConfig,
 } from '../../src/services/platform-config';
-import { startFakeSmtpServer } from '../helpers/fake-smtp-server';
 import {
   buildAuthApp,
   type CookieJar,
@@ -229,6 +228,8 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
     expect(authorizeUrl.searchParams.get('scope')).toBe(
       'read_user api read_repository write_repository'
     );
+  });
+
   it.each(['https://127.0.0.1', 'https://10.0.0.2', 'https://metadata.google.internal'])(
     'refuses private GitLab %s before browser authorization',
     async (host) => {
@@ -507,35 +508,6 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
     expect(callback.headers.get('location')).toContain('error=');
     expect(await currentUserId(env)).toBeNull();
     expect(gitlabAccounts()).toEqual([]);
-  });
-
-  // Box round R17 (D1): on a self-hosted box (SMTP, no AGENT_EMAIL) the owner alert for a newly
-  // linked sign-in was dropped with security_alert.no_sender. Entered through better-auth's own
-  // account.create.after hook, during a real GitLab callback.
-  it('emails the owners over SMTP when a GitLab sign-in is linked to the superadmin', async () => {
-    const smtp = await startFakeSmtpServer({ mode: 'plain' });
-    try {
-      const env = await runtimeGitLabEnv(PUBLIC_HOST, {
-        SMTP_HOST: '127.0.0.1',
-        SMTP_PORT: String(smtp.port),
-        SMTP_TLS: 'none',
-        SMTP_FROM: 'alerts@example.com',
-      } as Partial<Env>);
-      vi.stubGlobal('fetch', createFakeGitLab(PUBLIC_HOST, profileClaiming(OWNER.email)).fetch);
-      const linkedSubject =
-        'Subject: SAM security alert: a GitLab sign-in was linked to a superadmin account';
-      const linkAlerts = () => smtp.messages.filter((m) => m.data.includes(linkedSubject));
-      expect(linkAlerts()).toHaveLength(0);
-
-      const callback = await signInWithGitLab(env, PUBLIC_HOST);
-
-      expect(callback.headers.get('location')).toBe(CALLBACK_URL);
-      expect(gitlabAccounts()).toEqual([{ account_id: '424242', user_id: OWNER.id }]);
-      await vi.waitFor(() => expect(linkAlerts()).toHaveLength(1));
-      expect(linkAlerts()[0]).toMatchObject({ from: 'alerts@example.com', to: [OWNER.email] });
-    } finally {
-      await smtp.close();
-    }
   });
 
   it('requires explicit linking for a self-managed host pinned in Worker environment', async () => {

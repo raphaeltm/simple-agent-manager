@@ -185,10 +185,8 @@ describe('GitLab API requests (self-host SSRF, T5)', () => {
     );
     globalThis.fetch = fetchMock;
 
-    await expect(verifyGitLabProjectAccess({} as Env, 'gl_token', 123)).rejects.toMatchObject({
-      statusCode: 502,
-      error: 'GITLAB_REQUEST_REFUSED',
-    });
+    // Main's L6 shape: the outbound guard's refusal propagates (no GitLab-specific 502 mapping).
+    await expect(verifyGitLabProjectAccess({} as Env, 'gl_token', 123)).rejects.toThrow(/refused/);
 
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ redirect: 'manual' });
@@ -244,10 +242,8 @@ describe('GitLab API requests (self-host SSRF, T5)', () => {
     );
     globalThis.fetch = fetchMock;
 
-    await expect(verifyGitLabProjectAccess({} as Env, 'gl_token', 123)).rejects.toMatchObject({
-      statusCode: 502,
-      error: 'GITLAB_REQUEST_REFUSED',
-    });
+    // Main's L6 shape: the outbound guard's refusal propagates (no GitLab-specific 502 mapping).
+    await expect(verifyGitLabProjectAccess({} as Env, 'gl_token', 123)).rejects.toThrow(/refused/);
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 });

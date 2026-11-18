@@ -63,13 +63,6 @@ export {
   requireGitLabUserAccessTokenResultForOwner,
   verifyGitLabProjectAccess,
 } from './gitlab';
-export {
-  assertGitLabHostAllowed,
-  DEFAULT_GITLAB_API_TIMEOUT_MS,
-  type GitLabHostVerdict,
-  gitLabHostVerdict,
-  gitLabRequestError,
-} from './gitlab-host-policy';
 export { type RepoBrowser, resolveRepoBrowser } from './repo-browse';
 // Used by the worker's self-host hosted-git import (apps/api/src/services/hosted-git/import.ts).
 export { createFetchHttpClient } from './repo-browse/fetch-http-client';

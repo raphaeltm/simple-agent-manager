@@ -54,12 +54,12 @@ import {
   signKeyRotationRequest,
 } from '../../../src/selfhost/key-rotation/control-auth';
 import { previousKeyPairs } from '../../../src/selfhost/key-rotation/keys';
+import { isAcceptedGatewaySecret } from '../../../src/selfhost/reverse-tunnel/config';
 import { getDecryptedAgentKey } from '../../../src/services/agent-key-resolution';
 import { decryptWithKeyOnly, encrypt } from '../../../src/services/encryption';
 import { setPreviousEncryptionKeys } from '../../../src/services/encryption-key-fallback';
 import { signNodeCallbackToken } from '../../../src/services/jwt';
 import { getJWKS, verifyCallbackToken } from '../../../src/services/jwt-verify';
-import { isAcceptedGatewaySecret } from '../../../src/selfhost/reverse-tunnel/config';
 import { ConditionalR2 } from '../../helpers/conditional-r2';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
