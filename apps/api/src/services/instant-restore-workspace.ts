@@ -47,6 +47,7 @@ export async function loadInstantRestoreWorkspace(
   const source = await resolveWorkspaceGitSource(db, {
     id: input.projectId,
     repoProvider: row.repoProvider,
+    repository: row.repository,
   });
   return {
     workspaceId: input.workspaceId,
