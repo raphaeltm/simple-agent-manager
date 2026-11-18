@@ -39,17 +39,17 @@ SAM task 01M7QB46M5C4GE1Z51D1ZNEBGJ; coordinator 01M7JMXS2JRW6QQMB1356ENPM3; pla
 ## Checklist
 
 - [x] Record Cloudflare output snapshots (direct Origin CA default, task, deployment, minimal,
-      Cloudflare Tunnel defaults and configured) from main BEFORE the change
-- [ ] Bring the L18 cloud-init files from `origin/sam/selfhost-pass-2`; confirm byte-identity
+      Cloudflare Tunnel defaults, task, deployment and configured) from main's cloud-init src
+- [x] Bring the L18 cloud-init files from `origin/sam/selfhost-pass-2`; confirm byte-identity
       (`git diff origin/sam/selfhost-pass-2 -- <paths>` empty)
-- [ ] Add `frpc_install` to the boot-failure picklist + route test
-- [ ] Snapshot test passes unchanged after the change (byte-identical Cloudflare output)
-- [ ] Reverse-tunnel tests (render, validation, executed runcmd under /bin/sh) pass
-- [ ] API reverse-tunnel tests that render through `installReverseTunnelTransport(generateCloudInit)`
+- [x] Add `frpc_install` to the boot-failure picklist + route test
+- [x] Snapshot test passes unchanged after the change (byte-identical Cloudflare output)
+- [x] Reverse-tunnel tests (render, validation, executed runcmd under /bin/sh) pass
+- [x] API reverse-tunnel tests that render through `installReverseTunnelTransport(generateCloudInit)`
       pass against the new renderer
-- [ ] Docs: check public docs for boot-failure reasons / cloud-init ingress modes
+- [x] Docs: self-hosting.mdx (boot mode), security.md (reverse-tunnel ingress; `isTunnelMode` now covers both tunnel modes), packages/cloud-init/AGENTS.md, rule 06 cloud-init step
 - [ ] lint, typecheck, test, build
-- [ ] security-auditor, task-completion-validator
+- [ ] security-auditor, task-completion-validator (validator: WARN, no CRITICAL/HIGH; doc-sync, checklist and two extra snapshot cases addressed)
 - [ ] BOX proof (byte-identical to integration tip: cite BOX run 01M7QB382PDGH42XEG3ZFFS6DE)
 - [ ] Staging: real VM node provisioning with heartbeat, then cleanup
 

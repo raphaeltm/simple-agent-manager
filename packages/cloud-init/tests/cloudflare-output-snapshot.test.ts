@@ -64,6 +64,28 @@ const cases: Array<[string, CloudInitVariables]> = [
   ['direct-minimal', { ...base }],
   // Cloudflare Tunnel with every tunnel tunable left at its default.
   ['cloudflare-tunnel-defaults', { ...base, cloudflareTunnelToken: TUNNEL_TOKEN }],
+  // Cloudflare Tunnel on a task node and on a deployment node (#2646 gives both the tunnel).
+  [
+    'cloudflare-tunnel-task',
+    {
+      ...base,
+      cloudflareTunnelToken: TUNNEL_TOKEN,
+      projectId: 'project-snapshot',
+      chatSessionId: 'session-snapshot',
+      taskId: 'task-snapshot',
+      taskMode: 'task',
+    },
+  ],
+  [
+    'cloudflare-tunnel-deployment',
+    {
+      ...base,
+      cloudflareTunnelToken: TUNNEL_TOKEN,
+      role: 'deployment',
+      environmentId: 'env-snapshot',
+      deploySigningPubKey: 'PUBKEY-SNAPSHOT',
+    },
+  ],
   // Cloudflare Tunnel as provisioning renders it with explicit port and timings.
   [
     'cloudflare-tunnel-configured',
