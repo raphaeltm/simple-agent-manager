@@ -896,6 +896,8 @@ describe('MCP Routes', () => {
           'reply_to_email',
           'report_environment_issue',
           'run_ai_model',
+          // Insights numbers (slice I)
+          'project_insights',
         ].sort()
       );
       const sessionsRead = body.result.tools.find(

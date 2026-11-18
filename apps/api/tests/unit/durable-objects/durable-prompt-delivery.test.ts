@@ -961,7 +961,9 @@ describe('ProjectData durable prompt delivery', () => {
         })
     );
     preparationMocks.capabilities.mockResolvedValue(capabilities);
-    preparationMocks.send.mockImplementation(async () => {
+    preparationMocks.send.mockImplementation(async (...args) => {
+      // The production transport calls this after token signing, just before fetch.
+      await args[7]?.beforeExternalMutation?.();
       expect(
         db.prepare('SELECT prompt_delivery_phase, runtime_identity FROM session_inbox').get()
       ).toEqual({ prompt_delivery_phase: 'submitting', runtime_identity: 'runtime-1' });
@@ -991,7 +993,9 @@ describe('ProjectData durable prompt delivery', () => {
     const replacement = claimDuePromptDeliveries(sql, suspendedConfig)[0]!;
     expect(replacement.mode).toBe('submit');
     finishProbe(capabilities);
-    await expect(pending).resolves.toMatchObject({ kind: 'retry', reason: 'not_ready' });
+    // The live claim fence rejects stale preparation before it reaches beforeSubmit.
+    // Its result cannot retire or requeue the replacement's exact attempt.
+    await expect(pending).resolves.toMatchObject({ kind: 'failed', reason: 'terminal_target' });
     expect(preparationMocks.send).not.toHaveBeenCalled();
     expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
       deliveryState: 'delivering',

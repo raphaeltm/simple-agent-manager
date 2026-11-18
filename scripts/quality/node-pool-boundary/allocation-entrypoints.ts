@@ -18,6 +18,9 @@ import {
  * conceal a bypass behind `createNodeRecord`.
  */
 export const ALLOCATION_ENTRYPOINT_CALLS = [
+  'insertDispatchedTask',
+  'insertSamDispatchedTask',
+  'insertMcpRetriedTask',
   'createNodeRecord',
   'provisionNode',
   'reserveWorkspacePlacement',

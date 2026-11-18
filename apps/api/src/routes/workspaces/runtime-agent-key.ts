@@ -128,19 +128,25 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     const persistedAttribution = await persistAttribution(
       credentialAttributionFromData(data, body.agentType, providerMode)
     );
-    return callbackJsonWithJit(c, workspace, 'agent_key', {
-      apiKey: inferenceConfig ? '__sam_proxy__' : data.credential,
-      credentialKind: data.credentialKind,
-      credentialSource: data.credentialSource,
-      credentialReference: data.credentialReference,
-      credentialProvider:
-        data.credentialProvider ??
-        (inferenceConfig ? data.providerDialect : undefined) ??
-        agentCredentialProviderFallback(body.agentType),
-      providerMode,
-      credentialGeneration: persistedAttribution?.credentialGeneration,
-      ...(inferenceConfig ? { inferenceConfig } : {}),
-    });
+    return callbackJsonWithJit(
+      c,
+      workspace,
+      'agent_key',
+      {
+        apiKey: inferenceConfig ? '__sam_proxy__' : data.credential,
+        credentialKind: data.credentialKind,
+        credentialSource: data.credentialSource,
+        credentialReference: data.credentialReference,
+        credentialProvider:
+          data.credentialProvider ??
+          (inferenceConfig ? data.providerDialect : undefined) ??
+          agentCredentialProviderFallback(body.agentType),
+        providerMode,
+        credentialGeneration: persistedAttribution?.credentialGeneration,
+        ...(inferenceConfig ? { inferenceConfig } : {}),
+      },
+      persistedAttribution?.agentSessionId
+    );
   };
   const trackTaskCredentialSource = async (
     source: NonNullable<typeof credentialData>['credentialSource']
@@ -367,16 +373,22 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     const platformAttribution = platformProxyAttribution(body.agentType);
     const persistedAttribution = await persistAttribution(platformAttribution);
 
-    return callbackJsonWithJit(c, workspace, 'agent_key', {
-      apiKey: '__platform_proxy__',
-      credentialKind: 'api-key' as const,
-      credentialSource: 'platform' as const,
-      credentialReference: platformAttribution.credentialReference,
-      credentialProvider: platformAttribution.credentialProvider,
-      providerMode: platformAttribution.providerMode,
-      credentialGeneration: persistedAttribution?.credentialGeneration,
-      inferenceConfig,
-    });
+    return callbackJsonWithJit(
+      c,
+      workspace,
+      'agent_key',
+      {
+        apiKey: '__platform_proxy__',
+        credentialKind: 'api-key' as const,
+        credentialSource: 'platform' as const,
+        credentialReference: platformAttribution.credentialReference,
+        credentialProvider: platformAttribution.credentialProvider,
+        providerMode: platformAttribution.providerMode,
+        credentialGeneration: persistedAttribution?.credentialGeneration,
+        inferenceConfig,
+      },
+      persistedAttribution?.agentSessionId
+    );
   }
 
   if (!credentialData || credentialData.baseUrl) {

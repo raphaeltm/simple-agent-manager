@@ -31,7 +31,7 @@ describe('refreshGitHubAccessToken', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(refreshGitHubAccessToken(env, 'refresh-token')).rejects.toThrow(
-      'GitHub OAuth refresh failed'
+      'Your GitHub authorization needs to be renewed. Sign out and back in.'
     );
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];

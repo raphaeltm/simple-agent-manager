@@ -16,6 +16,17 @@ function Harness() {
 }
 
 describe('EmailTriggerFields', () => {
+  it('names the only sender check SAM makes, and claims no SPF or DKIM verification', () => {
+    // packages/agent-email/src/inbound.ts: Workers cannot see SPF/DKIM/DMARC verdicts; the only
+    // sender check is the From allowlist.
+    render(<Harness />);
+    const hint = screen.getByLabelText('Allowed senders');
+    expect(hint).toHaveAccessibleDescription(
+      /SAM checks only that the From address is on this list\. It cannot confirm the sender really sent the mail/
+    );
+    expect(document.body.textContent).not.toMatch(/SPF|DKIM|verified/i);
+  });
+
   it('accepts multiple addresses, one per line', async () => {
     const user = userEvent.setup();
     render(<Harness />);

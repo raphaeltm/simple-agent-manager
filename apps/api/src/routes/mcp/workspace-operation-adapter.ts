@@ -54,28 +54,9 @@ export async function runWorkspaceOperation(
   env: Env
 ): Promise<JsonRpcResponse> {
   const projectId = token.projectId;
-  if (params.projectId !== undefined && params.projectId !== projectId) {
-    return operationErrorToWorkspaceJsonRpc(
-      requestId,
-      new OperationError('forbidden', 'Project does not match workspace token')
-    );
-  }
-  const ctx: OperationContext = {
-    env,
-    ports: createOperationPorts(env),
-    requestId: String(requestId ?? ''),
-    actor: {
-      userId: token.userId,
-      via: 'workspace-agent',
-      scopes: new Set(['sam.read', 'sam.write']),
-      workspace: {
-        workspaceId: token.workspaceId,
-        taskId: token.taskId,
-        projectId,
-        agentSessionId: token.agentSessionId,
-      },
-    },
-  };
+  const mismatch = projectMismatch(requestId, params, token);
+  if (mismatch) return mismatch;
+  const ctx = workspaceOperationContext(requestId, token, env);
   const operation = workspaceOperations[name];
   if (!operation) throw new OperationError('invalid_input', `Unknown workspace operation: ${name}`);
   const input = {
@@ -97,8 +78,45 @@ export async function runWorkspaceOperation(
   }
 }
 
+/** A workspace token may only read its own project; a different `projectId` is refused (rule 51). */
+export function projectMismatch(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  token: McpTokenData
+): JsonRpcResponse | null {
+  if (params.projectId === undefined || params.projectId === token.projectId) return null;
+  return operationErrorToWorkspaceJsonRpc(
+    requestId,
+    new OperationError('forbidden', 'Project does not match workspace token')
+  );
+}
+
+/** The operation context for a workspace MCP token: its user, its project, nothing else. */
+export function workspaceOperationContext(
+  requestId: string | number | null,
+  token: McpTokenData,
+  env: Env
+): OperationContext {
+  return {
+    env,
+    ports: createOperationPorts(env),
+    requestId: String(requestId ?? ''),
+    actor: {
+      userId: token.userId,
+      via: 'workspace-agent',
+      scopes: new Set(['sam.read', 'sam.write']),
+      workspace: {
+        workspaceId: token.workspaceId,
+        taskId: token.taskId,
+        projectId: token.projectId,
+        agentSessionId: token.agentSessionId,
+      },
+    },
+  };
+}
+
 /** The workspace protocol has historically used INVALID_PARAMS for tool-level failures. */
-function operationErrorToWorkspaceJsonRpc(
+export function operationErrorToWorkspaceJsonRpc(
   requestId: string | number | null,
   error: OperationError
 ): JsonRpcResponse {

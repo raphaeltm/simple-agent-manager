@@ -13,7 +13,9 @@ import * as chatPersistence from '../services/chat-persistence';
 import { requireSessionWriter } from '../services/session-access';
 import { ensureSessionTaskBacked } from '../services/session-task-repair';
 import { isSleepingContainerRuntime } from '../services/sleeping-container-runtime';
-import { isExecutableTaskStatus, isTaskStatus } from '../services/task-status';
+import { retireTaskCancellationPrompts } from '../services/task-cancellation-prompts';
+import { taskRecoveryCancellationQuery } from '../services/task-recovery-cancellation';
+import { canTransitionTaskStatus, isTaskStatus } from '../services/task-status';
 import {
   cleanupTerminalTaskResources,
   type TerminalTaskCleanupStatus,
@@ -37,6 +39,10 @@ type TaskForStop = {
   id: string;
   status: string;
   errorMessage: string | null;
+  projectId: string;
+  userId: string;
+  chatSessionId: string | null;
+  workspaceId: string | null;
 };
 
 async function findTaskForStop(
@@ -49,6 +55,10 @@ async function findTaskForStop(
       id: schema.tasks.id,
       status: schema.tasks.status,
       errorMessage: schema.tasks.errorMessage,
+      projectId: schema.tasks.projectId,
+      userId: schema.tasks.userId,
+      chatSessionId: schema.tasks.chatSessionId,
+      workspaceId: schema.tasks.workspaceId,
     })
     .from(schema.tasks)
     .where(
@@ -77,20 +87,31 @@ async function cancelExecutableTaskForArchive(
   taskId: string,
   userId: string
 ): Promise<void> {
-  if (!isTaskStatus(task.status) || !isExecutableTaskStatus(task.status)) {
+  if (!isTaskStatus(task.status) || !canTransitionTaskStatus(task.status, 'cancelled')) {
     return;
   }
 
   const now = new Date().toISOString();
-  await db
-    .update(schema.tasks)
-    .set({
-      status: 'cancelled',
-      errorMessage: 'Archived by user',
-      completedAt: now,
-      updatedAt: now,
-    })
-    .where(eq(schema.tasks.id, taskId));
+  const [cancelled] = await db.batch([
+    db
+      .update(schema.tasks)
+      .set({
+        status: 'cancelled',
+        errorMessage: 'Archived by user',
+        completedAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(schema.tasks.id, taskId),
+          eq(schema.tasks.projectId, task.projectId),
+          eq(schema.tasks.status, task.status)
+        )
+      )
+      .returning({ id: schema.tasks.id }),
+    taskRecoveryCancellationQuery(db, task, now),
+  ]);
+  if (!cancelled.length) return;
   await db.insert(schema.taskStatusEvents).values({
     id: ulid(),
     taskId,
@@ -114,6 +135,8 @@ async function stopTaskBackedSession(
   await context.assertEffectAllowed?.();
 
   if (task && !terminalStatus) {
+    await retireTaskCancellationPrompts(env, task, context.assertEffectAllowed);
+    await context.assertEffectAllowed?.();
     await cancelExecutableTaskForArchive(db, task, taskId, context.actorUserId);
   }
 
@@ -124,6 +147,7 @@ async function stopTaskBackedSession(
     errorMessage: cleanupStatus === 'failed' ? (task?.errorMessage ?? null) : 'Archived by user',
     destructiveSessionEnd: true,
     requireStopAcknowledgement: context.requireStopAcknowledgement,
+    beforeSideEffect: context.assertEffectAllowed,
     logContext: {
       projectId: context.projectId,
       sessionId: context.sessionId,

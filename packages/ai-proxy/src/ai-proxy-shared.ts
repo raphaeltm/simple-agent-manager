@@ -8,6 +8,7 @@
  *
  * Upstream auth resolution (Unified Billing vs platform key) lives in ai-billing.ts.
  */
+import { AI_PROVIDER_BASE_URLS } from '@simple-agent-manager/shared';
 import { expectJsonRecord } from '@simple-agent-manager/worker-core';
 
 import { resolveAiGatewayId } from './ai-gateway-availability';
@@ -73,7 +74,7 @@ export function buildAnthropicGatewayUrl(env: AiProxyEnv): string {
     return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/anthropic/v1/messages`;
   }
   // Fallback: direct Anthropic API (no gateway monitoring)
-  return 'https://api.anthropic.com/v1/messages';
+  return `${AI_PROVIDER_BASE_URLS.anthropic}/v1/messages`;
 }
 
 /** Build upstream URL for Workers AI chat completions via AI Gateway. */
@@ -257,5 +258,5 @@ export function buildAnthropicCountTokensUrl(env: AiProxyEnv): string {
   if (gatewayId) {
     return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/anthropic/v1/messages/count_tokens`;
   }
-  return 'https://api.anthropic.com/v1/messages/count_tokens';
+  return `${AI_PROVIDER_BASE_URLS.anthropic}/v1/messages/count_tokens`;
 }

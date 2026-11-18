@@ -6,6 +6,7 @@
 import {
   listPhaseTimings,
   MAX_PHASE_STATS_PHASES,
+  MAX_PHASE_STATS_SAMPLE_LIMIT,
   nearestRankPercentile,
   OperationError,
   phaseDurationStats,
@@ -19,10 +20,13 @@ import {
   createSqliteD1WithBindLimit,
 } from '../../helpers/sqlite-d1';
 
-const MIGRATION = new URL(
-  '../../../src/db/migrations/0250_lifecycle_phase_timings.sql',
-  import.meta.url
-);
+const MIGRATIONS = [
+  new URL('../../../src/db/migrations/0250_lifecycle_phase_timings.sql', import.meta.url),
+  new URL(
+    '../../../src/db/migrations/0260_lifecycle_phase_timings_pair_indexes.sql',
+    import.meta.url
+  ),
+];
 const NOW = 1_794_000_000_000;
 const DAY = 86_400_000;
 
@@ -65,7 +69,7 @@ describe('insights phase timings reads', () => {
 
   beforeEach(() => {
     sqlite = new Database(':memory:');
-    applySqliteMigration(sqlite, MIGRATION);
+    for (const migration of MIGRATIONS) applySqliteMigration(sqlite, migration);
     db = createSqliteD1(sqlite);
   });
 
@@ -96,8 +100,16 @@ describe('insights phase timings reads', () => {
           count: 1,
           medianMs: 5_000,
           p90Ms: 5_000,
+          truncated: false,
         },
-        { operation: 'workspace', phase: 'git_clone', count: 10, medianMs: 50, p90Ms: 90 },
+        {
+          operation: 'workspace',
+          phase: 'git_clone',
+          count: 10,
+          medianMs: 50,
+          p90Ms: 90,
+          truncated: false,
+        },
       ],
     });
 
@@ -115,7 +127,74 @@ describe('insights phase timings reads', () => {
         count: 1,
         medianMs: 1_000_000,
         p90Ms: 1_000_000,
+        truncated: false,
       },
+    ]);
+  });
+
+  it('summarises every stored phase when phases is omitted, still within the project', async () => {
+    insert({ project: 'p', phase: 'git_clone', durationMs: 40 });
+    insert({ project: 'p', phase: 'devcontainer_up', durationMs: 900 });
+    insert({ project: 'p', phase: 'sam_env', durationMs: 3, skill: 'skill-2' });
+    // Attack: another project's rows under the same skill id and a phase p never stored.
+    insert({ project: 'foreign', phase: 'git_clone', durationMs: 1_000_000 });
+    insert({ project: 'foreign', phase: 'volume_create', durationMs: 5 });
+
+    const result = await phaseDurationStats(db, { projectId: 'p', skillId: 'skill-1', now: NOW });
+    expect(result.stats).toEqual([
+      {
+        operation: 'workspace',
+        phase: 'devcontainer_up',
+        count: 1,
+        medianMs: 900,
+        p90Ms: 900,
+        truncated: false,
+      },
+      {
+        operation: 'workspace',
+        phase: 'git_clone',
+        count: 1,
+        medianMs: 40,
+        p90Ms: 40,
+        truncated: false,
+      },
+    ]);
+  });
+
+  it('caps the sample per phase, so a frequent phase cannot crowd out a rare one', async () => {
+    // Skew: 12 recent git_clone rows, then one older devcontainer_up row. A global newest-first
+    // cap of 5 would read only git_clone rows.
+    for (let i = 0; i < 12; i += 1) {
+      insert({ project: 'p', phase: 'git_clone', durationMs: 100 + i, ageMs: DAY - i * 1000 });
+    }
+    insert({ project: 'p', phase: 'devcontainer_up', durationMs: 900, ageMs: 5 * DAY });
+
+    const capped = await phaseDurationStats(db, {
+      projectId: 'p',
+      skillId: 'skill-1',
+      sampleLimit: 5,
+      now: NOW,
+    });
+    expect(capped.truncated).toBe(true);
+    // Only the cut pair says so: the rare phase's median is over every row it has.
+    expect(capped.stats.map((stat) => [stat.phase, stat.count, stat.truncated])).toEqual([
+      ['devcontainer_up', 1, false],
+      ['git_clone', 5, true],
+    ]);
+    // The newest five git_clone rows are the ones kept (durations 107..111).
+    expect(capped.stats[1]).toMatchObject({ medianMs: 109, p90Ms: 111 });
+
+    // Control: a cap above every group reads everything and reports nothing cut.
+    const all = await phaseDurationStats(db, {
+      projectId: 'p',
+      skillId: 'skill-1',
+      sampleLimit: 50,
+      now: NOW,
+    });
+    expect(all.truncated).toBe(false);
+    expect(all.stats.map((stat) => [stat.phase, stat.count])).toEqual([
+      ['devcontainer_up', 1],
+      ['git_clone', 12],
     ]);
   });
 
@@ -148,6 +227,182 @@ describe('insights phase timings reads', () => {
       truncated: true,
       stats: [{ operation: 'runner_wake', count: 1 }],
     });
+  });
+
+  it('caps each operation of a shared phase separately, so newer rows of one cannot hide another', async () => {
+    // VM phases repeat across workspace, sleep and wake. Twelve newer workspace rows must not use
+    // up the older wake rows' share: a per-phase cap of any multiple of the sample would.
+    for (let i = 0; i < 12; i += 1) {
+      insert({ project: 'p', phase: 'git_clone', durationMs: 10 + i, ageMs: DAY - i * 1000 });
+    }
+    insert({ project: 'p', phase: 'git_clone', durationMs: 90, operation: 'wake', ageMs: 2 * DAY });
+    insert({ project: 'p', phase: 'git_clone', durationMs: 91, operation: 'wake', ageMs: 3 * DAY });
+
+    const result = await phaseDurationStats(db, {
+      projectId: 'p',
+      skillId: 'skill-1',
+      sampleLimit: 2,
+      now: NOW,
+    });
+    expect(result.truncated).toBe(true);
+    expect(result.stats.map((stat) => [stat.operation, stat.count, stat.medianMs])).toEqual([
+      ['wake', 2, 90],
+      ['workspace', 2, 20],
+    ]);
+  });
+
+  it('marks only the cut pairs when the total row bound is reached', async () => {
+    // Eleven dense pairs at the maximum sample exceed the total bound; a one-row pair is read in
+    // full and must not be reported as sampled. The response still says the bound was reached.
+    const insertDense = sqlite.prepare(
+      `INSERT INTO lifecycle_phase_timings
+         (operation, phase, outcome, duration_ms, project_id, skill_id, created_at)
+       VALUES ('workspace', ?, 'success', ?, 'p', 'skill-1', ?)`
+    );
+    sqlite.transaction(() => {
+      for (let pair = 0; pair < 11; pair += 1) {
+        for (let i = 0; i <= MAX_PHASE_STATS_SAMPLE_LIMIT; i += 1) {
+          insertDense.run(`dense_${pair}`, 100 + i, NOW - DAY + i);
+        }
+      }
+    })();
+    insert({ project: 'p', phase: 'rare', durationMs: 7, operation: 'wake' });
+
+    const result = await phaseDurationStats(db, {
+      projectId: 'p',
+      skillId: 'skill-1',
+      sampleLimit: MAX_PHASE_STATS_SAMPLE_LIMIT,
+      now: NOW,
+    });
+    expect(result.truncated).toBe(true);
+    const rare = result.stats.find((stat) => stat.phase === 'rare');
+    expect(rare).toMatchObject({ operation: 'wake', count: 1, truncated: false });
+    const dense = result.stats.filter((stat) => stat.phase.startsWith('dense_'));
+    expect(dense.length).toBeGreaterThan(0);
+    expect(dense.every((stat) => stat.truncated)).toBe(true);
+  });
+
+  it('does not claim truncation when the read fills the total bound exactly', async () => {
+    // Ten pairs of exactly the maximum sample: 20,000 rows, every one of them read.
+    const insertRow = sqlite.prepare(
+      `INSERT INTO lifecycle_phase_timings
+         (operation, phase, outcome, duration_ms, project_id, skill_id, created_at)
+       VALUES ('workspace', ?, 'success', ?, 'p', 'skill-1', ?)`
+    );
+    sqlite.transaction(() => {
+      for (let pair = 0; pair < 10; pair += 1) {
+        for (let i = 0; i < MAX_PHASE_STATS_SAMPLE_LIMIT; i += 1) {
+          insertRow.run(`full_${pair}`, 100 + i, NOW - DAY + i);
+        }
+      }
+    })();
+    const result = await phaseDurationStats(db, {
+      projectId: 'p',
+      skillId: 'skill-1',
+      sampleLimit: MAX_PHASE_STATS_SAMPLE_LIMIT,
+      now: NOW,
+    });
+    expect(result.stats).toHaveLength(10);
+    expect(result.stats.every((stat) => stat.count === MAX_PHASE_STATS_SAMPLE_LIMIT)).toBe(true);
+    expect(result.stats.some((stat) => stat.truncated)).toBe(false);
+    expect(result.truncated).toBe(false);
+  });
+
+  it('cuts equal timestamps by id, the same way on every call', async () => {
+    // Four rows in the same millisecond, sample 2: the two newest ids (durations 30 and 40) stay.
+    for (const durationMs of [10, 20, 30, 40]) {
+      insert({ project: 'p', phase: 'git_clone', durationMs, ageMs: DAY });
+    }
+    const read = () =>
+      phaseDurationStats(db, { projectId: 'p', skillId: 'skill-1', sampleLimit: 2, now: NOW });
+    const first = await read();
+    expect(first.stats).toEqual([
+      {
+        operation: 'workspace',
+        phase: 'git_clone',
+        count: 2,
+        medianMs: 30,
+        p90Ms: 40,
+        truncated: true,
+      },
+    ]);
+    expect(await read()).toEqual(first);
+  });
+
+  it('takes the newest successful rows of a phase past a run of newer failures', async () => {
+    for (let i = 0; i < 20; i += 1) {
+      insert({
+        project: 'p',
+        phase: 'git_clone',
+        durationMs: 1,
+        outcome: 'failure',
+        ageMs: DAY - i,
+      });
+    }
+    insert({ project: 'p', phase: 'git_clone', durationMs: 50, ageMs: 2 * DAY });
+    insert({ project: 'p', phase: 'git_clone', durationMs: 60, ageMs: 3 * DAY });
+    const result = await phaseDurationStats(db, {
+      projectId: 'p',
+      skillId: 'skill-1',
+      sampleLimit: 1,
+      now: NOW,
+    });
+    expect(result).toMatchObject({
+      truncated: true,
+      stats: [{ operation: 'workspace', phase: 'git_clone', count: 1, medianMs: 50 }],
+    });
+  });
+
+  it('reads each (operation, phase) through one index range, never a phase history (rule 81)', async () => {
+    // The work bound is per pair: pairs are listed with MIN seeks on the pair index, and each
+    // pair's sample is one index range keyed on every filter (operation, phase, outcome,
+    // created_at), so it stops at its LIMIT however many older, failed or other-operation rows
+    // exist. Checked on the SQL the read actually issues, for every branch of it.
+    const issued: string[] = [];
+    const recording = {
+      ...db,
+      prepare: (sql: string) => {
+        issued.push(sql);
+        return db.prepare(sql);
+      },
+    } as D1Database;
+    const variants: Array<{ phases?: string[]; operation?: string; profile?: boolean }> = [
+      {},
+      { phases: ['git_clone', 'devcontainer_up'] },
+      { operation: 'wake' },
+      { profile: true },
+    ];
+    for (const variant of variants) {
+      issued.length = 0;
+      await phaseDurationStats(recording, {
+        projectId: 'p',
+        ...(variant.profile ? { agentProfileId: 'profile-1' } : { skillId: 'skill-1' }),
+        phases: variant.phases,
+        operation: variant.operation,
+        now: NOW,
+      });
+      expect(issued).toHaveLength(1);
+      const binds = (issued[0]!.match(/\?/g) ?? []).map(() => 'x');
+      const plan = sqlite
+        .prepare(`EXPLAIN QUERY PLAN ${issued[0]}`)
+        .all(...binds)
+        .map((row) => (row as { detail: string }).detail);
+      const index = variant.profile ? 'profile_pair' : 'skill_pair';
+      const by = variant.profile ? 'agent_profile_id' : 'skill_id';
+      expect(plan).toContain(
+        `SEARCH s USING COVERING INDEX idx_lifecycle_phase_timings_${index} (project_id=? AND ${by}=? AND operation=? AND phase=? AND outcome=? AND created_at>?)`
+      );
+      // Pair listing: seeks into the next operation or the next phase, never a range on the
+      // first column alone after an equality on it.
+      expect(plan).toContain(
+        `SEARCH lifecycle_phase_timings USING COVERING INDEX idx_lifecycle_phase_timings_${index} (project_id=? AND ${by}=? AND operation=? AND phase>?)`
+      );
+      const tableReads = plan.filter((line) =>
+        /lifecycle_phase_timings|^(SCAN|SEARCH) [st]\b/.test(line)
+      );
+      expect(tableReads.length).toBeGreaterThan(5);
+      expect(tableReads.filter((line) => !line.startsWith('SEARCH'))).toEqual([]);
+    }
   });
 
   it('rejects ambiguous or empty inputs', async () => {
@@ -255,7 +510,14 @@ describe('insights phase timings reads', () => {
       now: NOW,
     });
     expect(result.stats).toEqual([
-      { operation: 'runner_wake', phase: 'phase-63', count: 1, medianMs: 7, p90Ms: 7 },
+      {
+        operation: 'runner_wake',
+        phase: 'phase-63',
+        count: 1,
+        medianMs: 7,
+        p90Ms: 7,
+        truncated: false,
+      },
     ]);
   });
 });

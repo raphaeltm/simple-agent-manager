@@ -215,7 +215,7 @@ export function StepWhen({
         <div className="flex flex-col gap-3">
           <Notice>
             {creating
-              ? 'SAM gives this automation its own email address once you save it. Mail whose From address is on the list below starts it, and the agent can reply by email. Senders are not verified yet, so keep that address private.'
+              ? 'SAM gives this automation its own email address once you save it. Mail whose From address is on the list below starts it, and the agent can reply by email. SAM checks only that the From address is on the list. It cannot confirm the sender really sent the mail, so keep that address private.'
               : 'Its address stays the same — see it on this automation’s page. Saving changes who may use it.'}
           </Notice>
           <EmailTriggerFields

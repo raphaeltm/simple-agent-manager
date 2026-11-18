@@ -57,6 +57,20 @@ vi.mock('../../../src/services/platform-capabilities', async (original) => ({
   resolveLlmEndpointCapability: vi.fn(async () => null),
 }));
 
+// These protocol fixtures have no settings DB. Supply a readable, disabled ceiling
+// while keeping the real usage gate and all other settings resolution in place.
+vi.mock('../../../src/services/admin-settings-resolution', async (original) => {
+  const actual = await original<typeof import('../../../src/services/admin-settings-resolution')>();
+  return {
+    ...actual,
+    resolveAdminSettingDetails: vi.fn(async (env, key) =>
+      key === 'aiProxy.perUserMonthlyCostCeilingUsd'
+        ? { value: 0 }
+        : actual.resolveAdminSettingDetails(env, key)
+    ),
+  };
+});
+
 // Mock cloudflare:workers (vitest hoists vi.mock calls automatically)
 
 function makeBudgetKv(): KVNamespace {

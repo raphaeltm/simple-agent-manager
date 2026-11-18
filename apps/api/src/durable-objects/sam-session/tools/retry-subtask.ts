@@ -246,7 +246,7 @@ export async function retrySubtask(
   const now = new Date().toISOString();
 
   // Insert new task + status event (batched for atomicity)
-  await env.DATABASE.batch([
+  const [inserted] = await env.DATABASE.batch([
     env.DATABASE.prepare(
       // triggered_by 'mcp' like dispatch_task: the agent started this, not the person, so it
       // must not count as their own new chat (e.g. the new-chat profile picker's recents).
@@ -257,12 +257,16 @@ export async function retrySubtask(
        credential_attribution_user_id, credential_attribution_project_id, credential_attribution_source,
        ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
        created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'queued', 'node_selection', 0, 0, ?, ?,
+       SELECT ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', 0, 0, ?, ?,
        ?, ?, ?, ?, ?, ?, 'mcp',
        ?, ?, ?, ?, ?,
        ?, ?, ?,
        ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
-       ?, ?)`
+       ?, ?
+       WHERE (? IS NULL OR EXISTS (
+         SELECT 1 FROM missions WHERE id = ? AND project_id = ?
+         AND status NOT IN ('cancelled', 'completed', 'failed')
+       ))`
     ).bind(
       newTaskId,
       original.projectId,
@@ -288,14 +292,19 @@ export async function retrySubtask(
       resolvedCredentialAttributionSource,
       ...capacityPlacementSnapshotSqlValues(capacityPlacementSnapshot),
       now,
-      now
+      now,
+      original.missionId ?? null,
+      original.missionId ?? null,
+      original.projectId
     ),
     env.DATABASE.prepare(
       `INSERT INTO task_status_events (id, task_id, from_status, to_status,
        actor_type, actor_id, reason, created_at)
-       VALUES (?, ?, NULL, 'queued', 'user', ?, ?, ?)`
-    ).bind(ulid(), newTaskId, ctx.userId, `Retry of task ${taskId} via SAM`, now),
+       SELECT ?, ?, NULL, 'queued', 'user', ?, ?, ? WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ?)`
+    ).bind(ulid(), newTaskId, ctx.userId, `Retry of task ${taskId} via SAM`, now, newTaskId),
   ]);
+
+  if (!inserted?.meta.changes) return { error: 'Mission no longer accepts retried tasks' };
 
   // Create chat session
   let sessionId: string;
