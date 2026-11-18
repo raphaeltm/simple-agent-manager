@@ -23,7 +23,7 @@ func Run(ctx context.Context, runtime Runtime) int {
 		return fail(runtime.Stderr, err)
 	}
 	if len(parsed.Positionals) == 0 || parsed.Bools["help"] || parsed.Bools["h"] {
-		fmt.Fprintln(runtime.Stdout, contextualHelp(parsed))
+		fmt.Fprintln(runtime.Stdout, sanitizeTerminalText(contextualHelp(parsed)))
 		return 0
 	}
 
@@ -365,7 +365,7 @@ func fail(stderr io.Writer, err error) int {
 		w.writeError(err)
 		return 1
 	}
-	fmt.Fprintln(stderr, err.Error())
+	fmt.Fprintln(stderr, sanitizeTerminalText(err.Error()))
 	return 1
 }
 
