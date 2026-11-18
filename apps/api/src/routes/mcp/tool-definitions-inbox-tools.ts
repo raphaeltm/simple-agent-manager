@@ -1,7 +1,7 @@
 /**
  * Agent inbox tools (slice D, idea 01M7G03ZCQ6TM6CMEYDRKQ8ST9). Listed to agents as the domain
- * groups `inbox_read` (list, get) and `inbox_write` (ask, review, assign, comment, attach, update,
- * cancel) in
+ * groups `inbox_read` (list, get) and `inbox_write` (ask, review, result, assign, comment, attach,
+ * update, cancel) in
  * `tool-groups.ts`; these members stay callable by name. Properties shared by several members are
  * one object each, because a group merges same-named properties and they must agree.
  */
@@ -90,6 +90,17 @@ export const INBOX_TOOLS = [
     name: 'inbox_review',
     description:
       'Ask the person to evaluate something you made (a PR, preview, file). Non-blocking; they answer "Looks good" or reply.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { title, why, links, groupKey, idempotencyKey },
+      required: ['title'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'inbox_result',
+    description:
+      'Hand the person what they asked for: an answer, a finding, finished work. Title: the outcome in one plain sentence. why: the details, written as a short note to a colleague. Non-blocking; they mark it "Got it" (you are not woken) or reply (you are woken with the reply).',
     inputSchema: {
       type: 'object' as const,
       properties: { title, why, links, groupKey, idempotencyKey },

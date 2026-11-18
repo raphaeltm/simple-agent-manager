@@ -231,37 +231,6 @@ export async function notifySystemError(
 }
 
 /**
- * Emit a "session_ended" notification when an agent finishes a chat turn.
- */
-export async function notifySessionEnded(
-  env: NotificationEnv,
-  userId: string,
-  opts: ProjectNotificationOpts & {
-    sessionId?: string | null;
-    taskId?: string | null;
-    taskTitle?: string | null;
-  }
-): Promise<void> {
-  const title = opts.taskTitle
-    ? `Agent finished: ${truncate(opts.taskTitle, MAX_NOTIFICATION_TITLE_LENGTH)}`
-    : 'Agent finished — your turn';
-
-  await sendNotification(env, userId, {
-    type: 'session_ended',
-    urgency: NOTIFICATION_TYPE_URGENCY.session_ended ?? 'medium',
-    title,
-    body: 'The agent has completed its turn. You can continue the conversation.',
-    projectId: opts.projectId,
-    taskId: opts.taskId,
-    sessionId: opts.sessionId,
-    actionUrl: buildActionUrl(opts.projectId, opts.sessionId),
-    metadata: {
-      projectName: opts.projectName,
-    },
-  });
-}
-
-/**
  * Emit a "pr_created" notification when a PR is created.
  */
 export async function notifyPrCreated(
@@ -310,6 +279,8 @@ export async function notifyNeedsInput(
     inboxRef?: string | null;
     /** Overrides the category label ("Review" for an inbox review item). */
     label?: string;
+    /** Replaces "<label> needed" ("Result ready" for an inbox result item). */
+    heading?: string;
   }
 ): Promise<NotificationResponse> {
   const categoryLabel =
@@ -317,11 +288,12 @@ export async function notifyNeedsInput(
     (opts.category
       ? opts.category.charAt(0).toUpperCase() + opts.category.slice(1).replaceAll('_', ' ')
       : 'Input');
+  const heading = opts.heading ?? `${categoryLabel} needed`;
 
   return sendNotification(env, userId, {
     type: 'needs_input',
     urgency: NOTIFICATION_TYPE_URGENCY.needs_input ?? 'high',
-    title: `${categoryLabel} needed: ${truncate(opts.taskTitle, MAX_NOTIFICATION_TITLE_LENGTH_NEEDS_INPUT)}`,
+    title: `${heading}: ${truncate(opts.taskTitle, MAX_NOTIFICATION_TITLE_LENGTH_NEEDS_INPUT)}`,
     body: truncate(opts.context, MAX_NOTIFICATION_BODY_LENGTH),
     projectId: opts.projectId,
     taskId: opts.taskId,

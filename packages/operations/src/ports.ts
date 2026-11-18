@@ -539,10 +539,10 @@ export interface InboxAskAnnouncement {
   sessionId: string;
   taskId: string;
   askId: string;
-  kind: 'question' | 'review';
+  kind: 'question' | 'review' | 'result';
   blocking: boolean;
   title: string;
-  /** The agent's full text: the question, or the reason for a review. */
+  /** The agent's full text: the question, the reason for a review, or a result's details. */
   body: string;
   options: string[];
   category: string | null;

@@ -24,7 +24,9 @@ import {
   useInboxSend,
 } from './inbox-actions';
 import {
+  acknowledgeLabel,
   type InboxErrorActionModel,
+  isAcknowledgeable,
   isIrreversibleApproval,
   readErrorActions,
 } from './inbox-model';
@@ -178,8 +180,16 @@ function StaleNotice({ onStale }: { onStale: () => void }) {
   );
 }
 
-function ReviewControls({ item, handlers }: { item: InboxItem; handlers: InboxAnswerHandlers }) {
+/** A review ("Looks good") or a result ("Got it"), each with Reply. */
+function AcknowledgeControls({
+  item,
+  handlers,
+}: {
+  item: InboxItem;
+  handlers: InboxAnswerHandlers;
+}) {
   const { busy, error, send } = useInboxSend(item, handlers);
+  const ackLabel = acknowledgeLabel(item);
   const [replying, setReplying] = useState(false);
   const [text, setText] = useState('');
   return (
@@ -229,10 +239,10 @@ function ReviewControls({ item, handlers }: { item: InboxItem; handlers: InboxAn
         <div className="grid min-w-0 grid-cols-2 gap-2">
           <Button
             disabled={busy !== null}
-            onClick={() => void send('ack', {}, (r) => `Marked “Looks good”${deliveryNote(r)}`)}
+            onClick={() => void send('ack', {}, (r) => `Marked “${ackLabel}”${deliveryNote(r)}`)}
             className="min-h-11"
           >
-            {busy === 'ack' ? 'Sending…' : 'Looks good'}
+            {busy === 'ack' ? 'Sending…' : ackLabel}
           </Button>
           <Button
             variant="secondary"
@@ -397,8 +407,8 @@ export function InboxAnswerControls({
     case 'acknowledge':
       // Human tasks and SAM's own error items are read-only here until their slices ship
       // (`hasPinnedControls` hides their strip); Open chat is in the top bar.
-      return item.kind === 'review' ? (
-        <ReviewControls key={item.ref} item={item} handlers={handlers} />
+      return isAcknowledgeable(item) ? (
+        <AcknowledgeControls key={item.ref} item={item} handlers={handlers} />
       ) : null;
   }
 }

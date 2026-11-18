@@ -54,6 +54,13 @@ export function buildInboxAskPrompt(
       ? `The person reviewed your ${item} and replied:\n\n${answer}`
       : `The person reviewed your ${item}: it looks good.`;
   }
+  if (row.kind === 'result' && outcome === 'answered') {
+    // "Got it" closes a result without a notice (`answerAsk`), so an answered result here
+    // carries the person's reply.
+    return answer
+      ? `The person replied to your ${item}:\n\n${answer}`
+      : `The person read your ${item}.`;
+  }
   switch (outcome) {
     case 'answered':
       return answer

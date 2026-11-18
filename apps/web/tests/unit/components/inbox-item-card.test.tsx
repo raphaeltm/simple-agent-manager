@@ -142,6 +142,27 @@ describe('InboxItemCard', () => {
     expect(await screen.findByText(/Looks good/)).toBeTruthy();
   });
 
+  it('shows a filed result with "Got it" and settles to "Seen"', async () => {
+    current = inboxItem({
+      kind: 'result',
+      title: 'The flaky login test is fixed',
+      body: 'It was racing the session cookie.',
+    });
+    renderCard(toolCall(FILED));
+    expect(await screen.findByText('The flaky login test is fixed')).toBeTruthy();
+    expect(screen.getByText('Result for you')).toBeTruthy();
+    expect(screen.getByText('Waiting for you')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Looks good' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }));
+    await waitFor(() =>
+      expect(calls.some((call) => call.method === 'POST' && call.path.endsWith('/answer'))).toBe(
+        true
+      )
+    );
+    expect(calls.find((call) => call.method === 'POST')!.body).toEqual({});
+    expect(await screen.findByText('Seen')).toBeTruthy();
+  });
+
   it('shows a blocking question with its options and the answered state once settled', async () => {
     current = inboxItem({
       kind: 'question',

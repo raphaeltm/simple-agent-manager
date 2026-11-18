@@ -125,6 +125,11 @@ export const MCP_TOOL_GROUPS: readonly McpToolGroup[] = [
         tool: 'inbox_review',
         summary: 'ask the person to evaluate something you made; answered "Looks good" or a reply',
       },
+      result: {
+        tool: 'inbox_result',
+        summary:
+          'hand the person what they asked for (an answer, a finding, finished work); "Got it" closes it, a reply wakes you',
+      },
       assign: {
         tool: 'inbox_assign',
         summary:

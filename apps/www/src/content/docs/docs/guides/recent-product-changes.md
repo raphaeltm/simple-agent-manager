@@ -27,6 +27,12 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
   production secret, arrives as a **Task**; something to evaluate arrives as a **Review** with
   **Looks good**. To give a teammate a task, ask the agent to assign it to them.
   → [Tasks for people](/docs/guides/inbox/#tasks-for-people)
+- **Agents put their answers in your Inbox.** When you ask an agent for something, its answer or
+  finished work arrives as a **Result**: the outcome in one plain sentence, then the details.
+  **Got it** closes it without waking the agent; **Reply** sends it your reply. Agents are told
+  nobody reads their chat, to file only what is worth your time, and to file nothing for routine
+  runs or work another agent handed out. The content-free "Agent finished — your turn" update is
+  gone. → [What agents file](/docs/guides/inbox/#what-agents-file)
 - **Projects open on their Overview.** Opening a project shows **Needs you** (the first items of its
   Inbox) above what is running, this week's numbers, budgets, automations and recent work, with a
   task box that starts work without leaving the page. Chat is one tap away: **Chat** in the project

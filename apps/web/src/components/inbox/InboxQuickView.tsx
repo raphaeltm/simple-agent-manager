@@ -6,7 +6,7 @@ import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 import { useMinuteClock } from '../../hooks/useMinuteClock';
 import type { answerInboxItem } from '../../lib/api';
 import { deliveryNote, useInboxPermissionDetail, useInboxSend } from './inbox-actions';
-import { buildRows } from './inbox-model';
+import { acknowledgeLabel, buildRows, isAcknowledgeable } from './inbox-model';
 import { InboxPushInvite } from './InboxPushInvite';
 import { InboxEmptyState, InboxRow } from './InboxRow';
 import { useInboxList, useInvalidateInbox } from './useInbox';
@@ -20,7 +20,7 @@ const ONE_TAP_MAX_OPTIONS = 3;
 
 type OneTap = { label: string; body: Parameters<typeof answerInboxItem>[2]; primary?: boolean };
 
-/** Option and review answers that are safe in one tap; permissions are handled separately. */
+/** Option, review and result answers that are safe in one tap; permissions are handled separately. */
 function staticOneTaps(item: InboxItem): OneTap[] {
   if (!item.canAct || item.status !== 'open') return [];
   const spec = item.answerSpec;
@@ -32,8 +32,8 @@ function staticOneTaps(item: InboxItem): OneTap[] {
   ) {
     return spec.options.map((option) => ({ label: option, body: { answer: option } }));
   }
-  if (spec.type === 'acknowledge' && item.kind === 'review') {
-    return [{ label: 'Looks good', body: {}, primary: true }];
+  if (spec.type === 'acknowledge' && isAcknowledgeable(item)) {
+    return [{ label: acknowledgeLabel(item), body: {}, primary: true }];
   }
   return [];
 }
@@ -121,7 +121,8 @@ function QuickAnswers({ item }: { item: InboxItem }) {
 
 /**
  * The desktop quick view behind the inbox icon: the first items across every project, one-tap
- * answers only where one tap is safe (Allow / Deny, three or fewer short options, "Looks good"),
+ * answers only where one tap is safe (Allow / Deny, three or fewer short options, "Looks good",
+ * "Got it"),
  * and a link to the full inbox. Everything else opens the item on the Inbox page.
  */
 export const InboxQuickView = forwardRef<

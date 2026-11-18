@@ -1,10 +1,10 @@
 ---
 title: Inbox
-description: One place for everything your agents need from you — questions, permissions, secrets, approvals, reviews and tasks — across every project, on a phone or a desktop.
+description: One place for everything your agents need from you — questions, permissions, secrets, approvals, reviews, results and tasks — across every project, on a phone or a desktop.
 ---
 
 The Inbox lists everything waiting on you: an agent's question, permission request, secret,
-Operations approval, review or task for a person, and the **Problems** SAM files itself when
+Operations approval, review, result or task for a person, and the **Problems** SAM files itself when
 something of yours fails. You answer from the Inbox instead of opening each chat. It replaced the
 notification bell panel and the project **Notifications** page.
 
@@ -20,7 +20,8 @@ notification bell panel and the project **Notifications** page.
 
 On a desktop the inbox icon opens a quick view of the first items. Where one tap is safe it offers
 the answer right there: **Allow** / **Deny** for a permission (never "always allow"), the options of
-a question with three or fewer short options, and **Looks good** for a review. Anything else opens
+a question with three or fewer short options, **Looks good** for a review and **Got it** for a
+result. Anything else opens
 the item on the Inbox page; **Open inbox** opens the page. On a phone the icon opens the page.
 
 ![The Inbox quick view on a desktop: a permission with Allow once and Deny buttons, an approval, a question stack, a task, a review with a Looks good button and a Problem, and an Open inbox button at the bottom.](/images/docs/inbox-quick-view.png)
@@ -58,6 +59,7 @@ has done since. The answer controls stay pinned at the bottom:
 | Secret             | The secure value field; it is saved encrypted and never shown to the agent ([details](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret)). **Decline** says you will not supply it. |
 | Approval           | **Approve** or **Deny** (superadmins, Operations project).                                                                                                                                          |
 | Review             | **Looks good**, or **Reply** with a comment.                                                                                                                                                        |
+| Result             | **Got it** closes it without waking the agent. **Reply** sends the agent your reply and wakes its chat.                                                                                             |
 | Task               | Read-only in the Inbox for now: the task's title, why a person is needed, its steps and links. **Archive** closes it. See [Tasks for people](#tasks-for-people).                                    |
 | Problem            | The fix for what failed, such as **Retry** or **Wake the chat**. See [Problems SAM files for you](#problems-sam-files-for-you).                                                                     |
 | Form, Sign-in link | Answered in the chat: the item says **This request is answered in its chat.** with an **Answer in chat** button.                                                                                    |
@@ -76,10 +78,14 @@ given in the chat card is the same answer, so the Inbox catches up.
 
 Agents file items with their `inbox_write` tool, and read what is already open with `inbox_read`
 (`apps/api/src/routes/mcp/inbox-tools.ts`, over `packages/operations/src/inbox-agent-core.ts`).
-Every session is told that people read their inbox, not chats: an agent that ends its turn with a
-question only in its message has asked nobody, so it files an item instead
-(`apps/api/src/routes/mcp/instruction-inbox-guidance.ts`). SAM files nothing on an agent's behalf;
-the only items SAM files itself are [Problems](#problems-sam-files-for-you).
+Every session is told that nobody reads its chat: you see only what the agent puts in your inbox
+(`apps/api/src/routes/mcp/instruction-inbox-guidance.ts`). So an agent files the answer or finished
+work you asked for as a result, something to check as a review, and a decision it needs as an ask.
+A question or an answer left only in the chat reaches nobody. Agents are also told to file only what
+is worth your time and to write each item like a short note to a colleague: the outcome first, in
+plain words, without IDs or jargon. A routine run with nothing for you, or work another agent
+handed out (which reports back to that agent), files nothing. SAM files nothing on an agent's
+behalf; the only items SAM files itself are [Problems](#problems-sam-files-for-you).
 The tools need a session started from a task or a project chat, as `request_human_input` always did;
 a chat opened directly on a workspace has no inbox to file into.
 
@@ -90,6 +96,10 @@ a chat opened directly on a workspace has no inbox to file into.
   working and never expires. `request_human_input` files a blocking ask.
 - **Review** (`review`): something the agent wants you to evaluate, such as a pull request or a
   preview. Answer **Looks good** or reply. It never expires.
+- **Result** (`result`): what you asked for, such as the answer to a question, a finding, or work
+  that is done. The title is the outcome and the details follow. **Got it** closes it and leaves
+  the agent alone; a reply wakes the agent's chat with your reply. It never blocks the agent and
+  never expires. You get a push titled **Result ready**.
 - **Task** (`assign`): work only a person can do, such as adding a production secret or deciding a
   price. It never blocks the agent and never expires; a soft due date only sorts and highlights it.
   See [Tasks for people](#tasks-for-people).
@@ -105,7 +115,9 @@ an item that looks like one already open (same group, or a title with most words
 shown the open one so it can point you there instead of filing a duplicate.
 
 An item you answer in the chat card or in the Inbox is the same record: answering either closes
-both, and the agent is woken in its chat with your answer.
+both, and the agent is woken in its chat with your answer. **Got it** on a result is the exception:
+there is nothing for the agent to do, so its chat is not woken (`answerAsk`,
+`packages/operations/src/inbox-write-core.ts`).
 
 ## Tasks for people
 

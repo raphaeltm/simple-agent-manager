@@ -9,6 +9,7 @@ import {
 } from '@simple-agent-manager/shared';
 import {
   CircleAlert,
+  CircleCheckBig,
   Eye,
   FileText,
   GitPullRequest,
@@ -71,6 +72,7 @@ export const KIND_META: Record<InboxItemKind, { label: string; icon: LucideIcon 
   secret: { label: 'Secret', icon: KeyRound },
   approval: { label: 'Approval', icon: ShieldCheck },
   review: { label: 'Review', icon: Eye },
+  result: { label: 'Result', icon: CircleCheckBig },
   task: { label: 'Task', icon: ListChecks },
   error: { label: 'Problem', icon: CircleAlert },
 };
@@ -187,7 +189,17 @@ export function readErrorActions(item: InboxItem): InboxErrorActionModel[] | nul
 export function hasPinnedControls(item: InboxItem): boolean {
   if (item.status !== 'open' || !item.canAct) return true;
   if (readErrorActions(item)) return true;
-  return !(item.answerSpec.type === 'acknowledge' && item.kind !== 'review');
+  return !(item.answerSpec.type === 'acknowledge' && !isAcknowledgeable(item));
+}
+
+/** Reviews and results are answered from the inbox: "Looks good" / "Got it", or a reply. */
+export function isAcknowledgeable(item: InboxItem): boolean {
+  return item.kind === 'review' || item.kind === 'result';
+}
+
+/** The one-tap acknowledgement for a review or a result. */
+export function acknowledgeLabel(item: InboxItem): string {
+  return item.kind === 'result' ? 'Got it' : 'Looks good';
 }
 
 /** A list row: one item, or a stack of items from one chat (or one group). */

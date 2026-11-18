@@ -65,6 +65,7 @@ export async function announceAgentAsk(
       sessionId: input.sessionId,
       attentionMarkerId: input.askId,
       label: input.kind === 'review' ? 'Review' : undefined,
+      heading: input.kind === 'result' ? 'Result ready' : undefined,
     });
     const scheduled = notification.id !== 'suppressed';
     if (scheduled && input.kind === 'question') {

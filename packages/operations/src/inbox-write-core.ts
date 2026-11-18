@@ -121,19 +121,35 @@ async function closeAsk(
   projectId: string,
   askId: string,
   status: 'answered' | 'done' | 'archived',
-  answerJson: string | null
+  answerJson: string | null,
+  /** `silent`: no agent notice will be sent, so record it as settled in the same write. */
+  options: { silent: boolean } = { silent: false }
 ): Promise<boolean> {
   const now = Date.now();
   const me = ctx.actor.userId;
   const result = await ctx.env.DATABASE.prepare(
     `UPDATE asks
-        SET status = ?, answer_json = ?, resolved_by_user_id = ?, resolved_at = ?, updated_at = ?
+        SET status = ?, answer_json = ?, resolved_by_user_id = ?, resolved_at = ?, updated_at = ?,
+            notified_at = CASE WHEN ? THEN ? ELSE notified_at END
       WHERE id = ? AND project_id = ? AND status = 'open'
         AND (expires_at IS NULL OR expires_at > ?)
         AND ((assignee_kind = 'user' AND assignee_user_id = ?)
           OR (assignee_kind = 'team' AND (claimed_by_user_id IS NULL OR claimed_by_user_id = ?)))`
   )
-    .bind(status, answerJson, me, now, now, askId, projectId, now, me, me)
+    .bind(
+      status,
+      answerJson,
+      me,
+      now,
+      now,
+      options.silent ? 1 : 0,
+      now,
+      askId,
+      projectId,
+      now,
+      me,
+      me
+    )
     .run();
   return (result.meta?.changes ?? 0) === 1;
 }
@@ -178,10 +194,17 @@ async function answerAsk(
     throw new OperationError('invalid_input', 'answer must match one of the requested options');
   if (spec.type === 'text' && !answer)
     throw new OperationError('invalid_input', 'answer is required');
+  const status = 'answered';
+  if (item.kind === 'result' && !answer) {
+    // "Got it": the person read the result and needs nothing more, so the agent is not woken.
+    // `notified_at` is set in the closing write, so the ask-notice sweep never sends one later.
+    if (!(await closeAsk(ctx, item.projectId, askId, status, null, { silent: true })))
+      throw new OperationError('conflict', 'This inbox item was already answered or closed');
+    return { ref: item.ref, outcome: status, agentNotified: false };
+  }
   // An answer reaches the agent as a prompt, so the agent-wake policy decides first.
   if (item.sessionId)
     await ctx.ports.inbox.authorizeAnswerWake(item.projectId, item.sessionId, ctx.actor.userId);
-  const status = 'answered';
   const answerJson = answer ? JSON.stringify({ text: answer }) : null;
   if (!(await closeAsk(ctx, item.projectId, askId, status, answerJson)))
     throw new OperationError('conflict', 'This inbox item was already answered or closed');
