@@ -16,6 +16,7 @@ import type { Env } from '../../../src/env';
 import { createOperationPorts } from '../../../src/operation-ports';
 import { invalidateAdminSettings } from '../../../src/services/admin-settings';
 import { recordHarnessRunUsage, recordProxyRunUsage } from '../../../src/services/agent-run-usage';
+import { countD1RoundTrips } from '../../helpers/insights-d1';
 import {
   createAllSchemaTables,
   createDeclaredIndexes,
@@ -710,45 +711,8 @@ describe('projectSetups', () => {
   });
 
   it('stays within its round-trip budget', async () => {
-    const real = env.DATABASE;
-    let trips = 0;
-    const wrap = <T extends Record<string, unknown>>(statement: T): T => ({
-      ...statement,
-      all: async (...a: unknown[]) => {
-        trips += 1;
-        return (statement.all as (...x: unknown[]) => unknown)(...a);
-      },
-      first: async (...a: unknown[]) => {
-        trips += 1;
-        return (statement.first as (...x: unknown[]) => unknown)(...a);
-      },
-      run: async (...a: unknown[]) => {
-        trips += 1;
-        return (statement.run as (...x: unknown[]) => unknown)(...a);
-      },
-      raw: async (...a: unknown[]) => {
-        trips += 1;
-        return (statement.raw as (...x: unknown[]) => unknown)(...a);
-      },
-    });
-    env = {
-      ...env,
-      DATABASE: {
-        ...real,
-        prepare: (sql: string) => {
-          const statement = real.prepare(sql) as unknown as Record<string, unknown>;
-          return {
-            ...wrap(statement),
-            bind: (...params: unknown[]) =>
-              wrap((statement.bind as (...p: unknown[]) => Record<string, unknown>)(...params)),
-          };
-        },
-        batch: async (statements: unknown[]) => {
-          trips += 1;
-          return (real.batch as (s: unknown[]) => unknown)(statements);
-        },
-      },
-    } as unknown as Env;
+    const counted = countD1RoundTrips(env);
+    env = counted.env;
     profile('prof', 'P', 'p');
     skill('sk', 'do');
     for (let i = 0; i < 120; i += 1) {
@@ -757,12 +721,12 @@ describe('projectSetups', () => {
       usage(`chat-t${i}`, 100);
     }
     await projectSetups(ctx(), { projectId: 'p', nowMs: NOW }); // warm settings
-    trips = 0;
+    counted.reset();
     nudgeCalls = [];
     const result = await projectSetups(ctx(), { projectId: 'p', nowMs: NOW });
     expect(result.groups[0]?.runs).toBe(120);
     // Rule 60 budget for this read is 6 (Insights spec). Measured: membership and the batch on
     // D1 (settings are cached after the first call), plus one ProjectData call for nudges.
-    expect(trips + nudgeCalls.length).toBe(3);
+    expect(counted.trips() + nudgeCalls.length).toBe(3);
   });
 });
