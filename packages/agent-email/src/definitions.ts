@@ -23,7 +23,13 @@ export {
   type AgentEmailSender,
   agentEmailSenderFor,
   createCloudflareAgentEmailSender,
+  createSmtpAgentEmailSender,
+  type EmailTransport,
+  type EmailTransportEnv,
+  type EmailTransportKind,
+  emailTransportKind,
   type OutboundAgentEmail,
+  systemEmailTransportFor,
 } from './provider';
 export {
   AGENT_EMAIL_SETTINGS,
@@ -41,6 +47,7 @@ export {
   DEFAULT_AGENT_EMAIL_SIGN_IN_CODE_ATTEMPTS_PER_EMAIL_PER_HOUR,
   DEFAULT_AGENT_EMAIL_SIGN_IN_CODES_PER_EMAIL_PER_HOUR,
   DEFAULT_AGENT_EMAIL_SIGN_IN_CODES_PER_IP_PER_HOUR,
+  DEFAULT_AGENT_EMAIL_SMTP_TIMEOUT_MS,
 } from './setting-definitions';
 export {
   allowedAdditions,
@@ -55,3 +62,23 @@ export {
   toMailRecord,
 } from './setup-changes';
 export { AgentEmailMainDomainChangedError, AgentEmailSetupRefusedError } from './setup-errors';
+export {
+  sendSmtpMessage,
+  type SmtpConnect,
+  type SmtpDelivery,
+  SmtpError,
+  type SmtpSendOptions,
+} from './smtp-client';
+export {
+  DEFAULT_SMTP_IMPLICIT_TLS_PORT,
+  DEFAULT_SMTP_STARTTLS_PORT,
+  isLoopbackHost,
+  isSmtpAddress,
+  resolveSmtpConfig,
+  SMTP_ADDRESS_PATTERN,
+  type SmtpConfig,
+  type SmtpConfigResult,
+  type SmtpEnv,
+  type SmtpTlsMode,
+} from './smtp-config';
+export { buildSmtpMessage, type BuiltMessage, dotStuff, SmtpMessageError } from './smtp-message';

@@ -170,6 +170,27 @@ describe('first-run setup with email', () => {
     expect((await post('/complete', { token: 'setup-token', config: {} })).status).toBe(200);
   });
 
+  it('completes with email sign-in over SMTP (no Cloudflare binding), without calling Cloudflare', async () => {
+    const fetchMock = vi.fn(async () => new Response('unexpected', { status: 500 }));
+    vi.stubGlobal('fetch', fetchMock);
+    env = makeEnv({
+      AGENT_EMAIL: undefined,
+      AGENT_EMAIL_WORKER_NAME: undefined,
+      SMTP_HOST: 'smtp.fixture.example',
+      SMTP_USERNAME: 'relay-user',
+      SMTP_PASSWORD: 'relay-pass',
+      SMTP_FROM: 'sign-in@fixture.example',
+    });
+    const verify = (await (await post('/verify', { token: 'setup-token' })).json()) as VerifyBody;
+    expect(verify.signIn).toEqual({
+      email: true,
+      emailReady: true,
+      ownerEmail: 'owner@fixture.example',
+    });
+    expect((await post('/complete', { token: 'setup-token', config: {} })).status).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('still needs a sign-in provider where the deployment cannot send email', async () => {
     env = makeEnv({ AGENT_EMAIL: undefined, AGENT_EMAIL_WORKER_NAME: undefined });
     const verify = (await (await post('/verify', { token: 'setup-token' })).json()) as VerifyBody;

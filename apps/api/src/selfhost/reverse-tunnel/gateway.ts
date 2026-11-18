@@ -11,6 +11,9 @@
  *   (`services/node-websocket-gateway.ts`), and returns that handler's refusal for Caddy to
  *   send, or a decision naming the loopback upstream and the headers Caddy must forward.
  *
+ * - `POST {prefix}/inbound-email`: the box's sam-mx SMTP receiver hands over one inbound agent
+ *   email (`inbound-email.ts`). Same secret header, plus its own on-switch.
+ *
  * frps and Caddy call celld on loopback; the box's Caddy answers 404 for this prefix on its
  * public listener (L22 owns that matcher). Both routes also fail closed here: no (or a
  * too-short) secret answers 404, and a wrong secret 401.
@@ -22,6 +25,7 @@ import { log } from '../../lib/logger';
 import { readRequestJsonRecord, RequestBodyTooLargeError } from '../../lib/runtime-validation';
 import { parseWorkspaceSubdomain } from '../../lib/workspace-subdomain';
 import { handleAppError } from '../../middleware/app-error-handler';
+import type { InboundDeps } from '../../services/agent-email/inbound';
 import {
   GATEWAY_HEADER,
   isGatewayDecisionFor,
@@ -30,6 +34,7 @@ import {
 import { authorizeFrpsPluginRequest, type FrpsPluginDecision } from './authz';
 import { getReverseTunnelGatewaySecret, isAcceptedGatewaySecret } from './config';
 import type { ReverseTunnelEnv } from './env';
+import { handleInboundEmailGateway } from './inbound-email';
 
 export const SELF_HOST_GATEWAY_PATH_PREFIX = '/api/self-host/gateway';
 /** frps plugin bodies are a few hundred bytes; bound them well above that. */
@@ -176,10 +181,15 @@ function toForwardAuthResponse(inner: Request, response: Response, host: string)
   });
 }
 
-export function createSelfHostGatewayRoutes(dispatch: GatewayDispatch) {
+export function createSelfHostGatewayRoutes(
+  dispatch: GatewayDispatch,
+  options: { inboundEmailDeps?: InboundDeps } = {}
+) {
   const routes = new Hono<{ Bindings: ReverseTunnelEnv }>().basePath(SELF_HOST_GATEWAY_PATH_PREFIX);
   routes.onError(handleAppError);
   routes.notFound(notFound);
+
+  routes.post('/inbound-email', (c) => handleInboundEmailGateway(c, options.inboundEmailDeps));
 
   routes.post('/frps-plugin', async (c) => {
     if (!getReverseTunnelGatewaySecret(c.env)) return notFound();

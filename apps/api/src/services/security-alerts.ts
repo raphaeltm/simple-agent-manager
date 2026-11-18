@@ -7,8 +7,9 @@
  *
  * Delivery is best-effort by design. Every entry point schedules work on the request's
  * `waitUntil` and returns immediately; nothing here can block, fail or roll back the mutation
- * that triggered it. Failures are logged (`security_alert.*`). The sender is the agent email
- * send binding sign-in codes already use (`agentEmailSenderFor`); a deployment without it logs
+ * that triggered it. Failures are logged (`security_alert.*`). The sender is the transport
+ * sign-in codes use (`resolveSystemEmailTransport`): the Cloudflare `AGENT_EMAIL` binding, or
+ * SMTP on an install without it (a self-hosted box). A deployment with neither logs
  * `security_alert.no_sender` and sends nothing.
  */
 import { SYSTEM_USER_ID } from '@simple-agent-manager/shared';
@@ -22,15 +23,17 @@ import {
   resolveActorLabels,
   sanitizeLabel,
 } from './actor-labels';
-import { agentEmailDomain } from './agent-email/address';
-import { agentEmailSenderFor } from './agent-email/provider';
+import { resolveSystemEmailTransport } from './agent-email/system-email';
 import { bootstrapOwnerEmail } from './bootstrap-owner';
 import type { PlatformIntegrationChange } from './platform-config-changes';
 import { integrationGroupTitleForName } from './platform-config-groups';
 
 const log = createModuleLogger('security-alerts');
 
-/** Local part of the address security alerts come from (`security@agents.<BASE_DOMAIN>`). */
+/**
+ * Local part of the address security alerts come from: `security@agents.<BASE_DOMAIN>` through
+ * the Cloudflare binding; over SMTP every message uses `SMTP_FROM`, as the relay requires.
+ */
 export const SECURITY_ALERT_LOCAL_PART = 'security';
 
 /** Account provider ids that are not a social sign-in, so linking them is not alerted. */
@@ -113,8 +116,8 @@ export async function deliverSecurityAlert(
   now: Date = new Date()
 ): Promise<void> {
   try {
-    const sender = agentEmailSenderFor(env);
-    if (!sender) {
+    const transport = await resolveSystemEmailTransport(env);
+    if (!transport) {
       // Error, not warn: a dropped security alert is something an operator must see.
       log.error('security_alert.no_sender', { kind: alert.kind });
       return;
@@ -134,13 +137,10 @@ export async function deliverSecurityAlert(
       log.error('security_alert.no_recipients', { kind: alert.kind });
       return;
     }
-    const from = {
-      email: `${SECURITY_ALERT_LOCAL_PART}@${agentEmailDomain(env.BASE_DOMAIN)}`,
-      name: 'SAM security',
-    };
+    const from = { email: transport.systemFrom(SECURITY_ALERT_LOCAL_PART), name: 'SAM security' };
     const results = await Promise.allSettled(
       recipients.map((to) =>
-        sender.send({ from, to, subject: email.subject, text: email.text, headers: {} })
+        transport.sender.send({ from, to, subject: email.subject, text: email.text, headers: {} })
       )
     );
     const failed = results.filter((result) => result.status === 'rejected');
@@ -154,6 +154,7 @@ export async function deliverSecurityAlert(
       kind: alert.kind,
       recipients: recipients.length,
       failed: failed.length,
+      transport: transport.kind,
     });
   } catch (error) {
     log.error('security_alert.failed', { kind: alert.kind, error: errorText(error) });
