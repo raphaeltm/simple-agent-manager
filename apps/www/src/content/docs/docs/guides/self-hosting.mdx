@@ -53,6 +53,62 @@ freed port still waits for its cooling interval. A full range and a cooling rang
 errors so operators can distinguish capacity exhaustion from a wait for safe reuse.
 
 
+## Speech endpoints on a single-box build
+
+This is a build integration foundation for the single-box runtime. Its entry must call
+`installSpeechEndpoints()` before serving requests and apply the shared database migrations,
+including `0259_speech_synthesis_rate_limits.sql`. The Cloudflare fork and browser-installer
+paths described below use Workers AI instead: they do not install these endpoint settings.
+A runtime without Workers AI or this installed backend cannot offer server speech.
+
+Once your single-box build includes that integration:
+
+1. Choose an OpenAI-compatible speech provider or run a compatible server reachable from SAM's
+   API process. It must support multipart `POST /audio/transcriptions` for voice input and/or
+   JSON `POST /audio/speech` returning real audio bytes for read-aloud. Check that provider's
+   documentation for its supported model IDs and synthesis voice IDs. Speech recordings and
+   read-aloud text leave SAM for the selected provider; configure only an endpoint you trust.
+2. Sign in as a superadmin and open [**Admin → Settings**](/docs/guides/admin-settings/),
+   category **AI models**. Configure either feature independently with the exact names below.
+   Use a base URL such as `https://speech.example.com/v1`; SAM appends the audio route, so do
+   not include `/audio/transcriptions` or `/audio/speech`, credentials, a query, or a fragment.
+
+   | Voice input setting | Read-aloud setting | Value |
+   | --- | --- | --- |
+   | `speech.transcription.baseUrl` | `speech.synthesis.baseUrl` | The provider's API base URL. |
+   | `speech.transcription.model` | `speech.synthesis.model` | A model ID supported by that endpoint. |
+   | — | `speech.synthesis.voice` | A voice ID supported by the synthesis model; required. |
+   | `speech.transcription.apiKey` | `speech.synthesis.apiKey` | Optional Bearer API key; required when the provider requires authentication. |
+   | `speech.transcription.allowPrivateNetwork` | `speech.synthesis.allowPrivateNetwork` | Defaults to `false`; opt in only for a trusted private endpoint. |
+
+3. Enter keys in the secret setting fields, never in the URL, repository, or GitHub Actions
+   logs. SAM stores them encrypted in its credential store and sends them as Bearer tokens.
+   An endpoint that requires no key can leave its key unset. Changing risky endpoint settings
+   requires the normal admin confirmation. HTTPS is required for public hosts. Plain HTTP is
+   allowed only for private hosts with that feature's `allowPrivateNetwork` enabled. Loopback
+   and Docker names resolve from the API process/container, so `localhost` must actually run
+   the provider there. Cloud metadata and link-local destinations remain refused after opt-in.
+4. Keep `TTS_ENCODING=mp3` in the runtime configuration for chunked read-aloud. Other supported
+   encodings work only for a single chunk; SAM refuses multi-chunk container formats before
+   spending provider calls. Raw `pcm` output is unsupported and refused before a provider call,
+   because the browser audio route cannot play it. Single-chunk Ogg Opus output is stored and
+   served as `audio/ogg`. Keep `TTS_ENABLED` enabled for read-aloud.
+5. Refresh the app after saving. Capability queries may remain fresh in the existing browser
+   query cache for up to five minutes. Check `/api/config/platform-capabilities` for
+   `speechToText` and `textToSpeech`, then record a short known sentence in project chat and
+   play read-aloud on a response. Verify the actual transcript and audible result: configured
+   capabilities indicate a complete configuration, not that provider credentials are valid.
+   Failed endpoint calls return a generic unavailable response; check server diagnostics without
+   publishing credentials. Clear that feature's base URL to disable its endpoint backend.
+
+The **AI models** category also exposes `speech.endpointTimeoutMs` (60,000 ms per provider call),
+`speech.transcription.maxResponseBytes` (1 MiB JSON), `speech.synthesis.maxAudioBytes` (8 MiB
+combined audio per read-aloud request), and `speech.synthesis.maxRequestsPerHour` (120 requests
+per user per clock hour). The hourly limit uses an atomic database counter and includes cache
+hits and failed requests; database-counter failures refuse synthesis. A 429 response includes
+`Retry-After` seconds until the next window. Provider billing, models, voices, availability and
+quotas remain the endpoint operator's responsibility.
+
 ## Prerequisites
 
 | Requirement              | Purpose                   | Tier                 |
