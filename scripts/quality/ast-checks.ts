@@ -386,6 +386,7 @@ function main() {
       resolve(ROOT, 'packages/app-deployment/src/**/*.ts'),
       resolve(ROOT, 'packages/operations/src/**/*.ts'),
       resolve(ROOT, 'packages/repo-hosting/src/**/*.ts'),
+      resolve(ROOT, 'packages/cron/src/**/*.ts'),
     ]);
   }
 

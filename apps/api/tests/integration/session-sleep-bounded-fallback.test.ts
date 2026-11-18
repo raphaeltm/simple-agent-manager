@@ -12,6 +12,9 @@
  * Time is injected: a fake clock moves the sweep forward five minutes per tick, so no
  * test keeps anything running for real (task brief: inject clocks/faults).
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import {
   guardedSessionSleep,
   type SessionSleepRuntimeGuard,
@@ -46,6 +49,14 @@ import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
 import { seedSnapshotGeneration, type SnapshotSeedMode } from '../helpers/session-snapshot-seed';
 import { createAllSchemaTables, createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 import { createRouteTestApp } from '../unit/routes/route-test-app';
+
+/** Shared with the vm-agent and the wake bootstrap: see the fixture's comment. */
+const TRANSCRIPT_ONLY_RESTORE_CONTRACT = JSON.parse(
+  readFileSync(
+    join(__dirname, '../../../../tests/fixtures/session-snapshot-restore-transcript-only-v1.json'),
+    'utf8'
+  )
+) as { controlPlaneRestoreResponse: Record<string, unknown> };
 
 const mocks = vi.hoisted(() => ({
   cleanupTaskRun: vi.fn(),
@@ -1001,6 +1012,30 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       // The next sleep's complete capture: its wake loads the agent session normally.
       completeGeneration('chat-a', 'ws-wake-a', 'gen-after-wake', 'complete');
       expect((await restoreResponse()).manifest).toMatchObject({ acpSessionId: 'acp-1' });
+    });
+
+    // Hop one of the transcript-only wake contract. The vm-agent answers this body with
+    // `transcript-replay` (session_snapshot_restore_contract_test.go) and the VM wake
+    // bootstrap starts the agent fresh on that (task-runner-transcript-only-wake.test.ts).
+    it('lets the wake claim a transcript-only fallback and answers the shared restore contract', async () => {
+      seedSession({ id: 'a', taskStatus: 'completed' });
+      capture = 'old-agent-rejected';
+      await spendFullBudget();
+      await sweepAt(tick(3));
+      expect(row()).toMatchObject({ sleep_status: 'sleeping', degradation: 'transcript-only' });
+
+      await expect(
+        claimSessionSnapshotRecovery(drizzle(env.DATABASE, { schema }), env, {
+          chatSessionId: 'chat-a',
+          userId: 'user-1',
+          taskId: 'wake-task',
+          now: tick(4),
+        })
+      ).resolves.toMatchObject({ status: 'claimed' });
+
+      expect(await restoreResponse()).toEqual(
+        TRANSCRIPT_ONLY_RESTORE_CONTRACT.controlPlaneRestoreResponse
+      );
     });
 
     it('still resumes the agent session after an ordinary sleep', async () => {

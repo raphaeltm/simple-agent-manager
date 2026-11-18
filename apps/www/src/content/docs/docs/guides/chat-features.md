@@ -641,7 +641,19 @@ Agent responses can be played back as audio. SAM uses Deepgram Aura 2 (via Worke
 | `TTS_MAX_TEXT_LENGTH` | `100000`                 | Max characters per synthesis |
 | `TTS_TIMEOUT_MS`      | `60000`                  | Synthesis timeout            |
 
-Voice input and server read-aloud need the Workers AI binding. An installation without it, or
+Voice input and server read-aloud need the Workers AI binding. On a runtime without it, a
+self-host build whose entry installs the speech backend (`installSpeechEndpoints()` in
+`apps/api/src/selfhost/speech/`) can send them to OpenAI-compatible speech endpoints its admin
+configures; the Cloudflare Worker never installs it. Endpoint synthesis needs a base URL, model
+and voice. Chunked endpoint read-aloud requires `TTS_ENCODING=mp3`; single-chunk output
+can use other supported encodings; raw PCM is refused. `speech.synthesis.maxAudioBytes` caps the combined audio across all chunks of a request
+(8 MiB by default); declared formats that differ from the requested encoding are refused before caching. Endpoint retries regenerate partial audio so changed model
+or voice settings cannot mix chunks. `speech.transcription.maxResponseBytes` caps transcription
+JSON responses before parsing (1 MiB by default). Endpoint synthesis admission uses an atomic
+per-user database counter, bounded by `speech.synthesis.maxRequestsPerHour` even for concurrent
+requests; unavailable counters refuse synthesis before calling the endpoint. Follow the
+[single-box speech setup walkthrough](/docs/guides/self-hosting/#speech-endpoints-on-a-single-box-build)
+for endpoint configuration. An installation with neither, or
 with `TTS_ENABLED` set to `false`, reports that through
 [`GET /api/config/platform-capabilities`](/docs/reference/api/), and the app hides the microphone
 (and, for TTS, plays read-aloud through the browser's own speech synthesis) instead of showing a
