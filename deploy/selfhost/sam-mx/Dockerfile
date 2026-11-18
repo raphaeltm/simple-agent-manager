@@ -1,6 +1,6 @@
 # sam-mx: the inbound SMTP receiver for agent email (compose profile `mail-in`). Both images are
 # pinned by digest; Go modules are pinned by go.sum.
-FROM golang:1.26.11-alpine@sha256:ae52b5bc6ed045a9ed26ab03dc19327a802a9cc9aa8b27ed57f5c6b60579b0bb AS build
+FROM golang:1.27.3-alpine@sha256:fa3d596898d9f126af7c01d14ee7597bab3f39cccf392ef36b69fe77cd681f18 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
