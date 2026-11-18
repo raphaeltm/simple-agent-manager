@@ -18,6 +18,7 @@ import { authorizeProjectOperation } from './authorization';
 import { OperationError } from './errors';
 import { answerErrorItem, archiveErrorItem } from './inbox-error-core';
 import { INBOX_NOT_FOUND, resolveInboxItem } from './inbox-item-core';
+import { TERMINAL_TASK_STATUSES } from './inbox-rows';
 import { getInboxLimits } from './inbox-settings';
 import { archiveTask, completeTask } from './inbox-task-core';
 import type { InboxAskNoticeOutcome, InboxAskNoticeRow } from './ports';
@@ -115,6 +116,29 @@ export async function notifyClosedAsk(
   return true;
 }
 
+/** Not `conflict`: clients read a 409 as "answered elsewhere" and would hide this message. */
+function finishedAgentReply(): OperationError {
+  return new OperationError(
+    'invalid_input',
+    'The agent that filed this has finished, so it would not see a reply. Continue in its chat.'
+  );
+}
+
+/** Whether the task that filed an ask has reached a terminal status. */
+async function sourceTaskFinished(
+  ctx: OperationContext,
+  projectId: string,
+  askId: string
+): Promise<boolean> {
+  const row = await ctx.env.DATABASE.prepare(
+    `SELECT t.status FROM asks a JOIN tasks t ON t.id = a.source_task_id AND t.project_id = a.project_id
+      WHERE a.id = ? AND a.project_id = ?`
+  )
+    .bind(askId, projectId)
+    .first<{ status: string }>();
+  return Boolean(row && (TERMINAL_TASK_STATUSES as readonly string[]).includes(row.status));
+}
+
 /** Compare-and-set an open ask to a closed status. Returns false when someone else won. */
 async function closeAsk(
   ctx: OperationContext,
@@ -122,8 +146,12 @@ async function closeAsk(
   askId: string,
   status: 'answered' | 'done' | 'archived',
   answerJson: string | null,
-  /** `silent`: no agent notice will be sent, so record it as settled in the same write. */
-  options: { silent: boolean } = { silent: false }
+  options: {
+    /** No agent notice will be sent, so record it as settled in the same write. */
+    silent?: boolean;
+    /** Close only while the filing task is live, so a reply cannot land after it finished. */
+    requireLiveTask?: boolean;
+  } = {}
 ): Promise<boolean> {
   const now = Date.now();
   const me = ctx.actor.userId;
@@ -134,7 +162,10 @@ async function closeAsk(
       WHERE id = ? AND project_id = ? AND status = 'open'
         AND (expires_at IS NULL OR expires_at > ?)
         AND ((assignee_kind = 'user' AND assignee_user_id = ?)
-          OR (assignee_kind = 'team' AND (claimed_by_user_id IS NULL OR claimed_by_user_id = ?)))`
+          OR (assignee_kind = 'team' AND (claimed_by_user_id IS NULL OR claimed_by_user_id = ?)))
+        AND (? = 0 OR source_task_id IS NULL OR NOT EXISTS (
+          SELECT 1 FROM tasks t WHERE t.id = asks.source_task_id AND t.project_id = asks.project_id
+            AND t.status IN (${TERMINAL_TASK_STATUSES.map((value) => `'${value}'`).join(', ')})))`
   )
     .bind(
       status,
@@ -148,7 +179,8 @@ async function closeAsk(
       projectId,
       now,
       me,
-      me
+      me,
+      options.requireLiveTask ? 1 : 0
     )
     .run();
   return (result.meta?.changes ?? 0) === 1;
@@ -195,14 +227,11 @@ async function answerAsk(
   if (spec.type === 'text' && !answer)
     throw new OperationError('invalid_input', 'answer is required');
   const status = 'answered';
-  if ((item.kind === 'result' || item.kind === 'review') && answer && item.agentState === 'finished')
-    // A reply reaches the agent only while its task is live (`sourceTaskGuardForClaim`,
-    // `inbox_ask`); after that it would be stored and silently never delivered.
-    // Not `conflict`: clients read a 409 as "answered elsewhere" and would hide this message.
-    throw new OperationError(
-      'invalid_input',
-      'The agent that filed this has finished, so it would not see a reply. Continue in its chat.'
-    );
+  // A reply reaches the agent only while its task is live (`sourceTaskGuardForClaim`,
+  // `inbox_ask`); after that it would be stored and silently never delivered. Checked here for
+  // the message, and again in the closing write in case the task finishes in between.
+  const replyNeedsLiveTask = (item.kind === 'result' || item.kind === 'review') && Boolean(answer);
+  if (replyNeedsLiveTask && item.agentState === 'finished') throw finishedAgentReply();
   if (item.kind === 'result' && !answer) {
     // "Got it": the person read the result and needs nothing more, so the agent is not woken.
     // `notified_at` is set in the closing write, so the ask-notice sweep never sends one later.
@@ -214,8 +243,14 @@ async function answerAsk(
   if (item.sessionId)
     await ctx.ports.inbox.authorizeAnswerWake(item.projectId, item.sessionId, ctx.actor.userId);
   const answerJson = answer ? JSON.stringify({ text: answer }) : null;
-  if (!(await closeAsk(ctx, item.projectId, askId, status, answerJson)))
+  const closed = await closeAsk(ctx, item.projectId, askId, status, answerJson, {
+    requireLiveTask: replyNeedsLiveTask,
+  });
+  if (!closed) {
+    if (replyNeedsLiveTask && (await sourceTaskFinished(ctx, item.projectId, askId)))
+      throw finishedAgentReply();
     throw new OperationError('conflict', 'This inbox item was already answered or closed');
+  }
   const row = await loadAskNoticeRow(ctx, item.projectId, askId);
   const agentNotified = row ? await notifyClosedAsk(ctx, row, status) : false;
   return { ref: item.ref, outcome: status, agentNotified };

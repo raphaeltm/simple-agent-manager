@@ -695,7 +695,11 @@ describe('inbox_write result', () => {
     const filed = await file();
     sqlite.prepare(`UPDATE tasks SET status = 'completed' WHERE id = 'task-1'`).run();
     await rejects(
-      answerInboxItem(webCtx('owner'), { projectId: P1, ref: filed.ref, answer: 'And production?' }),
+      answerInboxItem(webCtx('owner'), {
+        projectId: P1,
+        ref: filed.ref,
+        answer: 'And production?',
+      }),
       'invalid_input',
       /has finished.*Continue in its chat/
     );
@@ -704,6 +708,28 @@ describe('inbox_write result', () => {
     // "Got it" still closes it.
     const answered = await answerInboxItem(webCtx('owner'), { projectId: P1, ref: filed.ref });
     expect(answered).toMatchObject({ outcome: 'answered', agentNotified: false });
+  });
+
+  it('a reply is refused when the task finishes between the check and the closing write', async () => {
+    const filed = await file();
+    // The wake check runs after the item (agent still working) was read and before the closing
+    // write: finish the task there, as a complete_task landing at that moment would.
+    edges.authorizeAgentWake.mockImplementation(async () => {
+      sqlite.prepare(`UPDATE tasks SET status = 'completed' WHERE id = 'task-1'`).run();
+      return { writer: { ownerUserId: 'owner', role: 'owner' }, wake: { allowed: true } };
+    });
+    await rejects(
+      answerInboxItem(webCtx('owner'), {
+        projectId: P1,
+        ref: filed.ref,
+        answer: 'And production?',
+      }),
+      'invalid_input',
+      /has finished/
+    );
+    expect(edges.authorizeAgentWake).toHaveBeenCalledTimes(1);
+    expect(askRow(filed.id)).toMatchObject({ status: 'open', answer_json: null });
+    expect(edges.acceptPromptDelivery).not.toHaveBeenCalled();
   });
 
   it('a review answered "Looks good" still wakes the agent (control)', async () => {
