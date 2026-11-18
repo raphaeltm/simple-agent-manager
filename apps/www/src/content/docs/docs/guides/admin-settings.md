@@ -350,6 +350,17 @@ setups, Accounts and People tabs (`packages/operations/src/insights-page-setting
 | `insights.peopleWaitingItemsListed`      | 10      | 1–50       | Open items listed per person under "Waiting on" (each person still shows how many are open)                                                       |
 | `insights.peopleReviewScanCap`           | 2,000   | 100–20,000 | Review requests in the range, newest first, examined for "Review pickup"; the page says when the cap cut it short                                 |
 
+## Insights for agents
+
+Listed under **Operations**. The per-chat rate limit of the sam-mcp `project_insights` tool
+(`packages/operations/src/insights-agent-settings.ts`, enforced by
+`apps/api/src/routes/mcp/project-insights-tool.ts` on the `McpRateCounter` Durable Object).
+
+| Setting                            | Default | Range     | What it limits                                                         |
+| ---------------------------------- | ------- | --------- | ---------------------------------------------------------------------- |
+| `insights.agentToolCallsPerWindow` | 30      | 1–1,000   | Calls one agent chat may make to `project_insights` per window         |
+| `insights.agentToolWindowSeconds`  | 600     | 10–86,400 | Length of that window in seconds; later calls wait for the next window |
+
 ## Node provisioning
 
 This **Operations** setting bounds one durable node-provisioning attempt
