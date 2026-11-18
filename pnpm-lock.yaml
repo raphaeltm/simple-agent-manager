@@ -331,8 +331,8 @@ importers:
         specifier: 'catalog:'
         version: 1.5.0(typescript@5.9.3)
       workers-ai-provider:
-        specifier: 4.0.0
-        version: 4.0.0(@ai-sdk/provider@4.0.34)(ai@7.0.137(zod@4.5.4))
+        specifier: 4.0.1
+        version: 4.0.1(@ai-sdk/provider@4.0.34)(ai@7.0.137(zod@4.5.4))
       yaml:
         specifier: 'catalog:'
         version: 2.9.0
@@ -9950,8 +9950,8 @@ packages:
     engines: {node: '>=16'}
     hasBin: true
 
-  workers-ai-provider@4.0.0:
-    resolution: {integrity: sha512-FkhwMP1EP/MKXR8Jv1o7wLVKfTqu0h/PUaEmhZ7gyDiioib5Wsh3oPAKhG+7+SWfU3roTDHaEWlJpkJjpXu+fQ==}
+  workers-ai-provider@4.0.1:
+    resolution: {integrity: sha512-PDznmd1A6g058FGWDjQ6Io1LlV51gGQ7pze7y/rnsdxLnNgjqQf8zRHoKjJv3RPoU5cU4QT4TX7lZ2kxX2x73g==}
     deprecated: |-
       Deprecated. Use createAI from agents/models/ai-sdk, or
        ai-search-provider for AI Search: https://developers.cloudflare.com/agents/models/ai-sdk/
@@ -19870,7 +19870,7 @@ snapshots:
       '@cloudflare/workerd-linux-arm64': 1.20261006.1
       '@cloudflare/workerd-windows-64': 1.20261006.1
 
-  workers-ai-provider@4.0.0(@ai-sdk/provider@4.0.34)(ai@7.0.137(zod@4.5.4)):
+  workers-ai-provider@4.0.1(@ai-sdk/provider@4.0.34)(ai@7.0.137(zod@4.5.4)):
     dependencies:
       '@ai-sdk/provider': 4.0.34
       ai: 7.0.137(zod@4.5.4)
