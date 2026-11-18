@@ -58,7 +58,8 @@ export async function announceAgentAsk(
       projectId: input.projectId,
       projectName,
       taskId: input.taskId,
-      taskTitle: task?.title ?? input.title,
+      // A result's push leads with its outcome, not the task's name.
+      taskTitle: input.kind === 'result' ? input.title : (task?.title ?? input.title),
       context: input.body,
       category,
       options: input.options.length > 0 ? input.options : null,

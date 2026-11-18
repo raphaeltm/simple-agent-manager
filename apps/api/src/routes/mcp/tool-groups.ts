@@ -114,7 +114,7 @@ export const MCP_TOOL_GROUPS: readonly McpToolGroup[] = [
     destructive: true,
     requiresTask: true,
     summary:
-      'File what you need from a person in their inbox; they read the inbox, not chats. One ask per item. You are woken in this chat when they answer.',
+      'File what you need from a person in their inbox; they read the inbox, not chats. One ask per item. You are woken in this chat when they answer or reply.',
     methods: {
       ask: {
         tool: 'inbox_ask',

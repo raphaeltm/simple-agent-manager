@@ -62,24 +62,40 @@ He chose "Add a Result item" (inbox ask `ask:01M7NSVYAW1PS6GFJQFC2W9TN0`) over r
 
 ## Implementation checklist
 
-- [ ] shared: add `result` to `ASK_KINDS` and `INBOX_ITEM_KINDS`; retired notification types constant
-- [ ] operations: `AgentResultInputSchema`, `fileAgentResult`, kind unions, `AGENT_KINDS_SQL`
-- [ ] operations: `answerAsk` — result without text closes silently; with text authorizes wake and notifies
-- [ ] api: notice prompt for a result reply; announcement title "Result ready"
-- [ ] api: MCP tool `inbox_result`, group method `result`, handler, handler table
-- [ ] api: rewrite `INBOX_TURN_END_INSTRUCTION`; fix the conversation-mode line
-- [ ] api: remove `notifySessionEnded` and its call; hide the settings toggle
-- [ ] web: `KIND_META.result`, pinned controls, "Got it"/Reply controls, one-tap, chat card labels
-- [ ] tests: capability test (real `/mcp` + inbox routes + DO) for filing, Got it (no delivery, sweep stays quiet), reply (one delivery)
-- [ ] tests: unit tests for prompt, instructions, web controls; update session_ended tests
-- [ ] docs: `guides/inbox.md`, `guides/agents.md`, `guides/notifications.md`, `concepts.mdx`, recent product changes
-- [ ] Playwright visual audit of the Result item (375px, 1280px)
+- [x] shared: add `result` to `ASK_KINDS` and `INBOX_ITEM_KINDS`; retired notification types constant
+- [x] operations: `AgentResultInput`, `fileAgentResult`, kind unions, `AGENT_KINDS_SQL`
+- [x] operations: `answerAsk` — result without text closes silently; with text authorizes wake and notifies
+- [x] api: notice prompt for a result reply; announcement title "Result ready"
+- [x] api: MCP tool `inbox_result`, group method `result`, handler, handler table
+- [x] api: rewrite `INBOX_TURN_END_INSTRUCTION`; fix the conversation-mode line; update the
+      `inbox_write` entry of the agent onboarding text (`onboarding-tools.ts`, validator finding)
+- [x] api: remove `notifySessionEnded` and its call; hide the settings toggle
+- [x] web: `KIND_META.result`, pinned controls, "Got it"/Reply controls, one-tap, chat card labels
+- [x] tests: capability test (real `/mcp` + inbox routes + DO) for filing, Got it (no delivery, sweep stays quiet), reply (one delivery)
+- [x] tests: unit tests for prompt, instructions, web controls; update session_ended tests
+- [x] docs: `guides/inbox.md`, `guides/agents.md`, `guides/notifications.md`, `concepts.mdx`, recent product changes
+- [x] Playwright visual audit of the Result item (375px, 1280px)
 
 ## Acceptance criteria
 
-- [ ] An agent can file a result through `inbox_write` method `result`; it appears in Needs you with kind Result.
-- [ ] "Got it" closes it, the agent is not woken, and the notice sweep never wakes it later.
-- [ ] A reply closes it and the agent receives the reply exactly once.
-- [ ] `get_instructions` tells task and conversation sessions that only the inbox reaches the person, to file results, to skip routine/agent-dispatched work, and to write plainly.
-- [ ] No `session_ended` notification is emitted; its settings toggle is gone.
+- [x] An agent can file a result through `inbox_write` method `result`; it appears in Needs you with kind Result.
+- [x] "Got it" closes it, the agent is not woken, and the notice sweep never wakes it later.
+- [x] A reply closes it and the agent receives the reply exactly once.
+- [x] `get_instructions` tells task and conversation sessions that only the inbox reaches the person, to file results, to skip routine/agent-dispatched work, and to write plainly.
+- [x] No `session_ended` notification is emitted; its settings toggle is gone.
 - [ ] Verified on staging end to end.
+
+## Implementation notes
+
+- Evidence: `apps/api/tests/workers/inbox-agent-tools-capability.test.ts` ("result:" and the
+  get_instructions case), `apps/api/tests/unit/services/inbox/agent-asks.test.ts` ("inbox_write
+  result"), web unit tests (inbox-page, inbox-item-card, inbox-quick-view-and-nav,
+  settings-notifications), Playwright `inbox-audit.spec.ts` and
+  `project-chat-inbox-item-card-audit.spec.ts` (39 passed, screenshots reviewed).
+- Discrimination: removing the `kind === 'result' && !answer` branch turned exactly the
+  "Got it" test red; removing `{ silent: true }` turned the same test red at `notified_at`.
+- `main` is branch-protected, so the task file lives on the feature branch, not `main`.
+- Archiving a result: left unchanged here on purpose. Open PR #2862 (Raphaël's 2026-11-17
+  decision) makes archive close every question/review ask without telling the agent; its archive
+  path is generic over agent ask kinds, so results archive silently once it lands. Until then an
+  archived result tells the agent "the person will not act", which is harmless.

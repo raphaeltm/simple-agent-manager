@@ -9,7 +9,6 @@ import {
 } from '@simple-agent-manager/shared';
 import {
   CircleAlert,
-  CircleCheckBig,
   Eye,
   FileText,
   GitPullRequest,
@@ -21,6 +20,7 @@ import {
   type LucideIcon,
   MessageCircleQuestion,
   MessageSquare,
+  MessageSquareText,
   Scale,
   ShieldCheck,
   ShieldQuestion,
@@ -72,7 +72,7 @@ export const KIND_META: Record<InboxItemKind, { label: string; icon: LucideIcon 
   secret: { label: 'Secret', icon: KeyRound },
   approval: { label: 'Approval', icon: ShieldCheck },
   review: { label: 'Review', icon: Eye },
-  result: { label: 'Result', icon: CircleCheckBig },
+  result: { label: 'Result', icon: MessageSquareText },
   task: { label: 'Task', icon: ListChecks },
   error: { label: 'Problem', icon: CircleAlert },
 };
@@ -195,6 +195,15 @@ export function hasPinnedControls(item: InboxItem): boolean {
 /** Reviews and results are answered from the inbox: "Looks good" / "Got it", or a reply. */
 export function isAcknowledgeable(item: InboxItem): boolean {
   return item.kind === 'review' || item.kind === 'result';
+}
+
+/**
+ * Whether a reply can still reach the agent. A reply is delivered only while the filing task is
+ * live (`sourceTaskGuardForClaim`, `inbox_ask`); once it has finished the server refuses a reply
+ * (`answerAsk`), so the person continues in the chat instead.
+ */
+export function canReplyToAgent(item: InboxItem): boolean {
+  return item.agentState !== 'finished';
 }
 
 /** The one-tap acknowledgement for a review or a result. */

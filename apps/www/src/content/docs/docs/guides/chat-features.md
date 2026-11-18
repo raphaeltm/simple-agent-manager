@@ -195,9 +195,9 @@ An agent can also file an item in your [Inbox](/docs/guides/inbox/#what-agents-f
 in a **Task** too. The item appears as a card in the conversation as well, marked with where it
 stands: **Agent paused on this** for a question the agent is stopped on (every
 `request_human_input` question), **Needs your answer** for one it keeps working through, or
-**Waiting for your review** for a review, or **Waiting for you** for a result (the answer or
+**Waiting for your review** for a review, or **New result** for a result (the answer or
 finished work you asked for). Once it is settled the card reads **Answered**, **Reviewed**,
-**Seen**, **Archived**, **Withdrawn by the agent** or **Expired**. Answer it on the card or in your Inbox: it is the same
+**Done**, **Archived**, **Withdrawn by the agent** or **Expired**. Answer it on the card or in your Inbox: it is the same
 record wherever you answer it.
 
 ### Links to open

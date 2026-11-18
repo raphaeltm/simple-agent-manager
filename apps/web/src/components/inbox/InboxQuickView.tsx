@@ -1,11 +1,16 @@
-import type { InboxItem } from '@simple-agent-manager/shared';
+import type { InboxActionResponse, InboxItem } from '@simple-agent-manager/shared';
 import { Button, IconButton, paneClassName, Spinner } from '@simple-agent-manager/ui';
 import { ArrowRight, Check, X } from 'lucide-react';
 import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useMinuteClock } from '../../hooks/useMinuteClock';
 import type { answerInboxItem } from '../../lib/api';
-import { deliveryNote, useInboxPermissionDetail, useInboxSend } from './inbox-actions';
+import {
+  acknowledgeReceipt,
+  deliveryNote,
+  useInboxPermissionDetail,
+  useInboxSend,
+} from './inbox-actions';
 import { acknowledgeLabel, buildRows, isAcknowledgeable } from './inbox-model';
 import { InboxPushInvite } from './InboxPushInvite';
 import { InboxEmptyState, InboxRow } from './InboxRow';
@@ -18,7 +23,13 @@ const ONE_TAP_OPTION_MAX_CHARS = 24;
 /** And only for this many options or fewer. */
 const ONE_TAP_MAX_OPTIONS = 3;
 
-type OneTap = { label: string; body: Parameters<typeof answerInboxItem>[2]; primary?: boolean };
+type OneTap = {
+  label: string;
+  body: Parameters<typeof answerInboxItem>[2];
+  primary?: boolean;
+  /** Receipt text; defaults to `Sent “<label>”` plus the delivery note. */
+  receipt?: (response: InboxActionResponse) => string;
+};
 
 /** Option, review and result answers that are safe in one tap; permissions are handled separately. */
 function staticOneTaps(item: InboxItem): OneTap[] {
@@ -33,7 +44,14 @@ function staticOneTaps(item: InboxItem): OneTap[] {
     return spec.options.map((option) => ({ label: option, body: { answer: option } }));
   }
   if (spec.type === 'acknowledge' && isAcknowledgeable(item)) {
-    return [{ label: acknowledgeLabel(item), body: {}, primary: true }];
+    return [
+      {
+        label: acknowledgeLabel(item),
+        body: {},
+        primary: true,
+        receipt: (r) => acknowledgeReceipt(item, r),
+      },
+    ];
   }
   return [];
 }
@@ -78,7 +96,7 @@ function OneTapButtons({ item, taps }: { item: InboxItem; taps: OneTap[] }) {
               void send(
                 choice.label,
                 choice.body,
-                (r) => `Sent “${choice.label}”${deliveryNote(r)}`
+                choice.receipt ?? ((r) => `Sent “${choice.label}”${deliveryNote(r)}`)
               )
             }
             className="min-h-11 max-w-full !whitespace-normal break-words"

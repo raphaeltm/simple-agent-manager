@@ -217,6 +217,8 @@ test.describe('Inbox — Desktop', () => {
     expect(box!.x + box!.width).toBeLessThanOrEqual(1280);
     expect(box!.y + box!.height).toBeLessThanOrEqual(800);
     await screenshot(page, 'inbox-desktop-quick-view');
+    await dialog.getByRole('button', { name: 'Got it' }).scrollIntoViewIfNeeded();
+    await screenshot(page, 'inbox-desktop-quick-view-result');
   });
 
   test('nav items show counts', async ({ page }) => {

@@ -142,7 +142,7 @@ describe('InboxItemCard', () => {
     expect(await screen.findByText(/Looks good/)).toBeTruthy();
   });
 
-  it('shows a filed result with "Got it" and settles to "Seen"', async () => {
+  it('shows a filed result with "Got it" and settles to "Done"', async () => {
     current = inboxItem({
       kind: 'result',
       title: 'The flaky login test is fixed',
@@ -151,7 +151,7 @@ describe('InboxItemCard', () => {
     renderCard(toolCall(FILED));
     expect(await screen.findByText('The flaky login test is fixed')).toBeTruthy();
     expect(screen.getByText('Result for you')).toBeTruthy();
-    expect(screen.getByText('Waiting for you')).toBeTruthy();
+    expect(screen.getByText('New result')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Looks good' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Got it' }));
     await waitFor(() =>
@@ -160,7 +160,9 @@ describe('InboxItemCard', () => {
       )
     );
     expect(calls.find((call) => call.method === 'POST')!.body).toEqual({});
-    expect(await screen.findByText('Seen')).toBeTruthy();
+    expect(await screen.findByText('Done')).toBeTruthy();
+    // "Got it" wakes no one, so the receipt must not promise the agent will be told.
+    expect(screen.getByText(/Got it · the agent won’t be woken/)).toBeTruthy();
   });
 
   it('shows a blocking question with its options and the answered state once settled', async () => {

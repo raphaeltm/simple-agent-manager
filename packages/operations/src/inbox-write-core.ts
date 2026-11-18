@@ -195,6 +195,13 @@ async function answerAsk(
   if (spec.type === 'text' && !answer)
     throw new OperationError('invalid_input', 'answer is required');
   const status = 'answered';
+  if ((item.kind === 'result' || item.kind === 'review') && answer && item.agentState === 'finished')
+    // A reply reaches the agent only while its task is live (`sourceTaskGuardForClaim`,
+    // `inbox_ask`); after that it would be stored and silently never delivered.
+    throw new OperationError(
+      'conflict',
+      'The agent that filed this has finished, so it would not see a reply. Continue in its chat.'
+    );
   if (item.kind === 'result' && !answer) {
     // "Got it": the person read the result and needs nothing more, so the agent is not woken.
     // `notified_at` is set in the closing write, so the ask-notice sweep never sends one later.

@@ -52,7 +52,7 @@ const CARD_COPY: Record<
   { heading: string; open: string | null; closed: string }
 > = {
   review: { heading: 'Review requested', open: 'Waiting for your review', closed: 'Reviewed' },
-  result: { heading: 'Result for you', open: 'Waiting for you', closed: 'Seen' },
+  result: { heading: 'Result for you', open: 'New result', closed: 'Done' },
   // A question's open label depends on whether the agent is paused on it.
   question: { heading: 'Question for you', open: null, closed: 'Answered' },
 };

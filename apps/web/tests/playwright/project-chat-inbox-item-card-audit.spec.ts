@@ -53,7 +53,8 @@ const ITEMS: Record<string, InboxItem> = {
   'ask:result': inboxItem({
     ref: 'ask:result',
     kind: 'result',
-    agentState: 'finished',
+    // A conversation still running, so Reply is offered (the inbox audit covers a finished one).
+    agentState: 'working',
     title: 'The flaky login test is fixed: it was racing the session cookie on slow CI runners',
     links: [
       { kind: 'pr', id: 'https://github.com/user/sam/pull/2793', label: 'Login test fix PR #2793' },
@@ -190,13 +191,15 @@ async function auditResult(page: Page, name: string) {
   const card = page.getByTestId('inbox-item-card');
   await expect(card).toHaveCount(1);
   await expect(card.getByText('Result for you')).toBeVisible();
-  await expect(card.getByText('Waiting for you')).toBeVisible();
+  await expect(card.getByText('New result')).toBeVisible();
   await expect(card.getByRole('button', { name: 'Looks good' })).toHaveCount(0);
+  // Show the card's heading and badge, not only its buttons, in the evidence.
+  await card.getByText('Result for you').scrollIntoViewIfNeeded();
   await screenshot(page, `${name}-result-open`);
   await assertNoOverflow(page);
   await card.getByRole('button', { name: 'Got it' }).click();
-  await expect(card.getByText(/Marked “Got it”/)).toBeVisible();
-  await expect(card.getByText('Seen')).toBeVisible();
+  await expect(card.getByText(/Got it · the agent won’t be woken/)).toBeVisible();
+  await expect(card.getByText('Done', { exact: true })).toBeVisible();
   await screenshot(page, `${name}-result-answered`);
   await assertNoOverflow(page);
 }

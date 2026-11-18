@@ -39,7 +39,8 @@ The order is: items with a live deadline first, then the ones an agent is stoppe
 then the rest, oldest first.
 
 The chips filter the list: **Needs you** (everything you can act on), **Blocking** (agents stopped
-on you), **Tasks**, **Reviews**, and **Updates**. **Updates** holds the notifications that are not
+on you), **Tasks**, **Reviews**, and **Updates**. Results have no chip of their own: they are
+under **Needs you**. **Updates** holds the notifications that are not
 asks: finished tasks, pull requests, mentions, comments, shared chats and failures. Selecting one
 marks it read and opens it. **Archived**, in the **⋯** menu, lists what you archived.
 

@@ -543,7 +543,7 @@ The list returns `{ pending, settled, cursor }` and needs `task:read` on the pro
 Everything agents are waiting on from you, one item per ask, across projects
 (`apps/api/src/routes/inbox.ts`, operations in `packages/operations/src/inbox-*.ts`). The list reads
 each ask where it is stored: inbox asks (questions agents ask with `request_human_input`, and the
-reviews and tasks they file), permission requests from the chat index (`session_summaries`),
+reviews, results and tasks they file), permission requests from the chat index (`session_summaries`),
 [secret requests](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret) and Operations
 approvals. Nothing is copied.
 

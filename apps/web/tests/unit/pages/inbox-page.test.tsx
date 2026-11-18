@@ -350,6 +350,24 @@ describe('InboxPage — answering', () => {
     expect(answerCalls(server)[0]?.body).toEqual({});
   });
 
+  it('a result from a finished agent offers Open chat instead of Reply', async () => {
+    server.items = [
+      item({
+        ref: 'ask:res',
+        kind: 'result',
+        blocking: false,
+        agentState: 'finished',
+        answerSpec: { type: 'acknowledge' },
+      }),
+    ];
+    installFetch(server);
+    renderInbox();
+    // Liveness: the result's controls rendered.
+    expect(await screen.findByRole('button', { name: 'Got it' })).toBeTruthy();
+    expect(screen.getAllByRole('link', { name: 'Open chat' }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Reply' })).toBeNull();
+  });
+
   it('replies to a result', async () => {
     server.items = [
       item({

@@ -641,7 +641,8 @@ describe('inbox_write result', () => {
       'owner',
       expect.objectContaining({
         type: 'needs_input',
-        title: expect.stringMatching(/^Result ready: /),
+        // Leads with the outcome, not the task's name.
+        title: 'Result ready: Hetzner is the cheapest option for the staging nodes',
         body: expect.stringMatching(/^Same machines cost about a third/),
       })
     );
@@ -687,6 +688,21 @@ describe('inbox_write result', () => {
     // Already notified: the sweep does not send it again.
     await runInboxAskSweep(env, Date.now() + 10 * 60_000);
     expect(edges.acceptPromptDelivery).toHaveBeenCalledTimes(1);
+  });
+
+  it('a reply after the filing task finished is refused, the item stays open, nothing is lost', async () => {
+    const filed = await file();
+    sqlite.prepare(`UPDATE tasks SET status = 'completed' WHERE id = 'task-1'`).run();
+    await rejects(
+      answerInboxItem(webCtx('owner'), { projectId: P1, ref: filed.ref, answer: 'And production?' }),
+      'conflict',
+      /has finished.*Continue in its chat/
+    );
+    expect(askRow(filed.id)).toMatchObject({ status: 'open', answer_json: null });
+    expect(edges.acceptPromptDelivery).not.toHaveBeenCalled();
+    // "Got it" still closes it.
+    const answered = await answerInboxItem(webCtx('owner'), { projectId: P1, ref: filed.ref });
+    expect(answered).toMatchObject({ outcome: 'answered', agentNotified: false });
   });
 
   it('a review answered "Looks good" still wakes the agent (control)', async () => {

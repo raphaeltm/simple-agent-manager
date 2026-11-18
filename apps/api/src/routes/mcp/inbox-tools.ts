@@ -156,7 +156,7 @@ function filed(result: AgentFileResult) {
     : result.blocking
       ? 'Filed in the person’s inbox. End your turn if you cannot continue: you will be woken in this chat when they answer.'
       : result.kind === 'result'
-        ? 'Filed in the person’s inbox. If they reply you will be woken in this chat with the reply; "Got it" does not wake you.'
+        ? 'Filed in the person’s inbox. If they reply while your task is still running, you will be woken in this chat with the reply; "Got it" does not wake you.'
         : 'Filed in the person’s inbox. Keep working: you will be told in this chat when they answer.';
   const duplicateHint =
     result.similar.length > 0
