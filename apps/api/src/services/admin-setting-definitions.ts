@@ -4,10 +4,12 @@ import type {
   InsightsInstallationSettingName,
   InsightsPageSettingName,
   InsightsReceiptSettingName,
+  ProjectBriefSettingName,
 } from '@simple-agent-manager/operations';
 
 import type { Env } from '../env';
 import { type GcpCatalogSettingName } from './admin-settings-gcp-catalog-definitions';
+import { type InfomaniakSettingName } from './admin-settings-infomaniak-definitions';
 import { type InstructionBudgetSettingName } from './admin-settings-instructions-definitions';
 import type { NodeTunnelSettingName } from './admin-settings-node-tunnel-definitions';
 import { type OutboundSettingName } from './admin-settings-outbound-definitions';
@@ -37,7 +39,9 @@ export type AdminSettingName =
   | AiProxySettingName
   | DeploymentPublishJobSettingName
   | 'deployments.publishCallbackMaxBodyBytes'
+  | 'events.skipUnsubscribedGitHubCi'
   | 'chat.messageMergingEnabled'
+  | 'chat.toolCallMergingEnabled'
   | 'chat.messageMergeMaxRowBytes'
   | 'chat.messageMergeRecentIds'
   | `workflow.${keyof typeof WORKFLOW_DEFAULTS}`
@@ -50,11 +54,13 @@ export type AdminSettingName =
   | InsightsPageSettingName
   | InsightsInstallationSettingName
   | InsightsCloudflareCostSettingName
+  | ProjectBriefSettingName
   | RuntimeSecretRequestSettingName
   | AgentEmailSettingName
   | FleetOpsSettingName
   | NodeTunnelSettingName
   | GcpCatalogSettingName
+  | InfomaniakSettingName
   | InstructionBudgetSettingName
   | OperationsTelemetrySettingName
   | OutboundSettingName

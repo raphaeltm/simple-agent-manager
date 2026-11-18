@@ -60,7 +60,7 @@ but its root cause has not been established as this defect.
 
 Execution: SAM task `01M7MC07CGE5SRFY9JF58R09RB`, canonical idea
 `01M3D3P0A05ED6EKM1K2QGF1FH`, branch `sam/fix-composable-credential-pool-8r09rb`.
-**DRAFT PR ONLY: do not mark ready, merge, or deploy production. No GitHub issues.**
+**Original delivery was draft-only. That hold was released for PR #2853 on 2026-11-17; normal CI, review, staging and release gates apply. No GitHub issues.**
 Use the existing SAM-isolated workspace and keep task state on this branch.
 
 Preflight (2026-11-17): business-logic-change, cross-component-change,
@@ -172,3 +172,28 @@ No production deployment, readiness action, merge or GitHub issue creation occur
   Checks A/B/E passed, D not applicable, F passed locally; C warns only for the explicitly
   deferred live provider lifecycle. Security, Cloudflare, test, docs and constitution
   reviews pass within scope. Keep the active task and unchecked live criterion intact.
+
+## Authorized continuation (2026-11-18)
+
+Continuation task `01M7P016JSFBA9W3KJD6J9JTD3` resumes the original branch and PR,
+preserving every predecessor commit. Human release was reconciled directly against answered
+review `ask:01M7NBFXVS6DWHVAA2JXA2WY8B` and role=user message
+`inbox-ask:01M7NBFXVS6DWHVAA2JXA2WY8B` in session
+`chat_cron-b6c03fab39c6107918849d45b0d6619f679ff18639e628f605c04eae2048cd3a`
+at **2026-11-17T19:13:35.515Z**, answering the request to release the draft-only hold:
+“it looks good.” This releases this PR only; no validation gate is waived.
+The draft-only statements above describe the predecessor delivery, not a current hold.
+
+Fresh reconciliation read all 225 association records, 101 active agents, the exact URL/branch
+ownership filter, PR files, reviews, comments and all review threads. No competing owner or
+review findings were found; original head was `35826a9546302e8a1dcf4f890abe82c4983738c8`.
+The original terminal task's held association remains immutable historical evidence.
+`associate_pull_request` with its exact `previousTaskId` refused with MCP `-32602` because
+its SQL unconditionally rejects another held association, even for a terminal predecessor.
+The coordinator independently confirmed this metadata limitation; release authority comes
+from the verified human response and explicit continuation assignment. No SQL bypass,
+impersonation, guard changes or duplicate implementation is involved.
+
+Current main `4fc4cb99a` integrated through a normal merge without source/test conflicts.
+The exact-anchor production correction remains unchanged. Fresh combined-tree validation,
+independent reviews and real leased staging remain pending. Canonical idea stays open.

@@ -24,7 +24,7 @@ vi.mock('../../../src/services/trigger-template', () => ({
   buildCronContext: vi.fn().mockReturnValue({}),
 }));
 
-vi.mock('../../../src/services/cron-utils', () => ({
+vi.mock('@simple-agent-manager/cron', () => ({
   cronToNextFire: vi.fn().mockReturnValue('2026-04-10T09:00:00.000Z'),
 }));
 

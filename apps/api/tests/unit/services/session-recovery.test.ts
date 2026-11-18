@@ -1,3 +1,4 @@
+import { newProviderLimitWait } from '@simple-agent-manager/scheduler-core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
@@ -851,6 +852,73 @@ describe('session recovery consumes the canonical persisted resource plan', () =
         classifySessionRecoveryRefusal(result.reason).action === 'retry'
     ).toBe(true);
     expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+  });
+
+  describe('a task held by a provider usage limit (idea 01M7MMRHF3VZRKREC2XBMSC7HF)', () => {
+    function waitJson(phase: 'waiting' | 'blocked' | 'released') {
+      const now = Date.now();
+      return JSON.stringify({
+        ...newProviderLimitWait({
+          taskId: 'source-task-1',
+          origin: 'callback',
+          incidentId: 'incident-1',
+          credentialKey: 'sha256:credential',
+          previous: null,
+          now,
+          resetsAt: now + 3 * 24 * 60 * 60_000,
+          jitter: 0,
+        }),
+        phase,
+      });
+    }
+
+    function queueHeldWake(phase: 'waiting' | 'blocked' | 'released', status = 'sleeping') {
+      queueWake({
+        requestedVmSize: 'small',
+        requestedVmSizeSource: 'task',
+        outputBranch: 'sam/original',
+        credentialAttributionUserId: 'user-1',
+        credentialAttributionProjectId: null,
+        credentialAttributionSource: 'user',
+        chatSessionId: 'chat-1',
+        workspaceId: 'workspace-sleeping',
+        status,
+        providerLimitWaitJson: waitJson(phase),
+      });
+      selectQueue.push(
+        queuedSourceTask('Original run', 'workspace-sleeping'),
+        queuedSourceTask('Original run', null)
+      );
+    }
+
+    it('a blocked hold refuses before the claim, so repeated deliveries cannot spend the wake budget', async () => {
+      queueHeldWake('blocked');
+
+      const result = await wake();
+
+      expect(result).toEqual({ status: 'unavailable', reason: 'provider_limit_blocked' });
+      // Retry-class: delivery keeps the message (parked) and reports no failed wake.
+      expect(classifySessionRecoveryRefusal('provider_limit_blocked').action).toBe('retry');
+      expect(claimSessionSnapshotRecoveryMock).not.toHaveBeenCalled();
+      expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+      // A retry-class refusal records nothing on the snapshot.
+      expect(dbMock.update).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['waiting', 'sleeping'],
+      ['released', 'sleeping'],
+      ['blocked', 'cancelled'],
+    ] as const)('control: a %s wait on a %s task still claims the wake', async (phase, status) => {
+      // `waiting`: admission holds the wake until the reset (one claim). `released`: the owner's
+      // Resume records this before it wakes. A terminal task's stale wait is not a live hold.
+      queueHeldWake(phase, status);
+
+      const result = await wake();
+
+      expect(claimSessionSnapshotRecoveryMock).toHaveBeenCalledTimes(1);
+      expect(result).not.toEqual({ status: 'unavailable', reason: 'provider_limit_blocked' });
+    });
   });
 
   it('control: a well-formed plan still wakes normally', async () => {

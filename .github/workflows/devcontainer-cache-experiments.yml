@@ -89,7 +89,7 @@ jobs:
 
       - name: Plain Docker push/pull against registry.cloudflare.com
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           REF="registry.cloudflare.com/${CLOUDFLARE_ACCOUNT_ID}/${IMAGE_NAME}:docker-${GITHUB_RUN_ID}"
           docker tag "$IMAGE_NAME:${GITHUB_RUN_ID}" "$REF"
           docker push "$REF"
@@ -147,7 +147,7 @@ jobs:
 
       - name: Test R2 tarball upload/download
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           KEY="docker-save/sam-r2-cache-exp-${GITHUB_RUN_ID}.tar"
           pnpm --filter @simple-agent-manager/api exec wrangler r2 object put "$BUCKET/$KEY" --file /tmp/sam-cache-exp-image.tar
           pnpm --filter @simple-agent-manager/api exec wrangler r2 object get "$BUCKET/$KEY" --file /tmp/sam-cache-exp-image-downloaded.tar
@@ -226,7 +226,7 @@ jobs:
 
       - name: Build SAM devcontainer image
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           LOCAL_REF="${IMAGE_NAME}:local-${GITHUB_RUN_ID}"
           devcontainer build --workspace-folder . --image-name "$LOCAL_REF"
           IMAGE_ID="$(docker image inspect "$LOCAL_REF" --format '{{.Id}}')"
@@ -269,8 +269,8 @@ jobs:
             const raw = fs.readFileSync('registry-credentials.raw', 'utf8');
             const start = raw.lastIndexOf('{');
             if (start < 0) {
-              console.error(raw);
-              throw new Error('No JSON object found in Wrangler credentials output');
+              // Never print the raw output: it can hold the minted registry password.
+              throw new Error('No JSON object found in Wrangler credentials output (' + raw.length + ' bytes withheld)');
             }
             fs.writeFileSync('registry-credentials.json', raw.slice(start));
           "

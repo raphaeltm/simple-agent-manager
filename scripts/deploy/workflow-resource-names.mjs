@@ -171,8 +171,6 @@ export function resolveResourceNames(env, mode) {
     credential_environment: credentialEnvironment,
     secondary: 'true',
     zone_name: target.entry.baseDomain,
-    primary_stack: primary.stack,
-    primary_prefix: primary.prefix,
   };
 }
 
