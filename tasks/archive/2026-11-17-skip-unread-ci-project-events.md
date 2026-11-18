@@ -196,9 +196,12 @@ available from the current counters; retention label absence remains unknown.
 
 **Counterfactual estimate, not observed or billed savings:** 3,855 skipped CI
 admissions / 3.25274944 covered hours = about 1,185 skipped admissions/hour.
-Multiplying by the historical mixed-traffic average of approximately 7.1 writes
-per admission call gives about **8,400 writes/hour avoided** at this night's
-traffic. That assumes skipped CI would have incurred the historical average;
-it is not a measured per-skipped-event cost, does not isolate matched fanout,
-and excludes any unmeasured downstream retention effects. The zero-write skip
-path itself was measured in real-workerd tests before release.
+Every skipped event had no matching subscriber. The measured steady unmatched
+stored path costs five writes, so 1,185 × 5 gives about **5,900 immediate
+writes/hour avoided** at this night's traffic. This uses the measured unmatched
+path rather than the historical mixed-traffic average, which includes matched
+fanout and overstates this comparison. It excludes one-time cold scheduler
+initialization (four additional writes in the cold fixture) and unmeasured
+retention effects. It remains a counterfactual from local path measurements,
+not observed or billed production savings. The zero-write skip path itself
+was measured in real-workerd tests before release.
