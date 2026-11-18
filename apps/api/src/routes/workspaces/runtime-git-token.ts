@@ -19,6 +19,8 @@ import {
   requireGitLabUserAccessTokenResultForOwner,
   verifyGitLabProjectAccess,
 } from '../../services/gitlab';
+import { resolveArtifactsBackend } from '../../services/hosted-git/backend';
+import { boundArtifactsRepositoryHost } from '../../services/workspace-git-source';
 import { assertRepositoryAccess } from '../projects/_helpers';
 import {
   assertWorkspaceAcceptsCallback,
@@ -221,7 +223,8 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     if (c.env.ARTIFACTS_ENABLED !== 'true') {
       throw errors.forbidden('Artifacts provider is not enabled');
     }
-    if (!c.env.ARTIFACTS || !artifactsRepoId) {
+    const artifacts = resolveArtifactsBackend(c.env);
+    if (!artifacts || !artifactsRepoId) {
       throw errors.internal('Artifacts binding or repo ID missing');
     }
 
@@ -232,7 +235,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     const ttl = Number.isFinite(rawTtl) && rawTtl > 0 && rawTtl <= 86400 ? rawTtl : 3600;
     // Use requested scope or default to 'write' (agents need push access)
     const requestedScope = c.req.query('scope') === 'read' ? ('read' as const) : ('write' as const);
-    const repo = await c.env.ARTIFACTS.get(artifactsRepoId);
+    const repo = await artifacts.get(artifactsRepoId);
     await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'git_token');
     const tokenResult = await repo.createToken(requestedScope, ttl);
 
@@ -269,6 +272,10 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       token: tokenSecret,
       expiresAt: tokenResult.expiresAt ?? tokenResult.expires_at,
       cloneUrl,
+      // The VM agent's credential helper answers with username "x" only for Cloudflare Artifacts
+      // hosts it knows by name. For a bound self-hosted host, name it here so a refresh presents
+      // the same username the clone used. Cloudflare responses are unchanged.
+      ...(boundArtifactsRepositoryHost(cloneUrl) ? { username: 'x' } : {}),
     });
   }
 

@@ -14,6 +14,8 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
+import { retireTaskCancellationPrompts } from '../../services/task-cancellation-prompts';
+import { taskRecoveryCancellationQuery } from '../../services/task-recovery-cancellation';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import {
   ACTIVE_STATUSES,
@@ -247,6 +249,9 @@ export async function handleRemovePendingSubtask(
       parentTaskId: schema.tasks.parentTaskId,
       status: schema.tasks.status,
       projectId: schema.tasks.projectId,
+      userId: schema.tasks.userId,
+      chatSessionId: schema.tasks.chatSessionId,
+      workspaceId: schema.tasks.workspaceId,
     })
     .from(schema.tasks)
     .where(and(eq(schema.tasks.id, childTaskId), eq(schema.tasks.projectId, tokenData.projectId)))
@@ -279,21 +284,29 @@ export async function handleRemovePendingSubtask(
 
   const now = new Date().toISOString();
 
-  // Cancel the task
-  await db
-    .update(schema.tasks)
-    .set({
-      status: 'cancelled',
-      completedAt: now,
-      updatedAt: now,
-    })
-    .where(eq(schema.tasks.id, childTaskId));
+  await retireTaskCancellationPrompts(env, childTask);
+  const [cancelled] = await db.batch([
+    db
+      .update(schema.tasks)
+      .set({ status: 'cancelled', completedAt: now, updatedAt: now })
+      .where(
+        and(
+          eq(schema.tasks.id, childTaskId),
+          eq(schema.tasks.projectId, childTask.projectId),
+          eq(schema.tasks.status, 'queued')
+        )
+      )
+      .returning({ id: schema.tasks.id }),
+    taskRecoveryCancellationQuery(db, childTask, now),
+  ]);
+  if (!cancelled.length)
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Task changed while removing the pending subtask'
+    );
 
-  // Sync trigger execution status (best-effort) — without this, cron triggers
-  // with skipIfRunning=true permanently stop firing because the execution stays 'running'.
   await syncTriggerExecutionStatus(env.DATABASE, childTaskId, 'cancelled');
-
-  // Record status event
   await db.insert(schema.taskStatusEvents).values({
     id: ulid(),
     taskId: childTaskId,

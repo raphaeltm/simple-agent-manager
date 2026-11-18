@@ -1,10 +1,10 @@
 import { fileURLToPath } from 'node:url';
 
+import { cronToNextFire } from '@simple-agent-manager/cron';
 import { describe, expect, it } from 'vitest';
 import { unstable_readConfig } from 'wrangler';
 
 import { CAPACITY_POOL_CONTINUATION_CRON } from '../../../src/services/capacity-pool-refresh-defaults';
-import { cronToNextFire } from '../../../src/services/cron-utils';
 
 describe('deployed catalog continuation cadence', () => {
   it.each([undefined, 'staging'])(

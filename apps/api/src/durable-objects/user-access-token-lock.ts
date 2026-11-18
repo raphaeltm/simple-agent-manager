@@ -186,7 +186,9 @@ export abstract class UserAccessTokenLock extends DurableObject<Env> {
         userId: payload.userId,
         error: err instanceof Error ? err.message : String(err),
       });
-      return Response.json({ error: 'token_unavailable' }, { status: 401 });
+      const authError = err instanceof Error && 'statusCode' in err ? err.statusCode : undefined;
+      // Unknown failures and upstream outages cannot prove authorization expired.
+      return Response.json({ error: 'token_unavailable' }, { status: authError === 401 ? 401 : 503 });
     }
   }
 }

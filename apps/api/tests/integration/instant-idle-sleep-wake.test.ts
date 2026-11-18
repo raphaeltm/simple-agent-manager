@@ -23,6 +23,7 @@ import {
   acceptPromptDelivery,
   nudgePromptDeliveriesForTarget,
 } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import { cancelUnissuedSessionPrompts } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-cancellation';
 import { resolveSessionAccess } from '@simple-agent-manager/project-data/internal/do/session-access';
 import { getSession } from '@simple-agent-manager/project-data/internal/do/session-reads';
 import {
@@ -97,9 +98,21 @@ vi.mock('../../src/services/project-data', () => ({
   // The agent handed control back and nothing it started is still running.
   getSessionState: async () => ({ activity: 'idle', activityAt: projectData.idleSince }),
   getAcpSession: async () => null,
+  cancelUnissuedSessionPrompts: async (
+    _env: unknown,
+    projectId: string,
+    sessionId: string,
+    taskId: string
+  ) => cancelUnissuedSessionPrompts(projectDataSql(), sessionId, taskId, projectId),
+  linkSessionToTask: async (_env: unknown, _projectId: string, sessionId: string, taskId: string) =>
+    sessions.linkSessionToTask(projectDataSql(), sessionId, taskId),
   // The stop and cancel routes, and the teardown behind the stop route.
-  stopSession: async (_env: unknown, _projectId: string, sessionId: string) =>
-    sessions.stopSession(projectDataSql(), sessionId) !== null,
+  stopSession: async (
+    _env: unknown,
+    _projectId: string,
+    sessionId: string,
+    options?: { guard?: { taskId: string } }
+  ) => sessions.stopSession(projectDataSql(), sessionId, options?.guard) !== null,
   recordSessionTurnEnd: async () => {},
   cleanupWorkspaceActivity: async () => {},
   // The attention-answer route.

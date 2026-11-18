@@ -144,7 +144,9 @@ export function buildProviderConfig(
     VultrRuntimeEnv &
     InfomaniakRuntimeEnv &
     DigitalOceanRuntimeEnv &
-    UpCloudRuntimeEnv
+    UpCloudRuntimeEnv,
+  /** Runtime admin settings; resolved by `buildProviderConfigForEnv` (infomaniak-provider-settings.ts). */
+  settings: { infomaniakBootVolumeGb?: number } = {}
 ): ProviderConfig {
   switch (provider) {
     case 'hetzner':
@@ -206,6 +208,7 @@ export function buildProviderConfig(
         requestTimeoutMs: parseOptionalInt(providerEnv?.INFOMANIAK_API_TIMEOUT_MS),
         ipPollTimeoutMs: parseOptionalInt(providerEnv?.INFOMANIAK_IP_POLL_TIMEOUT_MS),
         ipPollIntervalMs: parseOptionalInt(providerEnv?.INFOMANIAK_IP_POLL_INTERVAL_MS),
+        bootVolumeSizeGb: settings.infomaniakBootVolumeGb,
       };
     }
     case 'digitalocean':

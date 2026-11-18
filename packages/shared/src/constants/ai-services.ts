@@ -1,10 +1,23 @@
 // FILE SIZE EXCEPTION: Keep platform model routing metadata in one auditable registry.
+/** Canonical provider endpoints: these identify the vendor whose catalog list price applies. */
+export const AI_PROVIDER_BASE_URLS = {
+  anthropic: 'https://api.anthropic.com',
+  openai: 'https://api.openai.com/v1',
+} as const;
+
 // =============================================================================
 // AI Task Title Generation
 // =============================================================================
 
 /** Default Workers AI model for task title generation. Override via TASK_TITLE_MODEL env var. */
 export const DEFAULT_TASK_TITLE_MODEL = '@cf/google/gemma-4-26b-a4b-it';
+
+/**
+ * Workers AI model for the Project Overview brief (inbox slice I). A small, inexpensive model
+ * through the same SAM AI Gateway path as task titles ($0.10 / $0.30 per million input / output
+ * tokens, see its PLATFORM_AI_MODELS entry).
+ */
+export const DEFAULT_PROJECT_BRIEF_MODEL = '@cf/google/gemma-4-26b-a4b-it';
 
 /** Defaults for the tightly scoped deployment debugging agent. */
 export const DEFAULT_DEBUG_AGENT_MODEL = '@cf/zai-org/glm-5.2';
@@ -383,6 +396,20 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     toolCallSupport: 'good',
     intendedRole: 'workspace-agent',
     fallbackGroup: 'workers-coding',
+  }),
+  workersAIModel({
+    // https://developers.cloudflare.com/workers-ai/models/deepseek-v4.1-flash-1017/
+    // Pricing and limits verified 2026-11-17; USD per 1K tokens.
+    id: '@cf/deepseek-ai/deepseek-v4.1-flash-1017',
+    label: 'DeepSeek V4.1 Flash 1017',
+    tier: 'low-cost',
+    costPer1kInputTokens: 0.0003,
+    costPer1kCachedInputTokens: 0.000006,
+    costPer1kOutputTokens: 0.0012,
+    contextWindow: 1048576,
+    toolCallSupport: 'good',
+    intendedRole: 'utility',
+    fallbackGroup: 'workers-general',
   }),
   workersAIModel({
     // Pricing and limits from the Cloudflare model page, verified 2026-10-21.

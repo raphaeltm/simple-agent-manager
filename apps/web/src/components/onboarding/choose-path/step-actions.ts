@@ -10,6 +10,7 @@ import type {
 import { getAgentDefinition } from '@simple-agent-manager/shared';
 
 import {
+  fetchUserAiBudget,
   saveAgentCredential,
   saveAgentSettings,
   updateUserAiBudget,
@@ -100,6 +101,27 @@ function buildBudgetRequest(form: StepFormState): UpdateAiBudgetRequest | null {
   return Object.keys(body).length > 0 ? body : null;
 }
 
+async function saveSamBudget(form: StepFormState): Promise<void> {
+  const budget = buildBudgetRequest(form);
+  if (budget) {
+    // Re-read at save time: installation pricing/ceilings may have changed since rendering.
+    if (budget.monthlyCostCapUsd != null) {
+      const { monthlyCostCap } = await fetchUserAiBudget();
+      if (!monthlyCostCap.available) delete budget.monthlyCostCapUsd;
+      else if (
+        monthlyCostCap.ceilingUsd !== null &&
+        budget.monthlyCostCapUsd > monthlyCostCap.ceilingUsd
+      ) {
+        throw new Error(
+          `Your monthly cap cannot exceed the administrator limit of $${monthlyCostCap.ceilingUsd}.`
+        );
+      }
+    }
+    // A rejected budget must not leave the agent switched to SAM mode.
+    if (Object.keys(budget).length > 0) await updateUserAiBudget(budget);
+  }
+}
+
 /** Saves how the chosen agent signs in. The guided subscription sign-in saves on its own. */
 export async function saveAgentConnection(form: StepFormState): Promise<void> {
   if (!form.selectedAgent) throw new Error('Please choose an agent');
@@ -131,9 +153,8 @@ export async function saveAgentConnection(form: StepFormState): Promise<void> {
   }
 
   if (method === 'sam') {
+    await saveSamBudget(form);
     await saveAgentSettings(agentType, { providerMode: 'sam' });
-    const budget = buildBudgetRequest(form);
-    if (budget) await updateUserAiBudget(budget);
     return;
   }
 

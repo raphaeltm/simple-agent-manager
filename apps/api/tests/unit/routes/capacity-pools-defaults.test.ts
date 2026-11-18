@@ -134,6 +134,8 @@ function expectSafePlacementSettings(body: Record<string, any>) {
   });
   expect(body.placementSettings.sourceGeneration).toEqual(expect.any(Number));
   expect(body.placementSettings).not.toHaveProperty('diagnostics');
+  // No env override in these tests: the resolver's default host reserve.
+  expect(body.placementSettings.hostMemoryReserveMb).toBe(1024);
 }
 
 function countRows(sqlite: Database.Database, tableName: string, whereSql: string) {
@@ -409,6 +411,48 @@ describe('default capacity pool routes', () => {
     expect(
       sqlite.prepare("SELECT source_order_json FROM capacity_pools WHERE scope = 'user'").get()
     ).toEqual({ source_order_json: JSON.stringify([sourceId]) });
+  });
+
+  it('reports the installation default requirements and host reserve the pool view warns with', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    // Installation overrides: a persisted default-requirements setting and an env host reserve.
+    sqlite
+      .prepare(`INSERT INTO platform_settings (key, value, updated_at) VALUES (?, ?, ?)`)
+      .run(
+        'capacityPools.platformDefaults.v1',
+        JSON.stringify({ minVcpu: 4, minMemoryGb: 8, minDiskGb: 20, exclusiveNode: false }),
+        new Date().toISOString()
+      );
+    const overridden = { ...env, TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB: '2048' } as Env;
+
+    const res = await createApp().request('/api/capacity-pools/defaults', {}, overridden);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.placementSettings.source.platformDefaults).toBe('persisted');
+    expect(body.placementSettings.resourceDefaults.platformDefaults).toMatchObject({
+      minVcpu: 4,
+      minMemoryGb: 8,
+    });
+    expect(body.placementSettings.hostMemoryReserveMb).toBe(2048);
+  });
+
+  it.each([
+    [{ VM_AGENT_MEMORY_RESERVE_MB: '1536' }, 1536],
+    [{ TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB: '3072', VM_AGENT_MEMORY_RESERVE_MB: '1536' }, 3072],
+    [{ TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB: 'not-a-number' }, 1024],
+  ])('resolves the reported host reserve from %o as placement does', async (vars, expected) => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+
+    const res = await createApp().request('/api/capacity-pools/defaults', {}, {
+      ...env,
+      ...vars,
+    } as Env);
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).placementSettings.hostMemoryReserveMb).toBe(expected);
   });
 
   it('keeps a zero-active user default visible and effective as configured-empty', async () => {

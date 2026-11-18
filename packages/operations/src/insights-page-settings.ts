@@ -46,6 +46,13 @@ export const INSIGHTS_PAGE_SETTINGS = [
     range: { min: 1, max: 50 },
   },
   {
+    name: 'insights.accountsUsageRowCap',
+    defaultValue: 500,
+    description:
+      'Measured token usage rows (one per account and model), largest first, read for tokens and spend on Insights · Accounts. The page says when the cap cut the smallest off.',
+    range: { min: 50, max: 5000 },
+  },
+  {
     name: 'insights.setupsRunScanCap',
     defaultValue: 2000,
     description:
@@ -98,6 +105,7 @@ export interface InsightsPageLimits {
   reworkWindowDays: number;
   accountsStallScanCap: number;
   accountsEpisodesListed: number;
+  accountsUsageRowCap: number;
   setupsRunScanCap: number;
   setupsSuggestionMinRuns: number;
   setupsSuggestionMinGapPercent: number;
@@ -113,6 +121,7 @@ const KEYS: Record<InsightsPageSettingName, keyof InsightsPageLimits> = {
   'insights.flowReworkWindowDays': 'reworkWindowDays',
   'insights.accountsStallScanCap': 'accountsStallScanCap',
   'insights.accountsEpisodesListed': 'accountsEpisodesListed',
+  'insights.accountsUsageRowCap': 'accountsUsageRowCap',
   'insights.setupsRunScanCap': 'setupsRunScanCap',
   'insights.setupsSuggestionMinRuns': 'setupsSuggestionMinRuns',
   'insights.setupsSuggestionMinGapPercent': 'setupsSuggestionMinGapPercent',

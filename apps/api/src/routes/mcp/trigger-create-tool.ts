@@ -1,3 +1,4 @@
+import { cronToHumanReadable } from '@simple-agent-manager/cron';
 import {
   ResourceRequirementsValidationError,
   serializeModernResourceRequirementsInput,
@@ -12,7 +13,6 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { AppError } from '../../middleware/error';
 import { CreateTriggerSchema } from '../../schemas/triggers';
-import { cronToHumanReadable } from '../../services/cron-utils';
 import { readGitHubTriggerConfig } from '../../services/github-trigger-config';
 import { createTrigger } from '../../services/trigger-create';
 import { areWebhookTriggersEnabled } from '../../services/webhook-trigger-config';
