@@ -446,7 +446,8 @@ export async function readUsual(
 export async function readAccount(
   ctx: OperationContext,
   row: TaskRow,
-  facts: RunReceiptFacts | null
+  facts: RunReceiptFacts | null,
+  includeName = true
 ): Promise<RunReceiptAccount | null> {
   const sessions = parseJsonList(row.agent_sessions, AgentSessionSchema, {
     taskId: row.id,
@@ -463,7 +464,7 @@ export async function readAccount(
   let accountName: string | null = null;
   const credentialId = chosen.reference ? credentialIdFromReference(chosen.reference) : null;
   // Account names are private to the person who ran the session (`routes/chat-agent-credential.ts`).
-  if (isOwnSession && credentialId) {
+  if (includeName && isOwnSession && credentialId) {
     const stored = await ctx.env.DATABASE.prepare(
       'SELECT name FROM cc_credentials WHERE id = ? AND owner_id = ? LIMIT 1'
     )

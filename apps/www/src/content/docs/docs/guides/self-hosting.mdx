@@ -33,7 +33,34 @@ instance owns session replacement. Its Login plugin must apply the server-select
 with `unchange: false`, and every subsequent operation checks that session against the lease.
 Credential-key rotation recovery is tracked separately. Changing the root key rejects stale
 resume derivation and old session IDs, but a credential matching the stored lease hash can
-still log in and obtain the new session ID; root-key rotation alone does not revoke that lease. Full gateway, cloud-init and installer packaging follow this foundation.
+still log in and obtain the new session ID; root-key rotation alone does not revoke that lease. Cloud-init and installer packaging follow this foundation.
+
+The self-host entry wraps the shared Worker with `withReverseTunnel(worker, render)` from
+`apps/api/src/selfhost/reverse-tunnel/entry.ts`. That call installs the transport driver, serves
+the gateway endpoints under `/api/self-host/gateway/` before the shared app sees the request,
+and runs the lease backstop after the shared handler on the five-minute sweep cron. The
+backstop logs `cron.reverse_tunnel_lease_sweep` with its release count, or why it skipped, and
+it honours the operational cron switch. The gateway has two endpoints:
+
+- `POST /api/self-host/gateway/frps-plugin`: the frps server plugin. frps authenticates with
+  HTTP basic auth, user `frps`, password `REVERSE_TUNNEL_GATEWAY_SECRET`. A Login allow is
+  answered `{reject:false, unchange:false, content}`, so frps applies the server-selected
+  `run_id`. Every other allow is `{reject:false, unchange:true}`.
+- `GET /api/self-host/gateway/node-websocket`: Caddy `forward_auth` for node WebSockets,
+  authenticated with the `X-SAM-Gateway-Secret` header. The original request runs through the
+  normal ws-* or node log-stream authentication. The answer is either that handler's refusal or
+  `X-SAM-Upstream`/`X-SAM-Upstream-*` headers naming the loopback lease port and the credentials
+  Caddy forwards.
+
+Without a gateway secret of at least 32 characters, both endpoints answer 404; a wrong secret
+gets 401. The Cloudflare Worker never imports this entry.
+
+Control-plane requests, the task liveness probe and WebSocket decisions reach a reverse-tunnel
+node through the active lease of its current incarnation (`resolveNodeAgentRoute` in
+`apps/api/src/services/node-agent-route.ts`). A released or superseded lease is never routed to,
+so revocation applies to control-plane traffic on the next request. frps drops the node's
+control session within one heartbeat timeout, because a refused Ping does not refresh it. A
+reverse-tunnel node is never chosen as a snapshot-upload relay, since it has no public hostname.
 
 The self-host build supplies these bootstrap settings; they are not Cloudflare Worker bindings:
 
@@ -48,7 +75,7 @@ The self-host build supplies these bootstrap settings; they are not Cloudflare W
 Allocation considers the whole bounded port range in one atomic SQL statement, with indexed
 history lookups. Release checks all active leases in one local statement, without network calls
 or pagination. At the outer normal limit of 20,000 active leases, one backstop pass releases all
-eligible leases; the later gateway slice schedules that backstop every five minutes. A newly
+eligible leases; the self-host entry runs that backstop every five minutes. A newly
 freed port still waits for its cooling interval. A full range and a cooling range have distinct
 errors so operators can distinguish capacity exhaustion from a wait for safe reuse.
 
