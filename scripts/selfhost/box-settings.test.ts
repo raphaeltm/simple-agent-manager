@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { resolveR2PresignConfig } from '../../apps/api/src/services/r2-presign-config.js';
 import {
   BOX_RESERVED_PORTS,
   celldChildEnv,
@@ -153,7 +154,56 @@ describe('presignVars', () => {
       R2_S3_BUCKET: 'my-bucket',
       R2_S3_KEY_PREFIX: 'celld/r2/assets/',
       R2_S3_ENDPOINT: 'https://storage.googleapis.com',
+      // The Worker refuses an operator store without a region; GCS signs with "auto".
+      R2_S3_REGION: 'auto',
     });
+  });
+
+  it('passes an explicit region through and requires one for an s3:// store', () => {
+    expect(
+      presignVars(
+        {
+          CELLD_BUCKET: 's3://celld-fleet',
+          R2_S3_ENDPOINT: 'https://s3.example.com',
+          R2_S3_REGION: 'us-east-1',
+        },
+        'assets'
+      ).R2_S3_REGION
+    ).toBe('us-east-1');
+    expect(() =>
+      presignVars(
+        { CELLD_BUCKET: 's3://celld-fleet', R2_S3_ENDPOINT: 'https://s3.example.com' },
+        'assets'
+      )
+    ).toThrow(/R2_S3_REGION is required/);
+  });
+
+  it('yields vars the Worker accepts as an operator store (real resolver)', () => {
+    const vars = presignVars(
+      { CELLD_BUCKET: 'gs://my-bucket/celld/', R2_S3_ENDPOINT: 'https://storage.googleapis.com' },
+      'assets'
+    );
+    const config = resolveR2PresignConfig({
+      ...vars,
+      R2_ACCESS_KEY_ID: 'scoped-key-id',
+      R2_SECRET_ACCESS_KEY: 'scoped-key-secret',
+    } as Parameters<typeof resolveR2PresignConfig>[0]);
+    expect(config).toMatchObject({
+      endpoint: 'https://storage.googleapis.com',
+      bucket: 'my-bucket',
+      keyPrefix: 'celld/r2/assets/',
+      region: 'auto',
+    });
+    // Control: without the region the Worker would leave presigning off.
+    const withoutRegion = { ...vars };
+    delete withoutRegion.R2_S3_REGION;
+    expect(
+      resolveR2PresignConfig({
+        ...withoutRegion,
+        R2_ACCESS_KEY_ID: 'scoped-key-id',
+        R2_SECRET_ACCESS_KEY: 'scoped-key-secret',
+      } as Parameters<typeof resolveR2PresignConfig>[0])
+    ).toBeNull();
   });
 
   it('gives Azure buckets no presign vars', () => {

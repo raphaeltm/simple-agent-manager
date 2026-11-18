@@ -1,24 +1,46 @@
 /**
- * Self-host analytics on D1 (ANALYTICS_SINK="d1"), end to end on a real SQLite engine:
- * the request middleware and `/api/t` write through the real routes into the real
- * observability migration chain, then every admin analytics route reads it back through the
- * real Analytics Engine SQL (translated). `fetch` is stubbed only to prove nothing calls
- * Cloudflare. Auth and rate limiting are bypassed; they are not what is under test.
+ * Self-host analytics on D1 (selfhost/analytics, installed by the self-host entry and switched on
+ * with ANALYTICS_SINK="d1"), end to end on a real SQLite engine: the request middleware and
+ * `/api/t` write through the real routes into the shared observability migration chain plus the
+ * self-host projection, then every admin analytics route reads it back through the real
+ * Analytics Engine SQL (translated). `fetch` is stubbed only to prove nothing calls Cloudflare.
+ * Auth and rate limiting are bypassed; they are not what is under test.
+ *
+ * The Cloudflare side of the same seam (nothing installed: Analytics Engine writes, the SQL API,
+ * no D1 call, no analytics table) is pinned at the end of this file.
  */
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { appendSelfhostObservabilityMigrations } from '../../../../../scripts/selfhost/observability-migrations';
 import type { Env } from '../../../src/env';
 import { analyticsMiddleware } from '../../../src/middleware/analytics';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
 import { adminAnalyticsRoutes } from '../../../src/routes/admin-analytics';
 import { analyticsIngestRoutes } from '../../../src/routes/analytics-ingest';
 import { runObservabilityPurge } from '../../../src/scheduled/observability-purge';
+import { installAnalyticsD1Sink } from '../../../src/selfhost/analytics';
+import { purgeAnalyticsEvents } from '../../../src/selfhost/analytics/d1-sink';
+import { translateAnalyticsSql } from '../../../src/selfhost/analytics/d1-sink';
+import {
+  ANALYTICS_D1_MAX_ROWS_SETTING,
+  ANALYTICS_D1_PURGE_BATCH_ROWS_SETTING,
+  ANALYTICS_D1_PURGE_TICK_BUDGET_MS_SETTING,
+  ANALYTICS_D1_SETTINGS,
+} from '../../../src/selfhost/analytics/settings';
+import { SELFHOST_OBSERVABILITY_MIGRATIONS } from '../../../src/selfhost/observability-migrations';
 import { updateAdminSettings } from '../../../src/services/admin-settings-mutations';
-import { translateAnalyticsSql } from '../../../src/services/analytics-d1-sink';
+import {
+  adminSettingsRegistry,
+  resetInstalledAdminSettingDefinitionsForTests,
+} from '../../../src/services/admin-settings-registry';
+import { resetLocalAnalyticsSinkExtensionForTests } from '../../../src/services/analytics-sink';
 import { resolvePlatformCapabilities } from '../../../src/services/platform-capabilities';
 import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -35,6 +57,7 @@ vi.mock('../../../src/middleware/rate-limit', () => ({
 }));
 
 const MIGRATIONS = new URL('../../../src/db/migrations/observability/', import.meta.url);
+const API_SRC = new URL('../../../src/', import.meta.url);
 
 let settingsDb: Database.Database;
 let obsDb: Database.Database;
@@ -42,11 +65,21 @@ let env: Env;
 let fetchMock: ReturnType<typeof vi.fn>;
 let pending: Promise<unknown>[];
 
-function applyObservabilityMigrations(db: Database.Database) {
-  for (const file of readdirSync(MIGRATIONS)
+/** The shared chain wrangler.toml applies on Cloudflare (the observability migrations_dir). */
+function sharedObservabilityMigrationFiles(): string[] {
+  return readdirSync(MIGRATIONS)
     .filter((f) => f.endsWith('.sql'))
-    .sort()) {
+    .sort();
+}
+
+/** What the self-host packager applies: the shared chain, then the self-host projection. */
+function applyObservabilityMigrations(db: Database.Database, selfHost = true) {
+  for (const file of sharedObservabilityMigrationFiles()) {
     db.exec(readFileSync(new URL(file, MIGRATIONS), 'utf8'));
+  }
+  if (!selfHost) return;
+  for (const file of SELFHOST_OBSERVABILITY_MIGRATIONS) {
+    db.exec(readFileSync(fileURLToPath(new URL(file, API_SRC)), 'utf8'));
   }
 }
 
@@ -63,7 +96,9 @@ function app() {
   a.use('*', analyticsMiddleware());
   a.use('*', async (c, next) => {
     // The real auth middleware sets this; the analytics middleware reads it after the handler.
-    c.set('auth' as never, { user: { id: c.req.header('x-test-user') ?? '' } } as never);
+    // No header means an anonymous request, as on the real ingest route.
+    const userId = c.req.header('x-test-user');
+    if (userId) c.set('auth' as never, { user: { id: userId } } as never);
     await next();
   });
   a.get('/api/projects/:projectId', (c) => c.json({ ok: true }));
@@ -79,6 +114,8 @@ async function call(path: string, init: RequestInit = {}) {
 }
 
 beforeEach(() => {
+  // What the self-host entry does once before any request.
+  installAnalyticsD1Sink();
   const created = createAdminSettingsEnv();
   settingsDb = created.sqlite;
   obsDb = new Database(':memory:');
@@ -98,6 +135,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  resetLocalAnalyticsSinkExtensionForTests();
+  resetInstalledAdminSettingDefinitionsForTests();
   settingsDb.close();
   obsDb.close();
 });
@@ -108,14 +147,13 @@ const rows = () =>
   >;
 
 describe('D1 analytics sink (self-host)', () => {
-  it('advertises analyticsIngest and analyticsQuery only when the sink is switched on', () => {
+  it('advertises analyticsQuery only when the sink is switched on', () => {
     expect(resolvePlatformCapabilities(env)).toMatchObject({
-      analyticsIngest: true,
       analyticsQuery: true,
-      cloudflareAccountApi: false,
+      workersObservability: false,
     });
     expect(resolvePlatformCapabilities({ ...env, ANALYTICS_SINK: undefined } as Env)).toMatchObject(
-      { analyticsIngest: false, analyticsQuery: false }
+      { analyticsQuery: false }
     );
   });
 
@@ -150,7 +188,10 @@ describe('D1 analytics sink (self-host)', () => {
     // No query string or fragment survives into a stored row.
     expect(JSON.stringify(stored)).not.toContain('sekret');
     const pageView = stored.find((r) => r.blob1 === 'page_view')!;
-    expect(pageView.blob3).toBe('/projects/p1');
+    // The project id after the `projects` marker is redacted, as the web tracker would.
+    expect(pageView.blob3).toBe('/projects/[redacted]');
+    // Request rows keep their route pattern: parameter names are not values.
+    expect(stored.find((r) => r.index1 === 'user-b')!.blob3).toBe('/api/projects/:projectId');
     expect(pageView.blob4).toBe('https://mail.example');
 
     const dau = await call('/api/admin/analytics/dau');
@@ -191,7 +232,7 @@ describe('D1 analytics sink (self-host)', () => {
     for (let i = 0; i < 5; i += 1) insert.run(`-${i} hours`);
 
     await updateAdminSettings(env, {
-      changes: [{ name: 'operations.analyticsD1MaxRows', value: 3 }],
+      changes: [{ name: ANALYTICS_D1_MAX_ROWS_SETTING, value: 3 }],
       actorUserId: 'admin-1',
     });
     await runObservabilityPurge(env);
@@ -201,6 +242,142 @@ describe('D1 analytics sink (self-host)', () => {
     // Both rows past the 90-day default are gone by age; the cap then keeps the newest three
     // by insertion (ids 5..7 of 7).
     expect(left.map((r) => r.id)).toEqual([5, 6, 7]);
+  });
+
+  it('stores anonymous visitors by network prefix and redacts sensitive page segments', async () => {
+    const post = (ip: string, page: string) =>
+      call('/api/t', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          origin: 'https://app.box.example',
+          'cf-connecting-ip': ip,
+        },
+        body: JSON.stringify({ events: [{ event: 'page_view', page }] }),
+      });
+    expect((await post('203.0.113.77', '/invite/sk-live-0123456789abcdefABCDEF')).status).toBe(204);
+    expect((await post('2001:db8:85a3:1:2:3:4:5', '/docs/getting-started')).status).toBe(204);
+
+    const stored = rows().filter((r) => r.blob1 === 'page_view');
+    expect(stored.map((r) => r.index1)).toEqual(['anon-203.0.113.0/24', 'anon-2001:db8:85a3::/48']);
+    expect(JSON.stringify(stored)).not.toContain('203.0.113.77');
+    expect(JSON.stringify(stored)).not.toContain('2001:db8:85a3:1:2');
+    expect(stored.map((r) => r.blob3)).toEqual(['/invite/[redacted]', '/docs/getting-started']);
+  });
+
+  it('skips the purge, deleting nothing, when the retention settings cannot be read', async () => {
+    obsDb
+      .prepare(
+        "INSERT INTO analytics_events (timestamp, index1, blob1) VALUES (datetime('now', '-120 days'), 'u', 'e')"
+      )
+      .run();
+    // The settings store fails while the observability database is healthy.
+    settingsDb.exec('DROP TABLE platform_settings');
+
+    expect(await purgeAnalyticsEvents(env)).toBeNull();
+    // A 90-day default would have deleted this row under a 180-day policy; it stays.
+    expect(rows()).toHaveLength(1);
+  });
+
+  it('purges more rows than one batch holds in a single tick, oldest first (rule 81)', async () => {
+    const insert = obsDb.prepare(
+      "INSERT INTO analytics_events (timestamp, index1, blob1) VALUES (datetime('now', ?), 'u', 'e')"
+    );
+    for (let i = 0; i < 5; i += 1) insert.run(`-${200 + i} days`); // ids 1..5, past retention
+    for (let i = 0; i < 12; i += 1) insert.run(`-${i} minutes`); // ids 6..17
+    await updateAdminSettings(env, {
+      changes: [
+        { name: ANALYTICS_D1_PURGE_BATCH_ROWS_SETTING, value: 2 },
+        { name: ANALYTICS_D1_MAX_ROWS_SETTING, value: 4 },
+      ],
+      actorUserId: 'admin-1',
+    });
+
+    const result = await purgeAnalyticsEvents(env);
+
+    // 5 aged rows and 8 over-cap rows, each larger than the 2-row batch, in one call.
+    expect(result).toEqual({ deletedByAge: 5, deletedByCount: 8, complete: true });
+    expect(rows().map((r) => r.id)).toEqual([14, 15, 16, 17]);
+  });
+
+  it('stops at the tick budget and the next tick resumes, so a purge is bounded by time', async () => {
+    const insert = obsDb.prepare(
+      "INSERT INTO analytics_events (timestamp, index1, blob1) VALUES (datetime('now', '-200 days'), 'u', 'e')"
+    );
+    for (let i = 0; i < 6; i += 1) insert.run();
+    await updateAdminSettings(env, {
+      changes: [
+        { name: ANALYTICS_D1_PURGE_BATCH_ROWS_SETTING, value: 2 },
+        { name: ANALYTICS_D1_PURGE_TICK_BUDGET_MS_SETTING, value: 1 },
+      ],
+      actorUserId: 'admin-1',
+    });
+    // Every clock read moves 1 s on, so the 1 ms budget is spent after the first batch.
+    let now = Date.parse('2026-11-18T12:00:00Z');
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => (now += 1_000));
+
+    try {
+      expect(await purgeAnalyticsEvents(env)).toMatchObject({ deletedByAge: 2, complete: false });
+      expect(rows()).toHaveLength(4);
+      expect(await purgeAnalyticsEvents(env)).toMatchObject({ deletedByAge: 2, complete: false });
+      expect(await purgeAnalyticsEvents(env)).toMatchObject({ deletedByAge: 2 });
+      expect(await purgeAnalyticsEvents(env)).toEqual({
+        deletedByAge: 0,
+        deletedByCount: 0,
+        complete: true,
+      });
+    } finally {
+      clock.mockRestore();
+    }
+    expect(rows()).toHaveLength(0);
+  });
+
+  it('still bounds analytics when the error purge fails, and still reports that failure', async () => {
+    const insert = obsDb.prepare(
+      "INSERT INTO analytics_events (timestamp, index1, blob1) VALUES (datetime('now', '-200 days'), 'u', 'e')"
+    );
+    insert.run();
+    obsDb.exec('DROP TABLE platform_errors');
+
+    await expect(runObservabilityPurge(env)).rejects.toThrow();
+    expect(rows()).toHaveLength(0);
+  });
+
+  it('registers its settings only through the self-host install point', () => {
+    const names = adminSettingsRegistry().map((definition) => definition.name);
+    for (const definition of ANALYTICS_D1_SETTINGS) expect(names).toContain(definition.name);
+    resetInstalledAdminSettingDefinitionsForTests();
+    const cloudflareNames = adminSettingsRegistry().map((definition) => definition.name);
+    for (const definition of ANALYTICS_D1_SETTINGS) {
+      expect(cloudflareNames).not.toContain(definition.name);
+    }
+    // Liveness: the shared registry is still populated.
+    expect(cloudflareNames.length).toBeGreaterThan(10);
+  });
+
+  it('the self-host packager projects the table into the observability database', () => {
+    const scratch = mkdtempSync(join(tmpdir(), 'sam-obs-projection-'));
+    try {
+      const flat = join(scratch, 'flat');
+      mkdirSync(flat);
+      for (const file of sharedObservabilityMigrationFiles()) {
+        symlinkSync(fileURLToPath(new URL(file, MIGRATIONS)), join(flat, file));
+      }
+      const apiDir = fileURLToPath(new URL('../../../', import.meta.url));
+      appendSelfhostObservabilityMigrations(apiDir, flat);
+      appendSelfhostObservabilityMigrations(apiDir, flat); // idempotent
+      const db = new Database(':memory:');
+      for (const file of readdirSync(flat).sort()) db.exec(readFileSync(join(flat, file), 'utf8'));
+      const tables = (
+        db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{
+          name: string;
+        }>
+      ).map((t) => t.name);
+      expect(tables).toEqual(expect.arrayContaining(['platform_errors', 'analytics_events']));
+      db.close();
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
   });
 
   it('refuses Analytics Engine SQL it cannot translate instead of returning wrong numbers', () => {
@@ -214,5 +391,110 @@ describe('D1 analytics sink (self-host)', () => {
     ).toBe(
       "SELECT date(timestamp) AS d, count(*) FROM analytics_events WHERE timestamp >= datetime('now', '-7 days')"
     );
+  });
+});
+
+describe('Cloudflare (the shared Worker installs no local sink)', () => {
+  let writeDataPoint: ReturnType<typeof vi.fn>;
+  let observabilityPrepare: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    // The Cloudflare entry never imports selfhost/: undo the install the outer hook performed.
+    resetLocalAnalyticsSinkExtensionForTests();
+    resetInstalledAdminSettingDefinitionsForTests();
+    writeDataPoint = vi.fn();
+    observabilityPrepare = vi.fn(() => {
+      throw new Error('Cloudflare analytics must not touch OBSERVABILITY_DATABASE');
+    });
+    // Production's shape (2026-11-18 script settings): Analytics Engine binding, generated dataset,
+    // Cloudflare account API, no ANALYTICS_SINK. Even a stray ANALYTICS_SINK="d1" does nothing
+    // without the self-host install.
+    env = {
+      ...env,
+      ANALYTICS: { writeDataPoint },
+      ANALYTICS_DATASET: 'sam_analytics',
+      ANALYTICS_SINK: 'd1',
+      CF_ACCOUNT_ID: 'account-1',
+      CF_API_TOKEN: 'token-1',
+      OBSERVABILITY_DATABASE: { prepare: observabilityPrepare, batch: observabilityPrepare },
+    } as unknown as Env;
+  });
+
+  it('writes requests and /api/t events to Analytics Engine, never to D1', async () => {
+    await call('/api/projects/proj-1', { headers: { 'x-test-user': 'user-a' } });
+    const ingest = await call('/api/t', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', origin: 'https://app.example.com' },
+      body: JSON.stringify({ events: [{ event: 'page_view', page: '/projects/p1' }] }),
+    });
+
+    expect(ingest.status).toBe(204);
+    // The project GET (middleware), the page_view (/api/t), and the middleware's own row for the
+    // /api/t request: every one reached Analytics Engine.
+    const written = writeDataPoint.mock.calls.map(
+      ([point]) => point as { indexes: string[]; blobs: string[] }
+    );
+    expect(written.map((point) => point.blobs[0])).toContain('page_view');
+    expect(
+      written.some((point) => point.indexes[0] === 'user-a' && point.blobs[1] === 'proj-1')
+    ).toBe(true);
+    expect(observabilityPrepare).not.toHaveBeenCalled();
+  });
+
+  it('queries the Analytics Engine SQL API for admin analytics, with the generated dataset', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ date: '2026-11-18', unique_users: '3' }] }), {
+        status: 200,
+      })
+    );
+
+    const res = await call('/api/admin/analytics/dau');
+
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      'https://api.cloudflare.com/client/v4/accounts/account-1/analytics_engine/sql'
+    );
+    expect(String(init.body)).toContain('FROM sam_analytics');
+    expect(observabilityPrepare).not.toHaveBeenCalled();
+  });
+
+  it('runs the observability purge without any analytics statement', async () => {
+    const statements: string[] = [];
+    const obs = createSqliteD1(obsDb);
+    env = {
+      ...env,
+      OBSERVABILITY_DATABASE: {
+        ...obs,
+        prepare: (sql: string) => {
+          statements.push(sql);
+          return obs.prepare(sql);
+        },
+        batch: obs.batch.bind(obs),
+      },
+    } as unknown as Env;
+
+    await runObservabilityPurge(env);
+
+    // Liveness: the error purge ran; and nothing touched analytics_events.
+    expect(statements.some((sql) => /platform_errors/.test(sql))).toBe(true);
+    expect(statements.some((sql) => /analytics_events/.test(sql))).toBe(false);
+  });
+
+  it('the shared observability migration chain never creates the analytics table', () => {
+    const cloudflareDb = new Database(':memory:');
+    try {
+      applyObservabilityMigrations(cloudflareDb, false);
+      const tables = cloudflareDb
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .all() as Array<{ name: string }>;
+      // Liveness: the shared chain did run.
+      expect(tables.map((t) => t.name)).toContain('platform_errors');
+      expect(tables.map((t) => t.name)).not.toContain('analytics_events');
+      expect(sharedObservabilityMigrationFiles().join('\n')).not.toMatch(/analytics/);
+    } finally {
+      cloudflareDb.close();
+    }
   });
 });

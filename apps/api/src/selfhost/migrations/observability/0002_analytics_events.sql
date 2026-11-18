@@ -1,13 +1,17 @@
 -- Migration: D1 analytics sink for installations without Analytics Engine (self-host).
--- Additive only. Written only when ANALYTICS_SINK="d1" (services/analytics-d1-sink.ts);
--- Cloudflare installations keep writing Analytics Engine and never touch this table.
+-- SELF-HOST ONLY: this file lives outside apps/api/wrangler.toml's observability migrations_dir,
+-- so Cloudflare installs never create the table. The self-host packager appends it to the
+-- observability database's flat migration projection (selfhost/observability-migrations.ts).
+-- The filename is unchanged from the integration branch so an existing box's ledger still
+-- matches it. Additive only. Written only when the self-host entry installed the D1 sink and
+-- ANALYTICS_SINK="d1" (selfhost/analytics/d1-sink.ts).
 --
 -- Columns mirror Analytics Engine's data point shape (index1, blob1..blob11, double1..double3,
 -- timestamp) so the admin analytics SQL runs against both with only a dialect translation.
 -- `timestamp` is UTC text 'YYYY-MM-DD HH:MM:SS' (SQLite datetime()), so range filters compare
 -- lexicographically and date()/strftime() work without conversion.
--- Growth is bounded by the 5-minute observability purge: age (ANALYTICS_D1_RETENTION_DAYS,
--- default 90) and row cap (ANALYTICS_D1_MAX_ROWS, default 500000).
+-- Growth is bounded by the 5-minute observability purge: age (admin setting
+-- analytics.d1.retentionDays, default 90) and row cap (analytics.d1.maxRows, default 500000).
 
 CREATE TABLE IF NOT EXISTS analytics_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

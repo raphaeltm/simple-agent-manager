@@ -8,8 +8,8 @@ import { createBuildContextUpload } from '../../src/build-context-upload';
 import type { ComposeImageArtifactPresignTarget } from '../../src/compose-image-artifacts';
 
 const secret = 'fake-secret';
-// The client the worker binds on Cloudflare: getR2PresignTarget(env, 'WHEN_REQUIRED')
-// (apps/api/src/services/r2-s3-client.ts).
+// The worker's shared R2 client (apps/api/src/services/r2-s3-client.ts) as it is configured on
+// Cloudflare for build contexts: WHEN_REQUIRED checksums, the account endpoint, unprefixed keys.
 const target: ComposeImageArtifactPresignTarget = {
   client: new S3Client({
     region: 'auto',
@@ -18,7 +18,7 @@ const target: ComposeImageArtifactPresignTarget = {
     credentials: { accessKeyId: 'fake-access', secretAccessKey: secret },
   }),
   bucket: 'fake-bucket',
-  objectKey: (r2Key) => r2Key,
+  objectKey: (key) => key,
 };
 
 // Independent SigV4 verification, deliberately not the SDK signer under test.

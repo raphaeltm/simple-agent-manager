@@ -12,6 +12,7 @@ import type { Env } from '../env';
 import { getAnalyticsDataset } from '../lib/analytics-config';
 import { log } from '../lib/logger';
 import { expectJsonRecord, readResponseJson } from '../lib/runtime-validation';
+import { activeLocalAnalyticsSink } from './analytics-sink';
 import { hasCloudflareAccountApi } from './platform-capabilities';
 
 // ─── Defaults (configurable via env vars per constitution Principle XI) ───
@@ -413,9 +414,10 @@ export async function forwardToGA4(
  */
 export async function runAnalyticsForward(env: Env): Promise<ForwardResult> {
   const enabled = (env.ANALYTICS_FORWARD_ENABLED ?? 'false').toLowerCase() === 'true';
-  // Forwarding reads Cloudflare's Analytics Engine SQL API; without an account there is
-  // nothing to read. Skip with a reason instead of throwing from the daily cron.
-  const queryable = hasCloudflareAccountApi(env);
+  // Forwarding reads Cloudflare's Analytics Engine SQL API. Without an account, or when a
+  // self-host local sink holds the events instead, there is nothing there to read: skip with a
+  // reason instead of throwing from the daily cron.
+  const queryable = hasCloudflareAccountApi(env) && !activeLocalAnalyticsSink(env);
   if (!enabled || !queryable) {
     return {
       enabled: false,

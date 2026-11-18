@@ -22,6 +22,7 @@ import { dirname, join, resolve } from 'node:path';
 
 import type { CelldConfigPlan, CelldWranglerConfig } from './celld-config.js';
 import { materialiseSandboxImageContext } from './guided-login.js';
+import { appendSelfhostObservabilityMigrations } from './observability-migrations.js';
 import { appendReverseTunnelMigrations } from './reverse-tunnel-migrations.js';
 import { writePrivateFile } from './secret-files.js';
 import {
@@ -37,6 +38,8 @@ export const ASSETS_DIR = 'web';
 export const CELLD_MAIN = 'celld-main.ts';
 /** apps/api/wrangler.toml `migrations_dir` of the primary DATABASE. */
 const PRIMARY_MIGRATIONS_DIR = 'src/db/migrations';
+/** apps/api/wrangler.toml `migrations_dir` of OBSERVABILITY_DATABASE. */
+const OBSERVABILITY_MIGRATIONS_DIR = 'src/db/migrations/observability';
 
 /**
  * Runtime switches every celld entry turns on before any request runs. On celld the code that
@@ -60,8 +63,8 @@ const SELFHOST_IMPORTS = [
 const SELFHOST_MOUNT_CALL = `selfhost.${SELFHOST_MOUNT_FUNCTION}(app);`;
 /**
  * The self-host build's additions to the shared entry (apps/api/src/selfhost/build.ts): the
- * speech backend and the reverse-tunnel transport, gateway and lease sweep. The shared entry
- * never imports it.
+ * speech backend, the D1 analytics sink and the reverse-tunnel transport, gateway and lease
+ * sweep. The shared entry never imports it.
  */
 const SELFHOST_BUILD_IMPORT = `import { withSelfHostBuild } from './${SOURCE_LINK}/selfhost/build.ts';`;
 const SELFHOST_CLASS_NAMES = new Set(SELFHOST_DURABLE_OBJECTS.map((object) => object.className));
@@ -184,6 +187,11 @@ export function prepareCelldProject(options: PrepareProjectOptions): void {
     // The primary database also gets the self-host-only migrations (reverse-tunnel leases,
     // apps/api/src/selfhost/migrations/), which apps/api/wrangler.toml never lists.
     if (dir.sourceDir === PRIMARY_MIGRATIONS_DIR) appendReverseTunnelMigrations(apiDir, target);
+    // OBSERVABILITY_DATABASE gets the D1 analytics sink's table the same way (L20,
+    // apps/api/src/selfhost/observability-migrations.ts).
+    if (dir.sourceDir === OBSERVABILITY_MIGRATIONS_DIR) {
+      appendSelfhostObservabilityMigrations(apiDir, target);
+    }
   }
 
   const mainPath = join(projectDir, CELLD_MAIN);

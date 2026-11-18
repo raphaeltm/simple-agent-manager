@@ -9,7 +9,7 @@
  */
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { purgeAnalyticsEvents } from '../services/analytics-d1-sink';
+import { activeLocalAnalyticsSink } from '../services/analytics-sink';
 import { purgeExpiredErrors, type PurgeResult } from '../services/observability';
 
 export async function runObservabilityPurge(env: Env): Promise<PurgeResult> {
@@ -17,15 +17,28 @@ export async function runObservabilityPurge(env: Env): Promise<PurgeResult> {
     return { deletedByAge: 0, deletedByCount: 0 };
   }
 
-  const result = await purgeExpiredErrors(env.OBSERVABILITY_DATABASE, env);
-  // Self-host D1 analytics sink: age and row-cap bound. No D1 call unless ANALYTICS_SINK="d1".
-  // Isolated so an analytics purge failure cannot hide the error purge result.
+  // The error purge and the self-host analytics purge are isolated from each other (rule 53):
+  // a failure in either must not stop the other's retention. The error purge's failure is
+  // rethrown after the analytics purge ran, so the cron still records it.
+  let errorPurge: PurgeResult | undefined;
+  let errorPurgeFailure: unknown;
   try {
-    await purgeAnalyticsEvents(env);
+    errorPurge = await purgeExpiredErrors(env.OBSERVABILITY_DATABASE, env);
   } catch (err) {
-    log.error('analytics.d1_purge_failed', {
-      error: err instanceof Error ? err.message : String(err),
-    });
+    errorPurgeFailure = err;
   }
-  return result;
+  // Self-host local analytics sink: age and row-cap bound. No call at all on Cloudflare, where
+  // nothing is installed.
+  const local = activeLocalAnalyticsSink(env);
+  if (local) {
+    try {
+      await local.purge(env);
+    } catch (err) {
+      log.error('analytics.local_purge_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  if (errorPurge === undefined) throw errorPurgeFailure;
+  return errorPurge;
 }

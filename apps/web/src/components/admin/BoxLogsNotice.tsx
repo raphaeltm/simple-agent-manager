@@ -1,7 +1,7 @@
 import { Body, Card } from '@simple-agent-manager/ui';
 import type { FC } from 'react';
 
-/** The commands deploy/selfhost/README.md ("Logs") documents for reading logs on the box. */
+/** Commands for reading logs on a self-hosted box (the compose services the self-host deploy runs). */
 const BOX_LOG_COMMANDS = [
   'cd deploy/selfhost',
   'docker compose logs -f --since 30m celld          # Worker (API) logs, console.log and errors',

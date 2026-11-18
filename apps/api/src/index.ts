@@ -220,11 +220,12 @@ app.use('*', async (c, next) => {
     baseDomain,
     appPagesProjectName: c.env.PAGES_PROJECT_NAME,
     wwwPagesProjectName: c.env.WWW_PAGES_PROJECT_NAME,
-    hasWebAssets: c.env.ASSETS !== undefined,
+    hasWebAssets: Boolean(c.env.ASSETS),
   });
 
-  // Self-hosted deployments serve the web UI from the Worker's static assets. (`c.env.ASSETS`
-  // is re-checked only so TypeScript narrows the optional binding.)
+  // Self-hosted deployments bind the apps/web build as ASSETS and serve app.* from it.
+  // Cloudflare deployments have no ASSETS binding and keep proxying to Pages. (`c.env.ASSETS` is
+  // re-checked only so TypeScript narrows the optional binding.)
   if (pagesTarget.type === 'assets' && c.env.ASSETS) {
     return c.env.ASSETS.fetch(c.req.raw);
   }

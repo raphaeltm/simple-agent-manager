@@ -8,9 +8,9 @@ export interface PlatformCapabilities {
   textToSpeech: boolean;
   /** Whether a monthly AI dollar cap can be set (needs Cloudflare AI Gateway). */
   monthlyCostCap: boolean;
-  /** Admin → Logs search (Workers Observability). False on a self-hosted install. */
+  /** Admin → Logs search (Workers Observability). False where logs are read on the server. */
   logSearch: boolean;
-  /** Admin → Stream (tail worker). False on a self-hosted install. */
+  /** Admin → Stream (tail worker). False where no tail worker feeds it. */
   liveLogStream: boolean;
   /** Whether app deployments can run here (needs Cloudflare DNS for node and app routes). */
   appDeployments: boolean;

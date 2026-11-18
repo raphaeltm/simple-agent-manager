@@ -80,7 +80,14 @@ describe('prepareCelldProject', () => {
     expect(readlinkSync(join(mainDir!, leases))).toBe(
       join(API_DIR, 'src/selfhost/migrations', leases)
     );
-    expect(readdirSync(obsDir!).sort()).toEqual(observability);
+    // OBSERVABILITY_DATABASE likewise carries the self-host-only D1 analytics sink table (L20),
+    // which the shared observability directory (wrangler.toml) no longer holds.
+    const analytics = '0002_analytics_events.sql';
+    expect(observability).not.toContain(analytics);
+    expect(readdirSync(obsDir!).sort()).toEqual([...observability, analytics].sort());
+    expect(readlinkSync(join(obsDir!, analytics))).toBe(
+      join(API_DIR, 'src/selfhost/migrations/observability', analytics)
+    );
     // Flat: no subdirectory holding .sql files (celld refuses that), and links, not copies.
     for (const dir of [mainDir!, obsDir!]) {
       for (const entry of readdirSync(dir))

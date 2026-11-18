@@ -60,6 +60,43 @@ describe('admin log pages on a self-hosted install', () => {
     expect(screen.getByText(/live log stream is not available/)).toBeInTheDocument();
   });
 
+  it('mounts neither the search viewer nor the stream until the capabilities answer arrives', async () => {
+    // Hold the answer open: a box must not get a log query or a WebSocket from the assumed
+    // "every service present" default while the request is outstanding.
+    let answer: (response: Response) => void = () => undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            answer = resolve;
+          })
+      )
+    );
+    render(
+      withQuery(
+        <>
+          <AdminLogs />
+          <AdminStream />
+        </>
+      )
+    );
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(screen.queryByTestId('log-viewer')).toBeNull();
+    expect(screen.queryByTestId('log-stream')).toBeNull();
+
+    answer(
+      new Response(JSON.stringify(SELF_HOST), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+    // Liveness: once answered, the box notice renders for both pages.
+    await waitFor(() => expect(screen.getAllByTestId('box-logs-notice')).toHaveLength(2));
+    expect(screen.queryByTestId('log-viewer')).toBeNull();
+    expect(screen.queryByTestId('log-stream')).toBeNull();
+  });
+
   it('Cloudflare installs keep the viewer and the stream', async () => {
     const fetchMock = serveCapabilities(ASSUMED_PLATFORM_CAPABILITIES);
     render(
@@ -70,8 +107,8 @@ describe('admin log pages on a self-hosted install', () => {
         </>
       )
     );
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(screen.getByTestId('log-viewer')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('log-viewer')).toBeInTheDocument());
+    expect(fetchMock).toHaveBeenCalled();
     expect(screen.getByTestId('log-stream')).toBeInTheDocument();
     expect(screen.queryByTestId('box-logs-notice')).toBeNull();
   });

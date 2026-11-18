@@ -40,7 +40,8 @@ export const SELFHOST_VAR_OVERRIDES: Readonly<Record<string, string>> = {
   // runs the Workers AI Clef model only.
   STALLED_TASK_CLASSIFIER_ENABLED: 'false',
   // No Analytics Engine here: product analytics go to the D1 sink in OBSERVABILITY_DATABASE
-  // (apps/api/src/services/analytics-d1-sink.ts), bounded by its retention and row cap.
+  // (apps/api/src/selfhost/analytics/, installed by selfhost/build.ts), bounded by its
+  // analytics.d1.* retention and row cap.
   ANALYTICS_SINK: 'd1',
   // No tail worker on celld, so nothing feeds Admin → Stream; the page says to read logs on
   // the box instead (platform-capabilities.ts hasLiveLogStream).

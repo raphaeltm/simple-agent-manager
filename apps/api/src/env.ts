@@ -1287,7 +1287,7 @@ export interface Env
   ANALYTICS_WEBSITE_TRAFFIC_TOP_PAGES_LIMIT?: string; // Max top pages per section in website traffic (default: 20)
   // Analytics ingest endpoint (Phase 2 — client-side events)
   ANALYTICS_INGEST_ENABLED?: string; // "true" (default) or "false"
-  /** "d1" records and reads product analytics in OBSERVABILITY_DATABASE (self-host; services/analytics-d1-sink.ts). Unset: Analytics Engine. */
+  /** "d1" records and reads product analytics in OBSERVABILITY_DATABASE when the self-host build installed the D1 sink (selfhost/analytics/). Unset: Analytics Engine. */
   ANALYTICS_SINK?: string;
   RATE_LIMIT_ANALYTICS_INGEST?: string; // Rate limit per IP per hour (default: 500)
   MAX_ANALYTICS_INGEST_BATCH_SIZE?: string; // Max events per batch (default: 25)
@@ -1327,11 +1327,11 @@ export interface Env
   R2_BUCKET_NAME?: string;
   // Operator-run S3 store that holds the R2 binding's objects (non-Cloudflare runtimes such as
   // celld). When R2_S3_ENDPOINT is set, presigned URLs target R2_S3_BUCKET at
-  // `${R2_S3_KEY_PREFIX}${key}` instead of Cloudflare R2. See services/r2-s3-client.ts.
+  // `${R2_S3_KEY_PREFIX}${key}` instead of Cloudflare R2. See services/r2-presign-config.ts.
   R2_S3_ENDPOINT?: string;
   R2_S3_BUCKET?: string;
   R2_S3_KEY_PREFIX?: string;
-  R2_S3_REGION?: string; // Signing region (default: "auto"; MinIO-style stores usually "us-east-1")
+  R2_S3_REGION?: string; // Signing region of that store; required with R2_S3_ENDPOINT ("auto" for GCS/R2, e.g. "us-east-1" for MinIO or AWS)
   R2_S3_FORCE_PATH_STYLE?: string; // "false" for virtual-host addressing (default with R2_S3_ENDPOINT: path style)
   // Task attachment upload limits (all configurable per constitution Principle XI)
   ATTACHMENT_UPLOAD_MAX_BYTES?: string;

@@ -21,9 +21,9 @@ const adminAnalyticsRoutes = new Hono<{ Bindings: Env }>();
 // All analytics routes require superadmin
 adminAnalyticsRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
 
-// Every query route reads Cloudflare's Analytics Engine SQL API, or the D1 sink on self-host
-// (ANALYTICS_SINK="d1"). With neither there is nothing to query (and the dataset name is never generated), so answer "not
-// available" before any route builds SQL. Forward status is local state and stays readable.
+// Every query route reads Cloudflare's Analytics Engine SQL API, or a self-host local sink. With
+// neither there is nothing to query (and no dataset name is configured), so answer "not available"
+// before any route builds SQL. Forward status is local state and stays readable. Pure: no I/O.
 adminAnalyticsRoutes.use('/*', async (c, next) => {
   if (
     !resolvePlatformCapabilities(c.env).analyticsQuery &&

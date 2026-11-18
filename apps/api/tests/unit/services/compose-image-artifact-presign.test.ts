@@ -34,6 +34,8 @@ function operatorStoreEnv(overrides: Partial<Env> = {}): Env {
     R2_S3_ENDPOINT: 'https://s3.example.test',
     R2_S3_BUCKET: 'celld-fleet',
     R2_S3_KEY_PREFIX: 'r2/sam-assets/',
+    // Required with R2_S3_ENDPOINT since L20 (r2-presign-config.ts).
+    R2_S3_REGION: 'auto',
     ...overrides,
   } as Env;
 }

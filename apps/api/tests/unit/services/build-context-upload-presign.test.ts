@@ -52,6 +52,8 @@ describe('createBuildContextUpload (worker shim)', () => {
       R2_S3_ENDPOINT: 'https://s3.example.test',
       R2_S3_BUCKET: 'celld-fleet',
       R2_S3_KEY_PREFIX: 'r2/sam-assets/',
+      // Required with R2_S3_ENDPOINT since L20 (r2-presign-config.ts).
+      R2_S3_REGION: 'auto',
     } as Env;
 
     const slot = await createBuildContextUpload(env, OWNER, DESCRIPTOR, 300);
@@ -84,6 +86,7 @@ describe('createBuildContextDownload (worker shim)', () => {
         R2_S3_ENDPOINT: 'https://s3.example.test',
         R2_S3_BUCKET: 'celld-fleet',
         R2_S3_KEY_PREFIX: 'r2/sam-assets/',
+        R2_S3_REGION: 'auto',
       },
       's3.example.test',
       `/celld-fleet/r2/sam-assets/${KEY}`,

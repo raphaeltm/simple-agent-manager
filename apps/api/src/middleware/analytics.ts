@@ -2,7 +2,7 @@ import type { MiddlewareHandler } from 'hono';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { resolveAnalyticsSink } from '../services/analytics-d1-sink';
+import { resolveAnalyticsSink } from '../services/analytics-sink';
 
 // ---------------------------------------------------------------------------
 // Event name mapping: HTTP method + route pattern → human-readable event name
@@ -177,7 +177,7 @@ export function analyticsMiddleware(): MiddlewareHandler<{ Bindings: Env }> {
     const enabled = c.env.ANALYTICS_ENABLED !== 'false';
     if (!enabled) return;
 
-    // Analytics Engine, or the D1 sink on self-host (graceful degradation for local dev)
+    // Analytics Engine, or a self-host local sink (graceful degradation for local dev)
     const analytics = resolveAnalyticsSink(c.env);
     if (!analytics) return;
 
