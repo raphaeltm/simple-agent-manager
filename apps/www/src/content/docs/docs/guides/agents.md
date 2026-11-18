@@ -639,6 +639,13 @@ before some actions even when SAM sets Bypass Permissions. Google Antigravity ru
 as its YOLO mode and Accept Edits as its Auto Edit mode. It has no plan mode, so in **Plan Mode** it
 asks before acting.
 
+Mistral Vibe runs **Bypass Permissions** as `auto-approve`, **Accept Edits** as `accept-edits`,
+**Plan Mode** as `plan`, and **Manual** as `ask`. Vibe has no equivalent of **Don't Ask**, so
+SAM uses `ask` to keep approval checks: it can still ask when agent requests are enabled, and
+requests count as a no when they are disabled. Unset or unrecognized modes also reset to `ask`,
+including when restoring a conversation (`acpSessionModeID` in
+`packages/vm-agent/internal/acp/antigravity.go`).
+
 #### After a chat wakes from sleep
 
 Chats started since 7 October 2026 (on a self-hosted instance, on v2026.10.08 or later) keep their
