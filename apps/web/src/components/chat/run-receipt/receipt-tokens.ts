@@ -40,7 +40,7 @@ export function spendLabel(tokens: RunReceiptTokens): string | null {
       ? 'No spend estimate: SAM has no price for these models'
       : 'No spend estimate: SAM has no price for this model';
   }
-  const floor = unpricedModels.length > 0 ? 'At least ' : '';
+  const floor = tokens.limited || unpricedModels.length > 0 ? 'At least ' : '';
   return `${floor}~${formatUsd(usd)} estimated at SAM’s model prices`;
 }
 
@@ -58,6 +58,8 @@ export function tokensTile(
     return { value: '—', note: 'Could not be read just now', muted: true };
   }
   if (tokens.state === 'not_reported') {
+    if (tokens.limited)
+      return { value: 'Incomplete', note: 'Usage rows could not be recorded', muted: true };
     return context.live
       ? { value: 'Not reported yet', note: 'Counted when the agent reports a turn', muted: true }
       : { value: 'Not reported', note: 'This agent did not report token counts', muted: true };

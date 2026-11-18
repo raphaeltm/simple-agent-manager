@@ -6160,6 +6160,23 @@ export const agentRunUsage = sqliteTable(
   })
 );
 
+/** Sticky disclosure of harness usage refused by admission (migration 0261). */
+export const agentRunUsageAdmissionHits = sqliteTable(
+  'agent_run_usage_admission_hits',
+  {
+    projectId: text('project_id').notNull(),
+    chatSessionId: text('chat_session_id').notNull(),
+    lastRejectedAt: integer('last_rejected_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.projectId, table.chatSessionId] }),
+    projectRejectedIdx: index('idx_agent_run_usage_hits_project_rejected').on(
+      table.projectId,
+      table.lastRejectedAt
+    ),
+  })
+);
+
 /**
  * Daily usage-derived Cloudflare cost estimate, one row per UTC day per product line (Insights
  * slice CF, migration 0256). Written by `runCloudflareCostSnapshot`

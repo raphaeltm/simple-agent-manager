@@ -5,7 +5,7 @@
  * be filed live in `packages/operations/src/inbox-agent-core.ts`; this file only reaches the
  * stores and services the operations layer cannot.
  */
-import type { InboxAskAnnouncement } from '@simple-agent-manager/operations';
+import type { ArchiveCheckinHold, InboxAskAnnouncement } from '@simple-agent-manager/operations';
 import type { HumanInputCategory, InboxLink } from '@simple-agent-manager/shared';
 import { HUMAN_INPUT_CATEGORIES } from '@simple-agent-manager/shared';
 
@@ -13,6 +13,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import * as notificationService from '../notification';
 import * as projectDataService from '../project-data';
+import { stripMarkdown } from '../task-title';
 import { linkQuestionNotification } from './question-asks';
 
 /**
@@ -58,13 +59,20 @@ export async function announceAgentAsk(
       projectId: input.projectId,
       projectName,
       taskId: input.taskId,
-      taskTitle: task?.title ?? input.title,
-      context: input.body,
+      // A result's push leads with its outcome, not the task's name.
+      taskTitle: input.kind === 'result' ? input.title : (task?.title ?? input.title),
+      // `why` is markdown in the inbox; a push shows plain text.
+      context: stripMarkdown(input.body),
       category,
       options: input.options.length > 0 ? input.options : null,
       sessionId: input.sessionId,
       attentionMarkerId: input.askId,
       label: input.kind === 'review' ? 'Review' : undefined,
+      heading: input.kind === 'result' ? 'Result ready' : undefined,
+      // A review or result opens its inbox item; a question keeps its chat link.
+      ...(input.kind === 'question'
+        ? {}
+        : { inboxKind: input.kind, inboxRef: `ask:${input.askId}` }),
     });
     const scheduled = notification.id !== 'suppressed';
     if (scheduled && input.kind === 'question') {
@@ -95,6 +103,32 @@ export async function withdrawAgentQuestion(
     // The row is closed and the chat list reads it as closed; SAM's check-in hold stays until the
     // question's original deadline, when the candidate is evaluated again and finds no question.
     log.warn('inbox.agent_ask.withdraw_live_update_failed', {
+      askId: input.askId,
+      projectId: input.projectId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * The person archived a question: open chat views stop showing it, and SAM's check-ins stay off
+ * the chat until `holdCheckinsUntil` or until the person writes in it. Never throws.
+ */
+export async function announceQuestionArchived(
+  env: Env,
+  input: { projectId: string; sessionId: string; askId: string } & ArchiveCheckinHold
+): Promise<void> {
+  try {
+    await projectDataService.recordQuestionArchived(env, input.projectId, {
+      sessionId: input.sessionId,
+      askId: input.askId,
+      archivedAt: input.archivedAt,
+      holdCheckinsUntil: input.holdCheckinsUntil,
+    });
+  } catch (error) {
+    // The row is closed; any fresh read of the chat shows it closed. An open view lags, and SAM
+    // may check in on the chat before the person writes in it.
+    log.warn('inbox.question_archived_live_update_failed', {
       askId: input.askId,
       projectId: input.projectId,
       error: error instanceof Error ? error.message : String(error),

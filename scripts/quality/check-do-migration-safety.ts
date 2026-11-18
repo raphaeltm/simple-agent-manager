@@ -29,29 +29,23 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const DO_MIGRATION_FILES = [
-  resolve(
-    import.meta.dirname,
-    '../../packages/project-data/src/do/migrations.ts'
-  ),
-  resolve(
-    import.meta.dirname,
-    '../../apps/api/src/durable-objects/notification-migrations.ts'
-  ),
+import ts from 'typescript';
+
+export const DO_MIGRATION_FILES = [
+  resolve(import.meta.dirname, '../../packages/project-data/src/do/migrations.ts'),
+  resolve(import.meta.dirname, '../../apps/api/src/durable-objects/notification-migrations.ts'),
   // Migration 072's DDL and legacy-row copy live beside the comment core (it is invoked
   // from migrations.ts); scan it like the ledger itself.
-  resolve(
-    import.meta.dirname,
-    '../../packages/project-data/src/do/anchored-comments-migration.ts'
-  ),
+  resolve(import.meta.dirname, '../../packages/project-data/src/do/anchored-comments-migration.ts'),
   // setup-session-pool uses inline constructor DDL (pure DO-SQLite) — scan it.
-  // NOTE: credential-setup-session is intentionally NOT scanned here: it mixes DO
-  // SQLite with D1 writes (UPDATE agent_credential_setup_sessions ... WHERE id=?),
-  // and this scanner's line heuristic false-positives on the dynamic-SET D1 UPDATE.
-  // Its DO-SQLite DDL is a safe CREATE TABLE IF NOT EXISTS + WHERE-scoped writes.
+  resolve(import.meta.dirname, '../../apps/api/src/durable-objects/setup-session-pool.ts'),
+  // CredentialSetupSession keeps every DO-SQLite DDL statement (CREATE TABLE IF NOT
+  // EXISTS plus guarded ALTER TABLE ADD COLUMN) in schema.ts. Its index.ts is not
+  // scanned: it also writes D1 through a dynamic `SET ${...}` UPDATE that this
+  // scanner's line heuristic misreads. Any new DO DDL for it belongs in schema.ts.
   resolve(
     import.meta.dirname,
-    '../../apps/api/src/durable-objects/setup-session-pool.ts'
+    '../../apps/api/src/durable-objects/credential-setup-session/schema.ts'
   ),
 ];
 
@@ -83,144 +77,140 @@ const ALLOWLISTED_VIOLATIONS = new Set<string>([]);
  *
  * Rule 31 calls this gate one that "cannot be bypassed", so a quoting style must
  * never be able to bypass it.
+ *
+ * Use TypeScript's parser so regex literals cannot masquerade as comments or
+ * strings. Retain raw string bodies (including template interpolations) and
+ * source line numbers for the existing SQL checks and diagnostics.
  */
-export function extractSqlFromTypeScript(
-  content: string
-): { sql: string; lineStart: number }[] {
+export function extractSqlFromTypeScript(content: string): { sql: string; lineStart: number }[] {
   const results: { sql: string; lineStart: number }[] = [];
-
   const SQL_KEYWORDS = /\b(CREATE|DROP|DELETE|INSERT|UPDATE|ALTER|TRUNCATE|SELECT)\b/i;
-
-  // One pass per string form. Each pattern is anchored to its own delimiter and
-  // consumes escapes, so a quote character appearing INSIDE a differently-quoted
-  // string cannot pair with a delimiter from a neighbouring statement and produce
-  // a garbled, unscannable capture that spans two statements.
-  const stringPatterns = [
-    /`([^`\\]*(?:\\.[^`\\]*)*)`/g, // template literal
-    /'((?:[^'\\]|\\.)*)'/g, // single-quoted
-    /"((?:[^"\\]|\\.)*)"/g, // double-quoted
-  ];
-
-  for (const pattern of stringPatterns) {
-    let match;
-    while ((match = pattern.exec(content)) !== null) {
-      const sqlContent = match[1];
-      // Only include if it looks like SQL
-      if (!SQL_KEYWORDS.test(sqlContent)) continue;
-      const lineStart = content.substring(0, match.index).split('\n').length;
-      results.push({ sql: sqlContent, lineStart });
-    }
-  }
-
-  return results;
-}
-
-function scanDoMigrations(filePath: string): Violation[] {
-  const violations: Violation[] = [];
-  const content = readFileSync(filePath, 'utf-8');
-  const basename = filePath.split('/').pop() ?? filePath;
-  const sqlBlocks = extractSqlFromTypeScript(content);
-
-  for (const { sql, lineStart } of sqlBlocks) {
-    const sqlLines = sql.split('\n');
-
-    for (let i = 0; i < sqlLines.length; i++) {
-      const line = sqlLines[i];
-      const absoluteLine = lineStart + i;
-
-      // Skip comments
-      if (line.trim().startsWith('--')) continue;
-
-      // 1. DROP TABLE (never allowed in DO migrations)
-      const dropTableMatch = line.match(
-        /DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)/i
-      );
-      if (dropTableMatch) {
-        const tableName = dropTableMatch[1];
-        // Allow dropping _new/_tmp tables (cleanup of failed recreation)
-        if (
-          !tableName.endsWith('_new') &&
-          !tableName.endsWith('_tmp')
-        ) {
-          const key = `${basename}:${absoluteLine}`;
-          if (!ALLOWLISTED_VIOLATIONS.has(key)) {
-            violations.push({
-              file: basename,
-              line: absoluteLine,
-              pattern: 'DROP TABLE in DO migration',
-              message:
-                `DROP TABLE ${tableName} in a Durable Object migration is irreversible. ` +
-                `DO SQLite has NO time-travel recovery (unlike D1). ` +
-                `Use ALTER TABLE ADD COLUMN or CREATE TABLE IF NOT EXISTS instead.`,
-            });
-          }
-        }
-      }
-
-      // 2. DELETE FROM without WHERE
-      const deleteMatch = line.match(/DELETE\s+FROM\s+(\w+)/i);
-      if (deleteMatch) {
-        const tableName = deleteMatch[1];
-        // Check next few lines for WHERE clause
-        const context = sqlLines
-          .slice(i, Math.min(i + 3, sqlLines.length))
-          .join(' ');
-        if (!/WHERE/i.test(context)) {
-          const key = `${basename}:${absoluteLine}`;
-          if (!ALLOWLISTED_VIOLATIONS.has(key)) {
-            violations.push({
-              file: basename,
-              line: absoluteLine,
-              pattern: 'DELETE FROM without WHERE in DO migration',
-              message:
-                `DELETE FROM ${tableName} without WHERE will wipe all rows. ` +
-                `DO SQLite has no recovery mechanism. Add a WHERE clause.`,
-            });
-          }
-        }
-      }
-
-      // 3. UPDATE without WHERE (data corruption risk)
-      const updateMatch = line.match(/UPDATE\s+(\w+)\s+SET\b/i);
-      if (updateMatch) {
-        const tableName = updateMatch[1];
-        const context = sqlLines
-          .slice(i, Math.min(i + 3, sqlLines.length))
-          .join(' ');
-        // Allow UPDATE with WHERE (backfill patterns are fine)
-        if (!/WHERE/i.test(context)) {
-          // Allow known safe backfill patterns (e.g., SET column = rowid WHERE column IS NULL)
-          // The existing migration 007 does: UPDATE chat_messages SET sequence = rowid WHERE sequence IS NULL
-          // That has a WHERE so it won't trigger this check.
-          const key = `${basename}:${absoluteLine}`;
-          if (!ALLOWLISTED_VIOLATIONS.has(key)) {
-            violations.push({
-              file: basename,
-              line: absoluteLine,
-              pattern: 'UPDATE without WHERE in DO migration',
-              message:
-                `UPDATE ${tableName} SET without WHERE will modify all rows. ` +
-                `If this is an intentional backfill, add a WHERE clause (e.g., WHERE column IS NULL).`,
-            });
-          }
-        }
-      }
-
-      // 4. TRUNCATE (not valid in SQLite but catch anyway)
-      const truncateMatch = line.match(
-        /TRUNCATE\s+(?:TABLE\s+)?(\w+)/i
-      );
-      if (truncateMatch) {
-        violations.push({
-          file: basename,
-          line: absoluteLine,
-          pattern: 'TRUNCATE in DO migration',
-          message: `TRUNCATE ${truncateMatch[1]} is irreversible in DO SQLite.`,
+  const source = ts.createSourceFile(
+    'migration.ts',
+    content,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS
+  );
+  function visit(node: ts.Node): void {
+    if (
+      ts.isStringLiteral(node) ||
+      ts.isNoSubstitutionTemplateLiteral(node) ||
+      ts.isTemplateExpression(node)
+    ) {
+      const start = node.getStart(source);
+      const sql = content.slice(start + 1, node.end - 1);
+      if (SQL_KEYWORDS.test(sql)) {
+        results.push({
+          sql,
+          lineStart: source.getLineAndCharacterOfPosition(start).line + 1,
         });
       }
     }
+    ts.forEachChild(node, visit);
   }
+  visit(source);
+  return results;
+}
 
+type ViolationLocation = Pick<Violation, 'file' | 'line'>;
+
+function dropTableViolation(line: string, location: ViolationLocation): Violation | undefined {
+  const match = /DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)/i.exec(line);
+  if (!match) return;
+  const tableName = match[1];
+  // Preserve failed-recreation cleanup and the source-line allowlist.
+  if (
+    tableName.endsWith('_new') ||
+    tableName.endsWith('_tmp') ||
+    ALLOWLISTED_VIOLATIONS.has(`${location.file}:${location.line}`)
+  )
+    return;
+  return {
+    ...location,
+    pattern: 'DROP TABLE in DO migration',
+    message:
+      `DROP TABLE ${tableName} in a Durable Object migration is irreversible. ` +
+      `DO SQLite has NO time-travel recovery (unlike D1). ` +
+      `Use ALTER TABLE ADD COLUMN or CREATE TABLE IF NOT EXISTS instead.`,
+  };
+}
+
+function deleteWithoutWhereViolation(
+  line: string,
+  context: string,
+  location: ViolationLocation
+): Violation | undefined {
+  const match = /DELETE\s+FROM\s+(\w+)/i.exec(line);
+  if (
+    !match ||
+    /WHERE/i.test(context) ||
+    ALLOWLISTED_VIOLATIONS.has(`${location.file}:${location.line}`)
+  )
+    return;
+  return {
+    ...location,
+    pattern: 'DELETE FROM without WHERE in DO migration',
+    message:
+      `DELETE FROM ${match[1]} without WHERE will wipe all rows. ` +
+      `DO SQLite has no recovery mechanism. Add a WHERE clause.`,
+  };
+}
+
+function updateWithoutWhereViolation(
+  line: string,
+  context: string,
+  location: ViolationLocation
+): Violation | undefined {
+  const match = /UPDATE\s+(\w+)\s+SET\b/i.exec(line);
+  if (
+    !match ||
+    /WHERE/i.test(context) ||
+    ALLOWLISTED_VIOLATIONS.has(`${location.file}:${location.line}`)
+  )
+    return;
+  return {
+    ...location,
+    pattern: 'UPDATE without WHERE in DO migration',
+    message:
+      `UPDATE ${match[1]} SET without WHERE will modify all rows. ` +
+      `If this is an intentional backfill, add a WHERE clause (e.g., WHERE column IS NULL).`,
+  };
+}
+
+function truncateViolation(line: string, location: ViolationLocation): Violation | undefined {
+  const match = /TRUNCATE\s+(?:TABLE\s+)?(\w+)/i.exec(line);
+  if (!match) return;
+  // TRUNCATE has never honored the allowlist; preserve that strict behavior.
+  return {
+    ...location,
+    pattern: 'TRUNCATE in DO migration',
+    message: `TRUNCATE ${match[1]} is irreversible in DO SQLite.`,
+  };
+}
+
+export function scanDoMigrations(filePath: string): Violation[] {
+  const violations: Violation[] = [];
+  const content = readFileSync(filePath, 'utf-8');
+  const basename = filePath.split('/').pop() ?? filePath;
+  for (const { sql, lineStart } of extractSqlFromTypeScript(content)) {
+    const sqlLines = sql.split('\n');
+    for (let i = 0; i < sqlLines.length; i++) {
+      const line = sqlLines[i];
+      if (line.trim().startsWith('--')) continue;
+      const location = { file: basename, line: lineStart + i };
+      // DELETE/UPDATE retain the same three-line WHERE lookahead.
+      const context = sqlLines.slice(i, Math.min(i + 3, sqlLines.length)).join(' ');
+      for (const violation of [
+        dropTableViolation(line, location),
+        deleteWithoutWhereViolation(line, context, location),
+        updateWithoutWhereViolation(line, context, location),
+        truncateViolation(line, location),
+      ]) {
+        if (violation) violations.push(violation);
+      }
+    }
+  }
   return violations;
 }
 
@@ -240,9 +230,7 @@ function main(): void {
       );
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
-        console.log(
-          `  ${filePath.split('/').pop()}: SKIPPED (file not found)`
-        );
+        console.log(`  ${filePath.split('/').pop()}: SKIPPED (file not found)`);
       } else {
         throw e;
       }
@@ -252,25 +240,19 @@ function main(): void {
   console.log('');
 
   if (allViolations.length > 0) {
-    console.error(
-      `DO migration safety check FAILED — ${allViolations.length} violation(s):\n`
-    );
+    console.error(`DO migration safety check FAILED — ${allViolations.length} violation(s):\n`);
     for (const v of allViolations) {
       console.error(`  ${v.file}:${v.line}`);
       console.error(`  Pattern: ${v.pattern}`);
       console.error(`  ${v.message}`);
       console.error('');
     }
-    console.error(
-      'DO SQLite has NO time-travel recovery. Destructive operations are permanent.'
-    );
+    console.error('DO SQLite has NO time-travel recovery. Destructive operations are permanent.');
     console.error('See .claude/rules/31-migration-safety.md\n');
     process.exit(1);
   }
 
-  console.log(
-    'DO migration safety check passed. All migrations are non-destructive.'
-  );
+  console.log('DO migration safety check passed. All migrations are non-destructive.');
 }
 
 // Only run main when executed directly (not when imported for testing).

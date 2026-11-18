@@ -1,12 +1,17 @@
-import type { InboxItem } from '@simple-agent-manager/shared';
+import type { InboxActionResponse, InboxItem } from '@simple-agent-manager/shared';
 import { Button, IconButton, paneClassName, Spinner } from '@simple-agent-manager/ui';
 import { ArrowRight, Check, X } from 'lucide-react';
 import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useMinuteClock } from '../../hooks/useMinuteClock';
 import type { answerInboxItem } from '../../lib/api';
-import { deliveryNote, useInboxPermissionDetail, useInboxSend } from './inbox-actions';
-import { buildRows } from './inbox-model';
+import {
+  acknowledgeReceipt,
+  deliveryNote,
+  useInboxPermissionDetail,
+  useInboxSend,
+} from './inbox-actions';
+import { acknowledgeLabel, buildRows, isAcknowledgeable } from './inbox-model';
 import { InboxPushInvite } from './InboxPushInvite';
 import { InboxEmptyState, InboxRow } from './InboxRow';
 import { useInboxList, useInvalidateInbox } from './useInbox';
@@ -18,9 +23,15 @@ const ONE_TAP_OPTION_MAX_CHARS = 24;
 /** And only for this many options or fewer. */
 const ONE_TAP_MAX_OPTIONS = 3;
 
-type OneTap = { label: string; body: Parameters<typeof answerInboxItem>[2]; primary?: boolean };
+type OneTap = {
+  label: string;
+  body: Parameters<typeof answerInboxItem>[2];
+  primary?: boolean;
+  /** Receipt text; defaults to `Sent “<label>”` plus the delivery note. */
+  receipt?: (response: InboxActionResponse) => string;
+};
 
-/** Option and review answers that are safe in one tap; permissions are handled separately. */
+/** Option, review and result answers that are safe in one tap; permissions are handled separately. */
 function staticOneTaps(item: InboxItem): OneTap[] {
   if (!item.canAct || item.status !== 'open') return [];
   const spec = item.answerSpec;
@@ -32,8 +43,15 @@ function staticOneTaps(item: InboxItem): OneTap[] {
   ) {
     return spec.options.map((option) => ({ label: option, body: { answer: option } }));
   }
-  if (spec.type === 'acknowledge' && item.kind === 'review') {
-    return [{ label: 'Looks good', body: {}, primary: true }];
+  if (spec.type === 'acknowledge' && isAcknowledgeable(item)) {
+    return [
+      {
+        label: acknowledgeLabel(item),
+        body: {},
+        primary: true,
+        receipt: (r) => acknowledgeReceipt(item, r),
+      },
+    ];
   }
   return [];
 }
@@ -78,7 +96,7 @@ function OneTapButtons({ item, taps }: { item: InboxItem; taps: OneTap[] }) {
               void send(
                 choice.label,
                 choice.body,
-                (r) => `Sent “${choice.label}”${deliveryNote(r)}`
+                choice.receipt ?? ((r) => `Sent “${choice.label}”${deliveryNote(r)}`)
               )
             }
             className="min-h-11 max-w-full !whitespace-normal break-words"
@@ -121,7 +139,8 @@ function QuickAnswers({ item }: { item: InboxItem }) {
 
 /**
  * The desktop quick view behind the inbox icon: the first items across every project, one-tap
- * answers only where one tap is safe (Allow / Deny, three or fewer short options, "Looks good"),
+ * answers only where one tap is safe (Allow / Deny, three or fewer short options, "Looks good",
+ * "Got it"),
  * and a link to the full inbox. Everything else opens the item on the Inbox page.
  */
 export const InboxQuickView = forwardRef<
