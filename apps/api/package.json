@@ -29,7 +29,7 @@
     "@cloudflare/workers-oauth-provider": "1.2.4",
     "@hono/node-server": "1.19.9",
     "@hono/valibot-validator": "0.6.1",
-    "@mastra/core": "1.83.0",
+    "@mastra/core": "1.84.0",
     "@modelcontextprotocol/server": "2.3.1",
     "@simple-agent-manager/agent-email": "workspace:*",
     "@simple-agent-manager/ai-proxy": "workspace:*",
@@ -44,7 +44,7 @@
     "@simple-agent-manager/shared": "workspace:*",
     "@simple-agent-manager/worker-core": "workspace:*",
     "@valibot/to-json-schema": "catalog:",
-    "ai": "7.0.137",
+    "ai": "7.0.173",
     "better-auth": "catalog:",
     "better-auth-cloudflare": "0.3.1",
     "drizzle-orm": "catalog:",
@@ -52,7 +52,7 @@
     "jose": "catalog:",
     "tsx": "catalog:",
     "valibot": "catalog:",
-    "workers-ai-provider": "4.0.1",
+    "workers-ai-provider": "4.0.0",
     "yaml": "catalog:"
   },
   "devDependencies": {
