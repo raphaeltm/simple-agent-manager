@@ -10,6 +10,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/emersion/go-smtp"
 )
@@ -64,12 +66,35 @@ func main() {
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	signalled := make(chan struct{})
 	go func() {
 		<-stop
-		_ = server.Close()
+		close(signalled)
 	}()
-	if err := server.Serve(newLimitedListener(listener, cfg)); err != nil && !errors.Is(err, smtp.ErrServerClosed) {
+	if err := serveUntil(server, newLimitedListener(listener, cfg), signalled, cfg.ShutdownGrace); err != nil {
 		slog.Error("sam-mx: server stopped", "error", err.Error())
 		os.Exit(1)
 	}
+}
+
+// serveUntil serves until stop closes, then lets in-flight deliveries finish for up to grace (the
+// Worker may already have committed one) before closing what is left. It returns only after that
+// drain: Serve itself returns as soon as Shutdown closes the listener, and returning then would
+// end the process with the deliveries still running.
+func serveUntil(server *smtp.Server, ln net.Listener, stop <-chan struct{}, grace time.Duration) error {
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		<-stop
+		ctx, cancel := context.WithTimeout(context.Background(), grace)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			_ = server.Close()
+		}
+	}()
+	if err := server.Serve(ln); err != nil && !errors.Is(err, smtp.ErrServerClosed) {
+		return err
+	}
+	<-drained
+	return nil
 }

@@ -16,10 +16,13 @@ export interface TestTlsCertificates {
   cert: string;
 }
 
+const OPENSSL_BIN = process.env.SAM_TEST_OPENSSL_BIN ?? '/usr/bin/openssl';
+
 /** A throwaway CA and a server certificate for `names` (DNS) plus 127.0.0.1. */
 export function createTestTlsCertificates(names: string[]): TestTlsCertificates {
   const dir = mkdtempSync(join(tmpdir(), 'sam-smtp-tls-'));
-  const openssl = (args: string[]) => execFileSync('openssl', args, { cwd: dir, stdio: 'pipe' });
+  // A fixed path rather than a PATH lookup (Linux CI runners and the devcontainer both have it).
+  const openssl = (args: string[]) => execFileSync(OPENSSL_BIN, args, { cwd: dir, stdio: 'pipe' });
   try {
     openssl([
       'req',
@@ -191,6 +194,10 @@ export async function startFakeSmtpServer(options: FakeSmtpOptions): Promise<Fak
       } else if (verb === 'RCPT') {
         to.push(/<(.*)>/.exec(line)?.[1] ?? '');
         write(`${options.rcptCode ?? 250} 2.1.5 recipient`);
+      } else if (verb === 'RSET') {
+        from = '';
+        to = [];
+        write('250 2.0.0 reset');
       } else if (verb === 'DATA') {
         inData = true;
         dataLines = [];

@@ -1,7 +1,7 @@
 /**
  * SMTP settings for SAM's own email (sign-in codes) on installs without Cloudflare's Email
  * Sending binding, such as a self-hosted celld box. Operator bootstrap configuration
- * (Worker vars plus the SMTP_PASSWORD secret, written by `scripts/selfhost/mail-settings.ts`):
+ * (Worker vars plus the SMTP_PASSWORD secret, written by the self-host deploy from the box .env):
  * the sender must work before any administrator exists, because the first account signs up by
  * email.
  *
@@ -31,7 +31,7 @@ export interface SmtpConfig {
 
 /**
  * The settings this module reads. Declared here rather than picked from `Env` so the self-host
- * deploy script (scripts/selfhost/mail-settings.ts) can validate a box's settings with this
+ * deploy script can validate a box's settings with this
  * same function; `Env` satisfies it structurally.
  */
 export interface SmtpEnv {

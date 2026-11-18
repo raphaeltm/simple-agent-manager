@@ -85,15 +85,20 @@ export function emailSignUpOffered(
  *   owner out.
  * - `ready`: the sending domain is enabled, or its state could not be read. An unreadable state
  *   (older runtime tokens lack Email Sending Read) keeps the previous behaviour rather than
- *   blocking setup on a permission the deploy may not have granted. An SMTP transport is
- *   `ready` without any check: Cloudflare's sending-domain API is only asked about its own
- *   binding, and SMTP has no domain verification step SAM could read.
+ *   blocking setup on a permission the deploy may not have granted.
+ *
+ * An SMTP transport (a self-hosted box) has no sending-domain state to read, and Cloudflare's
+ * API is never asked about it. Instead the relay is probed (`EmailTransport.probe`): connect,
+ * TLS, credentials, then the sender and the owner as recipient, abandoned with RSET so nothing
+ * is sent. A relay that refuses any step, or does not answer within `agentEmail.smtpTimeoutMs`,
+ * makes email sign-up `unavailable`, so setup asks for a sign-in provider instead of closing on
+ * a code that would never arrive (F13). The probe runs only for the token-gated setup routes.
  */
 export type EmailSignInReadiness = 'unavailable' | 'verifying' | 'ready';
 
 export async function emailSignInReadiness(env: Env): Promise<EmailSignInReadiness> {
   if (!emailSignUpOffered(env)) return 'unavailable';
-  if (emailTransportKind(env) !== 'cloudflare') return 'ready';
+  if (emailTransportKind(env) !== 'cloudflare') return smtpRelayReadiness(env);
   const domain = agentEmailDomain(env.BASE_DOMAIN).toLowerCase();
   try {
     const subdomains = await listSendingSubdomains(env);
@@ -104,6 +109,23 @@ export async function emailSignInReadiness(env: Env): Promise<EmailSignInReadine
       error: error instanceof Error ? error.message : String(error),
     });
     return 'ready';
+  }
+}
+
+async function smtpRelayReadiness(env: Env): Promise<EmailSignInReadiness> {
+  const owner = bootstrapOwnerEmail(env);
+  const transport = await resolveSystemEmailTransport(env);
+  if (!owner || !transport?.probe) return 'unavailable';
+  try {
+    await transport.probe(owner);
+    return 'ready';
+  } catch (error) {
+    // SmtpError messages name the refused step and reply code, never the server's text.
+    log.error('email_sign_in.smtp_relay_unusable', {
+      error: error instanceof Error ? error.message : String(error),
+      action: 'email_sign_up_unavailable',
+    });
+    return 'unavailable';
   }
 }
 

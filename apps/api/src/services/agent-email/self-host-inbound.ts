@@ -13,7 +13,7 @@
  * agent address: the recipient's answer goes back to the same trigger and the thread continues.
  *
  * The switch is the deploy's declaration that the receiver is installed
- * (`AGENT_EMAIL_INBOUND_SMTP='true'`, scripts/selfhost/inbound-mail-settings.ts), plus the two
+ * (`AGENT_EMAIL_INBOUND_SMTP='true'`, set by the self-host deploy), plus the two
  * things the feature cannot work without: the gateway secret the receiver authenticates with and
  * a working SMTP transport for replies. The Cloudflare binding always wins, so a Cloudflare
  * deployment behaves exactly as before.
@@ -23,11 +23,13 @@ import {
   type EmailTransportEnv,
   emailTransportKind,
   type SmtpConnect,
+  SmtpError,
   systemEmailTransportFor,
 } from '@simple-agent-manager/agent-email/definitions';
 import { AGENT_EMAIL_LOCAL_PART } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
+import { log } from '../../lib/logger';
 
 /**
  * Must equal `MIN_REVERSE_TUNNEL_GATEWAY_SECRET_LENGTH` in selfhost/reverse-tunnel/config.ts
@@ -36,7 +38,10 @@ import type { Env } from '../../env';
 export const MIN_GATEWAY_SECRET_LENGTH = 32;
 
 export type SelfHostInboundEnv = EmailTransportEnv &
-  Pick<Env, 'AGENT_EMAIL_INBOUND_SMTP' | 'REVERSE_TUNNEL_GATEWAY_SECRET'>;
+  Pick<Env, 'AGENT_EMAIL_INBOUND_SMTP'> & {
+    /** Self-host bootstrap secret (selfhost/reverse-tunnel/env.ts); never a Cloudflare binding. */
+    REVERSE_TUNNEL_GATEWAY_SECRET?: string;
+  };
 
 /** Agent email runs on this install through sam-mx and SMTP (and not through Cloudflare). */
 export function isSelfHostInboundEmailConfigured(env: SelfHostInboundEnv): boolean {
@@ -70,12 +75,23 @@ export function selfHostAgentEmailSender(
   const transport = systemEmailTransportFor(env, options);
   if (transport?.kind !== 'smtp') return null;
   return {
-    send(message) {
-      return transport.sender.send({
-        ...message,
-        from: { email: transport.systemFrom(AGENT_EMAIL_LOCAL_PART), name: message.from.name },
-        replyTo: message.from.email,
-      });
+    async send(message) {
+      try {
+        return await transport.sender.send({
+          ...message,
+          from: { email: transport.systemFrom(AGENT_EMAIL_LOCAL_PART), name: message.from.name },
+          replyTo: message.from.email,
+        });
+      } catch (error) {
+        // The failure text reaches the agent (reply_to_email). A relay refusal names only the
+        // step and reply code; a transport failure can name the relay host or TLS details, so the
+        // agent gets a fixed text and the operator log keeps the detail.
+        if (error instanceof SmtpError && error.replyCode !== null) throw error;
+        log.error('agent_email.smtp_transport_failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw new SmtpError('SMTP relay unavailable');
+      }
     },
   };
 }

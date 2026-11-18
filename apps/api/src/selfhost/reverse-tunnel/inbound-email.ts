@@ -23,7 +23,6 @@
  */
 import type { Context } from 'hono';
 
-import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { normalizeMailbox } from '../../services/agent-email/address';
 import {
@@ -36,6 +35,7 @@ import {
   getReverseTunnelGatewaySecret,
   isAcceptedGatewaySecret,
 } from './config';
+import type { ReverseTunnelEnv } from './env';
 
 export const INBOUND_EMAIL_HEADER = {
   secret: 'X-SAM-Gateway-Secret',
@@ -82,7 +82,7 @@ function boundedBody(
 }
 
 export async function handleInboundEmailGateway(
-  c: Context<{ Bindings: Env }>,
+  c: Context<{ Bindings: ReverseTunnelEnv }>,
   deps: InboundDeps = {}
 ): Promise<Response> {
   const secret = getReverseTunnelGatewaySecret(c.env);

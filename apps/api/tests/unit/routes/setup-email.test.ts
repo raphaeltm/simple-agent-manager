@@ -15,15 +15,23 @@ import type { Env } from '../../../src/env';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
 import { setupRoutes } from '../../../src/routes/setup';
 import { isAgentEmailOn } from '../../../src/services/agent-email/setup-state';
-import { __resetPlatformConfigCacheForTest } from '../../../src/services/platform-config';
+import {
+  __resetPlatformConfigCacheForTest,
+  isSetupCompleted,
+} from '../../../src/services/platform-config';
 import { FAKE_CF_ZONE_ID, fakeCloudflareEmail } from '../../helpers/fake-cloudflare-email';
+import {
+  type FakeSmtpOptions,
+  type FakeSmtpServer,
+  startFakeSmtpServer,
+} from '../../helpers/fake-smtp-server';
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const MAIN = 'fixture.example';
 const DOMAIN = `agents.${MAIN}`;
 
 interface VerifyBody {
-  signIn: { email: boolean; ownerEmail: string | null };
+  signIn: { email: boolean; emailReady?: boolean; ownerEmail: string | null };
 }
 
 interface CompleteBody {
@@ -170,25 +178,86 @@ describe('first-run setup with email', () => {
     expect((await post('/complete', { token: 'setup-token', config: {} })).status).toBe(200);
   });
 
-  it('completes with email sign-in over SMTP (no Cloudflare binding), without calling Cloudflare', async () => {
-    const fetchMock = vi.fn(async () => new Response('unexpected', { status: 500 }));
-    vi.stubGlobal('fetch', fetchMock);
-    env = makeEnv({
-      AGENT_EMAIL: undefined,
-      AGENT_EMAIL_WORKER_NAME: undefined,
-      SMTP_HOST: 'smtp.fixture.example',
-      SMTP_USERNAME: 'relay-user',
-      SMTP_PASSWORD: 'relay-pass',
-      SMTP_FROM: 'sign-in@fixture.example',
+  describe('over SMTP (a self-hosted box: no Cloudflare binding)', () => {
+    let relay: FakeSmtpServer | undefined;
+
+    afterEach(async () => {
+      await relay?.close();
+      relay = undefined;
     });
-    const verify = (await (await post('/verify', { token: 'setup-token' })).json()) as VerifyBody;
-    expect(verify.signIn).toEqual({
-      email: true,
-      emailReady: true,
-      ownerEmail: 'owner@fixture.example',
+
+    async function smtpEnv(options: Partial<FakeSmtpOptions> = {}): Promise<Env> {
+      relay = await startFakeSmtpServer({
+        mode: 'plain',
+        credentials: { username: 'relay-user', password: 'relay-pass' },
+        ...options,
+      });
+      return makeEnv({
+        AGENT_EMAIL: undefined,
+        AGENT_EMAIL_WORKER_NAME: undefined,
+        SMTP_HOST: '127.0.0.1',
+        SMTP_PORT: String(relay.port),
+        SMTP_TLS: 'none',
+        SMTP_USERNAME: 'relay-user',
+        SMTP_PASSWORD: 'relay-pass',
+        SMTP_FROM: 'sign-in@fixture.example',
+      });
+    }
+
+    it('completes with email sign-in once the relay accepts the owner, without calling Cloudflare', async () => {
+      const fetchMock = vi.fn(async () => new Response('unexpected', { status: 500 }));
+      vi.stubGlobal('fetch', fetchMock);
+      env = await smtpEnv();
+      const verify = (await (await post('/verify', { token: 'setup-token' })).json()) as VerifyBody;
+      expect(verify.signIn).toEqual({
+        email: true,
+        emailReady: true,
+        ownerEmail: 'owner@fixture.example',
+      });
+      expect((await post('/complete', { token: 'setup-token', config: {} })).status).toBe(200);
+      expect(fetchMock).not.toHaveBeenCalled();
+      // The readiness probe asked the relay about the owner and sent nothing.
+      expect(relay?.commands).toContain('RCPT TO:<owner@fixture.example>');
+      expect(relay?.commands).not.toContain('DATA');
+      expect(relay?.messages).toHaveLength(0);
     });
-    expect((await post('/complete', { token: 'setup-token', config: {} })).status).toBe(200);
-    expect(fetchMock).not.toHaveBeenCalled();
+
+    it.each([
+      ['refuses the credentials', { credentials: { username: 'relay-user', password: 'rotated' } }],
+      ['refuses to relay to the owner', { rcptCode: 554 }],
+      ['refuses the sender', { mailCode: 553 }],
+    ] as const)(
+      'does not close setup on email alone when the relay %s (F13: owner lock-out)',
+      async (_name, options) => {
+        env = await smtpEnv(options);
+        const verify = (await (
+          await post('/verify', { token: 'setup-token' })
+        ).json()) as VerifyBody;
+        expect(verify.signIn).toMatchObject({ email: false, emailReady: false });
+        const res = await post('/complete', { token: 'setup-token', config: {} });
+        expect(res.status).toBe(400);
+        expect(await isSetupCompleted(env)).toBe(false);
+        expect(relay?.messages).toHaveLength(0);
+      }
+    );
+
+    it('does not close setup on email alone when the owner address cannot go on the SMTP envelope', async () => {
+      // The relay would take it, but the sender refuses any address it cannot put on the envelope
+      // verbatim, so a code could never be sent: the probe must refuse it too.
+      env = { ...(await smtpEnv()), BOOTSTRAP_OWNER_EMAIL: "o'brien@fixture.example" } as Env;
+      const verify = (await (await post('/verify', { token: 'setup-token' })).json()) as VerifyBody;
+      expect(verify.signIn).toMatchObject({ email: false, emailReady: false });
+      expect((await post('/complete', { token: 'setup-token', config: {} })).status).toBe(400);
+      expect(relay?.commands).toEqual([]);
+    });
+
+    it('does not close setup on email alone when the relay is unreachable', async () => {
+      env = await smtpEnv();
+      await relay?.close();
+      relay = undefined;
+      expect((await post('/complete', { token: 'setup-token', config: {} })).status).toBe(400);
+      expect(await isSetupCompleted(env)).toBe(false);
+    });
   });
 
   it('still needs a sign-in provider where the deployment cannot send email', async () => {

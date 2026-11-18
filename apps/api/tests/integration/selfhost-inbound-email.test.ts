@@ -26,9 +26,9 @@ import { adminAgentEmailRoutes } from '../../src/routes/admin-agent-email';
 import { mcpRoutes } from '../../src/routes/mcp';
 import { createSelfHostGatewayRoutes } from '../../src/selfhost/reverse-tunnel/gateway';
 import { __resetAdminSettingsCacheForTest } from '../../src/services/admin-settings';
+import { isSelfHostInboundEmailConfigured } from '../../src/services/agent-email/self-host-inbound';
 import { agentEmailConfig } from '../../src/services/agent-email/setup-state';
 import { type McpTokenData, storeMcpToken } from '../../src/services/mcp-token';
-import { resolvePlatformCapabilities } from '../../src/services/platform-capabilities';
 import { __resetPlatformConfigCacheForTest } from '../../src/services/platform-config';
 import type { TriggerTaskSubmitter } from '../../src/services/trigger-admission';
 import { createAgentEmailTables } from '../helpers/agent-email-tables';
@@ -270,6 +270,37 @@ describe('self-hosted inbound agent email', () => {
     ).toEqual([{ status: 'sent', toAddress: 'alice@example.com' }]);
   });
 
+  it('tells the agent only "SMTP relay unavailable" when the relay cannot be reached, and logs the detail', async () => {
+    const response = await gatewayRequest(rawEmail());
+    expect(await response.json()).toEqual({ outcome: 'accepted' });
+    const submission = submitter.mock.calls[0]![1];
+    // The relay goes away between the inbound mail and the agent's reply.
+    await smtp.close();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const reply = await callReplyTool(submission.triggerExecutionId, 'Fixed and deployed.');
+    const text = JSON.stringify(reply.body);
+    expect(text).toContain('The email could not be sent: SMTP relay unavailable');
+    expect(text).not.toContain('127.0.0.1');
+    expect(text).not.toContain('ECONNREFUSED');
+    expect(
+      logged.mock.calls.some((call) =>
+        String(call[0]).includes('agent_email.smtp_transport_failed')
+      )
+    ).toBe(true);
+  });
+
+  it('control: a relay refusal still reaches the agent as the refused step and code', async () => {
+    const response = await gatewayRequest(rawEmail());
+    expect(await response.json()).toEqual({ outcome: 'accepted' });
+    const submission = submitter.mock.calls[0]![1];
+    await smtp.close();
+    smtp = await startFakeSmtpServer({ mode: 'plain', rcptCode: 550 });
+    env = makeEnv();
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const reply = await callReplyTool(submission.triggerExecutionId, 'Fixed and deployed.');
+    expect(JSON.stringify(reply.body)).toContain('SMTP RCPT TO refused with 550');
+  });
+
   it('refuses a sender outside the allowlist, so the receiver answers 550', async () => {
     const raw = rawEmail({ from: 'Mallory <mallory@example.com>' });
     const response = await gatewayRequest(raw, {
@@ -397,8 +428,8 @@ describe('self-hosted inbound agent email', () => {
     expect(smtp.messages).toHaveLength(0);
   });
 
-  it('turns agent email and the inbound capability on only when the receiver is configured', async () => {
-    expect(resolvePlatformCapabilities(env).inboundAgentEmail).toBe(true);
+  it('turns agent email on only when the receiver is configured', async () => {
+    expect(isSelfHostInboundEmailConfigured(env)).toBe(true);
     await expect(agentEmailConfig(env)).resolves.toEqual({
       enabled: true,
       domain: `agents.${BASE_DOMAIN}`,
@@ -410,24 +441,21 @@ describe('self-hosted inbound agent email', () => {
       { SMTP_HOST: undefined },
     ] satisfies Partial<Env>[]) {
       const off = makeEnv(overrides);
-      expect(resolvePlatformCapabilities(off).inboundAgentEmail).toBe(false);
+      expect(isSelfHostInboundEmailConfigured(off)).toBe(false);
       await expect(agentEmailConfig(off)).resolves.toEqual({ enabled: false, domain: null });
     }
   });
 
   describe('through the real sam-mx receiver', () => {
-    const goAvailable = (() => {
-      try {
-        execFileSync('go', ['version'], { stdio: 'ignore' });
-        return true;
-      } catch {
-        return false;
-      }
-    })();
-    if (!goAvailable) {
-      // Visible in the run output, not silent: the Go tests in deploy/selfhost/sam-mx cover the
-      // receiver on its own; this block needs the Go toolchain to build it.
-      console.warn('selfhost-inbound-email: go not found, skipping the sam-mx binary tests');
+    // Builds and runs the Go receiver, so it runs only where CI provides the pinned Go toolchain:
+    // the self-host email job (.github/workflows/selfhost-email-tests.yml) sets
+    // SAM_MX_RECEIVER_TESTS=1, and then a missing toolchain fails instead of skipping. Locally:
+    // SAM_MX_RECEIVER_TESTS=1 pnpm vitest run tests/integration/selfhost-inbound-email.test.ts
+    const receiverTests = process.env.SAM_MX_RECEIVER_TESTS === '1';
+    if (!receiverTests) {
+      console.warn(
+        'selfhost-inbound-email: SAM_MX_RECEIVER_TESTS is not 1, skipping the sam-mx binary tests'
+      );
     }
     let binary = '';
     let bridge: http.Server;
@@ -436,7 +464,7 @@ describe('self-hosted inbound agent email', () => {
     let smtpPort = 0;
 
     beforeAll(() => {
-      if (!goAvailable) return;
+      if (!receiverTests) return;
       const dir = mkdtempSync(join(tmpdir(), 'sam-mx-'));
       binary = join(dir, 'sam-mx');
       execFileSync('go', ['build', '-o', binary, '.'], {
@@ -551,7 +579,7 @@ describe('self-hosted inbound agent email', () => {
       return replies;
     }
 
-    it.skipIf(!goAvailable)(
+    it.skipIf(!receiverTests)(
       'an SMTP message from an allowed sender starts a task, and the reply goes out',
       async () => {
         await startBridge();

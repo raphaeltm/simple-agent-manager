@@ -15,6 +15,7 @@ import { githubUserTokenUnavailableError } from '../../src/services/github-token
 import { getGitHubUserAccessTokenForOwner } from '../../src/services/github-user-access-token';
 import { __resetPlatformConfigCacheForTest } from '../../src/services/platform-config';
 import { createSessionCookieForUser } from '../../src/services/session-factory';
+import { startFakeSmtpServer } from '../helpers/fake-smtp-server';
 import { buildAuthApp } from '../helpers/oauth-sign-in';
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../helpers/sqlite-d1';
 
@@ -25,6 +26,15 @@ const GITHUB_REDIRECT_URI = `${API_ORIGIN}/api/auth/callback/github`;
 const CLIENT_ID = 'Iv1.sam-link-client';
 const CLIENT_SECRET = 'sam-link-client-secret';
 const SAM_EMAIL = 'raphael@vmtest.example.com';
+
+/** The text of a message the fake relay received (7bit or base64 body, smtp-message.ts). */
+function smtpBodyText(data: string): string {
+  const [head = '', ...rest] = data.split('\r\n\r\n');
+  const body = rest.join('\r\n\r\n');
+  return /Content-Transfer-Encoding: base64/i.test(head)
+    ? Buffer.from(body.replace(/\r\n/g, ''), 'base64').toString('utf8')
+    : body;
+}
 
 /** A GitHub account whose primary email differs from the SAM account's. */
 const GITHUB_USER = { id: 777, login: 'octo', name: 'Octo', email: null, avatar_url: null };
@@ -110,7 +120,7 @@ describe('Connect GitHub for an email-signed account (vertical slice)', () => {
   let env: Env;
   let github: ReturnType<typeof createFakeGitHub>;
   const app = buildAuthApp();
-  let sent: Array<{ to: string; subject: string; text: string }>;
+  let sent: Array<{ from: { email: string }; to: string; subject: string; text: string }>;
 
   beforeEach(() => {
     sqlite = new Database(':memory:');
@@ -119,7 +129,12 @@ describe('Connect GitHub for an email-signed account (vertical slice)', () => {
     env = {
       KV: createMemoryKv(),
       AGENT_EMAIL: {
-        async send(message: { to: string; subject: string; text: string }) {
+        async send(message: {
+          from: { email: string };
+          to: string;
+          subject: string;
+          text: string;
+        }) {
           sent.push(message);
           return { messageId: 'test-message' };
         },
@@ -238,6 +253,11 @@ describe('Connect GitHub for an email-signed account (vertical slice)', () => {
       ).toBe(true)
     );
     expect(sent.every((mail) => mail.to === SAM_EMAIL)).toBe(true);
+    // Cloudflare unchanged: confirmation and owner alert both come from security@agents.<domain>.
+    expect(sent.map((mail) => mail.from.email)).toEqual([
+      'security@agents.example.com',
+      'security@agents.example.com',
+    ]);
     expect(githubLinks()).toEqual([{ account_id: '777', user_id: 'email-user' }]);
     const user = sqlite
       .prepare(`SELECT email, email_verified AS verified FROM users WHERE id = 'email-user'`)
@@ -250,6 +270,85 @@ describe('Connect GitHub for an email-signed account (vertical slice)', () => {
     const token = await getGitHubUserAccessTokenForOwner(env, 'email-user', 'git-token-test');
     expect(token).not.toBeNull();
     expect(github.issuedTokens.has(token ?? '')).toBe(true);
+  });
+
+  it('confirms the link and alerts the owner over SMTP on a self-hosted box (no Cloudflare binding)', async () => {
+    const relay = await startFakeSmtpServer({ mode: 'plain' });
+    try {
+      env = {
+        ...env,
+        AGENT_EMAIL: undefined,
+        SMTP_HOST: '127.0.0.1',
+        SMTP_PORT: String(relay.port),
+        SMTP_TLS: 'none',
+        SMTP_FROM: 'sam@vmtest.example.com',
+      } as Env;
+      const { sessionCookie } = await createSessionCookieForUser(env, 'email-user');
+      const request = await app.request(
+        `${API_ORIGIN}/api/auth/account-link/request`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            origin: APP_ORIGIN,
+            cookie: sessionCookie,
+          },
+          body: JSON.stringify({ provider: 'github' }),
+        },
+        env
+      );
+      expect(request.status, await request.clone().text()).toBe(200);
+      expect(relay.messages).toHaveLength(1);
+      const confirmation = relay.messages[0]!;
+      expect(confirmation.from).toBe('sam@vmtest.example.com');
+      expect(confirmation.to).toEqual([SAM_EMAIL]);
+      const url = new URL(/https:\/\/[^\s]+/.exec(smtpBodyText(confirmation.data))?.[0] ?? '');
+      const token = new URLSearchParams(url.hash.slice(1)).get('linkToken');
+      expect(token).toBeTruthy();
+
+      const start = await startLink(sessionCookie, token!);
+      expect(start.status).toBe(200);
+      const { url: authorize } = (await start.json()) as { url: string };
+      const authorizeUrl = new URL(authorize);
+      const callback = new URL(GITHUB_REDIRECT_URI);
+      callback.searchParams.set('code', github.approve(authorizeUrl));
+      callback.searchParams.set('state', authorizeUrl.searchParams.get('state') ?? '');
+      const done = await app.request(
+        callback.toString(),
+        { headers: { cookie: [sessionCookie, cookieHeader(start)].filter(Boolean).join('; ') } },
+        env
+      );
+      expect(done.status).toBe(302);
+      expect(githubLinks()).toEqual([{ account_id: '777', user_id: 'email-user' }]);
+
+      // The explicit link alerts the account owner, through the same SMTP transport.
+      await vi.waitFor(() => expect(relay.messages).toHaveLength(2));
+      const alert = relay.messages[1]!;
+      expect(alert.from).toBe('sam@vmtest.example.com');
+      expect(alert.to).toEqual([SAM_EMAIL]);
+      expect(alert.data).toMatch(
+        /^Subject: SAM security alert: a GitHub sign-in was linked to a user account$/im
+      );
+      expect(sent).toHaveLength(0);
+    } finally {
+      await relay.close();
+    }
+  });
+
+  it('refuses to start a link when SMTP is not configured and there is no Cloudflare binding', async () => {
+    env = { ...env, AGENT_EMAIL: undefined } as Env;
+    const { sessionCookie } = await createSessionCookieForUser(env, 'email-user');
+    const request = await app.request(
+      `${API_ORIGIN}/api/auth/account-link/request`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: APP_ORIGIN, cookie: sessionCookie },
+        body: JSON.stringify({ provider: 'github' }),
+      },
+      env
+    );
+    expect(request.status).toBe(403);
+    expect(sent).toHaveLength(0);
   });
 
   async function signInWithGitHub(): Promise<Response> {

@@ -70,6 +70,7 @@ jobs:
       web-ui: ${{ steps.filter.outputs.web-ui }}
       browser-install: ${{ steps.filter.outputs.browser-install }}
       go-modules: ${{ steps.filter.outputs.go-modules }}
+      selfhost-email: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.selfhost-email }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -136,6 +137,8 @@ jobs:
               - 'scripts/deploy/types.ts'
               - 'scripts/deploy/vapid-keys.ts'
               - 'scripts/selfhost/reverse-tunnel-migrations.ts'
+              # selfhost-inbound-email.test.ts builds this receiver (Self-host Email job only).
+              - 'deploy/selfhost/sam-mx/**'
               - 'scripts/quality/node-pool-boundary.ts'
               - 'scripts/quality/node-pool-boundary/**'
               - 'tests/fixtures/acp-activity-report-v1.json'
@@ -302,6 +305,29 @@ jobs:
               - '**/go.mod'
               - '**/go.sum'
               - 'scripts/quality/check-go-vulnerability-diff.ts'
+            # Self-host email: the sam-mx receiver and the SMTP path (landing plan F12, D9).
+            # Deliberately not packages/cloud-init: the VM path does not reach this code.
+            selfhost-email:
+              - 'deploy/selfhost/sam-mx/**'
+              - 'packages/agent-email/**'
+              - 'apps/api/src/selfhost/**'
+              - 'apps/api/src/services/agent-email/**'
+              - 'apps/api/src/services/email-sign-in.ts'
+              - 'apps/api/src/services/security-alerts.ts'
+              - 'apps/api/src/routes/account-linking.ts'
+              - 'apps/api/src/routes/admin-agent-email.ts'
+              - 'apps/api/src/routes/auth.ts'
+              - 'apps/api/src/routes/setup.ts'
+              - 'apps/api/src/env.ts'
+              - 'apps/api/tests/unit/routes/setup-email.test.ts'
+              - 'apps/api/tests/integration/github-link-social.test.ts'
+              - 'apps/api/tests/helpers/fake-smtp-server.ts'
+              - 'apps/api/tests/mocks/cloudflare-sockets.ts'
+              - 'apps/api/tests/integration/selfhost-inbound-email.test.ts'
+              - 'apps/api/tests/integration/email-sign-in-smtp.test.ts'
+              - 'apps/api/tests/workers/smtp-client-workerd.test.ts'
+              - 'apps/api/tests/workers/support/smtp-native-entry.ts'
+              - '.github/workflows/selfhost-email-tests.yml'
 
   # One job for the PR-body and PR-content checks. They used to be three jobs that each
   # spent a runner slot on checkout and install for a few seconds of work. Each check
@@ -1114,6 +1140,7 @@ jobs:
       - hosted-git
       - pulumi-infra
       - vm-agent-test
+      - selfhost-email
       - cli-test
       - vm-agent-integration
       - devcontainer
@@ -1230,6 +1257,12 @@ jobs:
       - name: Run VM Agent tests
         working-directory: packages/vm-agent
         run: go test -race ./...
+
+  selfhost-email:
+    name: Self-host Email
+    needs: [changes]
+    if: needs.changes.outputs.selfhost-email == 'true' && !github.event.pull_request.draft
+    uses: ./.github/workflows/selfhost-email-tests.yml
 
   cli-test:
     name: CLI Test
