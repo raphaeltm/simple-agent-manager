@@ -43,8 +43,10 @@ import {
 } from '../../components/resource-requirements';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import type { UseProfilePickerResult } from '../../hooks/useProfilePicker';
+import { getComposerPlaceholder } from './profileWizardHelpers';
 import { NoAgentsNotice, NoProfilesGate, ProfileWizardPanel } from './ProfileWizardPanel';
 import type { ProfileSheetState, ProfileWizardState } from './useProfileChoice';
+import { useSoleAgentQuickStart } from './useSoleAgentQuickStart';
 
 interface ChatAttachmentDisplay {
   file: File;
@@ -93,6 +95,8 @@ type ChatInputProps = Readonly<{
   onCloseProfileWizard: () => void;
   onUpdateProfileWizard: (patch: Partial<ProfileWizardState>) => void;
   onCreateProfileFromWizard: () => Promise<AgentProfile | null>;
+  /** One click when the project has exactly one agent: create its chat profile, no wizard. */
+  onCreateDefaultChatProfile?: () => Promise<AgentProfile | null>;
   suggestProfileName: (agentType: string | null, workType: TaskMode | null) => string;
   slashCommands?: SlashCommand[];
   attachments?: ChatAttachmentDisplay[];
@@ -112,22 +116,6 @@ type ChatInputProps = Readonly<{
   /** Accessible name for the text box when the placeholder alone is not enough. */
   inputLabel?: string;
 }>;
-
-function getComposerPlaceholder({
-  noAgents,
-  needsProfileBeforeSubmit,
-  wizardOpen,
-  placeholder,
-}: Readonly<{
-  noAgents: boolean;
-  needsProfileBeforeSubmit: boolean;
-  wizardOpen: boolean;
-  placeholder: string;
-}>) {
-  if (noAgents) return 'Add an agent in Settings to start chatting...';
-  if (needsProfileBeforeSubmit || wizardOpen) return 'Create a profile to start chatting...';
-  return placeholder;
-}
 
 /**
  * The new-chat composer: one toolbar row (who the chat goes to, attach, options) above
@@ -168,6 +156,7 @@ export function ChatInput({
   onCloseProfileWizard,
   onUpdateProfileWizard,
   onCreateProfileFromWizard,
+  onCreateDefaultChatProfile,
   suggestProfileName,
   slashCommands,
   attachments,
@@ -200,9 +189,18 @@ export function ChatInput({
   const inputDisabled =
     noAgents || needsProfileBeforeSubmit || profileWizard.open || Boolean(profilesLoading);
   const showToolbar = !inputDisabled && agentProfiles.length > 0;
+  const quickStart = useSoleAgentQuickStart({
+    agents,
+    suggestProfileName,
+    onCreate: onCreateDefaultChatProfile,
+    instantAvailable: profileWizard.instantAvailable,
+    inputDisabled,
+    containerRef,
+  });
   const composerPlaceholder = getComposerPlaceholder({
     noAgents,
     needsProfileBeforeSubmit,
+    quickStartOffered: Boolean(quickStart),
     wizardOpen: profileWizard.open,
     placeholder,
   });
@@ -342,7 +340,7 @@ export function ChatInput({
       {noAgents && <NoAgentsNotice projectId={projectId} />}
 
       {needsProfileBeforeSubmit && !profileWizard.open && (
-        <NoProfilesGate onStartWizard={onOpenProfileWizard} />
+        <NoProfilesGate onStartWizard={onOpenProfileWizard} quickStart={quickStart} />
       )}
 
       {profileWizard.open && (
