@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   acquireLibraryMemory,
   LIBRARY_MEMORY_BUDGET_BYTES,
-  LIBRARY_MEMORY_MIN_RESERVATION_BYTES,
+  LIBRARY_MEMORY_TRANSFER_OVERHEAD_BYTES,
   libraryMemoryReservation,
   loadLibraryDownload,
   withLibraryMemory,
@@ -26,15 +26,37 @@ afterEach(() => vi.useRealTimers());
 
 describe('Library memory budget', () => {
   it('lets small transfers share the budget and refuses the one that would exceed it', () => {
-    const small = 10 * 1024 * 1024;
-    const owners = [1, 2, 3, 4, 5].map(() => acquireLibraryMemory(small));
-    // 5 x 10 MiB fills the 50 MiB budget exactly; one more byte-sized transfer does not fit.
-    expect(() => acquireLibraryMemory(1)).toThrow(/in progress/);
+    const reservation = libraryMemoryReservation(10 * 1024 * 1024);
+    const fit = Math.floor(LIBRARY_MEMORY_BUDGET_BYTES / reservation);
+    expect(fit).toBe(4);
+    const owners = Array.from({ length: fit }, () => acquireLibraryMemory(10 * 1024 * 1024));
+    const remaining = LIBRARY_MEMORY_BUDGET_BYTES - fit * reservation;
+    // Fill the rest exactly, then nothing more fits.
+    const filler = acquireLibraryMemory(remaining - LIBRARY_MEMORY_TRANSFER_OVERHEAD_BYTES);
+    expect(() => acquireLibraryMemory(0)).toThrow(/in progress/);
+    filler();
     owners[0]!();
     owners[0]!(); // Idempotent: a repeated release cannot free another owner's bytes.
-    const next = acquireLibraryMemory(small);
-    expect(() => acquireLibraryMemory(1)).toThrow(/in progress/);
+    const next = acquireLibraryMemory(10 * 1024 * 1024);
+    expect(() => acquireLibraryMemory(remaining)).toThrow(/in progress/);
     for (const release of [next, ...owners.slice(1)]) release();
+    available();
+  });
+
+  it('caps how many tiny transfers fit, since each carries fixed buffers', () => {
+    const owners: Array<() => void> = [];
+    for (;;) {
+      try {
+        owners.push(acquireLibraryMemory(1));
+      } catch {
+        break;
+      }
+    }
+    expect(owners).toHaveLength(
+      Math.floor(LIBRARY_MEMORY_BUDGET_BYTES / (1 + LIBRARY_MEMORY_TRANSFER_OVERHEAD_BYTES))
+    );
+    expect(owners.length).toBeLessThanOrEqual(200);
+    for (const release of owners) release();
     available();
   });
 
@@ -49,12 +71,12 @@ describe('Library memory budget', () => {
     available();
   });
 
-  it('clamps reservations to a chunk floor and the budget, and treats invalid sizes as unknown', () => {
-    expect(libraryMemoryReservation(0)).toBe(LIBRARY_MEMORY_MIN_RESERVATION_BYTES);
-    expect(libraryMemoryReservation(5 * 1024 * 1024)).toBe(5 * 1024 * 1024);
-    expect(libraryMemoryReservation(LIBRARY_MEMORY_BUDGET_BYTES * 4)).toBe(
-      LIBRARY_MEMORY_BUDGET_BYTES
+  it('adds fixed overhead, clamps to the budget, and treats invalid sizes as unknown', () => {
+    expect(libraryMemoryReservation(0)).toBe(LIBRARY_MEMORY_TRANSFER_OVERHEAD_BYTES);
+    expect(libraryMemoryReservation(5 * 1024 * 1024)).toBe(
+      5 * 1024 * 1024 + LIBRARY_MEMORY_TRANSFER_OVERHEAD_BYTES
     );
+    expect(libraryMemoryReservation(LIBRARY_MEMORY_BUDGET_BYTES)).toBe(LIBRARY_MEMORY_BUDGET_BYTES);
     for (const invalid of [undefined, -1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 2]) {
       expect(libraryMemoryReservation(invalid)).toBe(LIBRARY_MEMORY_BUDGET_BYTES);
     }
@@ -63,8 +85,10 @@ describe('Library memory budget', () => {
 
   it('reserves a download by its declared size and returns it when the stream finishes', async () => {
     const owned = await loadLibraryDownload(async () => ({ data: new ArrayBuffer(16) }), 1000, 16);
+    // A small download leaves room for another transfer, but not for a whole-budget one.
     const other = acquireLibraryMemory(1024);
     other();
+    expect(() => acquireLibraryMemory()).toThrow(/in progress/);
     const reader = owned.stream().getReader();
     while (!(await reader.read()).done) {
       /* drain */

@@ -235,11 +235,15 @@ libraryRoutes.get('/:fileId/download', requireAuth(), requireApproved(), async (
 
   await requireProjectAccess(db, projectId, userId);
 
+  // Stored size bounds the plaintext, so small downloads share the memory budget.
+  const { file: stored } = await getFile(db, projectId, fileId);
+  assertDebugPackageVisibleTo(auth.user.role, stored.directory);
   const encryptionKey = getEncryptionKey(c.env);
   const timeoutMs = getDownloadTimeoutMs(c.env);
   const owned = await loadLibraryDownload(
-    () => downloadFile(db, c.env.R2, encryptionKey, projectId, fileId),
-    timeoutMs
+    () => downloadFile(db, c.env.R2, encryptionKey, projectId, fileId, stored.sizeBytes),
+    timeoutMs,
+    stored.sizeBytes
   );
   try {
     const { data, file } = owned.value;

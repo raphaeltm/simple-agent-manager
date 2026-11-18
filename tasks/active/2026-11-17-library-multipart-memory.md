@@ -65,3 +65,8 @@ Tests:
 - Two upload tests were updated, because an understated length is now refused before materialization.
 
 Residual: large concurrent transfers that together exceed 50 MiB still get 429. On main those would have exceeded the isolate's memory.
+
+Re-review (fresh security-auditor on c0f23010): PASS, with one MEDIUM. A 64 KiB minimum was smaller than the two fixed 64 KiB buffers each upload holds, so about 800 tiny slow uploads could exceed the budget. Fixed:
+- Every reservation now adds 256 KiB of fixed overhead (`LIBRARY_MEMORY_TRANSFER_OVERHEAD_BYTES`). That caps concurrency at about 200, and each transfer peaks at no more than twice its reservation.
+- From the LOW findings: the Download route now reserves the stored size, after a `getFile` (+1 D1 read; GET download stays within the 8 round-trip budget).
+- The weak download-reservation test now asserts that the budget stays held.

@@ -359,11 +359,12 @@ metadata consumes a small additional portion. Parsing uses 64 KiB allocation chu
 Browser writes, HTTP downloads/previews, agent transfers and diagnostic-package
 capture share a 50 MiB memory budget per Worker isolate (`acquireLibraryMemory()` in
 `apps/api/src/services/library-memory.ts`). A browser upload reserves its declared
-`Content-Length`, which is then enforced while streaming; a preview reserves the stored
-file size and refuses (`409`) a stored object larger than that reservation. Each
-reservation is at least 64 KiB. Downloads, agent transfers, diagnostic capture and
-uploads without a declared length reserve the whole budget. So several small uploads or
-previews run together, while a maximum-size file runs alone. A transfer that does not fit
+`Content-Length`, which is then enforced while streaming; a download or preview reserves
+the stored file size and refuses (`409`) a stored object larger than that reservation.
+Every reservation adds 256 KiB for fixed buffers, so at most about 200 transfers fit.
+Agent transfers, diagnostic capture and uploads without a declared length reserve the
+whole budget. So several small uploads or previews run together, while a maximum-size
+file runs alone. A transfer that does not fit
 receives `429` (or the MCP retry error) without queuing file buffers. The reservation
 follows the file through encryption/storage or its actual consumer. HTTP reads copy at
 most 64 KiB per response pull and keep their reservation until consumption,

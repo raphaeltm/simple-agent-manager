@@ -536,8 +536,14 @@ describe('Library multipart request memory and admission bounds', () => {
       expect(response.status).toBe(200);
       const reader = response.body!.getReader();
       try {
-        expect((await app().fetch(new Request(`${base}/file-1/download`), env)).status).toBe(429);
+        // A whole-budget transfer cannot start while this response holds its reservation.
+        mocks.getFile.mockResolvedValueOnce({
+          file: { id: 'file-2', filename: 'big.bin', directory: '/', sizeBytes: 50 * 1024 * 1024 },
+          tags: [],
+        });
+        expect((await app().fetch(new Request(`${base}/file-2/download`), env)).status).toBe(429);
         expect(mocks.download).toHaveBeenCalledOnce();
+        // An upload without a declared length reserves the whole budget too.
         const ingress = request(multipart(filePart('hello')));
         expect((await app().fetch(ingress.request, env)).status).toBe(429);
         expect(ingress.read).not.toHaveBeenCalled();

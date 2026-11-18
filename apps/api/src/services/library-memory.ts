@@ -9,8 +9,13 @@ import { LIBRARY_MULTIPART_DEFAULTS } from './admin-settings-library-definitions
  * several small uploads or previews a page issues together do not refuse each other.
  */
 export const LIBRARY_MEMORY_BUDGET_BYTES = LIBRARY_MULTIPART_DEFAULTS.fileMaxBytes;
-/** Smallest reservation: one 64 KiB parser/egress chunk, so tiny files are never free. */
-export const LIBRARY_MEMORY_MIN_RESERVATION_BYTES = 64 * 1024;
+/**
+ * Fixed bytes added to every reservation. An upload holds two 64 KiB buffers (BYOB read and
+ * parser pending) beyond its file bytes, and every request carries its own objects. With this
+ * overhead each transfer peaks at no more than twice its reservation, so the sum of concurrent
+ * peaks stays within twice the budget: the same bound as one maximum-size transfer.
+ */
+export const LIBRARY_MEMORY_TRANSFER_OVERHEAD_BYTES = 256 * 1024;
 
 let reservedBytes = 0;
 
@@ -19,10 +24,7 @@ export function libraryMemoryReservation(size?: number): number {
   if (size === undefined || !Number.isSafeInteger(size) || size < 0) {
     return LIBRARY_MEMORY_BUDGET_BYTES;
   }
-  return Math.min(
-    LIBRARY_MEMORY_BUDGET_BYTES,
-    Math.max(LIBRARY_MEMORY_MIN_RESERVATION_BYTES, size)
-  );
+  return Math.min(LIBRARY_MEMORY_BUDGET_BYTES, size + LIBRARY_MEMORY_TRANSFER_OVERHEAD_BYTES);
 }
 
 /**
