@@ -1146,6 +1146,7 @@ replay, duplicate count and fingerprint-conflict behavior in either mode. A skip
 event has no delivery-key ledger; a later redelivery is evaluated against the
 subscriptions active at that later admission. GitHub trigger execution remains
 independent of canonical project-event storage (`routes/github-webhook.ts`).
+
 ## Use an OpenAI-compatible model server
 
 Under **AI models**, set `llm.openAICompatible.baseUrl`, the model ID and optional API key.
@@ -1159,3 +1160,50 @@ for all keys, budgets, proxy availability and accounting limits.
 
 <!-- Verified: services/llm-endpoint-settings.ts, services/llm-chat-target.ts,
      services/platform-capabilities.ts:resolveLlmEndpointCapability. -->
+
+## Guided-login cleanup recovery
+
+`credentialSetup.cleanupRecoveryStepTimeoutMs` (Operations) limits each remote step when a
+guided credential-login cleanup is retried by its recovery alarm: D1 repair, sandbox scrub,
+sandbox destruction and pool release. The default is 5,000 ms per step (range 1–10,000 ms),
+capped by `SANDBOX_EXEC_TIMEOUT_MS`. `credentialSetup.cleanupRecoveryMaxAttempts` sets the
+number of recovery work attempts (default 3, range 1–10). Its value is fixed for each cleanup
+when recovery first begins; changing it affects future cleanups. Legacy cleanup already in
+progress keeps its original cap of three. Waiting for an
+already-issued SDK operation does not consume an attempt. Remote waits total
+at most 20 seconds per attempt by default (40 seconds at the maximum), plus the existing
+bounded settings read. A late successful scrub and a successful destruction may each continue once without spending
+another attempt. Including these two bounded continuation passes, the maximum configured
+cap allows 480 seconds of remote waits; the default allows 100 seconds. A final bounded
+D1/pool reconciliation after proven destruction adds at most 20 seconds (10 seconds by
+default), making the conservative episode limits 500 and 110 seconds respectively. Only recovery reads these settings; inline cancellation keeps the
+interactive sandbox timeout.
+
+An alarm joining cleanup already owned by an inline cancellation waits at most one
+recovery-step timeout. If that owner is still blocked in D1 or pool bookkeeping, the
+alarm preserves its ownership and schedules the same immutable uncertainty watchdog.
+Settlement wakes recovery sooner when cleanup is still owed; a permanent stall reaches
+quarantine without starting duplicate sandbox work or repeatedly polling the blocked RPC.
+
+A deadline stops waiting; it does not cancel an SDK operation. Cleanup cannot record
+successful destruction or release its pool slot while earlier sandbox work may still start
+the container. D1 status writes run outside the sandbox-flight counter: once the actual
+SDK work settles, a stalled status write cannot delay sandbox cleanup. Any subsequent
+SDK read rechecks the session lifecycle before starting. Unfinished cleanup remains marked pending. If an isolate dies before that
+work's settlement is observed, recovery preserves the uncertainty. After the recovery cap,
+the session is quarantined and reported as an operator-visible platform error; a late
+settlement does not reset the cap. Pending SDK work has a separate watchdog at the later
+of the original session expiry and one interactive timeout plus a capture poll after teardown.
+Observed settlement wakes cleanup earlier. A timed-out destruction remains tracked: only its
+original successful completion records destruction proof, and recovery waits before another
+sandbox operation or pool release. A rejected or nonzero scrub remains retryable until scrub
+or destruction succeeds. If an alarm cannot establish a durable next wake while cleanup is
+still owed, it fails so Cloudflare can apply its bounded alarm retry policy.
+
+Initial cancellation establishes its recovery alarm before committing a terminal state. If
+arming fails, cancellation fails with the session still active and eligible for the existing
+sweep. Recovery scrubs a provisioning sandbox after its SDK flight settles because a
+background login driver may already have started. A late successful scrub or a successful destruction
+can finish its current attempt once; it never reopens quarantined cleanup. Once destruction
+is proven, successful D1/pool bookkeeping clears pending cleanup before the failure budget
+is checked; failed bookkeeping still spends the bounded budget.
