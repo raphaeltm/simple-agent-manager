@@ -886,6 +886,13 @@ export {
   isInsightsRange,
 } from './insights-flow';
 
+// Lifecycle phase timings (Insights slice T): the operations a stored phase can name
+export type { LifecyclePhaseOperation } from './lifecycle-phase-operations';
+export {
+  LIFECYCLE_PHASE_OPERATIONS,
+  PROJECT_LIFECYCLE_PHASE_OPERATIONS,
+} from './lifecycle-phase-operations';
+
 // Insights · Accounts (Insights slice A)
 export type {
   InsightsAccount,

@@ -16,6 +16,7 @@
 import {
   INSIGHTS_RANGES,
   INSIGHTS_SETUP_GROUPINGS,
+  PROJECT_LIFECYCLE_PHASE_OPERATIONS,
   type ProjectAccountsResponse,
   type ProjectFlowResponse,
   type ProjectSetupsResponse,
@@ -58,7 +59,7 @@ export const ProjectInsightsInputSchema = v.strictObject({
   groupBy: v.optional(v.picklist(INSIGHTS_SETUP_GROUPINGS)),
   skillId: v.optional(id),
   agentProfileId: v.optional(id),
-  operation: v.optional(v.pipe(v.string(), v.regex(/^[a-z_]{1,32}$/))),
+  operation: v.optional(v.picklist(PROJECT_LIFECYCLE_PHASE_OPERATIONS)),
   phaseNames: v.optional(
     v.pipe(
       v.array(v.pipe(v.string(), v.regex(/^[a-z0-9_-]{1,64}$/))),

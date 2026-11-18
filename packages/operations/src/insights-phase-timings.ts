@@ -210,7 +210,8 @@ export async function phaseDurationStats(
     ...(phases ?? []),
   ];
   if (input.operation !== undefined) bindings.push(input.operation);
-  bindings.push(MAX_PHASE_STATS_TOTAL_ROWS);
+  // One row past the total bound: its presence, not a full page, is what proves the bound cut.
+  bindings.push(MAX_PHASE_STATS_TOTAL_ROWS + 1);
 
   const result = await db
     .prepare(
@@ -267,12 +268,13 @@ export async function phaseDurationStats(
     )
     .bind(...bindings)
     .all<Record<string, unknown>>();
-  const rows = result.results ?? [];
+  const read = result.results ?? [];
+  const totalBoundReached = read.length > MAX_PHASE_STATS_TOTAL_ROWS;
+  const rows = totalBoundReached ? read.slice(0, MAX_PHASE_STATS_TOTAL_ROWS) : read;
 
   const groups = new Map<string, { operation: string; phase: string; durations: number[] }>();
   // The total bound trims by row number, so it can also drop a pair entirely: the response says
   // so even when every pair that came back is complete.
-  const totalBoundReached = rows.length >= MAX_PHASE_STATS_TOTAL_ROWS;
   // Per pair, how many rows it read before the total bound. A stat with fewer durations than that
   // was cut, by its own sample (the extra row) or by the total bound.
   const pairRows = new Map<string, number>();

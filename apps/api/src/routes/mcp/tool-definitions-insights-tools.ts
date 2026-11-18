@@ -9,7 +9,11 @@ import {
   MAX_PHASE_STATS_WINDOW_DAYS,
   PROJECT_INSIGHTS_METHODS,
 } from '@simple-agent-manager/operations';
-import { INSIGHTS_RANGES, INSIGHTS_SETUP_GROUPINGS } from '@simple-agent-manager/shared';
+import {
+  INSIGHTS_RANGES,
+  INSIGHTS_SETUP_GROUPINGS,
+  PROJECT_LIFECYCLE_PHASE_OPERATIONS,
+} from '@simple-agent-manager/shared';
 
 /** Bounds the handler enforces (`ProjectInsightsInputSchema`); the test compares them all. */
 const id = (description: string) => ({
@@ -43,7 +47,7 @@ export const INSIGHTS_TOOLS = [
         agentProfileId: id('phases: exactly one of skillId or agentProfileId.'),
         operation: {
           type: 'string',
-          pattern: '^[a-z_]{1,32}$',
+          enum: [...PROJECT_LIFECYCLE_PHASE_OPERATIONS],
           description: 'phases: only workspace, wake, sleep, runner_start or runner_wake.',
         },
         phaseNames: {

@@ -282,6 +282,32 @@ describe('insights phase timings reads', () => {
     expect(dense.every((stat) => stat.truncated)).toBe(true);
   });
 
+  it('does not claim truncation when the read fills the total bound exactly', async () => {
+    // Ten pairs of exactly the maximum sample: 20,000 rows, every one of them read.
+    const insertRow = sqlite.prepare(
+      `INSERT INTO lifecycle_phase_timings
+         (operation, phase, outcome, duration_ms, project_id, skill_id, created_at)
+       VALUES ('workspace', ?, 'success', ?, 'p', 'skill-1', ?)`
+    );
+    sqlite.transaction(() => {
+      for (let pair = 0; pair < 10; pair += 1) {
+        for (let i = 0; i < MAX_PHASE_STATS_SAMPLE_LIMIT; i += 1) {
+          insertRow.run(`full_${pair}`, 100 + i, NOW - DAY + i);
+        }
+      }
+    })();
+    const result = await phaseDurationStats(db, {
+      projectId: 'p',
+      skillId: 'skill-1',
+      sampleLimit: MAX_PHASE_STATS_SAMPLE_LIMIT,
+      now: NOW,
+    });
+    expect(result.stats).toHaveLength(10);
+    expect(result.stats.every((stat) => stat.count === MAX_PHASE_STATS_SAMPLE_LIMIT)).toBe(true);
+    expect(result.stats.some((stat) => stat.truncated)).toBe(false);
+    expect(result.truncated).toBe(false);
+  });
+
   it('cuts equal timestamps by id, the same way on every call', async () => {
     // Four rows in the same millisecond, sample 2: the two newest ids (durations 30 and 40) stay.
     for (const durationMs of [10, 20, 30, 40]) {

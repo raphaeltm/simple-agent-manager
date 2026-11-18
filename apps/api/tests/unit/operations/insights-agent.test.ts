@@ -386,6 +386,22 @@ describe('projectInsights input rules', () => {
     });
     expect(typo.success).toBe(false);
     expect(typo.issues?.[0]?.path?.map((item) => item.key)).toEqual(['rang']);
+    // An operation outside the stored vocabulary is refused, not answered with empty stats.
+    const badOperation = v.safeParse(ProjectInsightsInputSchema, {
+      projectId: 'p',
+      method: 'phases',
+      skillId: 's',
+      operation: 'runner_strat',
+    });
+    expect(badOperation.success).toBe(false);
+    expect(
+      v.safeParse(ProjectInsightsInputSchema, {
+        projectId: 'p',
+        method: 'phases',
+        skillId: 's',
+        operation: 'runner_start',
+      }).success
+    ).toBe(true);
     // Control: the same call spelled right parses.
     expect(
       v.safeParse(ProjectInsightsInputSchema, { projectId: 'p', method: 'flow', range: '7d' })
