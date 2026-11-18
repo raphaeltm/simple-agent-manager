@@ -8,11 +8,16 @@
  * - member offboarding (`routes/projects/member-offboarding.ts`, `status = 'removed'`);
  * - account suspension (`routes/admin.ts`).
  *
- * A failure is logged, not thrown: the revocation itself is already committed, the RPC retries
- * transient faults, and failing the request would not close the socket either.
+ * `closeRevokedMemberSockets` logs a failure and returns `false` rather than throwing: the
+ * revocation itself is already committed and the RPC retries transient faults. Suspension turns a
+ * failure into a retryable 503, because suspending again is idempotent and re-runs the close.
+ * Offboarding cannot be re-applied once the member is removed, so it only logs. A reconciling
+ * sweep that would also close the remainder is tracked in
+ * `tasks/backlog/2026-11-18-project-socket-access-reconcile.md`.
  */
 import type { Env } from '../env';
 import { createModuleLogger, serializeError } from '../lib/logger';
+import { errors } from '../middleware/error';
 import * as projectDataService from './project-data';
 
 const log = createModuleLogger('project_socket_revocation');
@@ -24,10 +29,11 @@ export async function closeRevokedMemberSockets(
   projectId: string,
   userId: string,
   reason: SocketRevocationReason
-): Promise<void> {
+): Promise<boolean> {
   try {
     const closed = await projectDataService.closeBrowserSocketsForActor(env, projectId, userId);
     log.info('project_sockets.closed_for_revoked_access', { projectId, userId, reason, closed });
+    return true;
   } catch (err) {
     log.error('project_sockets.close_failed', {
       projectId,
@@ -36,6 +42,7 @@ export async function closeRevokedMemberSockets(
       action: 'left_open',
       ...serializeError(err),
     });
+    return false;
   }
 }
 
@@ -52,9 +59,14 @@ export async function closeSuspendedUserSockets(env: Env, userId: string): Promi
   const projectIds = (rows.results ?? []).flatMap((row) =>
     typeof row.project_id === 'string' ? [row.project_id] : []
   );
-  await Promise.all(
+  const results = await Promise.all(
     projectIds.map((projectId) =>
       closeRevokedMemberSockets(env, projectId, userId, 'account_suspended')
     )
   );
+  if (results.includes(false)) {
+    throw errors.serviceUnavailable(
+      'The account is suspended, but some open project connections could not be closed. Suspend it again to retry.'
+    );
+  }
 }

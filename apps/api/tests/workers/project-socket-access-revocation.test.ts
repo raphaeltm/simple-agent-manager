@@ -8,7 +8,7 @@
  * acf_064e2f55492d2ba99b2867ce3bcee6c9). Each case pairs the revoked user with a member who must
  * stay connected, proven by a ping answered after the revocation.
  */
-import { env, SELF } from 'cloudflare:test';
+import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import type { Env } from '../../src/env';
@@ -180,6 +180,11 @@ describe('project sockets close when project access is revoked', () => {
     expect(suspendedA.closeCode()).toBe(ACCESS_REVOKED_CLOSE_CODE);
     expect(suspendedB.closeCode()).toBe(ACCESS_REVOKED_CLOSE_CODE);
     await expectStillServed(staying, 'other member on project B');
+
+    // A suspended account cannot open a new socket.
+    const reconnect = await openSocket(PROJECT_B, SUSPENDED);
+    expect(reconnect.status).toBeGreaterThanOrEqual(400);
+    expect(reconnect.webSocket).toBeNull();
   });
 
   it('the object refuses a socket the API did not attribute to a user', async () => {
@@ -190,5 +195,44 @@ describe('project sockets close when project access is revoked', () => {
 
     expect(response.status).toBe(400);
     expect(response.webSocket).toBeNull();
+  });
+
+  it('a revocation also closes a socket admitted before sockets carried their user', async () => {
+    const stub = testEnv.PROJECT_DATA.get(testEnv.PROJECT_DATA.idFromName(PROJECT_B));
+    // Accepted with a session tag only, as the previous release admitted every socket.
+    const legacyOpen = await runInDurableObject(stub, async (_instance, state) => {
+      const pair = new WebSocketPair();
+      state.acceptWebSocket(pair[1], [`session:${crypto.randomUUID()}`]);
+      return state
+        .getWebSockets()
+        .filter(
+          (ws) =>
+            ws.readyState === WebSocket.OPEN &&
+            !state.getTags(ws).some((tag) => tag.startsWith('actor:'))
+        ).length;
+    });
+    expect(legacyOpen).toBeGreaterThan(0);
+    const staying = await connect(PROJECT_B, STAYING);
+
+    const closed = await projectDataService.closeBrowserSocketsForActor(
+      testEnv,
+      PROJECT_B,
+      `sock-nobody-${suffix}`
+    );
+
+    expect(closed).toBe(legacyOpen);
+    const untaggedStillOpen = await runInDurableObject(
+      stub,
+      async (_instance, state) =>
+        state
+          .getWebSockets()
+          .filter(
+            (ws) =>
+              ws.readyState === WebSocket.OPEN &&
+              !state.getTags(ws).some((tag) => tag.startsWith('actor:'))
+          ).length
+    );
+    expect(untaggedStillOpen).toBe(0);
+    await expectStillServed(staying, 'tagged member of another user');
   });
 });

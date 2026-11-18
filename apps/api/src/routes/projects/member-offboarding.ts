@@ -49,16 +49,24 @@ projectMemberOffboardingRoutes.post(
     const project = await requireProjectCapability(db, projectId, requesterId, 'member:manage');
     const body = c.req.valid('json');
 
-    const response = await applyProjectMemberOffboarding({
-      db,
-      project,
-      memberUserId,
-      actorUserId: requesterId,
-      planId: body.planId,
-      actions: body.actions,
-      finalMemberStatus: body.finalMemberStatus,
-      defaultAgentType: c.env.DEFAULT_TASK_AGENT_TYPE || 'opencode',
-    });
+    let response: Awaited<ReturnType<typeof applyProjectMemberOffboarding>>;
+    try {
+      response = await applyProjectMemberOffboarding({
+        db,
+        project,
+        memberUserId,
+        actorUserId: requesterId,
+        planId: body.planId,
+        actions: body.actions,
+        finalMemberStatus: body.finalMemberStatus,
+        defaultAgentType: c.env.DEFAULT_TASK_AGENT_TYPE || 'opencode',
+      });
+    } catch (err) {
+      // A step after the membership write can fail, leaving the member removed with no way to
+      // re-apply. Closing a still-active member's sockets only makes their tab reconnect.
+      await closeRevokedMemberSockets(c.env, projectId, memberUserId, 'member_removed');
+      throw err;
+    }
     if (response.status === 'removed') {
       // An open tab would otherwise keep receiving project events after removal. Close the
       // member's sockets first, so they cannot observe the hand-off below.

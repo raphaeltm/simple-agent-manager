@@ -60,8 +60,11 @@ function actorTag(actorId: string): string {
   return `${ACTOR_TAG_PREFIX}${actorId}`;
 }
 
+/** Printable ASCII only, so the tag's byte length equals its character length. */
+const ACTOR_ID_PATTERN = new RegExp(`^[\\x21-\\x7e]{1,${MAX_ACTOR_ID_LENGTH}}$`);
+
 function isValidActorId(actorId: string | null): actorId is string {
-  return !!actorId && actorId.length <= MAX_ACTOR_ID_LENGTH;
+  return !!actorId && ACTOR_ID_PATTERN.test(actorId);
 }
 
 /** Accept a browser socket upgrade forwarded by the API route. */
@@ -149,18 +152,28 @@ function send(ws: WebSocket, message: string): void {
   }
 }
 
-/** Close a socket that may already be closing (server-initiated resync, or the peer's close). */
-/** Close every socket the given user opened on this project. Returns how many were open. */
+/**
+ * Close every socket the given user opened on this project, plus any open socket that carries no
+ * actor tag. An untagged socket was admitted before sockets were attributed to users, so it cannot
+ * be shown not to belong to the revoked user; its client reconnects through the upgrade route,
+ * which re-checks membership. Returns how many open sockets were closed.
+ */
 export function closeBrowserSocketsForActor(ctx: DurableObjectState, actorId: string): number {
   if (!isValidActorId(actorId)) throw new Error('A valid actor id is required to close sockets');
+  const targets = new Set(ctx.getWebSockets(actorTag(actorId)));
+  for (const ws of ctx.getWebSockets()) {
+    const tags = tagsOf(ctx, ws);
+    if (tags && !tags.some((tag) => tag.startsWith(ACTOR_TAG_PREFIX))) targets.add(ws);
+  }
   let closed = 0;
-  for (const ws of ctx.getWebSockets(actorTag(actorId))) {
+  for (const ws of targets) {
     if (ws.readyState === WebSocket.OPEN) closed++;
     closeQuietly(ws, BROWSER_SOCKET_ACCESS_REVOKED_CLOSE_CODE, 'project access revoked');
   }
   return closed;
 }
 
+/** Close a socket that may already be closing (server-initiated resync, or the peer's close). */
 export function closeQuietly(ws: WebSocket, code?: number, reason?: string): void {
   try {
     ws.close(code, reason);

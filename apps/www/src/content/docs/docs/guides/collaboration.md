@@ -414,7 +414,7 @@ The key thing to understand: **personal credentials leave with their owner.** A 
 
 Some resources **block removal** until they are resolved, so you can't accidentally remove a member out from under running work, and each type clears the block differently: a **trigger** clears it when you disable it or reattach it to a project credential; a **task** clears it only by stopping its future work (tasks can't be reattached); a **node or deployment** clears it only by reattaching to a project credential. If no compatible project credential is available for a node or deployment, stop or delete it separately before finishing the removal.
 
-Once the removal is final, any SAM tab the member still has open on the project stops receiving updates.
+Once the removal is final, SAM closes the live connection of any tab the member still has open on the project, so it stops receiving updates.
 
 A departing member's own account choices on the project's profiles are removed with them (see [Using another account for one profile](/docs/guides/agents/#using-another-account-for-one-profile)); other members' choices are untouched.
 
