@@ -21,6 +21,7 @@ import {
   type MonthlyCostCapCheck,
 } from '@simple-agent-manager/ai-proxy';
 import {
+  AI_PROVIDER_BASE_URLS,
   DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
   DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
   DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES,
@@ -178,6 +179,23 @@ export function openaiProxyOptions(jsonContext: string): PrepareProxyOptions {
   };
 }
 
+/** A model id prices only its vendor's endpoint, not an arbitrary compatible alias. */
+function hasCanonicalCatalogPrice(upstream: ResolvedProxyUpstream, modelId: string): boolean {
+  const model = findPricedModel(modelId);
+  if (!model || model.provider === 'workers-ai') return false;
+  const dialect = model.provider === 'anthropic' ? 'anthropic' : 'openai-compatible';
+  if (upstream.dialect !== dialect) return false;
+  try {
+    const actual = new URL(upstream.baseUrl);
+    const canonical = new URL(AI_PROVIDER_BASE_URLS[model.provider]);
+    return !actual.username && !actual.password && !actual.search && !actual.hash &&
+      actual.origin === canonical.origin &&
+      actual.pathname.replace(/\/+$/, '') === canonical.pathname.replace(/\/+$/, '');
+  } catch {
+    return false;
+  }
+}
+
 /** Admission depends on the resolved owner; locally funded calls must be priceable. */
 async function enforcePassthroughFunding(
   c: ProxyContext,
@@ -187,8 +205,8 @@ async function enforcePassthroughFunding(
   options: PrepareProxyOptions
 ): Promise<Response | null> {
   const platformBilled = upstream.credentialSource === 'platform';
-  if (platformBilled && hasLocalAiCostMetering(c.env) && !findPricedModel(modelId)) {
-    const message = 'Model has no catalog price and cannot use an installation-funded credential.';
+  if (platformBilled && hasLocalAiCostMetering(c.env) && !hasCanonicalCatalogPrice(upstream, modelId)) {
+    const message = 'Model and upstream endpoint must match a catalog-priced provider to use an installation-funded credential.';
     return options.dialect === 'anthropic'
       ? anthropicError(message, 'invalid_request_error', 400)
       : openaiError(message, 'invalid_request_error', 400);

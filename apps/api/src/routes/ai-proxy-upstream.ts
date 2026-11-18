@@ -7,6 +7,7 @@ export const customEndpointResponses = new WeakSet<Response>();
  * Split out of ai-proxy.ts per .claude/rules/18-file-size-limits.md — pure
  * extraction, no behavior change.
  */
+import { AI_PROVIDER_BASE_URLS } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
@@ -58,7 +59,7 @@ function buildOpenAIUrl(env: Env): string {
     return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/openai/v1/chat/completions`;
   }
   // Fallback: direct OpenAI API (no gateway monitoring)
-  return 'https://api.openai.com/v1/chat/completions';
+  return `${AI_PROVIDER_BASE_URLS.openai}/chat/completions`;
 }
 
 /** Build upstream URL for OpenAI Responses API via AI Gateway. */
@@ -67,7 +68,7 @@ function buildOpenAIResponsesUrl(env: Env): string {
   if (gatewayId) {
     return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/openai/v1/responses`;
   }
-  return 'https://api.openai.com/v1/responses';
+  return `${AI_PROVIDER_BASE_URLS.openai}/responses`;
 }
 
 // =============================================================================

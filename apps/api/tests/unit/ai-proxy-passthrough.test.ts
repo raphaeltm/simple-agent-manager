@@ -1119,6 +1119,7 @@ describe('L13: platform-owned passthrough credentials count toward the monthly c
       missingUsage?: boolean;
       gateway?: boolean;
       requestBody?: Record<string, unknown>;
+      baseUrl?: string;
     } = {}
   ) {
     const model = options.model ?? PRICED.id;
@@ -1130,7 +1131,7 @@ describe('L13: platform-owned passthrough credentials count toward the monthly c
         consumer,
         configuration: {
           settings: options.anthropic
-            ? { baseUrl: 'https://anthropic-alt.example', dialect: 'anthropic' }
+            ? { baseUrl: options.baseUrl ?? 'https://api.anthropic.com', dialect: 'anthropic' }
             : { providerId: 'openai', providerName: 'OpenAI' },
         },
         credential: {
@@ -1140,7 +1141,7 @@ describe('L13: platform-owned passthrough credentials count toward the monthly c
             : {
                 kind: 'openai-compatible',
                 apiKey: 'sk-test',
-                baseUrl: 'https://custom-openai.example/v1',
+                baseUrl: options.baseUrl ?? 'https://api.openai.com/v1',
               },
         },
         source,
@@ -1195,6 +1196,42 @@ describe('L13: platform-owned passthrough credentials count toward the monthly c
     expect(res.status).toBe(400);
     expect(mockFetch).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['https://custom-openai.example/v1', false],
+    ['https://api.openai.com/v1/alias', false],
+    ['https://api.anthropic.com/v1', false],
+    ['https://api.anthropic.com', true],
+  ])('refuses catalog price mismatches before forwarding (%s anthropic=%s)', async (baseUrl, anthropic) => {
+    // The configuration claims providerId=openai on OpenAI-compatible calls. That is not proof.
+    const res = await callWithSource('platform', { baseUrl, anthropic });
+    expect(res.status).toBe(400);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('accepts the canonical endpoint with normalized host, default port and trailing slashes', async () => {
+    expect((await callWithSource('platform', { baseUrl: 'https://API.OPENAI.COM:443/v1///' })).status).toBe(200);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a custom Anthropic endpoint even when its model has an Anthropic price', async () => {
+    const model = PLATFORM_AI_MODELS.find((m) => m.provider === 'anthropic')!.id;
+    const res = await callWithSource('platform', {
+      model, anthropic: true, baseUrl: 'https://custom-anthropic.example',
+    });
+    expect(res.status).toBe(400);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it.each(['user-attachment', 'project-attachment', 'gateway'])(
+    'keeps custom endpoint behavior for %s', async (source) => {
+      const res = await callWithSource(source === 'gateway' ? 'platform' : source, {
+        baseUrl: 'https://custom-openai.example/v1', gateway: source === 'gateway',
+      });
+      expect(res.status).toBe(200);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    }
+  );
 
   it.each(['user-attachment', 'project-attachment'])(
     'keeps custom models for own-funded %s',

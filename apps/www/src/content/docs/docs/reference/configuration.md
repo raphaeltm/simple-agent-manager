@@ -2192,7 +2192,11 @@ per-model, per-day row in the same counter transaction, which the usage page sho
 day breakdowns on installations without a gateway (`packages/ai-proxy/src/ai-model-usage.ts`).
 
 Locally metered passthrough calls using an installation-owned credential must use a model in
-SAM's pricing catalog; unknown models are refused before forwarding. Missing provider usage is
+SAM's pricing catalog and that model's canonical provider endpoint (origin and base path).
+Unknown models and custom endpoints aliasing catalog model names are refused before forwarding:
+a compatible protocol or configured provider label does not establish a catalog price. Use a
+user/project-owned credential for custom passthrough endpoints; the native operator-endpoint
+exception described above is unchanged. Missing provider usage is
 estimated from serialized request bytes (including tool schemas, system prompts and structured
 tool history) and generated output. Provider-reported usage takes precedence over these fallback
 estimates. User- and project-owned credentials remain usable after

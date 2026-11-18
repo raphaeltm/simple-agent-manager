@@ -131,3 +131,15 @@ settings and spending-data outages. Fullbuild19, lint/typecheck, secret guard an
 The final main sync also includes88b6103e1 (#2879), an unrelated task archive only; runtime
 changes remain those reviewed above. Gateway staging proof carries; L22 still owes live self-host
 coverage for no-gateway metering and fault paths.
+
+## Catalog provider identity follow-up
+Locally platform-funded passthrough now requires a catalog model to match its canonical
+provider dialect, URL origin and base path. An arbitrary compatible endpoint or configured
+provider label cannot borrow another vendor's price. Five mismatch regressions went RED before
+the fix and GREEN after; canonical normalization, own-funded and Gateway controls remain green.
+Official provider base constants are shared with native URL builders, preserving native URLs.
+Package189, combinedWorker97 and native proxy50 tests, shared/package builds, fullbuild19,
+APItypecheck/lint, secretguard and docs links pass. Root independently reviewed the endpoint
+predicate and unchanged funding/Gateway gates. Custom platform passthrough endpoints require
+upstream-specific pricing support; user/project-funded endpoints and the native operator endpoint
+exception remain unchanged. Gateway staging proof carries; L22 still owes no-gateway live proof.
