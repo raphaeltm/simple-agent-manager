@@ -3,7 +3,7 @@
  *
  * - `POST /frps-plugin?op=Login|NewProxy|Ping|NewWorkConn` — frps server plugin. Authenticated with HTTP
  *   basic auth whose password is REVERSE_TUNNEL_GATEWAY_SECRET (frps sends the userinfo of
- *   its plugin `addr`). Decisions: services/node-reverse-tunnel-authz.ts.
+ *   its plugin `addr`). Decisions: selfhost/reverse-tunnel/authz.ts.
  * - `GET /node-websocket` — Caddy forward_auth for node WebSocket upgrades. Authenticated with
  *   the `X-SAM-Gateway-Secret` header. It re-dispatches the original request through the SAM
  *   app so the EXISTING ws-* / logs-stream authentication runs unchanged
@@ -27,11 +27,11 @@ import { log } from '../lib/logger';
 import { readRequestJsonRecord, RequestBodyTooLargeError } from '../lib/runtime-validation';
 import { parseWorkspaceSubdomain } from '../lib/workspace-subdomain';
 import type { InboundDeps } from '../services/agent-email/inbound';
-import { authorizeFrpsPluginRequest } from '../services/node-reverse-tunnel-authz';
+import { authorizeFrpsPluginRequest } from '../selfhost/reverse-tunnel/authz';
 import {
   getReverseTunnelGatewaySecret,
   isAcceptedGatewaySecret,
-} from '../services/node-reverse-tunnel-config';
+} from '../selfhost/reverse-tunnel/config';
 import {
   GATEWAY_HEADER,
   isGatewayDecisionFor,

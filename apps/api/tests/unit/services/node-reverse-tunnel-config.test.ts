@@ -7,7 +7,7 @@ import {
   resolveReverseTunnelHeartbeatTimeoutSeconds,
   resolveReverseTunnelPortRange,
   resolveReverseTunnelPortReuseMinAgeSeconds,
-} from '../../../src/services/node-reverse-tunnel-config';
+} from '../../../src/selfhost/reverse-tunnel/config';
 import { resolveManagedNodeTransport } from '../../../src/services/node-tunnel-config';
 
 const managedVm = { nodeRole: 'workspace', runtime: 'vm', nodeClass: 'managed' };

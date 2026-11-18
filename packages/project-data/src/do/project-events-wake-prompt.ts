@@ -13,6 +13,7 @@ import {
   agentMessageChannelForSubscription,
   agentMessageWakeContent,
 } from './agent-message-notice';
+import { inboxWakeContent, isInboxWatchSubscription } from './inbox-event-wake';
 import { projectDataPorts } from './ports';
 import type { ProjectEventWakeSourceTaskGuard } from './project-events-materialization';
 import type { AcceptPromptDeliveryInput } from './prompt-delivery';
@@ -58,18 +59,25 @@ export function buildWakePromptInput(
       ? 'Project event update added to your current turn (runtime_steer) — it does not stop ' +
         'your work; fold it in if it is relevant. '
       : '';
-  const content = agentMessageChannel
-    ? agentMessageWakeContent({
-        batchId: options.batchId,
-        channel: agentMessageChannel,
-        eventIds: options.eventIds,
-        urgentClass: urgentAgentClass,
-      })
-    : urgentPrefix +
-      `Project event wake batch ${options.batchId} is ready for this chat. ` +
-      `Event IDs: ${eventIds}. ` +
-      'Read the events through the ProjectData event MCP tools before acting on their contents. ' +
-      'Checkpoint or finish through the normal chat workflow after processing this batch.';
+  // A task watch names who acted (and whether it is teammate input); still no event content.
+  const inboxContent =
+    !agentMessageChannel && isInboxWatchSubscription(options.subscription)
+      ? inboxWakeContent({ batchId: options.batchId, events: options.events ?? [] })
+      : null;
+  const content = inboxContent
+    ? urgentPrefix + inboxContent
+    : agentMessageChannel
+      ? agentMessageWakeContent({
+          batchId: options.batchId,
+          channel: agentMessageChannel,
+          eventIds: options.eventIds,
+          urgentClass: urgentAgentClass,
+        })
+      : urgentPrefix +
+        `Project event wake batch ${options.batchId} is ready for this chat. ` +
+        `Event IDs: ${eventIds}. ` +
+        'Read the events through the ProjectData event MCP tools before acting on their contents. ' +
+        'Checkpoint or finish through the normal chat workflow after processing this batch.';
   return {
     deliveryId: options.batchId,
     targetSessionId,
@@ -95,10 +103,13 @@ export function buildWakePromptInput(
       ...(urgentAgentClass ? { agentMessageClass: urgentAgentClass } : {}),
       ...(agentMessageChannel ? { agentMessageChannel } : {}),
     },
-    notice: projectDataPorts().notices.safe(() => projectDataPorts().notices.projectEventWake(options.events ?? []), {
-      batchId: options.batchId,
-      subscriptionId: options.subscription.id,
-    }),
+    notice: projectDataPorts().notices.safe(
+      () => projectDataPorts().notices.projectEventWake(options.events ?? []),
+      {
+        batchId: options.batchId,
+        subscriptionId: options.subscription.id,
+      }
+    ),
     ttlMs: options.ttlMs,
     maxMessages: options.maxMessages,
   };

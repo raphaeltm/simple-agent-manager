@@ -135,8 +135,8 @@ empty log, or one without `session_start` entries, is reported as a mismatch; pa
 ### Test-quality Stop gate
 
 `.claude/hooks/verify-test-quality.mjs` runs at the end of every Claude Code turn
-(`.claude/settings.json`; observed firing in a fresh session, idea 01M7H32EK6S4E31EHWVSJSENR5).
-It is not configured for Codex: see "Codex hooks" below. It reads every change on the
+(`.claude/settings.json`; observed firing in a fresh session, idea 01M7H32EK6S4E31EHWVSJSENR5)
+and every Codex turn (`.codex/config.toml`; see "Codex hooks" below). It reads every change on the
 branch (commits since the merge base with `origin/main`, staged, unstaged and untracked
 files) and reports two classes:
 
@@ -159,18 +159,33 @@ that (`.claude/rules/35-vertical-slice-testing.md`).
 ### Codex hooks
 
 Codex runs repository hooks (`.codex/config.toml` or `.codex/hooks.json`) only for a
-trusted project, and only hook definitions that have themselves been trusted. SAM-managed
-Codex sessions trust neither: on 2026-11-16 a probe with the hook script committed
-(task 01M7HZ6Q1EVPVPCBN00AM3WN8A) saw no SessionStart, no PreToolUse context and no Stop
-prompt, and the session's `~/.codex/config.toml` had no trust entry for the repository
-(`CODEX_HOME` unset). The same applies to every other setting in `.codex/config.toml`.
-So no repository hook is configured for Codex. A rule-delivery hook (SessionStart and
-PreToolUse injection of path-scoped rule bodies, bounded, with a log) and the Codex Stop
-entry are kept on branch `sam/codex-rule-delivery-hook` until SAM decides whether its
-Codex sessions should trust repository hooks. Until then Codex reaches path-scoped rules
-through the `AGENTS.md` indexes only. `--check` still validates any Codex hook entry
-against the current schema, so a malformed one (like the flat `[[hooks.Stop]]` that held
-no handler) cannot come back unnoticed.
+trusted project, and only hook definitions that have themselves been trusted by hash, which
+normally takes an interactive `/hooks` review. codex-acp already marks the session's roots
+as trusted projects, so the repository's `.codex/` layer loads; SAM's vm-agent supplies the
+missing hook trust: `CODEX_CONFIG`, which codex-acp passes to every app-server thread,
+carries `bypass_hook_trust: true` (`buildCodexACPManagedConfigEnv` in
+`packages/vm-agent/internal/acp/session_host_agent_config.go`; decision: SAM idea
+01M7J0TXAHGRY8CWA7Y7SJZAK0). Before that change no repository hook ran in a SAM Codex
+session (probe task 01M7HZ6Q1EVPVPCBN00AM3WN8A).
+`TestCodexRunsRepositoryHooksWithSAMConfig`
+(`packages/vm-agent/internal/acp/session_host_codex_repo_hooks_process_test.go`) runs the
+real codex-acp and Codex CLI with that config against a synthetic model; set
+`SAM_CODEX_ACP_ADAPTER` and `SAM_CODEX_CLI` to run it.
+
+Two hooks are configured for Codex:
+
+- `.codex/hooks/rule-context.mjs` (SessionStart and PreToolUse on `Bash` and `apply_patch`)
+  adds the bodies of the path-scoped rules that govern the files a tool call touches, most
+  specific scope first, capped per call (`SAM_CODEX_RULE_CONTEXT_MAX_BYTES`, default 40,000
+  bytes, below the handler's `additionalContextLimit`), and names the rules it had no room
+  for. The first write to files whose rules were never delivered is refused once with the
+  rules attached. Deliveries are logged to `.tmp/instruction-loads/codex-<session>.jsonl`.
+  It reads `.codex/hooks/rule-scopes.json`, which `--write` generates from the instruction
+  model, so it runs without `node_modules`.
+- The test-quality Stop gate above.
+
+`--check` validates every Codex hook entry against the current schema, so a malformed one
+(like the flat `[[hooks.Stop]]` that held no handler) cannot come back unnoticed.
 
 ## Rule 73: optional fields must not overwrite on absence
 
@@ -199,6 +214,77 @@ original incident (`runtime.Lightweight = opt.Lightweight`), at every sampled co
 (policy f9ae7f88). There is no TypeScript counterpart: strict null checks reject the
 direct form, and the remaining forms (`patch.x ?? false`, spreads) are also how records
 are created, so a lint would be mostly noise.
+
+## No secret readback in CI code (policy 795e72a6)
+
+`pnpm quality:no-secret-readback` (`scripts/quality/check-no-secret-readback.ts`) is blocking in
+the Secret Scan job. It scans every `.yml`, `.yaml`, `.sh`, JS/TS file and Dockerfile under
+`.github/`, `scripts/` and `infra/`, except JS/TS tests (`*.test.*`, `*.spec.*`, `__tests__/`, `fixtures/`) and itself; shell
+`test-*.sh` scripts are scanned because workflows run some of them. Comment-only lines are skipped, apart from a tracing shebang on line 1. In shell, YAML and
+Dockerfiles only `#` starts a comment (a leading `*` there is a glob or a `case` pattern such as
+`*) env ;;`); in JS/TS a block comment that ends on the line does not hide the code after it. Rules apply to logical lines, so
+a split statement counts: shell `\` continuations in every file type, and JS/TS method chains
+(`crypto.subtle` followed by `.decrypt(` on the next line) are joined. A finding is reported at the
+statement's first line.
+
+It reports four kinds of finding:
+
+- `show-secrets`: `--show-secrets`, any `showSecrets` other than `showSecrets: false`, and
+  `pulumi config get`.
+- `decryption`: `subtle.decrypt(` or `subtle['decrypt'](`, `createDecipher(iv)(`,
+  `require(...).decrypt*`, and any import, re-export or dynamic import that names `decrypt*` or
+  loads the API's `services/encryption` module, including multi-line imports and inline JS in
+  YAML.
+- `xtrace`: `set -x` in any flag cluster or position (`set -euxo`, `set -e -x`), `set -o xtrace` or
+  `bash -o xtrace`,
+  a `-x` shebang, and, in shell and YAML only, `bash -x`, `SHELLOPTS=…xtrace`, `BASH_XTRACEFD` and
+  `trap … DEBUG`.
+- `env-dump`, in shell, YAML and Dockerfiles only: `env` with no command (options such as `-0`
+  or `-u NAME` allowed), `printenv`, and a bare `export`, `declare` or `typeset` (flags allowed,
+  no names) at the start of a command, including `run: env`, `RUN env`, and a subshell or
+  command substitution such as `echo "$(env)"`.
+
+The shell-only rules never apply to JS/TS, so code such as `value || env` is not reported.
+
+A legacy line that cannot go yet is accepted only when all of these hold:
+
+- it is a `show-secrets` finding (a decryption, trace or dump is never excused);
+- it carries `# sam:secret-readback-allowed <task>` on the same line or the line directly above;
+- `ALLOWED_LEGACY_READS` in the checker pins that file and task together;
+- the task is still open, under `tasks/backlog/` or `tasks/active/`.
+
+A marker that fails any of these makes the line a finding, and the marker itself is reported.
+Today the only entry is the Pulumi readback in `scripts/deploy/configure-secrets.sh`, tracked by
+`tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md` (idea 01M7M5PJCY4T3CR715AFKRM74R).
+Every value that read returns is masked before any other use.
+
+It runs in the Secret Scan job, which has no path filter, so every pull request and every
+canonical `main` push runs it, whatever the change touches.
+
+### Measurements (2026-11-17)
+
+- Current tree: 206 files and 42,024 lines scanned, 0 findings, 1 tracked read.
+- History: 25 first-parent commits on `main`, sampled evenly back to 2026-06-11. Every finding was
+  a real instance of the class, and there were no false positives:
+  - the `configure-secrets.sh` readback;
+  - the three `set -euxo pipefail` in `devcontainer-cache-experiments.yml`;
+  - `set -eux` in a fixture Dockerfile;
+  - at the newest sample (2026-11-17, before this fix), also the staging2 bootstrap's
+    `--show-secrets` read and its `crypto.subtle.decrypt`.
+
+  The patterns added after review (YAML `run:` forms, shebangs, `pulumi config get`, SHELLOPTS,
+  `trap DEBUG`, dynamic imports, Dockerfiles and logical lines) found nothing new in the same
+  sample. Because there were no false
+  positives, the check was blocking from the start (policy f9ae7f88).
+
+### How the tests prove it
+
+- They reintroduce the staging2 bootstrap step, its decrypt helper and its multi-line import, and
+  include negative controls for nearby shapes.
+- Each guard was deleted once and the tests went red: every pattern, the import pass, the comment
+  skip, the shebang check, the shell-only gate, the open-task check, the file pinning, Dockerfile
+  matching and logical-line joining.
+- A test also requires every pattern to be the only match for at least one reintroduced line.
 
 ## Runtime workflow state
 
@@ -244,6 +330,11 @@ invoice line. By default the window ends at the last complete UTC day so a parti
 does not dilute the recent-rate projection; pass `--end-date=YYYY-MM-DD` for an explicit same-day
 read. The script fails closed when credentials are absent, when Cloudflare GraphQL returns errors,
 or when a dataset reaches the query limit and might be partial.
+
+The query, the list prices and the analysis live in `packages/shared/src/cloudflare-cost/`, shared
+with the API Worker's daily snapshot behind the Cloudflare card on Admin → Health & cost
+(`apps/api/src/services/cloudflare-cost-snapshot.ts`), so both report the same numbers. Workers
+requests exclude tail-worker invocations (`eventType = tail`); their CPU time is counted.
 
 Metric choices are deliberate:
 

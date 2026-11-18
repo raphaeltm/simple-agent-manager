@@ -104,21 +104,10 @@ describe('resolveProfileAccountBindings', () => {
       schema.agentSettings,
       schema.platformSettings,
     ]);
-    sqlite.exec(
-      readFileSync(
-        new URL('../../../src/db/migrations/0196_admin_settings.sql', import.meta.url),
-        'utf8'
-      )
-    );
-    __resetAdminSettingsCacheForTest();
-    // A Cloudflare installation: an addressable AI Gateway, so the proxy is on unless the
-    // AI_PROXY_ENABLED kill switch says otherwise (`services/ai-proxy-availability.ts`).
     env = {
       DATABASE: createSqliteD1(sqlite),
-      KV: createMemoryKv(),
-      ENCRYPTION_KEY: KEY,
-      AI_GATEWAY_ID: 'sam',
-      CF_ACCOUNT_ID: 'account',
+      CF_ACCOUNT_ID: 'account-test',
+      AI_GATEWAY_ID: 'gateway-test',
     } as unknown as Env;
 
     // owner: one Max account stored twice with identical ciphertext (a dual-write mirror).

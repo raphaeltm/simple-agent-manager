@@ -1,3 +1,4 @@
+export const customEndpointResponses = new WeakSet<Response>();
 /**
  * AI proxy upstream forwarding — sends prepared requests to Workers AI,
  * Anthropic, or OpenAI through Cloudflare AI Gateway, translating Anthropic's
@@ -18,15 +19,13 @@ import {
 } from '../services/ai-anthropic-translate';
 import type { UpstreamAuth } from '../services/ai-billing';
 import { resolveUnifiedBillingToken } from '../services/ai-billing';
-import { buildAnthropicGatewayUrl, upstreamErrorLogFields } from '../services/ai-proxy-shared';
+import { buildAnthropicGatewayUrl } from '../services/ai-proxy-shared';
 import { copyCredentialLimitHeaders } from '../services/credential-limit-events';
 import {
   chatTargetHeaders,
   fetchChatTarget,
-  isCloudflareChatTarget,
   LlmUnavailableError,
   resolveWorkersAiChatTarget,
-  withStreamUsageRequested,
 } from '../services/llm-chat-target';
 import {
   aiGatewayOnlyHeaders,
@@ -79,57 +78,33 @@ function buildOpenAIResponsesUrl(env: Env): string {
 // Forwarding Functions
 // =============================================================================
 
-/**
- * A forwarded Workers AI-route response, and whether its usage may need estimating: an
- * admin-configured OpenAI-compatible endpoint can omit `usage`, Cloudflare's routes report it.
- */
-export interface WorkersAiForward {
-  response: Response;
-  estimateMissingUsage: boolean;
-}
-
 /** Forward request to Workers AI (transparent OpenAI-format pass-through). */
 export async function forwardToWorkersAI(
   env: Env,
   body: Record<string, unknown>,
   modelId: string,
   aigMetadata: string
-): Promise<WorkersAiForward> {
-  const forward = (response: Response, estimateMissingUsage = false): WorkersAiForward => ({
-    response,
-    estimateMissingUsage,
-  });
-  let target: Awaited<ReturnType<typeof resolveWorkersAiChatTarget>>;
+): Promise<Response> {
+  let target;
   try {
     target = await resolveWorkersAiChatTarget(env, 'aiProxy', modelId);
   } catch (err) {
     if (!(err instanceof LlmUnavailableError)) throw err;
-    // The endpoint settings could not be read; the call is refused rather than sent elsewhere.
-    return forward(
-      new Response(
-        JSON.stringify({
-          error: { message: err.message, type: 'api_error', code: 'LLM_SETTINGS_UNAVAILABLE' },
-        }),
-        { status: 503, headers: { 'Content-Type': 'application/json' } }
-      )
+    return new Response(
+      JSON.stringify({
+        error: { message: err.message, type: 'api_error', code: 'LLM_SETTINGS_UNAVAILABLE' },
+      }),
+      { status: 503, headers: { 'Content-Type': 'application/json' } }
     );
   }
-  if (!target) {
-    // No Workers AI on this installation and no OpenAI-compatible endpoint configured.
-    return forward(
-      new Response(
-        JSON.stringify({
-          error: {
-            message: 'This model route is not available on this installation.',
-            type: 'invalid_request_error',
-            code: 'FEATURE_UNAVAILABLE',
-          },
-        }),
-        { status: 404, headers: { 'Content-Type': 'application/json' } }
-      )
+  if (!target)
+    return new Response(
+      JSON.stringify({
+        error: { message: 'Model route is unavailable', code: 'FEATURE_UNAVAILABLE' },
+      }),
+      { status: 404, headers: { 'Content-Type': 'application/json' } }
     );
-  }
-  const gatewayBody = withStreamUsageRequested(target, { ...body, model: target.model });
+  const gatewayBody = { ...body, model: target.model };
 
   const response = await fetchChatTarget(target, {
     method: 'POST',
@@ -138,23 +113,24 @@ export async function forwardToWorkersAI(
   });
 
   if (!response.ok) {
+    const errorText = await response.text();
     log.error('ai_proxy.workers_ai_error', {
       status: response.status,
-      target: target.kind,
-      ...(await upstreamErrorLogFields(response, !isCloudflareChatTarget(target))),
+      body:
+        target.kind === 'openai-compatible'
+          ? '[external endpoint body omitted]'
+          : errorText.slice(0, 500),
     });
     const errorHeaders = new Headers({ 'Content-Type': 'application/json' });
     copyCredentialLimitHeaders(response.headers, errorHeaders);
-    return forward(
-      new Response(
-        JSON.stringify({
-          error: {
-            message: `AI inference failed (${response.status}). Please try again.`,
-            type: 'server_error',
-          },
-        }),
-        { status: response.status, headers: errorHeaders }
-      )
+    return new Response(
+      JSON.stringify({
+        error: {
+          message: `AI inference failed (${response.status}). Please try again.`,
+          type: 'server_error',
+        },
+      }),
+      { status: response.status, headers: errorHeaders }
     );
   }
 
@@ -168,10 +144,12 @@ export async function forwardToWorkersAI(
     responseHeaders.set('X-Accel-Buffering', 'no');
   }
 
-  return forward(
-    new Response(response.body, { status: response.status, headers: responseHeaders }),
-    !isCloudflareChatTarget(target)
-  );
+  const forwarded = new Response(response.body, {
+    status: response.status,
+    headers: responseHeaders,
+  });
+  if (target.kind === 'openai-compatible') customEndpointResponses.add(forwarded);
+  return forwarded;
 }
 
 /** Forward request to Anthropic via AI Gateway (with format translation). */
@@ -255,7 +233,6 @@ export async function forwardToAnthropic(
   return new Response(translatedBody, { status: 200, headers: responseHeaders });
 }
 
-/** Forward request to OpenAI via AI Gateway (OpenAI-native format, no translation needed). */
 /**
  * Without AI Gateway, SAM's own metering is the only spend record (`hasLocalAiCostMetering`), and
  * OpenAI reports a stream's usage only when asked (`stream_options.include_usage`). Ask on every
@@ -268,6 +245,7 @@ function withDirectStreamUsage(env: Env, body: Record<string, unknown>): Record<
   return { ...body, stream_options: { ...streamOptions, include_usage: true } };
 }
 
+/** Forward request to OpenAI via AI Gateway (OpenAI-native format, no translation needed). */
 export async function forwardToOpenAI(
   env: Env,
   body: Record<string, unknown>,

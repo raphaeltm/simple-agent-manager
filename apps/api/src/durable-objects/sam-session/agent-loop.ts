@@ -1,3 +1,4 @@
+import { estimateInputTokensFromMessages } from '@simple-agent-manager/ai-proxy';
 /**
  * Agent loop — unified OpenAI-format code path routed through AI Gateway.
  *
@@ -19,7 +20,6 @@ import {
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
-import { upstreamErrorLogFields } from '../../services/ai-proxy-shared';
 import { checkAiUsageGate } from '../../services/ai-token-budget';
 import { attachTokenUsageAccounting } from '../../services/ai-token-usage-accounting';
 import { LlmUnavailableError, resolveOpenAICompatibleTarget } from '../../services/llm-chat-target';
@@ -84,8 +84,6 @@ export async function runAgentLoop(
   ];
 
   const systemPrompt = options?.systemPrompt ?? SAM_SYSTEM_PROMPT;
-  // An admin-configured OpenAI-compatible endpoint replaces the model route for SAM and project
-  // agents (services/llm-chat-target.ts); without one the configured model routes as before.
   let endpoint;
   try {
     endpoint = await resolveOpenAICompatibleTarget(env, 'agent', baseConfig.model);
@@ -95,7 +93,7 @@ export async function runAgentLoop(
     await writer.write(encodeSseEvent({ type: 'done' }));
     return;
   }
-  const config: SamConfig = endpoint ? { ...baseConfig, model: endpoint.model } : baseConfig;
+  const config = endpoint ? { ...baseConfig, model: endpoint.model } : baseConfig;
   const tools = options?.tools ?? [];
   const executeToolFn =
     options?.executeTool ?? (async () => ({ error: 'No tool executor configured' }));
@@ -112,7 +110,7 @@ export async function runAgentLoop(
   // unless the user explicitly set SAM_MAX_REQUEST_BODY_BYTES as an override.
   const hasExplicitOverride = !!env.SAM_MAX_REQUEST_BODY_BYTES;
   const effectiveBudget =
-    !hasExplicitOverride && (endpoint !== null || isWorkersAIModel(config.model))
+    !hasExplicitOverride && isWorkersAIModel(config.model)
       ? DEFAULT_SAM_MAX_REQUEST_BODY_BYTES_WORKERS_AI
       : config.maxRequestBodyBytes;
   const fixedOverhead = systemPrompt.length + JSON.stringify(tools).length + 500;
@@ -160,26 +158,23 @@ export async function runAgentLoop(
         userId,
         conversationId,
         systemPrompt,
-        tools,
-        endpoint
+        { tools, endpoint }
       );
       response = await attachTokenUsageAccounting(response, {
         env,
         userId,
         format: tokenUsageFormat,
-        executionCtx,
         estimateMissingUsage: endpoint !== null,
-        // An operator endpoint serves its own model, which has no catalog price.
-        costModelId: endpoint === null ? config.model : undefined,
+        fallbackInputTokens: endpoint
+          ? estimateInputTokensFromMessages([
+              { role: 'system', content: systemPrompt },
+              ...llmMessages,
+            ])
+          : undefined,
+        costModelId: endpoint ? undefined : config.model,
+        executionCtx,
       });
     } catch (fetchErr) {
-      // No model on this installation (no endpoint configured, no Cloudflare route): retrying
-      // cannot help, so say what an admin must do instead of reporting a transient failure.
-      if (fetchErr instanceof LlmUnavailableError) {
-        log.warn('sam.llm_unavailable', { model: config.model });
-        await writer.write(encodeSseEvent({ type: 'error', message: fetchErr.message }));
-        break;
-      }
       const errMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
       const isTimeout = errMsg.includes('abort');
       log.error('sam.llm_fetch_error', {
@@ -205,10 +200,10 @@ export async function runAgentLoop(
     });
 
     if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Unknown error');
       log.error('sam.llm_error', {
         status: response.status,
-        // An admin-configured endpoint is third-party: a bounded, sanitized reason, never its body.
-        ...(await upstreamErrorLogFields(response, endpoint !== null)),
+        body: endpoint ? '[external endpoint body omitted]' : errorText.slice(0, 500),
         model: config.model,
       });
       await writer.write(

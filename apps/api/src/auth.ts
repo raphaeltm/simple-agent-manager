@@ -284,14 +284,12 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
     };
   }
 
-  // Not registered when the admin's GitLab host may not be called (gitlab-login-provider.ts).
-  const gitlabProvider = gitlabOAuth ? gitLabLoginProvider(env, gitlabOAuth) : null;
-  if (gitlabOAuth && gitlabProvider) {
-    // better-auth links a sign-in to the existing user with that email when the provider is
-    // trusted OR the provider says the email is verified, so an untrusted host must lose both
-    // (its `getUserInfo` reports emails unverified and host-scopes its account ids).
-    if (gitlabOAuth.identityTrusted) trustedProviders.push('gitlab');
-    socialProviders.gitlab = gitlabProvider;
+  if (gitlabOAuth) {
+    const provider = gitLabLoginProvider(env, gitlabOAuth);
+    if (provider) {
+      if (gitlabOAuth.identityTrusted) trustedProviders.push('gitlab');
+      socialProviders.gitlab = provider;
+    }
   }
 
   return betterAuth({
@@ -342,9 +340,7 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
     socialProviders,
     plugins: emailSignInPlugins(env),
     advanced: {
-      // One client-IP rule for the whole API (`lib/client-ip.ts`): only the ingress-set
-      // CF-Connecting-IP is trusted for BetterAuth's session IPs and rate limits. Its default,
-      // X-Forwarded-For, carries whatever a client prepends.
+      // Ingress owns this header. BetterAuth's X-Forwarded-For default is client-controlled.
       ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] },
       ...(options.waitUntil ? { backgroundTasks: { handler: options.waitUntil } } : {}),
     },

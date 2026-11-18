@@ -98,6 +98,7 @@ export async function probeLiveRuntimeSession(input: {
   );
   const response = await input.containerFetch(
     new Request(url.toString(), {
+      redirect: 'manual',
       headers: {
         Authorization: `Bearer ${token}`,
         'X-SAM-Node-Id': input.nodeId,

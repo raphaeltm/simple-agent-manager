@@ -22,7 +22,7 @@ export const OUTBOUND_SETTINGS: readonly AdminSettingDefinition[] = [
     'outbound.maxRedirects',
     DEFAULT_OUTBOUND_MAX_REDIRECTS,
     'Operations',
-    'Redirect hops a guarded outbound request follows when the server it calls answers with a redirect (today: check_dns_status, whose workspace host is answered by a node the user controls; it also stays on the workspace origin). Every hop is re-checked; 0 refuses every redirect.',
+    'Redirect hops a guarded outbound request follows when the server it calls answers with a redirect (including GitLab profile/API calls and check_dns_status; DNS checks also stay on the workspace origin). Every hop is re-checked; 0 refuses every redirect.',
     { min: 0, max: MAX_OUTBOUND_REDIRECTS }
   ),
   switchDefinition(

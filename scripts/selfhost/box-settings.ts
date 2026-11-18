@@ -17,7 +17,7 @@ export const DEFAULT_REVERSE_TUNNEL_PORT_RANGE_START = 20000;
 export const DEFAULT_REVERSE_TUNNEL_PORT_RANGE_END = 29999;
 /** Same cap the Worker enforces (MAX_REVERSE_TUNNEL_PORT_RANGE_SIZE); a bigger range fails here. */
 export const MAX_REVERSE_TUNNEL_PORT_RANGE_SIZE = 20000;
-/** frps heartbeatTimeout; same default and bounds as the Worker (node-reverse-tunnel-config.ts). */
+/** frps heartbeatTimeout; same default and bounds as the Worker (apps/api/src/selfhost/reverse-tunnel/config.ts). */
 export const DEFAULT_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS = 90;
 export const MIN_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS = 60;
 export const MAX_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS = 3600;

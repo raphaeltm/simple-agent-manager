@@ -21,7 +21,7 @@ import {
   assertReverseTunnelUpstreamPort,
   type ReverseTunnelRangeEnv,
   reverseTunnelUpstreamOrigin,
-} from './node-reverse-tunnel-config';
+} from '../selfhost/reverse-tunnel/config';
 
 export type NodeAgentRoute =
   | { kind: 'container'; runtime: 'cf-container' }

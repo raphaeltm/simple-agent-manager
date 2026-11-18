@@ -304,14 +304,14 @@
     "shortName": "Vibe",
     "category": "ai-agents",
     "tagline": "Mistral's coding agent with a Mistral API key",
-    "description": "Mistral AI's command-line coding agent. Add a Mistral API key and SAM runs Vibe in your workspace with Mistral Large 3 by default, or Codestral, Mistral Small 4 and the Ministral models.",
+    "description": "Mistral AI's command-line coding agent. Add a Mistral API key and SAM runs Vibe in your workspace with Mistral Large by default, or Codestral, Mistral Small 4 and the Ministral models.",
     "logoPath": "/images/integrations/mistral.svg",
     "seoTitle": "Run Mistral Vibe on Your Own Cloud | SAM",
-    "seoDescription": "Run Mistral Vibe coding agents on cloud VMs you control with SAM, the open-source agent platform. Bring a Mistral API key and choose Mistral Large 3, Codestral or Ministral models.",
+    "seoDescription": "Run Mistral Vibe coding agents on cloud VMs you control with SAM, the open-source agent platform. Bring a Mistral API key and choose Mistral Large 4, Codestral or Ministral models.",
     "features": [
       {
         "title": "Mistral models",
-        "description": "Mistral Large 3 by default, Codestral for code-focused work, Mistral Small 4, and Ministral 3 in 14B, 8B and 3B sizes. Z.ai GLM 5.3 is also listed."
+        "description": "Mistral Large by default, Codestral for code-focused work, Mistral Small 4, and Ministral 3 in 14B, 8B and 3B sizes. Mistral Large 4, Z.ai GLM 5.3 and GLM 5.3 Flash are also listed."
       },
       {
         "title": "API key sign-in",
@@ -349,7 +349,7 @@
     "faq": [
       {
         "question": "Which models can I choose?",
-        "answer": "Mistral Large 3, Mistral Small 4, Codestral, Ministral 3 (14B, 8B and 3B) and Z.ai GLM 5.3. Mistral Medium 3.5 is listed as deprecated."
+        "answer": "Mistral Large 4, the Mistral Large latest alias, Mistral Small 4, Codestral, Ministral 3 (14B, 8B and 3B), Z.ai GLM 5.3 and GLM 5.3 Flash. Mistral Medium 3.5 is listed as deprecated."
       },
       {
         "question": "Does everything stay in the EU?",
@@ -364,7 +364,7 @@
     "externalUrl": "https://docs.mistral.ai/capabilities/vibe/",
     "externalLabel": "Mistral Vibe docs",
     "docsPath": "/docs/guides/agents/",
-    "models": ["Mistral Large 3", "Codestral", "Mistral Small 4", "Ministral 3 14B"]
+    "models": ["Mistral Large 4", "Codestral", "Mistral Small 4", "Ministral 3 14B"]
   },
   {
     "slug": "opencode",

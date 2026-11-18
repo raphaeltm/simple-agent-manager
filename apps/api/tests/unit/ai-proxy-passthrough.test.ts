@@ -1,3 +1,6 @@
+vi.mock('../../src/services/outbound-fetch-settings', () => ({
+  resolveOutboundMaxRedirects: async () => 3,
+}));
 /** URL-path-based proxy auth routes and usage tracking. */
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -995,4 +998,89 @@ describe('stored configuration with a refused base URL (Anthropic passthrough)',
     expect(mockFetch).toHaveBeenCalledOnce();
     expect(String(mockFetch.mock.calls[0]?.[0])).toContain('https://anthropic-alt.example/');
   });
+});
+
+describe('L12 guarded redirects at every passthrough fetch site', () => {
+  const cases = [
+    ['anthropic messages', ANTHROPIC_MESSAGES_PATH, 'claude-code', 'sk-ant-resolved-key'],
+    [
+      'anthropic count_tokens',
+      '/ai/proxy/valid-token/anthropic/v1/messages/count_tokens',
+      'claude-code',
+      'sk-ant-resolved-key',
+    ],
+    ['OpenAI chat', OPENAI_CHAT_COMPLETIONS_PATH, 'openai-codex', 'sk-resolved-openai'],
+  ] as const;
+  it.each(cases)(
+    '%s follows same-origin redirects, retaining the credential only there',
+    async (_name, path, agentType, key) => {
+      mockWorkspaceAuth(agentType);
+      mockAllowedRateLimit();
+      mockFetch.mockResolvedValueOnce(
+        new Response(null, { status: 307, headers: { Location: '/same-origin' } })
+      );
+      mockSuccessfulFetch('{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}');
+      const response = await postJson(path, {
+        model: 'test-model',
+        messages: [{ role: 'user', content: 'private prompt' }],
+      });
+      expect(response.status).toBe(200);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      const [first, second] = mockFetch.mock.calls as [string, RequestInit][];
+      expect(new URL(second[0]).origin).toBe(new URL(first[0]).origin);
+      expect([...new Headers(second[1].headers).values()].join(' ')).toContain(key);
+      expect(second[1].body).toBe(first[1].body);
+      expect(second[1].redirect).toBe('manual');
+    }
+  );
+  it.each(cases)(
+    '%s refuses private/metadata hops and cross-origin body replay',
+    async (_name, path, agentType) => {
+      for (const [location, status] of [
+        ['http://127.0.0.1/private', 302],
+        ['https://169.254.169.254/latest/meta-data', 302],
+        ['https://attacker.example.org/collect', 307],
+      ] as const) {
+        mockFetch.mockReset();
+        mockWorkspaceAuth(agentType);
+        mockAllowedRateLimit();
+        mockFetch.mockResolvedValueOnce(
+          new Response(null, { status, headers: { Location: location } })
+        );
+        const response = await postJson(path, {
+          model: 'test-model',
+          messages: [{ role: 'user', content: 'private prompt' }],
+        });
+        expect(response.status).toBe(502);
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+        expect(await response.text()).not.toContain('private prompt');
+      }
+    }
+  );
+  it.each(cases)(
+    '%s strips credential headers on a cross-origin GET redirect',
+    async (_name, path, agentType, key) => {
+      mockWorkspaceAuth(agentType);
+      mockAllowedRateLimit();
+      mockFetch.mockResolvedValueOnce(
+        new Response(null, {
+          status: 303,
+          headers: { Location: 'https://other.example.org/result' },
+        })
+      );
+      mockSuccessfulFetch('{"choices":[]}');
+      const response = await postJson(path, {
+        model: 'test-model',
+        messages: [{ role: 'user', content: 'private prompt' }],
+      });
+      expect(response.status).toBe(200);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      const [, init] = mockFetch.mock.calls[1] as [string, RequestInit];
+      expect(init.method).toBe('GET');
+      expect(init.body).toBeUndefined();
+      expect(JSON.stringify(init.headers)).not.toContain(key);
+      expect(new Headers(init.headers).has('Authorization')).toBe(false);
+      expect(new Headers(init.headers).has('x-api-key')).toBe(false);
+    }
+  );
 });

@@ -201,6 +201,8 @@ export interface ExpiredWakeDelivery {
   sourceTaskId: string | null;
   lastError: string | null;
   terminalReason: string;
+  /** `human` for a person's message, which a provider-limit hold keeps rather than expires. */
+  senderType: string;
 }
 
 function listExpiringWakeDeliveries(sql: SqlStorage, now: number): ExpiredWakeDelivery[] {
@@ -210,6 +212,7 @@ function listExpiringWakeDeliveries(sql: SqlStorage, now: number): ExpiredWakeDe
               inbox.target_session_id,
               inbox.source_task_id,
               inbox.last_error,
+              inbox.sender_type,
               'ttl_expired' AS terminal_reason
          FROM session_inbox inbox INDEXED BY idx_inbox_active_expiry
          JOIN chat_sessions session ON session.id = inbox.target_session_id
@@ -227,6 +230,7 @@ function listExpiringWakeDeliveries(sql: SqlStorage, now: number): ExpiredWakeDe
       sourceTaskId: typeof row.source_task_id === 'string' ? row.source_task_id : null,
       lastError: typeof row.last_error === 'string' ? row.last_error : null,
       terminalReason: String(row.terminal_reason),
+      senderType: String(row.sender_type),
     }));
 }
 

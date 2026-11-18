@@ -34,7 +34,6 @@ export interface PlatformConfigPort {
   githubApp(env: Env): Promise<GitHubAppConfig | null>;
   githubOAuth(env: Env): Promise<GitHubOAuthConfig | null>;
   gitlabOAuth(env: Env): Promise<GitLabOAuthConfig | null>;
-  /** Admin setting `outbound.maxRedirects`: redirect hops a guarded outbound fetch may follow. */
   outboundMaxRedirects(env: Env): Promise<number>;
 }
 

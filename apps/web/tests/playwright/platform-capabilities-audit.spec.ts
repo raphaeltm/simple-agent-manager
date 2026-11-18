@@ -2,7 +2,7 @@
  * Platform capabilities: voice input and read-aloud follow the installation (rule 17).
  *
  * `GET /api/config/platform-capabilities` says which services an installation has. A
- * self-hosted install has no speech-to-text and no server text-to-speech, so the project
+ * install without Workers AI has no speech-to-text and no server text-to-speech, so the project
  * chat must not offer a mic button, and agent messages must stop routing "Read aloud"
  * through the server `/api/tts` player.
  *
@@ -54,15 +54,15 @@ const PROJECT_ID = 'proj-test-1';
 const LONG_URL = `https://example.com/${'long-unbroken-segment-'.repeat(8)}end`;
 const AGENT_TEXT =
   'I traced the capability lookup through the public config route and the web hook. ' +
-  'Voice input needs speech-to-text and read-aloud needs server text-to-speech, and a ' +
-  'self-hosted installation has neither, so the entry points must not be offered. ' +
+  'Voice input needs speech-to-text and read-aloud needs server text-to-speech, and an ' +
+  'installation without Workers AI has neither, so the entry points must not be offered. ' +
   `Details are at ${LONG_URL} <script>alert("xss")</script> &amp; ☃ \u{1F680}`;
 
 const SESSION = {
   id: 'session-1',
   projectId: PROJECT_ID,
   taskId: 'task-session-1',
-  topic: 'Capabilities audit: hide voice input and read-aloud on self-hosted installs',
+  topic: 'Capabilities audit: hide voice input and read-aloud without Workers AI',
   status: 'sleeping',
   workspaceId: null,
   nodeId: null,
@@ -104,24 +104,17 @@ const OWN_TASK = {
   workspaceId: null,
 };
 
+/** The public answer of `GET /api/config/platform-capabilities`. */
 interface Capabilities {
   speechToText: boolean;
   textToSpeech: boolean;
-  guidedCredentialSetup: boolean;
-  analytics: boolean;
-  workerLogSearch: boolean;
-  artifacts: boolean;
-  emailSending: boolean;
+  agentModelCalls: boolean;
 }
 
 const CLOUDFLARE: Capabilities = {
   speechToText: true,
   textToSpeech: true,
-  guidedCredentialSetup: true,
-  analytics: true,
-  workerLogSearch: true,
-  artifacts: true,
-  emailSending: true,
+  agentModelCalls: true,
 };
 
 interface Config {
@@ -132,17 +125,8 @@ interface Config {
 const CONFIGS: Config[] = [
   { name: 'cloudflare', capabilities: CLOUDFLARE },
   {
-    name: 'self-hosted',
-    capabilities: {
-      ...CLOUDFLARE,
-      speechToText: false,
-      textToSpeech: false,
-      guidedCredentialSetup: false,
-      analytics: false,
-      workerLogSearch: false,
-      artifacts: false,
-      emailSending: false,
-    },
+    name: 'no-workers-ai',
+    capabilities: { speechToText: false, textToSpeech: false, agentModelCalls: false },
   },
   // The two flags are independent: neither may gate the other.
   { name: 'stt-off-only', capabilities: { ...CLOUDFLARE, speechToText: false } },
@@ -338,13 +322,15 @@ for (const config of CONFIGS) {
           .poll(() => harness.ttsRequests().some((r) => r.startsWith('POST /api/tts/synthesize')))
           .toBe(true);
         // The server request is in flight and the browser has said nothing.
-        expect(await page.evaluate(() => (window as never as { __spoken: string[] }).__spoken)).toEqual(
-          []
-        );
+        expect(
+          await page.evaluate(() => (window as never as { __spoken: string[] }).__spoken)
+        ).toEqual([]);
         harness.releaseTts();
       } else {
         await expect
-          .poll(() => page.evaluate(() => (window as never as { __spoken: string[] }).__spoken.length))
+          .poll(() =>
+            page.evaluate(() => (window as never as { __spoken: string[] }).__spoken.length)
+          )
           .toBeGreaterThan(0);
         expect(harness.ttsRequests()).toEqual([]);
       }
@@ -425,7 +411,9 @@ for (const config of [CONFIGS[0]!, CONFIGS[2]!]) {
       if (config.capabilities.speechToText) {
         expect(geometry.mic).not.toBeNull();
         // The mic sits inside the reserved strip, clear of the text area.
-        expect(geometry.mic!.left).toBeGreaterThanOrEqual(geometry.boxRight - geometry.paddingRight - 1);
+        expect(geometry.mic!.left).toBeGreaterThanOrEqual(
+          geometry.boxRight - geometry.paddingRight - 1
+        );
         expect(geometry.mic!.right).toBeLessThanOrEqual(geometry.boxRight + 1);
       } else {
         expect(geometry.mic).toBeNull();

@@ -35,7 +35,7 @@ import { isSelfHostInboundEmailConfigured } from '../services/agent-email/self-h
 import {
   getReverseTunnelGatewaySecret,
   isAcceptedGatewaySecret,
-} from '../services/node-reverse-tunnel-config';
+} from '../selfhost/reverse-tunnel/config';
 
 export const INBOUND_EMAIL_HEADER = {
   secret: 'X-SAM-Gateway-Secret',

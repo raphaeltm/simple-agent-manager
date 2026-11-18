@@ -5,6 +5,7 @@
  * method closes over the request's `env`, so operations never pass the full worker `Env`.
  * Construction is a handful of closures per request; there is no I/O here.
  */
+import { cronToHumanReadable } from '@simple-agent-manager/cron';
 import type { OperationPorts, ProjectEventErrorKind } from '@simple-agent-manager/operations';
 import type { OperationContext, OperationDeps } from '@simple-agent-manager/operations';
 import { drizzle } from 'drizzle-orm/d1';
@@ -56,9 +57,10 @@ import {
   listOwnCredentialLimitsByReferences,
   listProjectCredentialLimits,
 } from './services/credential-limit-events/read';
-import { cronToHumanReadable } from './services/cron-utils';
 import { getInstallationToken } from './services/github-app';
 import { createInboxPort } from './services/inbox/port';
+import { createInboxTaskPort } from './services/inbox/task-port';
+import { readLifecycleLatencyRange } from './services/lifecycle-latency/range-report';
 import { resolveProfileAccountBindings } from './services/profile-account-bindings';
 import * as projectData from './services/project-data';
 import { describeRootSearchCoverage } from './services/project-data-search-coverage';
@@ -120,6 +122,7 @@ export function createOperationPorts(env: Env): OperationPorts {
       getMailboxMessage: (...a) => projectData.getMailboxMessage(env, ...a),
       listActiveAttentionMarkers: (...a) => projectData.listActiveAttentionMarkers(env, ...a),
       getRunReceiptFacts: (...a) => projectData.getRunReceiptFacts(env, ...a),
+      countRunNudges: (...a) => projectData.countRunNudges(env, ...a),
       searchKnowledgeObservations: (...a) => projectData.searchKnowledgeObservations(env, ...a),
       getIdeaWorkSnapshots: (...a) => projectData.getIdeaWorkSnapshots(env, ...a),
       addIdeaUpdate: (...a) => projectData.addIdeaUpdate(env, ...a),
@@ -152,6 +155,7 @@ export function createOperationPorts(env: Env): OperationPorts {
       connectorReadLimits: () => getConnectorReadLimits(env),
     },
     inbox: createInboxPort(env),
+    inboxTasks: createInboxTaskPort(env),
     access: {
       requireProjectAccess: (projectId, userId) => requireProjectAccess(db(), projectId, userId),
       requireProjectCapability: (projectId, userId, capability) =>
@@ -245,6 +249,9 @@ export function createOperationPorts(env: Env): OperationPorts {
     },
     missions: {
       startOrchestration: (projectId, missionId) => startOrchestration(env, projectId, missionId),
+    },
+    lifecycleLatency: {
+      rangeReport: (input) => readLifecycleLatencyRange(env, input),
     },
   };
 }

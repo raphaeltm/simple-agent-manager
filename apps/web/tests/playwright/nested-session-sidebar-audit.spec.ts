@@ -270,7 +270,7 @@ async function assertHierarchyButtonOpensModal(page: Page) {
 
 async function verifyNormalHierarchyFlow(page: Page, screenshotName: string, openSidebar = false) {
   await setupApiMocks(page, { sessions: NORMAL_SESSIONS, tasks: NORMAL_TASKS });
-  await page.goto('/projects/proj-1');
+  await page.goto('/projects/proj-1/chat');
   await page.waitForTimeout(1500);
   await assertChatPageRendered(page);
   if (openSidebar) {
@@ -283,7 +283,7 @@ async function verifyNormalHierarchyFlow(page: Page, screenshotName: string, ope
 
 async function verifyDeepHierarchyFlow(page: Page, screenshotName: string, openSidebar = false) {
   await setupApiMocks(page, { sessions: DEEP_SESSIONS, tasks: DEEP_TASKS });
-  await page.goto('/projects/proj-1');
+  await page.goto('/projects/proj-1/chat');
   await page.waitForTimeout(1500);
   await assertChatPageRendered(page);
   if (openSidebar) {
@@ -296,7 +296,7 @@ async function verifyDeepHierarchyFlow(page: Page, screenshotName: string, openS
 
 async function verifyHistoryHierarchyFlow(page: Page, screenshotName: string, openSidebar = false) {
   await setupApiMocks(page, { sessions: STALE_HIERARCHY_SESSIONS, tasks: STALE_HIERARCHY_TASKS });
-  await page.goto('/projects/proj-1');
+  await page.goto('/projects/proj-1/chat');
   await page.waitForTimeout(1500);
   await assertChatPageRendered(page);
   if (openSidebar) {
@@ -331,7 +331,7 @@ test.describe('Nested session sidebar — Mobile', () => {
 
   test('stopped ancestors of deep child surface as context anchors', async ({ page }) => {
     await setupApiMocks(page, { sessions: STALE_ANCESTOR_SESSIONS, tasks: STALE_ANCESTOR_TASKS });
-    await page.goto('/projects/proj-1');
+    await page.goto('/projects/proj-1/chat');
     await page.waitForTimeout(1500);
     await assertChatPageRendered(page);
     await openMobileSidebar(page);
@@ -389,7 +389,7 @@ test('Connector provenance in session sidebar remains user-initiated', async ({ 
   }));
   const sessions = NORMAL_SESSIONS.map((session, i) => ({ ...session, task: tasks[i] }));
   await setupApiMocks(page, { tasks, sessions });
-  await page.goto('/projects/proj-1');
+  await page.goto('/projects/proj-1/chat');
   // Ready: the project chat's new-chat page has rendered.
   await expect(page.getByText('What do you want to build?')).toBeVisible();
   await openMobileSidebar(page);

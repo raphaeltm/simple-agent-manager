@@ -30,6 +30,7 @@ import { configureRepoHostingPort } from '../../src/ports';
 
 // The worker resolves GitHub App settings through its platform-config port.
 configureRepoHostingPort('platformConfig', {
+  outboundMaxRedirects: async () => 3,
   githubApp: vi.fn().mockResolvedValue({
     appId: '123',
     privateKey: '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----',

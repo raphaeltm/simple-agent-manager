@@ -13,6 +13,7 @@ import { Clock3, Database, Radio, RefreshCcw, ShieldAlert } from 'lucide-react';
 import type { CSSProperties, ReactNode } from 'react';
 
 import { stateTone } from '../../lib/event-state-tone';
+import { EventAdmissionDisclosure } from './EventAdmissionDisclosure';
 
 interface ProjectEventInspectorProps {
   data: AdminProjectEventInspectorResponse;
@@ -578,6 +579,8 @@ export function ProjectEventInspector({
           </div>
         </div>
       </Card>
+
+      <EventAdmissionDisclosure admission={data.admission} />
 
       <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard

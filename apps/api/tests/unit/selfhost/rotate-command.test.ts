@@ -59,7 +59,7 @@ import { decryptWithKeyOnly, encrypt } from '../../../src/services/encryption';
 import { setPreviousEncryptionKeys } from '../../../src/services/encryption-key-fallback';
 import { signNodeCallbackToken } from '../../../src/services/jwt';
 import { getJWKS, verifyCallbackToken } from '../../../src/services/jwt-verify';
-import { isAcceptedGatewaySecret } from '../../../src/services/node-reverse-tunnel-config';
+import { isAcceptedGatewaySecret } from '../../../src/selfhost/reverse-tunnel/config';
 import { ConditionalR2 } from '../../helpers/conditional-r2';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 

@@ -1,17 +1,21 @@
 import type { DeploymentPublishJobSettingName } from '@simple-agent-manager/app-deployment';
 import type {
-  InsightsFlowSettingName,
+  InsightsCloudflareCostSettingName,
+  InsightsInstallationSettingName,
+  InsightsPageSettingName,
   InsightsReceiptSettingName,
+  ProjectBriefSettingName,
 } from '@simple-agent-manager/operations';
 
 import type { Env } from '../env';
 import { type GcpCatalogSettingName } from './admin-settings-gcp-catalog-definitions';
+import { type InfomaniakSettingName } from './admin-settings-infomaniak-definitions';
 import { type InstructionBudgetSettingName } from './admin-settings-instructions-definitions';
 import type { NodeTunnelSettingName } from './admin-settings-node-tunnel-definitions';
 import { type OutboundSettingName } from './admin-settings-outbound-definitions';
 import { type AgentEmailSettingName } from './agent-email/setting-definitions';
 import { type AgentModelSettingKey } from './agent-models/settings-definition';
-import { type AiProxySettingName } from './ai-proxy-settings';
+import type { AiProxySettingName } from './ai-proxy-settings';
 import { type ConnectorReadSettingName } from './connector-read-settings-definition';
 import {
   CONNECTOR_DEFAULTS,
@@ -21,10 +25,9 @@ import {
 import { type FleetOpsSettingName } from './fleet-ops/settings-definitions';
 import { type InboxSettingName } from './inbox-settings-definition';
 import { type LifecycleLatencySettingKey } from './lifecycle-latency/defaults';
-import { type LlmEndpointSettingName } from './llm-endpoint-settings';
+import type { LlmEndpointSettingName } from './llm-endpoint-settings';
 import { type OperationsTelemetrySettingName } from './operations-telemetry-defaults';
 import { type RuntimeSecretRequestSettingName } from './runtime-secret-request-settings-definition';
-import { type SpeechEndpointSettingName } from './speech-endpoint-settings';
 import { type StalledClassifierEndpointSettingName } from './stalled-task-classifier-endpoint-settings';
 import { type WORKFLOW_DEFAULTS } from './workflow-defaults';
 
@@ -33,9 +36,13 @@ export type AdminSettingValue = boolean | number | string | readonly string[] | 
 export type AdminSettingType = 'boolean' | 'integer' | 'string' | 'string-list' | 'enum';
 
 export type AdminSettingName =
+  | LlmEndpointSettingName
+  | AiProxySettingName
   | DeploymentPublishJobSettingName
   | 'deployments.publishCallbackMaxBodyBytes'
+  | 'events.skipUnsubscribedGitHubCi'
   | 'chat.messageMergingEnabled'
+  | 'chat.toolCallMergingEnabled'
   | 'chat.messageMergeMaxRowBytes'
   | 'chat.messageMergeRecentIds'
   | `workflow.${keyof typeof WORKFLOW_DEFAULTS}`
@@ -45,16 +52,17 @@ export type AdminSettingName =
   | ConnectorReadSettingName
   | InboxSettingName
   | InsightsReceiptSettingName
-  | InsightsFlowSettingName
+  | InsightsPageSettingName
+  | InsightsInstallationSettingName
+  | InsightsCloudflareCostSettingName
+  | ProjectBriefSettingName
   | RuntimeSecretRequestSettingName
   | AgentEmailSettingName
   | FleetOpsSettingName
   | NodeTunnelSettingName
-  | LlmEndpointSettingName
-  | AiProxySettingName
-  | SpeechEndpointSettingName
   | StalledClassifierEndpointSettingName
   | GcpCatalogSettingName
+  | InfomaniakSettingName
   | InstructionBudgetSettingName
   | OperationsTelemetrySettingName
   | OutboundSettingName
@@ -176,6 +184,8 @@ export interface AdminSettingDefinition {
   readonly credential?: { readonly provider: string; readonly kind: string };
   readonly range?: { readonly min: number; readonly max: number };
   readonly choices?: readonly string[];
+  /** Explicit fail-closed value for invalid overrides or unavailable storage; absent uses normal fallback. */
+  readonly unavailableValue?: AdminSettingValue;
   readonly validate: (value: unknown) => boolean;
 }
 
@@ -290,6 +300,10 @@ export function connectorDefinition(key: ConnectorSettingKey): AdminSettingDefin
     type,
     // Reuse the shipped defaults; integration will move their ownership here without duplication.
     defaultValue: Array.isArray(value) ? Object.freeze([...value]) : value,
+    // Invalid security controls must restrict access, not inherit permissive defaults.
+    ...(type === 'boolean' ? { unavailableValue: false } : {}),
+    ...(key === 'clientRegistration' ? { unavailableValue: 'allowlist' } : {}),
+    ...(key === 'allowedRedirectHosts' ? { unavailableValue: Object.freeze([]) } : {}),
     category: 'Connector',
     description: connectorDescriptions[key],
     secret: false,
@@ -334,7 +348,7 @@ export function switchDefinition(
   defaultValue: boolean,
   category: AdminSettingDefinition['category'],
   description: string,
-  legacy: Pick<AdminSettingDefinition, 'legacyEnvironment' | 'legacyKv'>
+  legacy: Pick<AdminSettingDefinition, 'legacyEnvironment' | 'legacyKv' | 'unavailableValue'>
 ): AdminSettingDefinition {
   return {
     name,

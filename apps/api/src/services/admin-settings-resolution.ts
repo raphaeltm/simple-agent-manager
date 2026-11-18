@@ -12,9 +12,13 @@ import {
 } from './admin-settings-cache';
 import { DecryptedCredentialValues } from './admin-settings-credential-values';
 import {
-  ADMIN_SETTINGS_REGISTRY,
+  InvalidStoredAdminSettingError,
+  invalidStoredSettingDetails,
+} from './admin-settings-invalid-stored';
+import {
   type AdminSettingDefinition,
   type AdminSettingName,
+  adminSettingsRegistry,
   type AdminSettingValue,
   findAdminSetting,
   publicAdminSettingDefinition,
@@ -23,7 +27,6 @@ import { readAdminSettingsSnapshot } from './admin-settings-snapshot';
 import { DEFAULT_CONFIG_READ_TIMEOUT_MS } from './config-read-deadline';
 import { withDeadline } from './fetch-timeout';
 import { INTEGRATION_CREDENTIAL_TYPE } from './platform-config-store';
-
 export function requiredDefinition(name: string): AdminSettingDefinition {
   const def = findAdminSetting(name);
   if (!def) throw errors.badRequest('Unknown admin setting');
@@ -33,11 +36,11 @@ export const cache = new AdminSettingsCache();
 let generations = new WeakMap<D1Database, number>();
 let generationClock = 0;
 let resetGeneration = 0;
-function generationOf(db: D1Database): number {
+export function adminSettingsGeneration(db: D1Database): number {
   return generations.get(db) ?? resetGeneration;
 }
 function assertGeneration(db: D1Database, generation: number): void {
-  if (generationOf(db) !== generation) throw new AdminSettingsUnavailableError();
+  if (adminSettingsGeneration(db) !== generation) throw new AdminSettingsUnavailableError();
 }
 export type CredentialRow = {
   provider: string;
@@ -66,7 +69,7 @@ export async function credentialRows(
   if (attempt >= 3) throw new AdminSettingsUnavailableError();
   const db = resolveD1BindingIdentity(env.DATABASE);
   if (!db || typeof db.prepare !== 'function') throw new AdminSettingsUnavailableError();
-  const generation = generationOf(db);
+  const generation = adminSettingsGeneration(db);
   const ttlMs = adminSettingCacheMs(env, 'integration.github.clientSecret');
   const useCache = !fresh && ttlMs > 0;
   const existing = credentialCache.get(db);
@@ -113,7 +116,7 @@ export async function credentialRows(
     if (useCache && credentialCache.get(db) !== entry)
       return credentialRows(env, false, attempt + 1);
     if (
-      generationOf(db) !== generation ||
+      adminSettingsGeneration(db) !== generation ||
       Date.now() >= entry.deadlineAt ||
       (ttlMs > 0 && Date.now() >= entry.expiresAt)
     )
@@ -155,7 +158,7 @@ async function legacyKv(
   }
   if (attempt >= 3) throw new AdminSettingsUnavailableError();
   const db = resolveD1BindingIdentity(env.DATABASE);
-  const generation = generationOf(db);
+  const generation = adminSettingsGeneration(db);
   let map = kvCache.get(db);
   if (!map) {
     map = new Map();
@@ -175,7 +178,7 @@ async function legacyKv(
     const value = joined.value;
     if (map.get(key) !== cached) return legacyKv(env, key, false, ttlMs, attempt + 1);
     if (
-      generationOf(db) !== generation ||
+      adminSettingsGeneration(db) !== generation ||
       Date.now() >= Math.min(cached.expiresAt, cached.startedAt + ttlMs)
     )
       throw new AdminSettingsUnavailableError();
@@ -193,7 +196,7 @@ async function legacyKv(
     const value = await entry.promise;
     if (useCache && map.get(key) !== entry) return legacyKv(env, key, false, ttlMs, attempt + 1);
     if (
-      generationOf(db) !== generation ||
+      adminSettingsGeneration(db) !== generation ||
       Date.now() >= entry.deadlineAt ||
       (ttlMs > 0 && Date.now() >= entry.expiresAt)
     )
@@ -304,7 +307,7 @@ async function overrideDetails(
   const row = rows.find((row) => row.key === def.name);
   if (!row) return null;
   const value = parseValue(def, row.value);
-  if (!validStoredValue(def, value)) throw new AdminSettingsUnavailableError();
+  if (!validStoredValue(def, value)) throw new InvalidStoredAdminSettingError();
   if (value === true && (await hasEmergencyVeto(env, def, fresh, kvReads)))
     return kvDetails(env, def, false);
   observe(env, def.name, value as AdminSettingValue);
@@ -380,7 +383,7 @@ export async function resolveAdminSettingDetailsMany(
   const primary = resolveD1BindingIdentity(env.DATABASE);
   const maxAge = Math.min(...names.map((name) => adminSettingCacheMs(env, name)));
   for (let attempt = 0; attempt < 3; attempt++) {
-    const generation = generationOf(primary);
+    const generation = adminSettingsGeneration(primary);
     try {
       const [rows, credentials] = await Promise.all([
         cache.read(primary, options.fresh ?? false, maxAge, DEFAULT_CONFIG_READ_TIMEOUT_MS),
@@ -391,10 +394,10 @@ export async function resolveAdminSettingDetailsMany(
       const values = await Promise.all(
         definitions.map((def) => resolved(env, def, rows, true, credentials))
       );
-      if (generationOf(primary) !== generation) continue;
+      if (adminSettingsGeneration(primary) !== generation) continue;
       return values;
     } catch {
-      if (generationOf(primary) !== generation) continue;
+      if (adminSettingsGeneration(primary) !== generation) continue;
       throw new AdminSettingsUnavailableError();
     }
   }
@@ -443,8 +446,7 @@ function outageValue(
   def: AdminSettingDefinition,
   name: AdminSettingName
 ): AdminSettingValue {
-  // This switch has inverse polarity: true is the safe state on a settings outage.
-  if (name === 'operations.samOperatorDisabled') return true;
+  if (def.unavailableValue !== undefined) return def.unavailableValue;
   if (
     def.legacyEnvironment &&
     typeof env[def.legacyEnvironment] === 'string' &&
@@ -452,13 +454,10 @@ function outageValue(
   )
     return false;
   if (def.type === 'boolean') {
-    if (name.startsWith('connector.')) return false;
     return disabled.get(resolveD1BindingIdentity(env.DATABASE))?.has(name)
       ? false
       : def.defaultValue;
   }
-  if (name === 'connector.clientRegistration') return 'allowlist';
-  if (name === 'connector.allowedRedirectHosts') return [];
   if (def.category === 'OAuth') return null;
   return def.defaultValue;
 }
@@ -470,7 +469,7 @@ export async function readAdminSettings(env: Env, options: { fresh?: boolean } =
       DEFAULT_CONFIG_READ_TIMEOUT_MS
     );
     const kvReads = new Map<string, Promise<{ value: string | null } | { error: unknown }>>();
-    for (const def of ADMIN_SETTINGS_REGISTRY) {
+    for (const def of adminSettingsRegistry()) {
       const key = operationalKvKey(env, def);
       if (key && !kvReads.has(key))
         kvReads.set(
@@ -485,10 +484,21 @@ export async function readAdminSettings(env: Env, options: { fresh?: boolean } =
     if (snapshot.revision === undefined) throw new AdminSettingsUnavailableError();
     const { rows, credentials } = snapshot;
     const settings = await Promise.all(
-      ADMIN_SETTINGS_REGISTRY.map(async (def) => ({
-        ...publicAdminSettingDefinition(def),
-        ...(await resolved(env, def, rows, false, credentials, options.fresh ?? true, kvReads)),
-      }))
+      adminSettingsRegistry().map(async (def) => {
+        const definition = publicAdminSettingDefinition(def);
+        try {
+          return {
+            ...definition,
+            ...(await resolved(env, def, rows, false, credentials, options.fresh ?? true, kvReads)),
+          };
+        } catch (error) {
+          if (!(error instanceof InvalidStoredAdminSettingError)) throw error;
+          const fallback = (await hasEmergencyVeto(env, def, true, kvReads))
+            ? false
+            : outageValue(env, def, def.name);
+          return { ...definition, ...invalidStoredSettingDetails(primary, def, rows, fallback) };
+        }
+      })
     );
     return { revision: snapshot.revision, settings, history: snapshot.history };
   } catch {
@@ -496,5 +506,4 @@ export async function readAdminSettings(env: Env, options: { fresh?: boolean } =
   }
 }
 export type AdminSettingsView = Awaited<ReturnType<typeof readAdminSettings>>;
-
 export { adminSettingCacheMs } from './admin-settings-cache';

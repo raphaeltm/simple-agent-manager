@@ -20,7 +20,7 @@ import {
   type ProviderDeletionOutcome,
   sendProviderDeletion,
 } from './node-provider-deletion';
-import { releaseNodeReverseTunnelLeases } from './node-reverse-tunnel-leases';
+import { releaseTerminatedNodeIngress } from './node-provisioning-ingress';
 import {
   deleteWithCurrentOwnerCredential,
   NodeTeardownBlockedError,
@@ -28,7 +28,6 @@ import {
 } from './node-teardown-authority';
 import { recordNodeTeardownBlocked } from './node-teardown-blocked';
 import { isNodeCapacitySourceReleased } from './node-teardown-provenance';
-import { releaseNodeTunnels } from './node-tunnel-cleanup';
 import {
   type ContainerWorkspaceDeletionAuthority,
   requireNodeWorkspaceArtifactsDeleted,
@@ -166,20 +165,10 @@ async function deleteStrictProviderInstance(
 
 /**
  * Mark the Cloudflare tunnel of every non-live incarnation of this node for deletion (one D1
- * write; the cron sweep does the Cloudflare I/O, so teardown never waits on that API), or
- * release a reverse-tunnel node's non-live port leases. Only managed tunnel-transport VM nodes
- * own either: legacy nodes and Instant containers pay nothing, and an incarnation missed here
- * is still found by the sweeps' own non-live scans.
+ * write; the cron sweep does the Cloudflare I/O, so teardown never waits on that API). Only
+ * managed tunnel-transport VM nodes own tunnels: legacy nodes and Instant containers pay
+ * nothing, and an incarnation missed here is still found by the sweep's own non-live scan.
  */
-async function releaseTerminatedNodeTunnels(env: Env, node: NodeRow): Promise<void> {
-  if (node.runtime !== 'vm') return;
-  if (node.transport === 'cloudflare-tunnel') {
-    await releaseNodeTunnels(env, node.id, 'runtime_terminated');
-  } else if (node.transport === 'reverse-tunnel') {
-    // Frees the incarnation's loopback port; the frps plugin refuses it from now on.
-    await releaseNodeReverseTunnelLeases(env, node.id, 'runtime_terminated');
-  }
-}
 
 async function markWorkspaceRuntimeTerminationConfirmed(
   db: NodeDb,
@@ -411,7 +400,7 @@ export async function deleteNodeResourcesStrict(
       );
     }
     await markWorkspaceRuntimeTerminationConfirmed(db, node, node.runtimeTerminationConfirmedAt);
-    await releaseTerminatedNodeTunnels(env, node);
+    await releaseTerminatedNodeIngress(env, node);
     return {
       providerVm: node.providerInstanceId ? 'already-absent' : 'no-instance',
       runtimeTerminationConfirmedAt: node.runtimeTerminationConfirmedAt,
@@ -491,7 +480,7 @@ export async function deleteNodeResourcesStrict(
   const runtimeTerminationConfirmedAt = await markRuntimeTerminationConfirmed(db, node);
   // The proof makes this incarnation non-live, which releases its Cloudflare tunnel (if it
   // had one). Never throws: the tunnel journal keeps the identity for the cron sweep.
-  await releaseTerminatedNodeTunnels(env, node);
+  await releaseTerminatedNodeIngress(env, node);
   if (options.cleanupDns !== false) {
     await deleteStrictNodeDnsRecord(
       node,

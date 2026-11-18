@@ -143,6 +143,7 @@ function collectTaskTerminalRows(
           workspace_id: candidate.workspace_id ?? null,
           chat_session_id: candidate.chat_session_id ?? null,
           parent_task_id: candidate.parent_task_id ?? null,
+          updated_at: candidate.updated_at,
         });
       }
     }

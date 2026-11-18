@@ -92,6 +92,7 @@ jobs:
               - 'packages/ai-proxy/**'
               - 'packages/app-deployment/**'
               - 'packages/cloud-init/**'
+              - 'packages/cron/**'
               - 'packages/operations/**'
               - 'packages/project-data/**'
               - 'packages/providers/**'
@@ -134,11 +135,13 @@ jobs:
               - 'scripts/deploy/deploy-signing-keys.ts'
               - 'scripts/deploy/types.ts'
               - 'scripts/deploy/vapid-keys.ts'
+              - 'scripts/selfhost/reverse-tunnel-migrations.ts'
               - 'scripts/quality/node-pool-boundary.ts'
               - 'scripts/quality/node-pool-boundary/**'
               - 'tests/fixtures/acp-activity-report-v1.json'
               - 'tests/fixtures/deploy-release/**'
               - 'tests/fixtures/durable-execution-protocol-v1.json'
+              - 'tests/fixtures/session-snapshot-restore-transcript-only-v1.json'
             # The conformance suite also builds the self-host entry/configuration.
             hosted-git:
               - *api
@@ -174,6 +177,7 @@ jobs:
               - 'packages/ai-proxy/**'
               - 'packages/app-deployment/**'
               - 'packages/cloud-init/**'
+              - 'packages/cron/**'
               - 'packages/eslint-plugin-sam/**'
               - 'packages/operations/**'
               - 'packages/project-data/**'
@@ -190,6 +194,8 @@ jobs:
               - 'apps/web/src/components/AgentSettingsCard.tsx'
             vm-agent:
               - 'packages/vm-agent/**'
+              # Shared with the Worker tests; a fixture-only edit must run the Go half too.
+              - 'tests/fixtures/session-snapshot-restore-transcript-only-v1.json'
               - 'apps/api/Dockerfile.vm-agent-container'
               - 'scripts/ci/verify-codex-runtime-image.sh'
               - 'scripts/deploy/prepare-codex-runtime-artifact.sh'
@@ -206,6 +212,7 @@ jobs:
               - 'packages/agent-email/src/**'
               - 'packages/operations/src/**'
               - 'packages/ai-proxy/src/**'
+              - 'packages/cron/src/**'
               - 'sonar-project.properties'
               - '.claude/rules/36-cli-quality.md'
             devcontainer:
@@ -421,6 +428,14 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # Policy 795e72a6 / rule 83: no Pulumi secret readback, credential decryption, shell
+      # tracing or environment dumps in workflow, deploy, infra or CI-script code. Here, not in a
+      # path-filtered job, so every PR runs it whatever it touches. Blocking from the start: zero
+      # findings outside real instances in 25 sampled commits since June 2026
+      # (scripts/quality/README.md).
+      - name: No secret readback in CI code (policy 795e72a6)
+        run: pnpm quality:no-secret-readback
 
       - name: Install verified Gitleaks release
         env:

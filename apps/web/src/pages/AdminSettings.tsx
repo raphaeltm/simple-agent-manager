@@ -169,6 +169,16 @@ function SettingCard({
         Source: {setting.source} · {setting.configured ? 'Configured' : 'Not configured'}
         {setting.risky ? ' · Requires confirmation' : ''}
       </p>
+      {setting.storedValueInvalid && (
+        <Alert variant="warning">
+          {setting.storedValueFallback === 'safe' ? 'Safe fallback' : 'Default'} in effect, stored
+          value invalid.
+          {!setting.secret && setting.storedValue !== undefined && (
+            <span className="block break-all">Stored value: {setting.storedValue}</span>
+          )}
+          <span className="block">Save a valid value or reset the override.</span>
+        </Alert>
+      )}
       <SettingInput
         setting={setting}
         id={id}
@@ -193,7 +203,9 @@ function SettingCard({
         </Button>
         <Button
           variant="secondary"
-          disabled={disabled || conflict || setting.source !== 'database'}
+          disabled={
+            disabled || conflict || (setting.source !== 'database' && !setting.storedValueInvalid)
+          }
           onClick={() => requestSave(setting, true)}
         >
           Reset override

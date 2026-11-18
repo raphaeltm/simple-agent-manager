@@ -65,6 +65,11 @@ type ChatInputProps = Readonly<{
   projectId: string;
   agents: AgentInfo[];
   agentProfiles: AgentProfile[];
+  /**
+   * The profile list has not loaded yet. An empty list then means "not known yet", not "none",
+   * so the create-a-profile gate waits instead of flashing on every open.
+   */
+  profilesLoading?: boolean;
   selectedProfileId: string | null;
   onProfileChange: (profileId: string | null) => void;
   profilePicker: UseProfilePickerResult;
@@ -142,6 +147,7 @@ export function ChatInput({
   projectId,
   agents,
   agentProfiles,
+  profilesLoading = false,
   selectedProfileId,
   onProfileChange,
   profilePicker,
@@ -191,9 +197,11 @@ export function ChatInput({
   const selectedProfile = selectedProfileId
     ? (agentProfiles.find((p) => p.id === selectedProfileId) ?? null)
     : null;
-  const needsProfileBeforeSubmit = agentProfiles.length === 0 && agents.length >= 1;
+  const needsProfileBeforeSubmit =
+    !profilesLoading && agentProfiles.length === 0 && agents.length >= 1;
   const noAgents = agents.length === 0;
-  const inputDisabled = noAgents || needsProfileBeforeSubmit || profileWizard.open;
+  const inputDisabled =
+    noAgents || needsProfileBeforeSubmit || profileWizard.open || Boolean(profilesLoading);
   const showToolbar = !inputDisabled && agentProfiles.length > 0;
   const composerPlaceholder = getComposerPlaceholder({
     noAgents,

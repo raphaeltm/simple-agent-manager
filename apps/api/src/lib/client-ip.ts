@@ -4,9 +4,9 @@
  * One rule for every caller (rate-limit keys, stored diagnostics, heartbeat IP backfill,
  * forwarded-for on the VM hop):
  *
- * - Only `CF-Connecting-IP` is trusted. On Cloudflare the edge always sets it and overwrites any
- *   value a client sent; the self-hosted ingress (deploy/selfhost Caddy) does the same from the
- *   TCP peer address. `X-Forwarded-For` is never read: wherever the trusted header is missing,
+ * - Only `CF-Connecting-IP` is trusted. On normal Cloudflare edge ingress it overwrites any
+ *   value a client sent. Another trusted ingress must do the same from the TCP peer address
+ *   and prevent direct origin access. `X-Forwarded-For` is never read: wherever the trusted header is missing,
  *   nothing guarantees who wrote `X-Forwarded-For`, so a key taken from it is a bypass.
  * - A well-formed value is returned exactly as received, so Cloudflare rate-limit keys and stored
  *   addresses stay byte-identical to what SAM produced before this helper existed.

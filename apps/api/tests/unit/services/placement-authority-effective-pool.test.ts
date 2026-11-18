@@ -264,6 +264,7 @@ function seedNode(fixture: PoolFixture | null, overrides: Record<string, unknown
     observed_provider_instance_disk_gb: 240,
     observed_hardware_source: 'observed',
     health_status: 'healthy',
+    agent_ready_at: AUTHORITY_TIMESTAMP,
     heartbeat_stale_after_seconds: 180,
     last_metrics: null,
     node_mode: 'shared',
@@ -337,6 +338,7 @@ function reuseState(fixture: PoolFixture): TaskRunnerState {
   } as TaskStartCapacityPoolSelection;
   return {
     taskId: 'task-reuse',
+    agentReadyStartedAt: null,
     userId: USER_ID,
     projectId: PROJECT_ID,
     config: {

@@ -11,9 +11,12 @@ import {
   withAgentMessageChannels,
 } from './helpers/agent-message-channels';
 import { materialize, withQuietAlarms } from './helpers/event-wake-harness';
+import { useFullProjectEventHistory } from './helpers/full-project-event-history';
 import { expectSteeredOnce, mockSteered } from './helpers/steer-wake-harness';
 
 const SHA = '1234567890123456789012345678901234567890';
+
+useFullProjectEventHistory();
 
 describe('CI webhook storage optimization preserves subscriber wakes', () => {
   afterEach(() => vi.restoreAllMocks());
@@ -53,12 +56,12 @@ describe('CI webhook storage optimization preserves subscriber wakes', () => {
               metadata: {},
               display: { title: 'CI' },
             };
-            expect(instance.admitProjectEvent(event).matches).toHaveLength(1);
+            expect((await instance.admitProjectEvent(event)).matches).toHaveLength(1);
             await vi.waitFor(() => expect(alarm).toHaveBeenCalledTimes(1));
             const armedAt = await state.storage.getAlarm();
             alarm.mockClear();
             expect(
-              instance.admitProjectEvent({ ...event, deliveryKey: 'wake-two' }).matches
+              (await instance.admitProjectEvent({ ...event, deliveryKey: 'wake-two' })).matches
             ).toHaveLength(1);
             expect(await state.storage.getAlarm()).toBe(armedAt);
             expect(alarm).not.toHaveBeenCalled();
@@ -98,7 +101,7 @@ describe('CI webhook storage optimization preserves subscriber wakes', () => {
           const alarm = vi.spyOn(state.storage, 'setAlarm');
           try {
             const oldAlarm = await state.storage.getAlarm();
-            const result = instance.admitProjectEvent({
+            const result = await instance.admitProjectEvent({
               projectId: f.projectId,
               source: 'github',
               eventType: 'push',

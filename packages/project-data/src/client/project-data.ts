@@ -28,6 +28,7 @@ import type {
   GetProjectEventInput,
   GetProjectEventRecentStatusInput,
   GetProjectEventSubscriptionInput,
+  InboxItemCommentThread,
   LibraryFileCommentMutationResponse,
   ListProjectEventChannelsInput,
   ListProjectEventChannelSubscribersInput,
@@ -90,6 +91,11 @@ import type {
   GroupedFtsWallRecoveryResult,
 } from '../do/grouped-fts-wall-recovery';
 import type { IdeaWorkLinkCaps, IdeaWorkSnapshot } from '../do/idea-work';
+import type {
+  CreateInboxItemCommentInput,
+  InboxItemCommentMutationResult,
+  ListInboxItemCommentThreadsInput,
+} from '../do/inbox-item-comments';
 import type { LogicalMessageRequest, LogicalMessageResult } from '../do/logical-message';
 import type { LogicalTranscriptRequest, LogicalTranscriptResult } from '../do/logical-transcript';
 import type { MessageContextRequest, MessageContextResult } from '../do/message-context';
@@ -1029,6 +1035,21 @@ export async function getRunReceiptFacts(
     projectId,
     'getRunReceiptFacts',
     (stub) => stub.getRunReceiptFacts(input),
+    'idempotent_read'
+  );
+}
+
+export async function countRunNudges(
+  env: Env,
+  projectId: string,
+  windows: Parameters<ProjectData['countRunNudges']>[0],
+  maxWindows: number
+): Promise<ReturnType<ProjectData['countRunNudges']>> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'countRunNudges',
+    (stub) => stub.countRunNudges(windows, maxWindows),
     'idempotent_read'
   );
 }
@@ -2292,6 +2313,59 @@ export async function runProjectEventRetention(
   return callProjectDataEvent(env, projectId, 'runProjectEventRetention', input);
 }
 
+// --- Inbox item comments (inbox slice H1) ------------------------------------
+// Scoped to the asks id. Callers must have already proven the item belongs to `projectId` and
+// that the actor may read it (packages/operations/src/inbox-task-core.ts) — the DO has no D1.
+
+export async function listInboxItemCommentThreads(
+  env: Env,
+  projectId: string,
+  input: ListInboxItemCommentThreadsInput
+): Promise<{ threads: InboxItemCommentThread[]; hasMore: boolean }> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'listInboxItemCommentThreads',
+    (stub) => stub.listInboxItemCommentThreads(input),
+    'idempotent_read'
+  );
+}
+
+export async function countInboxItemWatchers(
+  env: Env,
+  projectId: string,
+  itemId: string
+): Promise<number> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'countInboxItemWatchers',
+    (stub) => stub.countInboxItemWatchers(projectId, itemId),
+    'idempotent_read'
+  );
+}
+
+/** Renew an item's watches before admitting a change (`renewInboxItemWatches`). */
+export async function renewInboxItemWatches(
+  env: Env,
+  projectId: string,
+  input: { itemId: string; open: boolean; closedGraceMs: number }
+): Promise<number> {
+  return callProjectDataNoRetry(env, projectId, 'renewInboxItemWatches', (stub) =>
+    stub.renewInboxItemWatches({ projectId, ...input })
+  );
+}
+
+export async function createInboxItemComment(
+  env: Env,
+  projectId: string,
+  input: CreateInboxItemCommentInput
+): Promise<InboxItemCommentMutationResult> {
+  return callProjectDataNoRetry(env, projectId, 'createInboxItemComment', (stub) =>
+    stub.createInboxItemComment(input)
+  );
+}
+
 // --- Library file comments ---------------------------------------------------
 // Every entry point is `fileId`-scoped. Callers must have already proven the file
 // belongs to `projectId` (see assertLibraryFileInProject) — the DO has no D1.
@@ -3440,7 +3514,6 @@ export async function expireQuestionAsk(
   const stub = await getStub(env, projectId);
   return stub.expireQuestionAsk(input);
 }
-
 
 export async function prepareAttentionAnswer(
   env: Env,

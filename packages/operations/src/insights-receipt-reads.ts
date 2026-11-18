@@ -16,6 +16,12 @@ import { log } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
 import {
+  FIRST_TRY_FAILED_SQL,
+  FIRST_TRY_PASSED_SQL,
+  FIRST_TRY_PENDING_SQL,
+  firstTryVerdictSql,
+} from './insights-flow-sql';
+import {
   type ComparableRun,
   timestampMs,
   type UsualDurations,
@@ -109,7 +115,23 @@ const PULL_REQUEST_SQL = `
                  'last', MAX(CASE WHEN c.state != 'pending' THEN c.updated_at END))
             FROM pull_request_checks c
            WHERE c.project_id = pr.project_id AND c.repository = pr.repository
-             AND c.head_sha = pr.head_sha) AS checks
+             AND c.head_sha = pr.head_sha) AS checks,
+         -- The opening commit's verdict; NULL (not recorded) when SAM has no from_open head.
+         -- Only the pull_request.opened webhook sets from_open (recordPullRequestHead), so a PR has
+         -- at most one such head and this reads the same commit as Flow's ciFirstTryStatement.
+         -- Served by the pull_request_heads primary key prefix and the checks primary key.
+         (SELECT CASE WHEN count(h.head_sha) = 0 THEN NULL ELSE ${firstTryVerdictSql({
+           failed: FIRST_TRY_FAILED_SQL,
+           passed: FIRST_TRY_PASSED_SQL,
+           pending: FIRST_TRY_PENDING_SQL,
+           movedOn: "(pr.state <> 'open' OR pr.head_sha IS NOT h.head_sha)",
+         })} END
+            FROM pull_request_heads h
+            LEFT JOIN pull_request_checks c
+              ON c.project_id = h.project_id AND c.repository = h.repository
+             AND c.head_sha = h.head_sha
+           WHERE h.project_id = pr.project_id AND h.repository = pr.repository
+             AND h.pr_number = pr.number AND h.from_open = 1) AS first_try
     FROM pull_requests pr
    WHERE pr.project_id = ? AND pr.repository = ? AND pr.number = ?
    LIMIT 1`;
@@ -191,6 +213,7 @@ const PullRequestRowSchema = v.object({
   merged_at: v.nullish(v.string()),
   checks_state: v.nullish(v.picklist(['pending', 'success', 'failure', 'neutral'])),
   checks: v.nullish(v.string()),
+  first_try: v.nullish(v.picklist(['passed', 'failed', 'pending'])),
 });
 
 const ChecksSchema = v.object({ count: v.number(), last: v.nullish(v.string()) });
@@ -252,7 +275,9 @@ export function earliest(...values: Array<number | null>): number | null {
   return known.length ? Math.min(...known) : null;
 }
 
-export function reservationOf(row: TaskRow): { memoryMb: number; cpuMillis: number } | null {
+export function reservationOf(
+  row: Pick<TaskRow, 'id' | 'workspace_reservation' | 'task_reservation'>
+): { memoryMb: number; cpuMillis: number } | null {
   for (const raw of [row.workspace_reservation, row.task_reservation]) {
     try {
       const parsed = parseStoredResolvedReservationJson(raw);
@@ -317,7 +342,7 @@ export async function readTask(
 }
 
 export interface PullRequestRead {
-  outcome: Pick<RunReceiptOutcome, 'pullRequest' | 'checks'>;
+  outcome: Pick<RunReceiptOutcome, 'pullRequest' | 'checks' | 'ciFirstTry'>;
   finalCheckAt: number | null;
   hasChecks: boolean;
 }
@@ -328,7 +353,7 @@ export async function readPullRequest(
   row: TaskRow
 ): Promise<PullRequestRead> {
   const none: PullRequestRead = {
-    outcome: { pullRequest: null, checks: null },
+    outcome: { pullRequest: null, checks: null, ciFirstTry: 'not_recorded' },
     finalCheckAt: null,
     hasChecks: false,
   };
@@ -377,6 +402,7 @@ export async function readPullRequest(
         mergedAt: pr.merged_at ?? null,
       },
       checks: checkCount > 0 ? (pr.checks_state ?? null) : null,
+      ciFirstTry: pr.first_try ?? 'not_recorded',
     },
     finalCheckAt: timestampMs(checks?.last),
     hasChecks: checkCount > 0,

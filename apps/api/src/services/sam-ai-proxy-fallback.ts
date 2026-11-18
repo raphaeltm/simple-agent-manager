@@ -7,7 +7,6 @@
 import { HARNESS_CAPABILITIES } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
-import { isAiProxyEnabled } from './ai-proxy-availability';
 
 /** Agent types eligible for AI proxy credential fallback (module-scope for isolate reuse). */
 export const PROXY_ELIGIBLE_AGENTS: ReadonlySet<string> = new Set(
@@ -15,6 +14,9 @@ export const PROXY_ELIGIBLE_AGENTS: ReadonlySet<string> = new Set(
     (capability) => capability.proxyRouteSegment && capability.proxyProviderTag
   ).map((capability) => capability.agentType)
 );
+
+import { isAiProxyEnabled } from './ai-proxy-availability';
+export { isAiProxyEnabled };
 
 /**
  * Claude Code and Codex use the platform proxy only after the person explicitly chose SAM as the
@@ -34,12 +36,9 @@ export async function samProxyFallbackAvailable(
   providerMode: string | null
 ): Promise<boolean> {
   return (
+    (await isAiProxyEnabled(env)) &&
     PROXY_ELIGIBLE_AGENTS.has(agentType) &&
     requiresExplicitSamProvider(agentType) &&
-    providerMode === 'sam' &&
-    // The same resolver the agent-key route reads (`ai-proxy-availability.ts`): on Cloudflare it
-    // is the AI_PROXY_ENABLED kill switch alone; without an AI Gateway it also needs the admin's
-    // direct-upstream opt-in.
-    (await isAiProxyEnabled(env))
+    providerMode === 'sam'
   );
 }

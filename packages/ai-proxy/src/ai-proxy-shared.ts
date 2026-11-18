@@ -8,8 +8,16 @@
  *
  * Upstream auth resolution (Unified Billing vs platform key) lives in ai-billing.ts.
  */
+import { expectJsonRecord } from '@simple-agent-manager/worker-core';
+
 import { resolveAiGatewayId } from './ai-gateway-availability';
 import type { AiProxyEnv } from './env';
+import {
+  type ChatCompletionsTarget,
+  chatTargetHeaders,
+  fetchChatTarget,
+  isCloudflareChatTarget,
+} from './llm-chat-target';
 
 // =============================================================================
 // Model Validation
@@ -68,9 +76,30 @@ export function buildAnthropicGatewayUrl(env: AiProxyEnv): string {
   return 'https://api.anthropic.com/v1/messages';
 }
 
+/** Build upstream URL for Workers AI chat completions via AI Gateway. */
+export function buildWorkersAIGatewayUrl(env: AiProxyEnv): string {
+  const gatewayId = resolveAiGatewayId(env);
+  if (gatewayId) {
+    return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/workers-ai/v1/chat/completions`;
+  }
+  return `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/ai/v1/chat/completions`;
+}
+
 export interface WorkersAIChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+}
+
+export interface WorkersAIChatCompletionOptions {
+  modelId: string;
+  maxTokens: number;
+  timeoutMs: number;
+  messages: WorkersAIChatMessage[];
+  metadata: Record<string, unknown>;
+  responseLabel: string;
+  reasoningEffort?: string | null;
+  chatTemplateKwargs?: Record<string, unknown>;
+  errorDiagnosticMaxLength?: number;
 }
 
 export class WorkersAIGatewayError extends Error {
@@ -172,33 +201,54 @@ export async function readSafeGatewayErrorDiagnostic(
   return parts.join(' ').slice(0, boundedMaxLength);
 }
 
-/** Bound on the sanitized reason logged for a failed third-party model call. */
-export const UPSTREAM_ERROR_REASON_MAX_LENGTH = 256;
-/**
- * Bytes of a third-party error body read to find its `code`/`type` (never logged). An
- * OpenAI-style body puts a long `message` first, so a window as small as the reason would cut
- * the JSON before the fields that matter and log nothing.
- */
-export const UPSTREAM_ERROR_BODY_PARSE_MAX_BYTES = 4096;
+export async function fetchWorkersAIChatCompletion(
+  env: AiProxyEnv,
+  options: WorkersAIChatCompletionOptions,
+  target?: ChatCompletionsTarget,
+  signal?: AbortSignal
+): Promise<string | null> {
+  const resolved = target ?? {
+    kind: 'cloudflare-gateway' as const,
+    url: buildWorkersAIGatewayUrl(env),
+    baseUrl: '',
+    apiKey: env.CF_API_TOKEN,
+    model: options.modelId,
+    allowPrivateNetwork: false,
+  };
+  const cloudflare = isCloudflareChatTarget(resolved);
+  const response = await fetchChatTarget(resolved, {
+    method: 'POST',
+    signal: signal ?? AbortSignal.timeout(options.timeoutMs),
+    headers: chatTargetHeaders(resolved, { 'cf-aig-metadata': JSON.stringify(options.metadata) }),
+    body: JSON.stringify({
+      model: resolved.model,
+      max_tokens: options.maxTokens,
+      messages: options.messages,
+      ...(cloudflare && options.reasoningEffort !== undefined
+        ? { reasoning_effort: options.reasoningEffort }
+        : {}),
+      ...(cloudflare && options.chatTemplateKwargs
+        ? { chat_template_kwargs: options.chatTemplateKwargs }
+        : {}),
+    }),
+  });
 
-/**
- * Log fields for a failed model response, consuming its body. A Cloudflare or first-party
- * provider route keeps logging up to 500 characters of the body, as it always has. A
- * third-party endpoint's body is never logged: it can echo the configured key or the prompt, so
- * only an allowlisted, bounded reason (`readSafeGatewayErrorDiagnostic`) is kept.
- */
-export async function upstreamErrorLogFields(
-  response: Response,
-  thirdParty: boolean
-): Promise<{ body?: string; reason?: string }> {
-  if (!thirdParty) {
-    return { body: (await response.text().catch(() => 'Unknown error')).slice(0, 500) };
+  if (!response.ok) {
+    const diagnostic = options.errorDiagnosticMaxLength
+      ? await readSafeGatewayErrorDiagnostic(response, options.errorDiagnosticMaxLength)
+      : undefined;
+    throw new WorkersAIGatewayError(response.status, diagnostic);
   }
-  const reason = await readSafeGatewayErrorDiagnostic(
-    response,
-    UPSTREAM_ERROR_BODY_PARSE_MAX_BYTES
-  ).catch(() => undefined);
-  return reason ? { reason: reason.slice(0, UPSTREAM_ERROR_REASON_MAX_LENGTH) } : {};
+
+  const payload = expectJsonRecord(await response.json(), options.responseLabel);
+  const choices = Array.isArray(payload.choices) ? payload.choices : [];
+  const firstChoice = choices[0]
+    ? expectJsonRecord(choices[0], `${options.responseLabel}.choices[0]`)
+    : undefined;
+  const messageRecord = firstChoice?.message
+    ? expectJsonRecord(firstChoice.message, `${options.responseLabel}.message`)
+    : undefined;
+  return typeof messageRecord?.content === 'string' ? messageRecord.content.trim() : null;
 }
 
 /** Build upstream URL for Anthropic token counting via AI Gateway. */

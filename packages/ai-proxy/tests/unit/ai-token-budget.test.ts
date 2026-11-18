@@ -482,7 +482,11 @@ describe('checkAiUsageGate', () => {
     );
     kv._store.set(buildMonthlyCostCacheKey('user-monthly'), '10.010000');
 
-    const result = await checkAiUsageGate(kv, 'user-monthly', makeEnv());
+    const result = await checkAiUsageGate(
+      kv,
+      'user-monthly',
+      makeEnv({ AI_GATEWAY_ID: 'gateway', CF_ACCOUNT_ID: 'account', CF_API_TOKEN: 'token' })
+    );
     expect(result.allowed).toBe(false);
     if (!result.allowed) {
       expect(result.reason).toBe('monthly-cost-cap');

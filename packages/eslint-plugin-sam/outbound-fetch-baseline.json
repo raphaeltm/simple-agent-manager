@@ -11,7 +11,6 @@
   "apps/api/src/routes/google-auth.ts": 1,
   "apps/api/src/routes/project-deployment.ts": 1,
   "apps/api/src/routes/projects/devcontainer-configs.ts": 3,
-  "apps/api/src/routes/workspace-subdomain-proxy.ts": 1,
   "apps/api/src/services/agent-credential-validation.ts": 1,
   "apps/api/src/services/agent-models/workers-ai.ts": 1,
   "apps/api/src/services/analytics-forward.ts": 3,

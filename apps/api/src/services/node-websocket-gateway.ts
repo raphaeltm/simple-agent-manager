@@ -19,7 +19,7 @@ import {
   assertReverseTunnelUpstreamPort,
   REVERSE_TUNNEL_UPSTREAM_HOST,
   type ReverseTunnelRangeEnv,
-} from './node-reverse-tunnel-config';
+} from '../selfhost/reverse-tunnel/config';
 
 /** Response headers Caddy copies into the upstream request (deploy/selfhost/caddy/sam.d/). */
 export const GATEWAY_HEADER = {

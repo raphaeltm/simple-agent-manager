@@ -215,7 +215,7 @@ export type {
   WorkspaceStatus,
 } from './workspace';
 // Node class runtime guards (value exports, not types)
-export { isNodeClass, isTunnelNodeTransport, isUserOwnedNodeClass } from './workspace';
+export { isNodeClass, isUserOwnedNodeClass, NODE_BILLING_ENDED_STATUSES } from './workspace';
 // Provider Catalog
 export type {
   LocationInfo,
@@ -389,6 +389,7 @@ export type {
   ProjectCommentSessionRef,
   ReplyToLibraryFileCommentThreadRequest,
   ReplyToMessageCommentThreadRequest,
+  StoredCommentAnchorKind,
   UpdateLibraryFileCommentThreadStatusRequest,
   UpdateMessageCommentThreadStatusRequest,
 } from './comments';
@@ -398,6 +399,7 @@ export {
   COMMENT_STATUSES,
   MESSAGE_COMMENT_AUTHOR_KINDS,
   MESSAGE_COMMENT_THREAD_STATUSES,
+  STORED_COMMENT_ANCHOR_KINDS,
 } from './comments';
 
 // ProjectData event subscription core
@@ -813,6 +815,11 @@ export {
 
 // Project Overview (Inbox slice F1)
 export type {
+  OverviewBrief,
+  OverviewBriefPart,
+  OverviewBriefRef,
+  OverviewBriefRefKind,
+  OverviewBriefSentence,
   OverviewMergedPullRequest,
   OverviewRunningChat,
   OverviewRunningState,
@@ -823,12 +830,14 @@ export {
   DEFAULT_PROJECT_OVERVIEW_RECENT_LIMIT,
   DEFAULT_PROJECT_OVERVIEW_RUNNING_LIMIT,
   MAX_PROJECT_OVERVIEW_LIMIT,
+  OVERVIEW_BRIEF_REF_KINDS,
 } from './project-overview';
 
 // Run receipt (Insights slice R)
 export type {
   RunReceipt,
   RunReceiptAccount,
+  RunReceiptCiFirstTry,
   RunReceiptFacts,
   RunReceiptFactsInput,
   RunReceiptOutcome,
@@ -844,6 +853,14 @@ export type {
   RunReceiptWaitingInterval,
 } from './insights-receipt';
 export { RUN_RECEIPT_PHASE_KEYS } from './insights-receipt';
+// Run usage (Insights slice U)
+export type {
+  RunModelUsage,
+  RunReceiptTokens,
+  RunTokenCounts,
+  RunUsageSource,
+  RunUsageSpend,
+} from './insights-run-usage';
 // Insights · Flow (Insights slice F)
 export type {
   FlowFlakyCheck,
@@ -868,6 +885,51 @@ export {
   INSIGHTS_RANGES,
   isInsightsRange,
 } from './insights-flow';
+
+// Insights · Accounts (Insights slice A)
+export type {
+  InsightsAccount,
+  InsightsAccountKind,
+  InsightsAccountOwner,
+  InsightsAccountSpend,
+  InsightsAccountsSection,
+  InsightsAccountStalls,
+  InsightsAccountTokens,
+  InsightsStallEpisode,
+  InsightsStallOutcome,
+  ProjectAccountsResponse,
+} from './insights-accounts';
+export type {
+  InsightsFirstPerson,
+  InsightsPeopleAskKind,
+  InsightsPeopleSection,
+  InsightsReviewPickup,
+  InsightsWaiting,
+  InsightsWaitingGroup,
+  InsightsWaitingItem,
+  ProjectPeopleResponse,
+} from './insights-people';
+export { INSIGHTS_PEOPLE_ASK_KINDS } from './insights-people';
+
+// Insights · Agent setups (Insights slice S)
+export type {
+  InsightsSetupGroup,
+  InsightsSetupGrouping,
+  InsightsSetupMemory,
+  InsightsSetupNudges,
+  InsightsSetupOwner,
+  InsightsSetupsSection,
+  InsightsSetupSuggestion,
+  InsightsSetupTokens,
+  ProjectSetupsResponse,
+  RunNudgeCounts,
+  RunNudgeWindow,
+} from './insights-setups';
+export {
+  DEFAULT_INSIGHTS_SETUP_GROUPING,
+  INSIGHTS_SETUP_GROUPINGS,
+  isInsightsSetupGrouping,
+} from './insights-setups';
 
 // Knowledge Graph
 export type {
@@ -1192,6 +1254,8 @@ export type {
   InboxAskAnswerShape,
   InboxContextMessage,
   InboxCountResponse,
+  InboxErrorAction,
+  InboxErrorActionOption,
   InboxFilter,
   InboxItem,
   InboxItemContext,
@@ -1213,9 +1277,65 @@ export {
   INBOX_AGENT_URL_LINK_KINDS,
   INBOX_ASK_ANSWER_SHAPES,
   INBOX_CONFIRM_OPTIONS,
+  INBOX_ERROR_ACTIONS,
   INBOX_FILTERS,
   INBOX_ITEM_KINDS,
   INBOX_STORES,
   INBOX_WRITE_TOOL,
   parseInboxRef,
 } from './inbox';
+export type {
+  AskActivityKind,
+  AskActorKind,
+  InboxItemCommentThread,
+  InboxTaskActionResponse,
+  InboxTaskActivity,
+  InboxTaskAssignee,
+  InboxTaskCommentRequest,
+  InboxTaskCommentResponse,
+  InboxTaskDetail,
+  InboxTaskDoneRequest,
+  InboxTaskEventType,
+  InboxTaskReassignRequest,
+  InboxTaskStep,
+  InboxTaskStepRequest,
+} from './inbox-tasks';
+export {
+  ASK_ACTIVITY_KINDS,
+  ASK_ACTOR_KINDS,
+  INBOX_EVENT_SOURCE,
+  INBOX_EVENT_SUBJECT_TYPE,
+  INBOX_TASK_DEFAULT_WAKE_EVENT_TYPES,
+  INBOX_TASK_EVENT_TYPES,
+  INBOX_TASK_STEP_EVENT_TYPES,
+} from './inbox-tasks';
+
+// Admin Health & cost (Insights slices H and CF)
+export type {
+  InstallationCloudflareCost,
+  InstallationCloudflareCostStatus,
+  InstallationCloudflareProductLine,
+  InstallationCloudflareRefreshResponse,
+  InstallationComputeCurrencySpend,
+  InstallationComputeProviderSpend,
+  InstallationComputeSpend,
+  InstallationComputeWeek,
+  InstallationHealthRange,
+  InstallationHealthResponse,
+  InstallationHealthSection,
+  InstallationHealthWindow,
+  InstallationLatencyIncident,
+  InstallationLatencyIncidentState,
+  InstallationLatencyState,
+  InstallationLifecycleLatency,
+  InstallationMachineDensity,
+  InstallationMachineReuse,
+  InstallationNewMachineReason,
+  InstallationNewMachineReasonKind,
+  InstallationNewMachineReasons,
+} from './insights-installation';
+export {
+  DEFAULT_INSTALLATION_HEALTH_RANGE,
+  INSTALLATION_HEALTH_RANGES,
+  isInstallationHealthRange,
+} from './insights-installation';

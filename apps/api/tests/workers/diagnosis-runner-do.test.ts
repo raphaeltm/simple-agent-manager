@@ -2,11 +2,6 @@ import { applyD1Migrations, env, runDurableObjectAlarm, runInDurableObject } fro
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { DiagnosisRunner } from '../../src/durable-objects/diagnosis-runner';
-import type { Env } from '../../src/env';
-import {
-  __resetAdminSettingsCacheForTest,
-  updateAdminSettings,
-} from '../../src/services/admin-settings';
 import { listDiagnosisEvents, reconcileDiagnosisRuns } from '../../src/services/diagnosis-runner';
 import { seedUser } from './helpers/seed-d1';
 
@@ -37,112 +32,53 @@ async function seedRun(runId: string, userId: string): Promise<void> {
     .run();
 }
 
-async function waitForModelAwait(runId: string): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt++) {
-    const started = await env.DATABASE.prepare(
-      "SELECT 1 AS started FROM debug_diagnosis_run_events WHERE run_id=? AND step_key='model:1:started'"
-    )
-      .bind(runId)
-      .first<{ started: number }>();
-    if (started) return;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error('Diagnosis runner did not enter the model await');
-}
-
-const MODEL_ENDPOINT = 'https://llm.diagnosis-test.example/v1';
-const SETTINGS_ADMIN = 'diagnosis-test-admin';
-/** The Cloudflare deployment's model route: AI Gateway's Workers AI path for this account. */
-const GATEWAY_ACCOUNT = {
-  CF_ACCOUNT_ID: 'diagnosis-test-account',
-  CF_API_TOKEN: 'cf-token',
-  AI_GATEWAY_ID: 'sam',
-};
-const GATEWAY_URL = `https://gateway.ai.cloudflare.com/v1/${GATEWAY_ACCOUNT.CF_ACCOUNT_ID}/${GATEWAY_ACCOUNT.AI_GATEWAY_ID}/workers-ai/v1/chat/completions`;
-
-type ModelRoute = 'openai-compatible endpoint' | 'Cloudflare AI Gateway';
-
-/** Gateway vars the test lent the runner, restored after each test. */
-let lentGatewayEnv: { target: Record<string, unknown>; previous: Record<string, unknown> } | null =
-  null;
-
-/**
- * Gives the runner a model route and holds the model response until the test releases it, so the
- * race lands inside the real model await on purpose rather than on network timing. The released
- * response is a valid completion: the late result must still lose. Two routes, because the runner
- * reaches the model differently on each:
- * - an admin-configured OpenAI-compatible endpoint (a deployment without Cloudflare AI), set
- *   through the real admin settings writer;
- * - the Cloudflare AI Gateway (every Cloudflare deployment), lent to this runner's env.
- * Returns the release function and the URLs the held fetch saw, so each test can prove the call
- * really went through the route it names.
- */
-async function holdModel(
-  route: ModelRoute,
-  runner: DurableObjectStub<DiagnosisRunner>
-): Promise<{ release: () => void; heldUrls: string[] }> {
-  if (route === 'openai-compatible endpoint') {
-    await seedUser(SETTINGS_ADMIN, {
-      githubId: `gh-${SETTINGS_ADMIN}`,
-      email: `${SETTINGS_ADMIN}@test.com`,
-    });
-    await updateAdminSettings(env as unknown as Env, {
-      changes: [{ name: 'llm.openAICompatible.baseUrl', value: MODEL_ENDPOINT }],
-      actorUserId: SETTINGS_ADMIN,
-    });
-  } else {
-    await runInDurableObject(runner, (instance) => {
-      const target = (instance as unknown as { env: Record<string, unknown> }).env;
-      lentGatewayEnv = {
-        target,
-        previous: Object.fromEntries(Object.keys(GATEWAY_ACCOUNT).map((key) => [key, target[key]])),
-      };
-      Object.assign(target, GATEWAY_ACCOUNT);
-    });
-  }
-  const modelUrl = route === 'openai-compatible endpoint' ? MODEL_ENDPOINT : GATEWAY_URL;
-  let release!: () => void;
-  const released = new Promise<void>((resolve) => {
-    release = resolve;
+async function duringModelAwait(
+  runner: DurableObjectStub<DiagnosisRunner>,
+  action: (instance: DiagnosisRunner) => Promise<void>
+): Promise<void> {
+  // The full Workers pool has no AI binding/account credentials. Configure this DO's own
+  // gateway target, then suspend the actual network boundary, not the earlier audit event.
+  let owner!: DiagnosisRunner;
+  await runInDurableObject(runner, async (instance) => {
+    owner = instance;
+    instance.env = {
+      ...instance.env,
+      CF_ACCOUNT_ID: 'test-account',
+      CF_API_TOKEN: 'test-token',
+      AI_GATEWAY_ID: 'test-gateway',
+    };
   });
-  const heldUrls: string[] = [];
-  const passThrough = globalThis.fetch;
-  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
-    const url = input instanceof Request ? input.url : String(input);
-    if (!url.startsWith(modelUrl)) return passThrough(input, init);
-    heldUrls.push(url);
-    await released;
-    return Response.json({
-      choices: [
-        { index: 0, message: { role: 'assistant', content: 'late' }, finish_reason: 'stop' },
-      ],
-    });
+  let boundaryError: unknown;
+  const upstream = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    try {
+      expect(String(input)).toBe(
+        'https://gateway.ai.cloudflare.com/v1/test-account/test-gateway/workers-ai/v1/chat/completions'
+      );
+      expect(init?.method).toBe('POST');
+      // Await the real terminal writer before releasing the model response. Run it in the
+      // model owner's I/O context: workerd forbids using test-context stubs from this DO.
+      await action(owner);
+      return Response.json({
+        choices: [{ message: { content: 'Summary\nDeferred diagnosis completion' } }],
+        usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+      });
+    } catch (error) {
+      boundaryError = error;
+      throw error;
+    }
   });
-  return { release, heldUrls };
-}
-
-/** Wait until the runner's model request is actually held (the race must land inside it). */
-async function waitForHeldModelCall(heldUrls: string[]): Promise<void> {
-  for (let attempt = 0; attempt < 200 && heldUrls.length === 0; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
+  vi.stubGlobal('fetch', upstream);
+  try {
+    await runDurableObjectAlarm(runner);
+    if (boundaryError) throw boundaryError; // The production alarm handles model errors itself.
+    expect(upstream).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.unstubAllGlobals();
   }
-  if (heldUrls.length === 0) throw new Error('The model request was never made');
 }
-
-afterEach(async () => {
-  vi.restoreAllMocks();
-  if (lentGatewayEnv) {
-    Object.assign(lentGatewayEnv.target, lentGatewayEnv.previous);
-    lentGatewayEnv = null;
-  }
-  await updateAdminSettings(env as unknown as Env, {
-    changes: [{ name: 'llm.openAICompatible.baseUrl', value: null }],
-    actorUserId: SETTINGS_ADMIN,
-  }).catch(() => undefined);
-  __resetAdminSettingsCacheForTest();
-});
 
 describe('DiagnosisRunner DO durability and fault injection', () => {
+  afterEach(() => vi.unstubAllGlobals());
   it('starts idempotently and keeps one durable checkpoint/alarm after the 202 owner disappears', async () => {
     const runId = 'diagnosis-do-start-001';
     await seedRun(runId, 'diagnosis-user-start');
@@ -233,105 +169,79 @@ describe('DiagnosisRunner DO durability and fault injection', () => {
     expect(terminalEvents?.count).toBe(1);
   });
 
-  describe.each([
-    ['openai-compatible endpoint', 'endpoint'],
-    ['Cloudflare AI Gateway', 'gateway'],
-  ] as const)('through the %s', (route, routeKey) => {
-    it('keeps cancellation terminal when it commits during the real model await', async () => {
-      const runId = `diagnosis-do-cancel-race-${routeKey}`;
-      const userId = `diagnosis-user-cancel-race-${routeKey}`;
-      await seedRun(runId, userId);
-      const runner = stub(runId);
-      const held = await holdModel(route, runner);
-      await runner.start(runId);
+  it('keeps cancellation terminal when it commits during the real model await', async () => {
+    const runId = 'diagnosis-do-cancel-race-001';
+    await seedRun(runId, 'diagnosis-user-cancel-race');
+    const runner = stub(runId);
+    await runner.start(runId);
 
-      const alarm = runDurableObjectAlarm(runner);
-      await waitForModelAwait(runId);
-      await waitForHeldModelCall(held.heldUrls);
-      await runner.cancel(runId);
+    await duringModelAwait(runner, async (instance) => {
+      await instance.cancel(runId);
       expect(
-        await env.DATABASE.prepare(
+        await instance.env.DATABASE.prepare(
           'SELECT cancel_requested_at FROM debug_diagnosis_runs WHERE id=?'
         )
           .bind(runId)
           .first<{ cancel_requested_at: string | null }>()
       ).toMatchObject({ cancel_requested_at: expect.any(String) });
-      // The race really landed inside this route's model call.
-      expect(held.heldUrls).toEqual([
-        route === 'Cloudflare AI Gateway' ? GATEWAY_URL : `${MODEL_ENDPOINT}/chat/completions`,
-      ]);
-      held.release();
-      await alarm;
-      await runInDurableObject(runner, async (instance) => instance.alarm());
-      await runInDurableObject(runner, async (instance) => instance.alarm());
+    });
+    await runInDurableObject(runner, async (instance) => instance.alarm());
+    await runInDurableObject(runner, async (instance) => instance.alarm());
 
-      const row = await env.DATABASE.prepare(
-        'SELECT run_status,diagnosis_id FROM debug_diagnosis_runs WHERE id=?'
+    const row = await env.DATABASE.prepare(
+      'SELECT run_status,diagnosis_id FROM debug_diagnosis_runs WHERE id=?'
+    )
+      .bind(runId)
+      .first<{ run_status: string; diagnosis_id: string | null }>();
+    expect(row).toEqual({ run_status: 'cancelled', diagnosis_id: null });
+    expect(
+      await env.DATABASE.prepare('SELECT COUNT(*) AS count FROM debug_diagnoses WHERE created_by=?')
+        .bind('diagnosis-user-cancel-race')
+        .first<{ count: number }>()
+    ).toEqual({ count: 0 });
+    expect(
+      await env.DATABASE.prepare(
+        "SELECT step_key,COUNT(*) AS count FROM debug_diagnosis_run_events WHERE run_id=? AND step_key IN ('completed','terminal:cancelled') GROUP BY step_key"
       )
         .bind(runId)
-        .first<{ run_status: string; diagnosis_id: string | null }>();
-      expect(row).toEqual({ run_status: 'cancelled', diagnosis_id: null });
-      expect(
-        await env.DATABASE.prepare(
-          'SELECT COUNT(*) AS count FROM debug_diagnoses WHERE created_by=?'
-        )
-          .bind(userId)
-          .first<{ count: number }>()
-      ).toEqual({ count: 0 });
-      expect(
-        await env.DATABASE.prepare(
-          "SELECT step_key,COUNT(*) AS count FROM debug_diagnosis_run_events WHERE run_id=? AND step_key IN ('completed','terminal:cancelled') GROUP BY step_key"
-        )
-          .bind(runId)
-          .all<{ step_key: string; count: number }>()
-      ).toMatchObject({ results: [{ step_key: 'terminal:cancelled', count: 1 }] });
-    });
+        .all<{ step_key: string; count: number }>()
+    ).toMatchObject({ results: [{ step_key: 'terminal:cancelled', count: 1 }] });
+  });
 
-    it('keeps deadline reconciliation terminal when it commits during the real model await', async () => {
-      const runId = `diagnosis-do-deadline-race-${routeKey}`;
-      const userId = `diagnosis-user-deadline-race-${routeKey}`;
-      await seedRun(runId, userId);
-      const runner = stub(runId);
-      const held = await holdModel(route, runner);
-      await runner.start(runId);
+  it('keeps deadline reconciliation terminal when it commits during the real model await', async () => {
+    const runId = 'diagnosis-do-deadline-race-001';
+    await seedRun(runId, 'diagnosis-user-deadline-race');
+    const runner = stub(runId);
+    await runner.start(runId);
 
-      const alarm = runDurableObjectAlarm(runner);
-      await waitForModelAwait(runId);
-      await waitForHeldModelCall(held.heldUrls);
-      await env.DATABASE.prepare(
+    await duringModelAwait(runner, async (instance) => {
+      await instance.env.DATABASE.prepare(
         "UPDATE debug_diagnosis_runs SET deadline_at='2020-01-01T00:00:00.000Z',heartbeat_at='2020-01-01T00:00:00.000Z' WHERE id=?"
       )
         .bind(runId)
         .run();
-      expect(await reconcileDiagnosisRuns(env)).toMatchObject({ terminalized: 1 });
-      expect(held.heldUrls).toEqual([
-        route === 'Cloudflare AI Gateway' ? GATEWAY_URL : `${MODEL_ENDPOINT}/chat/completions`,
-      ]);
-      held.release();
-      await alarm;
-      await runInDurableObject(runner, async (instance) => instance.alarm());
-      await runInDurableObject(runner, async (instance) => instance.alarm());
-
-      const row = await env.DATABASE.prepare(
-        'SELECT run_status,diagnosis_id FROM debug_diagnosis_runs WHERE id=?'
-      )
-        .bind(runId)
-        .first<{ run_status: string; diagnosis_id: string | null }>();
-      expect(row).toEqual({ run_status: 'failed', diagnosis_id: null });
-      const terminalEvents = await env.DATABASE.prepare(
-        "SELECT COUNT(*) AS count FROM debug_diagnosis_run_events WHERE run_id=? AND step_key='terminal:failed'"
-      )
-        .bind(runId)
-        .first<{ count: number }>();
-      expect(terminalEvents?.count).toBe(1);
-      expect(
-        await env.DATABASE.prepare(
-          'SELECT COUNT(*) AS count FROM debug_diagnoses WHERE created_by=?'
-        )
-          .bind(userId)
-          .first<{ count: number }>()
-      ).toEqual({ count: 0 });
+      expect(await reconcileDiagnosisRuns(instance.env)).toMatchObject({ terminalized: 1 });
     });
+    await runInDurableObject(runner, async (instance) => instance.alarm());
+    await runInDurableObject(runner, async (instance) => instance.alarm());
+
+    const row = await env.DATABASE.prepare(
+      'SELECT run_status,diagnosis_id FROM debug_diagnosis_runs WHERE id=?'
+    )
+      .bind(runId)
+      .first<{ run_status: string; diagnosis_id: string | null }>();
+    expect(row).toEqual({ run_status: 'failed', diagnosis_id: null });
+    const terminalEvents = await env.DATABASE.prepare(
+      "SELECT COUNT(*) AS count FROM debug_diagnosis_run_events WHERE run_id=? AND step_key='terminal:failed'"
+    )
+      .bind(runId)
+      .first<{ count: number }>();
+    expect(terminalEvents?.count).toBe(1);
+    expect(
+      await env.DATABASE.prepare('SELECT COUNT(*) AS count FROM debug_diagnoses WHERE created_by=?')
+        .bind('diagnosis-user-deadline-race')
+        .first<{ count: number }>()
+    ).toEqual({ count: 0 });
   });
 
   it('returns a cursor only when another event page exists and preserves all events', async () => {

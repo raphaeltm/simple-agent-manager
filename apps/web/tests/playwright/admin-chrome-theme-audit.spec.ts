@@ -58,13 +58,6 @@ function makeCostSummary(empty = false) {
       daysElapsed: 17,
       daysInMonth: 31,
     },
-    compute: {
-      totalNodeHours: empty ? 0 : 12345.67,
-      totalVcpuHours: empty ? 0 : 98765.43,
-      estimatedCostUsd: empty ? 0 : 4321.99,
-      activeNodes: empty ? 0 : 42,
-      vcpuHourCostUsd: 0.0123,
-    },
     period: '30d',
     periodLabel: empty ? 'No activity' : 'Large-number stress period',
   };

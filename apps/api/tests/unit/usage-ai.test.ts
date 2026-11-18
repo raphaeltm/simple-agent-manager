@@ -45,7 +45,7 @@ testApp.route('/api/usage', usageRoutes);
 function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
     AI_GATEWAY_ID: 'test-gateway',
-    CF_ACCOUNT_ID: 'test-account',
+    CF_ACCOUNT_ID: 'account-test',
     ...overrides,
   } as Env;
 }

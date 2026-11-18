@@ -1,144 +1,99 @@
-/**
- * The better-auth GitLab sign-in provider, built from the admin's GitLab settings.
- *
- * Outbound requests, and who controls them (better-auth 1.7.14, @better-auth/core dist):
- * - authorization redirect: the browser goes there; the Worker fetches nothing.
- * - code exchange (`validateAuthorizationCode`) and token refresh (`refreshAccessToken`, reached
- *   through `getAccessToken` from the repo-hosting package's gitlab.ts): better-auth's
- *   `fetchRefusingRedirects` (`oauth2/reject-redirects.mjs`), `redirect: 'manual'`, any 3xx is
- *   an error. They carry the client secret and refresh token, and go only to
- *   `<issuer>/oauth/token`. The provider has no
- *   fetch hook for these, so SAM guards them by refusing to register the provider at all for a
- *   host it may not call (`assertGitLabHostAllowed`); DNS answers are the egress fence's job.
- * - profile (`getUserInfo`): better-auth's default follows redirects with the access token, so
- *   SAM replaces it with a guarded fetch (every hop re-checked, cross-origin hops lose the token).
- *
- * Identity trust (`GitLabOAuthConfig.identityTrusted`): a host SAM does not trust (a self-managed
- * host saved at runtime) cannot vouch for an email and cannot reuse another host's account ids.
- * Its accounts are stored under a host-scoped key (`untrustedGitLabAccountSubject`), its emails
- * count as unverified, it gets no profile override, and `auth.ts` leaves it out of
- * `trustedProviders`.
+/** GitLab profile requests use the shared outbound guard; OAuth exchange/refresh use
+ * BetterAuth's fetchRefusingRedirects (manual, any redirect refused). Refusing the
+ * provider before registration also protects those library-owned token requests.
  */
 import {
-  DEFAULT_GITLAB_API_TIMEOUT_MS,
-  gitLabHostVerdict,
-} from '@simple-agent-manager/repo-hosting';
+  assertOutboundUrl,
+  getTimeoutMs,
+  guardedFetch,
+  readResponseJson,
+  withDeadline,
+} from '@simple-agent-manager/worker-core';
 import type { GitlabOptions, GitlabProfile } from 'better-auth/social-providers';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
-import { createModuleLogger } from '../lib/logger';
-import { guardedFetchWithDeadline } from '../lib/network-hosts';
-import { readResponseJson } from '../lib/runtime-validation';
-import { getTimeoutMs } from './fetch-timeout';
+import { log } from '../lib/logger';
 import { untrustedGitLabAccountSubject } from './gitlab-sign-in-identity';
 import { keepLinkedAccountEmail } from './linked-account-identity';
 import { resolveOutboundMaxRedirects } from './outbound-fetch-settings';
 import type { GitLabOAuthConfig } from './platform-config-oauth';
 
-const log = createModuleLogger('gitlab-login');
-
-/**
- * Every scope SAM asks GitLab for, once each. better-auth's GitLab provider prepends its own
- * default `read_user` unless `disableDefaultScope` is set, which made the authorize URL ask for
- * `read_user` twice (box round R17, D4); the provider below disables that default so this list
- * is the whole request.
- */
-export const GITLAB_SCOPES = ['read_user', 'api', 'read_repository', 'write_repository'];
-
+const DEFAULT_GITLAB_API_TIMEOUT_MS = 30_000;
 const gitlabUserSchema = v.object({
-  id: v.number(),
-  username: v.string(),
+  id: v.union([v.number(), v.string()]),
+  username: v.optional(v.nullable(v.string())),
   name: v.optional(v.nullable(v.string())),
   email: v.optional(v.nullable(v.string())),
-  state: v.string(),
-  locked: v.optional(v.nullable(v.boolean())),
   avatar_url: v.optional(v.nullable(v.string())),
-  email_verified: v.optional(v.nullable(v.boolean())),
+  email_verified: v.optional(v.boolean()),
+  state: v.optional(v.nullable(v.string())),
+  locked: v.optional(v.nullable(v.boolean())),
 });
 
-type GitLabProvider = GitlabOptions;
-type GitLabUserInfo = Awaited<ReturnType<NonNullable<GitLabProvider['getUserInfo']>>>;
-
-/** The signed-in GitLab user, fetched through the guarded fetch. Mirrors better-auth's default. */
-export async function fetchGitLabUserInfo(
-  env: Env,
-  config: GitLabOAuthConfig,
-  accessToken: string | undefined
-): Promise<GitLabUserInfo> {
-  if (!accessToken) return null;
-  let response: Response;
+export function gitLabLoginProvider(env: Env, config: GitLabOAuthConfig): GitlabOptions | null {
   try {
-    response = await guardedFetchWithDeadline(
-      `${config.host}/api/v4/user`,
-      { headers: { authorization: `Bearer ${accessToken}`, accept: 'application/json' } },
-      {
-        allowPrivateNetwork: config.allowPrivateNetwork,
-        maxRedirects: await resolveOutboundMaxRedirects(env),
-        deadlineMs: getTimeoutMs(env.GITLAB_API_TIMEOUT_MS, DEFAULT_GITLAB_API_TIMEOUT_MS),
-      }
-    );
-  } catch (err) {
-    log.warn('gitlab_user_fetch_refused', {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
-  if (!response.ok) {
-    log.warn('gitlab_user_fetch_failed', { status: response.status });
-    return null;
-  }
-  const profile = await readResponseJson(response, gitlabUserSchema, 'gitlab.user');
-  if (profile.state !== 'active' || profile.locked) return null;
-  if (!config.identityTrusted) {
-    if (!profile.email) return null;
-    return {
-      user: {
-        name: profile.name ?? profile.username ?? '',
-        email: profile.email,
-        image: profile.avatar_url ?? undefined,
-        emailVerified: false,
-      },
-      // better-auth keys the account on `data.id`; the host-scoped key is a string, which
-      // better-auth stringifies anyway (`resolveOAuthAccountKey`).
-      data: {
-        ...profile,
-        id: untrustedGitLabAccountSubject(config.host, profile.id),
-      } as unknown as GitlabProfile,
-    };
-  }
-  // A linked account keeps its own verified SAM email (`keepLinkedAccountEmail`).
-  const identity = await keepLinkedAccountEmail(env, 'gitlab', String(profile.id), {
-    email: profile.email,
-    emailVerified: profile.email_verified ?? false,
-  });
-  return {
-    user: {
-      name: profile.name ?? profile.username ?? '',
-      email: identity.email ?? undefined,
-      image: profile.avatar_url ?? undefined,
-      emailVerified: identity.emailVerified,
-    },
-    // better-auth keys the account on `data.id` (`accountSubject: ({ profile }) => profile.id`).
-    // Only the fields gitlabUserSchema validates exist; nothing in SAM reads the others.
-    data: profile as GitlabProfile,
-  };
-}
-
-/** The GitLab provider, or null when the admin's host may not be called (logged). */
-export function gitLabLoginProvider(env: Env, config: GitLabOAuthConfig): GitLabProvider | null {
-  const verdict = gitLabHostVerdict(config.host, config.allowPrivateNetwork);
-  if (verdict !== 'allowed') {
-    log.warn('gitlab_login_disabled_host_refused', { verdict });
+    // A private host needs the admin opt-in `integration.gitlab.allowPrivateNetwork`.
+    assertOutboundUrl(config.host, { allowPrivateNetwork: config.allowPrivateNetwork });
+  } catch {
+    log.warn('gitlab_login_disabled_host_refused');
     return null;
   }
   return {
     clientId: config.clientId,
     clientSecret: config.clientSecret,
     issuer: config.host,
-    scope: GITLAB_SCOPES,
+    scope: ['read_user', 'api', 'read_repository', 'write_repository'],
     disableDefaultScope: true,
     overrideUserInfoOnSignIn: config.identityTrusted,
-    getUserInfo: (token) => fetchGitLabUserInfo(env, config, token.accessToken),
+    getUserInfo: async (token) => {
+      if (!token.accessToken) return null;
+      try {
+        const maxRedirects = await resolveOutboundMaxRedirects(env);
+        return await withDeadline(
+          async (signal) => {
+            const response = await guardedFetch(
+              `${config.host}/api/v4/user`,
+              {
+                headers: { authorization: `Bearer ${token.accessToken}` },
+                signal,
+              },
+              { maxRedirects, allowPrivateNetwork: config.allowPrivateNetwork }
+            );
+            if (!response.ok) return null;
+            const profile = await readResponseJson(response, gitlabUserSchema, 'gitlab.user');
+            if (profile.state !== 'active' || profile.locked || !profile.email) return null;
+            // A trusted host's linked account keeps its own verified SAM email
+            // (`keepLinkedAccountEmail`); an untrusted host never vouches for one.
+            const identity = config.identityTrusted
+              ? await keepLinkedAccountEmail(env, 'gitlab', String(profile.id), {
+                  email: profile.email,
+                  emailVerified: profile.email_verified ?? false,
+                })
+              : { email: profile.email, emailVerified: false };
+            return {
+              user: {
+                name: profile.name ?? profile.username ?? '',
+                email: identity.email ?? profile.email,
+                image: profile.avatar_url ?? undefined,
+                emailVerified: identity.emailVerified,
+              },
+              // BetterAuth reads data.id as the account key. Untrusted hosts retain
+              // their host-scoped string key; GitlabProfile only types numeric ids.
+              data: {
+                ...profile,
+                id: config.identityTrusted
+                  ? profile.id
+                  : untrustedGitLabAccountSubject(config.host, profile.id),
+              } as unknown as GitlabProfile,
+            };
+          },
+          getTimeoutMs(env.GITLAB_API_TIMEOUT_MS, DEFAULT_GITLAB_API_TIMEOUT_MS)
+        );
+      } catch {
+        log.warn('gitlab_sign_in.user_fetch_refused');
+        return null;
+      }
+    },
   };
 }

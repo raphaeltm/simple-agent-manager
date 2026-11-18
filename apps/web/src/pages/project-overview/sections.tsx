@@ -20,8 +20,11 @@ import {
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 
+import { projectIdeaPath } from '../../lib/project-routes';
 import { formatMsSpan, formatTimeFromNow } from '../../lib/time-utils';
-import { IdeaRow } from '../ideas/parts';
+import { IdeaStateIcon, LiveDot } from '../ideas/parts';
+import { IDEA_STATE_LABELS, ideaRowLine } from '../ideas/view-model';
+import type { ViewerPausedChats } from './NeedsYouSection';
 
 /** A section's heading: its name, an optional count, and the link to its full page. */
 export function SectionHead({
@@ -67,17 +70,22 @@ export function SectionHead({
 export function Section({
   label,
   className = '',
+  focusTarget,
   children,
 }: {
   label: string;
   className?: string;
+  /** Lets a section take focus (Needs you does, when the person comes back to it). */
+  focusTarget?: string;
   children: ReactNode;
 }) {
   return (
     <Pane
       as="section"
+      tabIndex={focusTarget ? -1 : undefined}
+      data-focus-target={focusTarget}
       aria-label={label}
-      className={`flex min-w-0 shrink-0 flex-col px-1.5 pt-1 pb-2 ${className}`}
+      className={`flex min-w-0 shrink-0 flex-col px-1.5 pt-1 pb-2 outline-none ${className}`}
     >
       {children}
     </Pane>
@@ -89,13 +97,30 @@ export function SectionNote({ children }: { children: ReactNode }) {
   return <p className="m-0 px-2 pb-1 text-sm text-fg-muted">{children}</p>;
 }
 
-function RunningIcon({ chat }: { chat: OverviewRunningChat }) {
-  if (chat.state === 'waiting') {
+/**
+ * Whether the chat is paused on something the viewer must answer. The viewer's own inbox decides
+ * (`viewerPaused`, from the Needs you list), so Running now and Needs you word the same chat the
+ * same way (inbox slice F2). The Overview read's own flag stands in until that list has loaded,
+ * and also counts while the list has unfetched pages (its item may be past the first page).
+ */
+export function isPausedOnViewer(
+  chat: OverviewRunningChat,
+  viewerPaused: ViewerPausedChats | null
+): boolean {
+  if (chat.state === 'starting') return false;
+  const readSaysYou = chat.state === 'waiting' && chat.waitingOnViewer;
+  if (!viewerPaused) return readSaysYou;
+  if (viewerPaused.ids.has(chat.sessionId)) return true;
+  return !viewerPaused.complete && readSaysYou;
+}
+
+function RunningIcon({ chat, pausedOnYou }: { chat: OverviewRunningChat; pausedOnYou: boolean }) {
+  if (pausedOnYou || chat.state === 'waiting') {
     return (
       <CircleHelp
         size={18}
         aria-hidden="true"
-        className={chat.waitingOnViewer ? 'text-warning-fg' : 'text-fg-muted'}
+        className={pausedOnYou ? 'text-warning-fg' : 'text-fg-muted'}
       />
     );
   }
@@ -111,21 +136,30 @@ function RunningIcon({ chat }: { chat: OverviewRunningChat }) {
   );
 }
 
-/** "1h 20m · Opus 5.5 Build", "Starting · …", or "Waiting on you · …" in amber. */
-function RunningMeta({ chat, now }: { chat: OverviewRunningChat; now: number }) {
+/**
+ * "1h 20m · Opus 5.5 Build", "Starting · …", or "Paused on this · …" in amber: the inbox's own
+ * phrase for an agent stopped on an item that is in Needs you.
+ */
+function RunningMeta({
+  chat,
+  now,
+  pausedOnYou,
+}: {
+  chat: OverviewRunningChat;
+  now: number;
+  pausedOnYou: boolean;
+}) {
   const lead =
     chat.state === 'starting'
       ? 'Starting'
-      : chat.state === 'waiting'
-        ? chat.waitingOnViewer
-          ? 'Waiting on you'
-          : 'Waiting for an answer'
-        : formatMsSpan(now - chat.startedAt);
+      : pausedOnYou
+        ? 'Paused on this'
+        : chat.state === 'waiting'
+          ? 'Waiting for an answer'
+          : formatMsSpan(now - chat.startedAt);
   return (
     <span className="line-clamp-1 text-[13px] text-fg-muted [overflow-wrap:anywhere]">
-      <span className={chat.state === 'waiting' && chat.waitingOnViewer ? 'text-warning-fg' : ''}>
-        {lead}
-      </span>
+      <span className={pausedOnYou ? 'text-warning-fg' : ''}>{lead}</span>
       {chat.profile && <> · {chat.profile.name}</>}
     </span>
   );
@@ -135,10 +169,12 @@ export function RunningRow({
   chat,
   projectId,
   now,
+  pausedOnYou,
 }: {
   chat: OverviewRunningChat;
   projectId: string;
   now: number;
+  pausedOnYou: boolean;
 }) {
   const title = chat.topic?.trim() || 'New chat';
   return (
@@ -149,13 +185,13 @@ export function RunningRow({
         data-testid="overview-running-row"
       >
         <span className="mt-0.5 flex shrink-0">
-          <RunningIcon chat={chat} />
+          <RunningIcon chat={chat} pausedOnYou={pausedOnYou} />
         </span>
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="line-clamp-2 break-words text-[15px] font-medium leading-snug text-fg-primary">
             {title}
           </span>
-          <RunningMeta chat={chat} now={now} />
+          <RunningMeta chat={chat} now={now} pausedOnYou={pausedOnYou} />
         </span>
       </Link>
     </li>
@@ -167,6 +203,7 @@ export function RunningNowSection({
   items,
   total,
   waitingOnViewerTotal,
+  pausedSessionIds,
   loading,
   unavailable,
   className,
@@ -176,6 +213,8 @@ export function RunningNowSection({
   total: number;
   /** Running chats waiting on the viewer, including those past the cap. */
   waitingOnViewerTotal: number;
+  /** Chats paused on one of the viewer's open inbox items; null until the inbox has loaded. */
+  pausedSessionIds: ViewerPausedChats | null;
   loading: boolean;
   unavailable: boolean;
   className?: string;
@@ -200,7 +239,13 @@ export function RunningNowSection({
       {shown.length > 0 ? (
         <ul className="m-0 flex flex-col p-0" data-testid="overview-running-list">
           {shown.map((chat) => (
-            <RunningRow key={chat.sessionId} chat={chat} projectId={projectId} now={now} />
+            <RunningRow
+              key={chat.sessionId}
+              chat={chat}
+              projectId={projectId}
+              now={now}
+              pausedOnYou={isPausedOnViewer(chat, pausedSessionIds)}
+            />
           ))}
         </ul>
       ) : unavailable ? (
@@ -225,6 +270,42 @@ export function RunningNowSection({
         </Link>
       )}
     </Section>
+  );
+}
+
+/**
+ * A recent idea, shaped like every other Overview row (same padding, icon column, type and
+ * hover) so it lines up with the merged pull requests in the same pane. The Ideas page's own
+ * row (`IdeaRow`) is a full-width list row with dividers and counts, which is the wrong shape
+ * here.
+ */
+function RecentIdeaRow({ item, projectId }: { item: IdeaListItem; projectId: string }) {
+  return (
+    <li className="list-none">
+      <Link
+        to={projectIdeaPath(projectId, item.ideaId)}
+        className="flex min-h-12 min-w-0 items-start gap-3 rounded-lg px-2 py-2 no-underline hover:bg-surface-hover"
+        data-testid="overview-recent-idea"
+      >
+        <span className="mt-0.5 flex shrink-0">
+          <IdeaStateIcon state={item.derived.state} size="glyph" />
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="line-clamp-2 break-words text-[15px] font-medium leading-snug text-fg-primary">
+            {item.title}
+          </span>
+          <span className="line-clamp-1 text-[13px] text-fg-muted [overflow-wrap:anywhere]">
+            <span className="sr-only">{IDEA_STATE_LABELS[item.derived.state]}. </span>
+            {item.derived.state === 'working' && (
+              <>
+                <LiveDot />{' '}
+              </>
+            )}
+            {ideaRowLine(item)}
+          </span>
+        </span>
+      </Link>
+    </li>
   );
 }
 
@@ -279,11 +360,11 @@ export function RecentlySection({
     <Section label="Recently" className={className}>
       <SectionHead title="Recently" to={`/projects/${projectId}/ideas`} linkLabel="Ideas" />
       {ideas.length > 0 && (
-        <div className="flex flex-col" data-testid="overview-recent-ideas">
+        <ul className="m-0 flex flex-col p-0" data-testid="overview-recent-ideas">
           {ideas.map((item) => (
-            <IdeaRow key={item.ideaId} item={item} projectId={projectId} compact />
+            <RecentIdeaRow key={item.ideaId} item={item} projectId={projectId} />
           ))}
-        </div>
+        </ul>
       )}
       {pullRequests.length > 0 && (
         <ul className="m-0 flex flex-col p-0">

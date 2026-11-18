@@ -91,10 +91,10 @@ describe('ActiveTaskCard', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1/chat/session-1');
   });
 
-  it('navigates to project chat when no session', () => {
+  it('navigates to the project Overview when the task has no chat yet', () => {
     render(<ActiveTaskCard task={makeTask({ sessionId: null })} />);
     fireEvent.click(screen.getByRole('button'));
-    expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1/chat');
+    expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1');
   });
 
   it('navigates on keyboard Enter', async () => {

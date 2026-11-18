@@ -12,6 +12,10 @@ import {
   findProjectsForGitHubRepository,
   type GitHubProjectCandidate,
 } from './github-project-repositories';
+import {
+  ingestPullRequestReviewWebhook,
+  isReviewCycleDelivery,
+} from './github-pull-request-reviews';
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -28,7 +32,9 @@ export async function ingestPullRequestWebhook(
   event: string,
   payload: Record<string, unknown>
 ): Promise<void> {
-  if (!['pull_request', 'check_run', 'check_suite'].includes(event)) return;
+  const reviewCycles = isReviewCycleDelivery(event, payload.action);
+  // Review events matter only for review cycles: anything else returns before the project lookup.
+  if (!['pull_request', 'check_run', 'check_suite'].includes(event) && !reviewCycles) return;
   const repo = record(payload.repository);
   const repositoryFullName = string(repo?.full_name)?.toLowerCase() ?? null;
   const repositoryId = typeof repo?.id === 'number' ? repo.id : null;
@@ -42,9 +48,13 @@ export async function ingestPullRequestWebhook(
   );
   if (projects.length === 0 || !repositoryFullName) return;
 
+  // Review cycles for Insights · People; never throws, so it cannot hold up the work below.
+  if (reviewCycles)
+    await ingestPullRequestReviewWebhook(env, event, repositoryFullName, projects, payload);
   if (event === 'pull_request')
     await ingestLifecycleWebhook(env, repositoryFullName, projects, payload);
-  else await ingestChecksWebhook(env, event, repositoryFullName, projects, payload);
+  else if (event === 'check_run' || event === 'check_suite')
+    await ingestChecksWebhook(env, event, repositoryFullName, projects, payload);
 }
 
 async function ingestLifecycleWebhook(

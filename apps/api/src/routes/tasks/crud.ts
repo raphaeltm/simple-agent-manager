@@ -1,3 +1,4 @@
+import { cronToHumanReadable } from '@simple-agent-manager/cron';
 import { toOperationHttpError } from '@simple-agent-manager/operations';
 import { applyIdeaStatusTransition, isIdeaStatus } from '@simple-agent-manager/operations';
 import { getIdeaSessionLinks } from '@simple-agent-manager/operations';
@@ -38,7 +39,6 @@ import {
   resolveTaskAgentProfileHints,
 } from '../../services/agent-profile-display';
 import { cancelTask } from '../../services/cancel-task';
-import { cronToHumanReadable } from '../../services/cron-utils';
 import { getRuntimeLimits } from '../../services/limits';
 import * as projectDataService from '../../services/project-data';
 import {

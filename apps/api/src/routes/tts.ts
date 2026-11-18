@@ -2,20 +2,13 @@ import { Hono } from 'hono';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
+import { getAuth, requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import {
-  checkRateLimit,
-  createRateLimitKey,
-  DEFAULT_WINDOW_SECONDS,
-  getCurrentWindowStart,
-  getRateLimit,
-  RateLimitError,
-} from '../middleware/rate-limit';
+import { RateLimitError } from '../middleware/rate-limit';
 import { parseOptionalBody, TtsRequestSchema } from '../schemas';
 import { getWorkersAiBindingOrNull } from '../services/platform-capabilities';
-import { resolveSpeechEndpoint } from '../services/speech-endpoints';
-import { getAudioFromR2, getTTSConfig, synthesizeSpeech } from '../services/tts';
+import { resolveSpeechSynthesisBackend } from '../services/speech-backend';
+import { getAudioFromR2, getTTSConfig,synthesizeSpeech } from '../services/tts';
 
 const ttsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -42,30 +35,23 @@ ttsRoutes.post('/synthesize', async (c) => {
   if (!config.enabled) {
     throw errors.badRequest('Text-to-speech is disabled');
   }
-  // Synthesis runs on Workers AI, or without the binding on an admin-configured OpenAI-compatible
-  // speech endpoint (`speech.synthesis.*`). With neither, say so instead of retrying into a 500.
+  // Synthesis runs on Workers AI. Without the binding, a backend the self-host build installed
+  // (services/speech-backend.ts) serves instead; with neither, say so instead of failing with a
+  // 500. With the binding nothing else is read.
   const binding = getWorkersAiBindingOrNull(c.env);
-  const ai = binding ?? (await resolveSpeechEndpoint(c.env, 'synthesis'));
+  const backend = binding ? null : await resolveSpeechSynthesisBackend(c.env);
+  const ai = binding ?? backend;
   if (!ai) {
     throw errors.featureUnavailable(
       'textToSpeech',
       'Text-to-speech is not available on this installation'
     );
   }
-  if (!binding) {
-    // Every miss spends the admin's speech endpoint: bound it per user (KV, per hour).
-    const limit = getRateLimit(c.env, 'TTS_SYNTHESIZE');
-    const window = getCurrentWindowStart(DEFAULT_WINDOW_SECONDS);
-    const result = await checkRateLimit(
-      c.env.KV,
-      createRateLimitKey('tts-synthesize', userId, window),
-      limit,
-      DEFAULT_WINDOW_SECONDS
-    );
-    if (!result.allowed) {
-      throw new RateLimitError(Math.max(1, result.resetAt - Math.floor(Date.now() / 1000)));
-    }
-  }
+  // A backend spends the admin's endpoint on every miss; it decides whether this user may.
+  await backend?.admit(c.env, userId).catch((err: unknown) => {
+    if (err instanceof RateLimitError) c.header('Retry-After', String(err.retryAfter));
+    throw err;
+  });
 
   const body = await parseOptionalBody(c.req.raw, TtsRequestSchema, {});
   if (!body.text || !body.storageId) {
@@ -99,8 +85,8 @@ ttsRoutes.post('/synthesize', async (c) => {
       textLength: text.length,
       mode,
     });
-    // An endpoint error can name the admin's host or the provider's status; keep it in the log.
-    if (!binding) throw errors.serviceUnavailable('Text-to-speech failed. Try again shortly.');
+    // A backend error can name the admin's endpoint host or the provider's status; log only.
+    if (backend) throw errors.serviceUnavailable('Text-to-speech failed. Try again shortly.');
     const errorMessage = err instanceof Error ? err.message : String(err);
     throw errors.internal(`TTS synthesis failed: ${errorMessage}`);
   }

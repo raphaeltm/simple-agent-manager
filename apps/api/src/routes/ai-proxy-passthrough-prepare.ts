@@ -1,8 +1,20 @@
 /**
- * Request preparation for the AI proxy passthrough routes (ai-proxy-passthrough.ts): workspace
- * token auth, rate limit, body parsing, usage gate and upstream resolution, plus the guarded
- * upstream fetch.
+ * AI proxy passthrough routes — URL-path-based workspace auth.
+ *
+ * These routes embed the workspace callback token in the URL path instead of
+ * auth headers, so protocol auth headers can be reserved for upstream provider
+ * credentials that are resolved server-side.
+ *
+ * Routes:
+ *   POST /ai/proxy/:wstoken/anthropic/v1/messages
+ *   POST /ai/proxy/:wstoken/anthropic/v1/messages/count_tokens
+ *   POST /ai/proxy/:wstoken/openai/v1/chat/completions
+ *
+ * The wstoken is verified as a workspace callback token to extract userId,
+ * workspaceId, and projectId. Upstream provider credentials are never accepted
+ * from, or returned to, tenant workspaces.
  */
+import type { MeasuredTokenUsage } from '@simple-agent-manager/ai-proxy';
 import {
   DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
   DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
@@ -10,11 +22,10 @@ import {
   type Dialect,
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
-import type { Context } from 'hono';
+import { type Context } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { guardedFetch, OutboundRequestRefusedError } from '../lib/network-hosts';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { readRequestJsonRecord, RequestBodyTooLargeError } from '../lib/runtime-validation';
 import {
@@ -22,10 +33,10 @@ import {
   createRateLimitKey,
   getCurrentWindowStart,
 } from '../middleware/rate-limit';
-import { isAiProxyEnabled, isAiProxyKillSwitchEngaged } from '../services/ai-proxy-availability';
+import { proxyRunUsageRecorder } from '../services/agent-run-usage';
+import { isAiProxyEnabled } from '../services/ai-proxy-availability';
 import { AIProxyAuthError, verifyAIProxyAuth } from '../services/ai-proxy-shared';
 import { checkAiUsageGate } from '../services/ai-token-budget';
-import { resolveOutboundMaxRedirects } from '../services/outbound-fetch-settings';
 import type { PreloadedRuntimeRows } from '../services/workspace-runtime-assets';
 import {
   anthropicError,
@@ -33,14 +44,11 @@ import {
   openaiError,
   openaiUsageGateError,
 } from './ai-proxy-passthrough-errors';
-import {
-  type ResolvedProxyUpstream,
-  resolveProxyUpstream,
-  trimTrailingSlashes,
-} from './ai-proxy-passthrough-upstream';
+import { type ResolvedProxyUpstream, resolveProxyUpstream } from './ai-proxy-passthrough-upstream';
 
-export type ProxyContext = Context<{ Bindings: Env }>;
-export interface PassthroughAuthResult {
+type ProxyContext = Context<{ Bindings: Env }>;
+
+interface PassthroughAuthResult {
   userId: string;
   workspaceId: string;
   projectId: string | null;
@@ -55,16 +63,18 @@ export interface PassthroughAuthResult {
   agentCredentialGeneration: number;
 }
 
-export interface PreparedProxyRequest extends PassthroughAuthResult {
+interface PreparedProxyRequest extends PassthroughAuthResult {
   body: Record<string, unknown>;
   modelId: string;
   upstream: ResolvedProxyUpstream;
+  /** Insights run usage hook for this request (`proxyRunUsageRecorder`). */
+  recordRunUsage: (usage: MeasuredTokenUsage) => Promise<void>;
 }
 
-export type PreparedProxyResult =
+type PreparedProxyResult =
   { ok: true; value: PreparedProxyRequest } | { ok: false; response: Response };
 
-export interface PrepareProxyOptions {
+interface PrepareProxyOptions {
   dialect: Dialect;
   jsonContext: string;
   disabledResponse: () => Response;
@@ -84,37 +94,14 @@ async function verifyPassthroughAuth(wstoken: string, env: Env): Promise<Passthr
   return verifyAIProxyAuth(wstoken, env, db);
 }
 
-function trimLeadingSlashes(value: string): string {
-  let start = 0;
-  while (start < value.length && value.charCodeAt(start) === 47) start++;
-  return value.slice(start);
-}
-
-export function joinUpstreamUrl(baseUrl: string, path: string): string {
-  return `${trimTrailingSlashes(baseUrl)}/${trimLeadingSlashes(path)}`;
-}
-
-export function buildUpstreamAuthHeaders(upstream: ResolvedProxyUpstream): Record<string, string> {
-  if (
-    upstream.capability.authStyle === 'bearer-token' ||
-    upstream.dialect === 'openai-compatible'
-  ) {
-    return { Authorization: `Bearer ${upstream.apiKey}` };
-  }
-  if (upstream.capability.authStyle === 'api-key' && upstream.dialect === 'anthropic') {
-    return { 'x-api-key': upstream.apiKey };
-  }
-  return {};
-}
-
 async function checkPassthroughRateLimit(
   env: Env,
   userId: string
 ): Promise<{ allowed: boolean; remaining: number; resetAt: number; limit: number }> {
   const rpmLimit =
-    parseInt(env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
+    Number.parseInt(env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
   const windowSeconds =
-    parseInt(env.AI_PROXY_RATE_LIMIT_WINDOW_SECONDS || '', 10) ||
+    Number.parseInt(env.AI_PROXY_RATE_LIMIT_WINDOW_SECONDS || '', 10) ||
     DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS;
   const windowStart = getCurrentWindowStart(windowSeconds);
   const rateLimitKey = createRateLimitKey('ai-proxy', userId, windowStart);
@@ -187,11 +174,6 @@ export async function prepareProxyRequest(
   c: ProxyContext,
   options: PrepareProxyOptions
 ): Promise<PreparedProxyResult> {
-  // Kill switch first; the no-gateway gate runs after auth (isAiProxyEnabled).
-  if (isAiProxyKillSwitchEngaged(c.env)) {
-    return { ok: false, response: options.disabledResponse() };
-  }
-
   const wstoken = c.req.param('wstoken');
   if (!wstoken) {
     return { ok: false, response: options.invalidTokenResponse() };
@@ -207,10 +189,7 @@ export async function prepareProxyRequest(
     return { ok: false, response: options.invalidTokenResponse() };
   }
 
-  // No AI Gateway and the admin has not enabled the direct upstream.
-  if (!(await isAiProxyEnabled(c.env))) {
-    return { ok: false, response: options.disabledResponse() };
-  }
+  if (!(await isAiProxyEnabled(c.env))) return { ok: false, response: options.disabledResponse() };
 
   const { allowed, remaining, resetAt, limit } = await checkPassthroughRateLimit(
     c.env,
@@ -266,53 +245,12 @@ export async function prepareProxyRequest(
     return { ok: false, response: options.missingUpstreamResponse() };
   }
 
-  return { ok: true, value: { ...auth, body, modelId, upstream } };
-}
-
-export function buildJsonUpstreamHeaders(upstream: ResolvedProxyUpstream): Record<string, string> {
-  return {
-    ...buildUpstreamAuthHeaders(upstream),
-    'Content-Type': 'application/json',
-  };
-}
-
-export function upstreamFetchErrorMeta(err: unknown): Record<string, string> {
-  if (err instanceof OutboundRequestRefusedError) {
-    return { errorName: err.name, refusal: err.reason };
-  }
-  if (err instanceof Error) {
-    return { errorName: err.name };
-  }
-  return { errorType: typeof err };
-}
-
-/**
- * The upstream base URL is chosen by the user (an `openai-compatible` credential or a
- * configuration's `baseUrl`), so the request goes through the guarded fetch: public hosts only,
- * and every redirect hop re-validated instead of followed by the runtime. A refused URL or hop
- * throws `OutboundRequestRefusedError`, which each route reports as an upstream failure.
- */
-export async function fetchProxyUpstream(
-  env: Env,
-  url: string,
-  headers: Record<string, string>,
-  body: Record<string, unknown>
-): Promise<Response> {
-  return guardedFetch(
-    url,
-    { method: 'POST', headers, body: JSON.stringify(body) },
-    { allowPrivateNetwork: false, maxRedirects: await resolveOutboundMaxRedirects(env) }
-  );
-}
-
-export function addAnthropicRequestHeaders(
-  headers: Record<string, string>,
-  c: ProxyContext
-): Record<string, string> {
-  // Anthropic-compatible Messages calls require an API version header.
-  // https://docs.anthropic.com/en/api/versioning
-  headers['anthropic-version'] = c.req.header('anthropic-version') || '2023-06-01';
-  const anthropicBeta = c.req.header('anthropic-beta');
-  if (anthropicBeta) headers['anthropic-beta'] = anthropicBeta;
-  return headers;
+  // Insights run usage: the measured tokens go to this workspace's run, keyed by the credential
+  // the proxy forwards with.
+  const recordRunUsage = proxyRunUsageRecorder(c.env, auth, {
+    model: modelId,
+    credentialReference: upstream.credentialReference,
+    credentialSource: upstream.credentialSource,
+  });
+  return { ok: true, value: { ...auth, body, modelId, upstream, recordRunUsage } };
 }

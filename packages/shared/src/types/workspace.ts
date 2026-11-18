@@ -62,15 +62,17 @@ export type NodeClass = 'managed' | 'user-owned';
  */
 export type NodeTransport = 'vm-public-dns' | 'cloudflare-tunnel' | 'reverse-tunnel';
 
-/** Transports whose node agent is reached only through an outbound tunnel (never a public IP). */
-export function isTunnelNodeTransport(transport: string | null | undefined): boolean {
-  return transport === 'cloudflare-tunnel' || transport === 'reverse-tunnel';
-}
-
 /** Runtime type guard for {@link NodeClass}. Unknown/legacy values are treated as not user-owned. */
 export function isNodeClass(value: unknown): value is NodeClass {
   return value === 'managed' || value === 'user-owned';
 }
+
+/**
+ * Node statuses after which a node no longer accrues compute time. For these the node's end time
+ * is its `updated_at` (`getNodeEndedAt`, apps/api `node-usage-calculation.ts`). One list for
+ * metering, quotas and Admin Health & cost.
+ */
+export const NODE_BILLING_ENDED_STATUSES = ['destroyed', 'destroying', 'deleted', 'error'] as const;
 
 /** True only for enrolled BYO machines. Any unknown/absent value is treated as managed (safe default). */
 export function isUserOwnedNodeClass(value: unknown): boolean {

@@ -16,6 +16,7 @@ import {
   resolveAttentionMarkers,
 } from '@simple-agent-manager/project-data/internal/do/attention';
 import {
+  acceptPromptDelivery,
   type DurabilityFoundationHooks,
   processPromptDeliveryAlarm,
 } from '@simple-agent-manager/project-data/internal/do/durability-foundation';
@@ -33,6 +34,7 @@ import {
 } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-storage';
 import { admitProjectEvent } from '@simple-agent-manager/project-data/internal/do/project-events';
 import { syncProviderLimitAttention } from '@simple-agent-manager/project-data/internal/do/provider-limit-attention';
+import { applySessionWakeReady } from '@simple-agent-manager/project-data/internal/do/session-wake-ready';
 import type { ProjectScheduledAction } from '@simple-agent-manager/shared';
 import type Database from 'better-sqlite3';
 import { getTableName, is } from 'drizzle-orm';
@@ -44,6 +46,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
+import { inboxErrorsPort } from '../../src/project-data-ports/inbox-errors';
 import { taskCallbackRoute } from '../../src/routes/tasks/callback';
 import { providerLimitResumeRoutes } from '../../src/routes/tasks/provider-limit-resume';
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
@@ -51,14 +54,16 @@ import {
   __resetAdminSettingsCacheForTest,
   updateAdminSettings,
 } from '../../src/services/admin-settings';
+import { fileTaskFailure, runInboxSystemErrorSweep } from '../../src/services/inbox/system-errors';
 import { preserveProviderLimitWait } from '../../src/services/provider-limit-reconciliation';
 import {
   queueWorkspaceSessionSleep,
   sleepWorkspaceSession,
 } from '../../src/services/session-sleep';
+import { markTaskFailedIfNonTerminal } from '../../src/services/task-failure';
 import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
 import { createSleepProjectDataFixture } from '../helpers/session-sleep-project-data-fixture';
-import { createMemoryKv, createSchemaTables } from '../helpers/sqlite-d1';
+import { applySqliteMigration, createMemoryKv, createSchemaTables } from '../helpers/sqlite-d1';
 
 vi.mock('../../src/services/jwt', () => ({
   verifyCallbackToken: vi.fn(async () => ({ workspace: 'workspace-1', scope: 'workspace' })),
@@ -242,6 +247,49 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
       env,
       { waitUntil: (p) => deliveries.push(p), passThroughOnException: () => {} }
     );
+  }
+
+  /** Distinct rejected prompts, each after the previous wait's retry time (4 exhaust the budget). */
+  async function rejectDistinctIncidents(agentPrefix: string, afterEach?: () => void) {
+    for (let incident = 0; incident < 4; incident++) {
+      if (incident) {
+        const row = d1
+          .prepare('SELECT provider_limit_wait_json AS value FROM tasks WHERE id=?')
+          .get(TASK) as { value: string };
+        vi.setSystemTime(JSON.parse(row.value).nextRetryAt + 1);
+        d1.prepare('UPDATE agent_sessions SET id=?').run(`${agentPrefix}-${incident}`);
+      }
+      expect(
+        (await callback({ toStatus: 'failed', errorMessage: 'provider_limit_reached' })).status
+      ).toBe(200);
+      afterEach?.();
+    }
+  }
+
+  /** The inbox tables (shipped migrations), the owner as an active member, a notification spy. */
+  function seedInboxOwner() {
+    for (const file of ['0245_asks.sql', '0247_asks_questions.sql', '0248_asks_system_errors.sql'])
+      applySqliteMigration(d1, new URL(`../../src/db/migrations/${file}`, import.meta.url));
+    d1.prepare(
+      "INSERT OR IGNORE INTO users (id,email,name,role,status) VALUES (?, 'u1@x.test', 'One', 'user', 'active')"
+    ).run(USER);
+    d1.prepare(
+      "UPDATE projects SET user_id = ?, name = 'One', repository = 'o/one' WHERE id = ?"
+    ).run(USER, PROJECT);
+    d1.prepare(
+      "INSERT OR REPLACE INTO project_members (project_id,user_id,role,status) VALUES (?, ?, 'owner', 'active')"
+    ).run(PROJECT, USER);
+    const notified = vi.fn().mockResolvedValue({ id: 'n-1' });
+    Object.assign(env, {
+      NOTIFICATION: {
+        idFromName: (name: string) => name,
+        get: () => ({
+          createNotification: notified,
+          claimNotificationDeduplication: vi.fn().mockResolvedValue(true),
+        }),
+      },
+    });
+    return notified;
   }
 
   async function sleepTheTask() {
@@ -971,18 +1019,7 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
 
   it('preserves an exhausted unknown-reset block after its runtime was deleted', async () => {
     // Distinct real callback incidents exhaust the existing consecutive budget.
-    for (let incident = 0; incident < 4; incident++) {
-      if (incident) {
-        const row = d1
-          .prepare('SELECT provider_limit_wait_json AS value FROM tasks WHERE id=?')
-          .get(TASK) as { value: string };
-        vi.setSystemTime(JSON.parse(row.value).nextRetryAt + 1);
-        d1.prepare('UPDATE agent_sessions SET id=?').run(`blocked-agent-${incident}`);
-      }
-      expect(
-        (await callback({ toStatus: 'failed', errorMessage: 'provider_limit_reached' })).status
-      ).toBe(200);
-    }
+    await rejectDistinctIncidents('blocked-agent');
     const before = d1
       .prepare(
         'SELECT admission_state,admission_reason,provider_limit_wait_json FROM tasks WHERE id=?'
@@ -1034,6 +1071,111 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
     expect(d1.prepare('SELECT status FROM tasks WHERE id=?').get(TASK)).toEqual({
       status: 'in_progress',
     });
+  });
+
+  it('a usage-limit wait files no inbox error item, and its block supersedes an open failed-wake item', async () => {
+    // Inbox slice E on the real callback route: waiting for a provider usage limit is not a
+    // failed start. The shipped asks migrations, not the drizzle mirror.
+    const notified = seedInboxOwner();
+    const errorAsk = (key: string) =>
+      d1.prepare("SELECT status FROM asks WHERE kind = 'error' AND dedupe_key = ?").get(key) as
+        { status: string } | undefined;
+
+    // A failed wake earlier in this chat, filed by the real ProjectData port.
+    const wakeItem = await inboxErrorsPort.fileWakeFailure(env as never, {
+      projectId: PROJECT,
+      sessionId: CHAT,
+      createdByUserId: USER,
+      topic: 'Ship it',
+    });
+    expect(wakeItem?.created).toBe(true);
+
+    // Distinct rejected prompts: the first waits, the budget then exhausts into a block.
+    // While it only waits, nothing is filed for the task, inline or by the sweep.
+    await rejectDistinctIncidents('limit-agent', () =>
+      expect(d1.prepare('SELECT status FROM tasks WHERE id=?').get(TASK)).toEqual({
+        status: 'in_progress',
+      })
+    );
+    expect(
+      JSON.parse(
+        (
+          d1
+            .prepare('SELECT provider_limit_wait_json AS value FROM tasks WHERE id=?')
+            .get(TASK) as {
+            value: string;
+          }
+        ).value
+      )
+    ).toMatchObject({ phase: 'blocked' });
+
+    // Liveness: a genuine failure of another task in the same sweep tick is filed.
+    d1.prepare(
+      "INSERT INTO tasks (id, project_id, user_id, title, status, chat_session_id, updated_at) VALUES ('task-genuine', ?, ?, 'Genuine', 'in_progress', 'chat-genuine', ?)"
+    ).run(PROJECT, USER, new Date().toISOString());
+    await markTaskFailedIfNonTerminal(env.DATABASE, 'task-genuine', 'Task runner startup failed');
+    const stats = await runInboxSystemErrorSweep(env);
+    expect(stats.filed).toBe(1);
+    expect(errorAsk('error:task:task-genuine')).toMatchObject({ status: 'open' });
+    expect(errorAsk(`error:task:${TASK}`)).toBeUndefined();
+    expect(await fileTaskFailure(env, PROJECT, TASK)).toBeNull();
+    // Nor did the person get an error notification for the waiting task; the genuine one did.
+    const errorNoticeTasks = notified.mock.calls
+      .map(([, n]) => n as { type?: string; title?: string; taskId?: string | null })
+      // Task-failure notices only: the failed-wake item filed above also names this task.
+      .filter((n) => n.type === 'error' && !n.title?.startsWith("Couldn't wake"))
+      .map((n) => n.taskId);
+    expect(errorNoticeTasks).toEqual(['task-genuine']);
+
+    // The blocked task sleeps and the block is presented to the chat (the real path that
+    // resolves the wake_failed marker): it supersedes the failed-wake item too.
+    expect(d1.prepare('SELECT status FROM asks WHERE id = ?').get(wakeItem?.id)).toEqual({
+      status: 'open',
+    });
+    await sleepTheTask();
+    expect(await preserveProviderLimitWait(env, TASK, Date.now())).toBe(true);
+    expect(
+      d1
+        .prepare('SELECT status, dedupe_key AS key, answer_json AS answer FROM asks WHERE id = ?')
+        .get(wakeItem?.id)
+    ).toEqual({ status: 'done', key: null, answer: '{"resolution":"superseded"}' });
+    expect(listActiveAttentionMarkers(sql, CHAT)).toEqual([
+      expect.objectContaining({ kind: 'provider_limit_blocked' }),
+    ]);
+  });
+
+  it('a genuine agent_prompt_failed callback files one task error item inline, linked from its notification', async () => {
+    const notified = seedInboxOwner();
+
+    d1.prepare("UPDATE tasks SET title = 'Ship it' WHERE id = ?").run(TASK);
+    // The exact report a staging VM agent sent when its agent could not start.
+    const response = await callback({ toStatus: 'failed', errorMessage: 'agent_prompt_failed' });
+    expect(response.status).toBe(200);
+    await Promise.all(deliveries.splice(0));
+    expect(d1.prepare('SELECT status FROM tasks WHERE id=?').get(TASK)).toEqual({
+      status: 'failed',
+    });
+    const items = d1
+      .prepare(
+        "SELECT id, assignee_user_id AS assignee, title, status FROM asks WHERE kind = 'error'"
+      )
+      .all() as Array<{ id: string; assignee: string; title: string; status: string }>;
+    expect(items).toEqual([
+      expect.objectContaining({
+        assignee: USER,
+        status: 'open',
+        title: "“Ship it” couldn't start",
+      }),
+    ]);
+    const errorNotices = notified.mock.calls.filter(
+      ([, n]) => (n as { type?: string }).type === 'error'
+    );
+    expect(errorNotices).toHaveLength(1);
+    expect(errorNotices[0]?.[1]).toMatchObject({
+      actionUrl: `/projects/${PROJECT}/inbox?item=${encodeURIComponent(`ask:${items[0]?.id}`)}`,
+    });
+    // The sweep after it files nothing more.
+    expect((await runInboxSystemErrorSweep(env)).filed).toBe(0);
   });
 
   it.each(['stale', 'expired', 'unrelated', 'future', 'ambiguous', 'auth'] as const)(
@@ -1156,4 +1298,397 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
       expect(getSchedule(sql, PROJECT, scheduleId)?.state).toBe('cancelled');
     }
   );
+  describe('a person writes to a chat held by a provider limit (idea 01M7MMRHF3VZRKREC2XBMSC7HF)', () => {
+    const HOUR = 60 * MINUTE;
+    const DAY = 24 * HOUR;
+
+    function accept(text: string, extra: Partial<Parameters<typeof acceptPromptDelivery>[3]> = {}) {
+      // The person owns the chat: delivery re-checks the sender at submit time.
+      sql.exec('UPDATE chat_sessions SET created_by_user_id = ? WHERE id = ?', USER, CHAT);
+      return acceptPromptDelivery(sql, env as never, hooks, {
+        targetSessionId: CHAT,
+        displayContent: text,
+        senderType: 'human',
+        senderId: USER,
+        sourceKind: 'user_followup',
+        ...extra,
+      });
+    }
+
+    /** Accept, then let the accept-time hold (a background step) finish. */
+    async function followUp(text: string) {
+      const accepted = await accept(text);
+      await Promise.all(deliveries.splice(0));
+      return accepted;
+    }
+
+    function delivery(id: string) {
+      return doDb
+        .prepare(
+          `SELECT delivery_state AS state, terminal_reason AS terminal, expires_at AS expiresAt,
+                  next_attempt_at AS nextAttemptAt
+             FROM session_inbox WHERE id = ?`
+        )
+        .get(id) as {
+        state: string;
+        terminal: string | null;
+        expiresAt: number;
+        nextAttemptAt: number | null;
+      };
+    }
+
+    const ttl = () => resolveDurableExecutionConfig(env as never).ttlMs;
+    const wakeAsks = () =>
+      d1
+        .prepare("SELECT status FROM asks WHERE kind = 'error' AND dedupe_key = ?")
+        .all(`error:wake:${CHAT}`);
+    const wakeMessages = () =>
+      sql
+        .exec(
+          "SELECT content FROM chat_messages WHERE role = 'system' AND content LIKE 'Wake failed:%'"
+        )
+        .toArray();
+    const waitRow = () =>
+      JSON.parse(
+        (
+          d1
+            .prepare('SELECT provider_limit_wait_json AS value FROM tasks WHERE id=?')
+            .get(TASK) as {
+            value: string;
+          }
+        ).value
+      ) as { phase: string; nextRetryAt: number; deadlineAt: number };
+
+    /** The real callback parks the task for a weekly-style window, then the real sweep sleeps it. */
+    async function parkAndSleep() {
+      const response = await callback({
+        ...producedCallbacks[0].callback,
+        providerLimitResetsAt: Date.now() + 3 * DAY,
+      });
+      expect(response.status).toBe(200);
+      const wait = waitRow();
+      expect(wait.phase).toBe('waiting');
+      await sleepTheTask();
+      return wait;
+    }
+
+    /** What a committed wake does in ProjectData: the chat is active, readiness nudges it. */
+    function commitWake() {
+      sql.exec("UPDATE chat_sessions SET status = 'active' WHERE id = ?", CHAT);
+      return applySessionWakeReady(
+        sql,
+        {
+          projectId: PROJECT,
+          chatSessionId: CHAT,
+          workspaceId: 'workspace-1',
+          agentSessionId: 'agent-1',
+          fence: { runtime: 'vm', taskId: TASK, recoveryAttemptId: 'attempt-1' },
+        },
+        Date.now()
+      );
+    }
+
+    /** The real wake, with what it needs to reach its claim (as in the owner-resume test above). */
+    async function useRealWake() {
+      const absentTables = Object.values(schema).filter(
+        (value): value is SQLiteTable =>
+          is(value, SQLiteTable) &&
+          !d1
+            .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?")
+            .get(getTableName(value))
+      );
+      createSchemaTables(d1, absentTables);
+      d1.exec(`INSERT INTO credentials(id,user_id,provider,credential_type,credential_kind,is_active,encrypted_token,iv)
+        VALUES ('cloud-credential','user-1','hetzner','cloud-provider','api-key',1,'encrypted','iv');
+        UPDATE projects SET default_location='nbg1',default_branch='main',repository='owner/repo',installation_id='install-1' WHERE id='project-1';
+        UPDATE nodes SET cloud_provider='hetzner',vm_size='small',vm_location='nbg1' WHERE id='node-1'`);
+      await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
+        userId: 'user-1',
+        projectId: 'project-1',
+        includeInstallation: true,
+      });
+      recovery.start.mockResolvedValue(undefined);
+      const actual = await vi.importActual<typeof import('../../src/services/session-recovery')>(
+        '../../src/services/session-recovery'
+      );
+      recovery.ensure.mockImplementation(actual.ensureSessionRecovery);
+    }
+
+    it('keeps the message past its TTL, parks it until the reset and files no wake error', async () => {
+      const notified = seedInboxOwner();
+      const wait = await parkAndSleep();
+
+      const first = await followUp('Also update the changelog, please');
+      // Accepted into a held chat: kept for the hold from the start.
+      expect(delivery(first.message.id)).toMatchObject({
+        expiresAt: wait.nextRetryAt + ttl(),
+        nextAttemptAt: wait.nextRetryAt,
+      });
+
+      // The real delivery alarm does not even try the wake before the reset.
+      await runDeliveryAlarm();
+      expect(recovery.ensure).not.toHaveBeenCalled();
+
+      // Well past the original TTL, through the real alarm: nothing expires, nothing is filed.
+      vi.setSystemTime(Date.now() + 2 * HOUR);
+      await runDeliveryAlarm();
+      vi.setSystemTime(Date.now() + DAY);
+      await runDeliveryAlarm();
+      expect(delivery(first.message.id)).toEqual({
+        state: 'queued',
+        terminal: null,
+        expiresAt: wait.nextRetryAt + ttl(),
+        nextAttemptAt: wait.nextRetryAt,
+      });
+      expect(recovery.ensure).not.toHaveBeenCalled();
+      expect(wakeAsks()).toEqual([]);
+      expect(wakeMessages()).toEqual([]);
+      expect(
+        notified.mock.calls.filter(([, n]) => (n as { type?: string }).type === 'error')
+      ).toEqual([]);
+
+      // At the reset the message tries the wake the hold released, still alive.
+      vi.setSystemTime(wait.nextRetryAt);
+      await runDeliveryAlarm();
+      expect(recovery.ensure).toHaveBeenCalledOnce();
+      expect(delivery(first.message.id).state).toBe('retry_wait');
+
+      // The committed wake releases it at once (no backoff wait), and the alarm submits it again.
+      expect(commitWake()).toBeGreaterThan(0);
+      expect(delivery(first.message.id).nextAttemptAt).toBe(Date.now());
+      sql.exec("UPDATE chat_sessions SET status = 'sleeping' WHERE id = ?", CHAT);
+      await runDeliveryAlarm();
+      expect(recovery.ensure).toHaveBeenCalledTimes(2);
+      expect(wakeAsks()).toEqual([]);
+    });
+
+    it('keeps a later message queued behind a parked one (only the lane head is ever claimed)', async () => {
+      seedInboxOwner();
+      const wait = await parkAndSleep();
+      // The first message is claimed, learns of the hold from its not_ready result and parks.
+      d1.prepare('UPDATE tasks SET provider_limit_wait_json = NULL WHERE id=?').run(TASK);
+      const first = await followUp('First note');
+      d1.prepare('UPDATE tasks SET provider_limit_wait_json = ? WHERE id=?').run(
+        JSON.stringify(wait),
+        TASK
+      );
+      await runDeliveryAlarm();
+      expect(recovery.ensure).toHaveBeenCalledOnce();
+      expect(delivery(first.message.id).nextAttemptAt).toBe(wait.nextRetryAt);
+
+      // An hour later the person writes again: that message is never the head, so it is only
+      // ever kept by the accept-time hold.
+      vi.setSystemTime(Date.now() + HOUR);
+      const second = await followUp('Second note');
+      vi.setSystemTime(Date.now() + 2 * HOUR);
+      await runDeliveryAlarm();
+      expect(delivery(second.message.id)).toMatchObject({
+        state: 'queued',
+        expiresAt: wait.nextRetryAt + ttl(),
+      });
+      expect(delivery(first.message.id).state).toBe('retry_wait');
+      expect(wakeAsks()).toEqual([]);
+    });
+
+    it('keeps a message whose accept finalizer failed after it was committed', async () => {
+      seedInboxOwner();
+      const wait = await parkAndSleep();
+      vi.mocked(hooks.recalculateAlarm).mockRejectedValueOnce(new Error('alarm unavailable'));
+      await expect(accept('Sent while the alarm write failed')).rejects.toThrow(
+        'alarm unavailable'
+      );
+      await Promise.all(deliveries.splice(0));
+      // The delivery was committed before the finalizer failed; the hold still reached it.
+      expect(
+        doDb
+          .prepare(
+            "SELECT expires_at AS expiresAt, next_attempt_at AS nextAttemptAt FROM session_inbox WHERE sender_type = 'human'"
+          )
+          .get()
+      ).toEqual({ expiresAt: wait.nextRetryAt + ttl(), nextAttemptAt: wait.nextRetryAt });
+    });
+
+    it('lets a non-human delivery expire on its own deadline, without a wake error', async () => {
+      seedInboxOwner();
+      await parkAndSleep();
+      // Queued first, so the hold the person's message brings applies to it too: parked, but its
+      // own deadline is not stretched.
+      const parentWake = await accept('Your subtask finished', {
+        senderType: 'agent',
+        senderId: 'task-child',
+        sourceKind: 'parent_wakeup',
+        sourceTaskId: 'task-child',
+        ttlMs: 30 * MINUTE,
+      });
+      const ownDeadline = Date.now() + 30 * MINUTE;
+      const person = await followUp('Please keep this');
+      expect(delivery(parentWake.message.id)).toMatchObject({
+        expiresAt: ownDeadline,
+        nextAttemptAt: expect.any(Number),
+      });
+      expect(delivery(parentWake.message.id).nextAttemptAt).toBeGreaterThan(Date.now());
+
+      vi.setSystemTime(Date.now() + HOUR);
+      await runDeliveryAlarm();
+      // Liveness: the alarm ran the expiry.
+      expect(delivery(parentWake.message.id)).toMatchObject({
+        state: 'expired',
+        terminal: 'ttl_expired',
+        expiresAt: ownDeadline,
+      });
+      expect(delivery(person.message.id).state).toBe('queued');
+      expect(recovery.ensure).not.toHaveBeenCalled();
+      expect(wakeAsks()).toEqual([]);
+      expect(wakeMessages()).toEqual([]);
+    });
+
+    it('closes an open failed-wake item when a message finds the chat held', async () => {
+      seedInboxOwner();
+      const earlier = await inboxErrorsPort.fileWakeFailure(env as never, {
+        projectId: PROJECT,
+        sessionId: CHAT,
+        createdByUserId: USER,
+        topic: 'Ship it',
+      });
+      expect(earlier?.created).toBe(true);
+      await parkAndSleep();
+      await followUp('Any news?');
+      expect(
+        d1.prepare('SELECT status, answer_json AS answer FROM asks WHERE id = ?').get(earlier?.id)
+      ).toEqual({ status: 'done', answer: '{"resolution":"superseded"}' });
+      expect(hooks.scheduleSummarySync).toHaveBeenCalled();
+    });
+
+    it('control: an ordinary stalled wake with no hold still expires and files one wake error', async () => {
+      seedInboxOwner();
+      await sleepWorkspaceSession(env, {
+        workspaceId: 'workspace-1',
+        userId: USER,
+        reason: 'explicit sleep',
+      });
+      const accepted = await followUp('Still there?');
+      await runDeliveryAlarm();
+      expect(recovery.ensure).toHaveBeenCalledOnce();
+      expect(delivery(accepted.message.id).expiresAt).toBe(accepted.message.createdAt + ttl());
+      vi.setSystemTime(Date.now() + 2 * HOUR);
+      await runDeliveryAlarm();
+      expect(delivery(accepted.message.id)).toMatchObject({
+        state: 'expired',
+        terminal: 'ttl_expired',
+      });
+      expect(wakeAsks()).toEqual([{ status: 'open' }]);
+      expect(wakeMessages()).toHaveLength(1);
+    });
+
+    it('a blocked hold keeps the message until the snapshot expires and never claims a wake', async () => {
+      seedInboxOwner();
+      await rejectDistinctIncidents('limit-agent');
+      expect(waitRow().phase).toBe('blocked');
+      await sleepTheTask();
+      // The reconciler presents the block, as in production (task asleep, no workspace).
+      expect(await preserveProviderLimitWait(env, TASK, Date.now())).toBe(true);
+      await useRealWake();
+      const budget = () =>
+        d1
+          .prepare(
+            'SELECT recovery_attempts AS attempts, recovery_status AS status, expires_at AS expiresAt FROM session_snapshots WHERE chat_session_id = ?'
+          )
+          .get(CHAT) as { attempts: number; status: string | null; expiresAt: string };
+      const before = budget();
+
+      const accepted = await followUp('Can you continue?');
+      const keepUntil = Date.parse(before.expiresAt);
+      expect(delivery(accepted.message.id)).toEqual({
+        state: 'queued',
+        terminal: null,
+        expiresAt: keepUntil,
+        nextAttemptAt: keepUntil,
+      });
+      for (const step of [2 * HOUR, DAY, 2 * DAY]) {
+        vi.setSystemTime(Date.now() + step);
+        await runDeliveryAlarm();
+      }
+      expect(delivery(accepted.message.id).state).toBe('queued');
+      expect(recovery.ensure).not.toHaveBeenCalled();
+
+      // A wake attempt anyway (a nudge from elsewhere): refused before the claim, no budget spent.
+      sql.exec(
+        'UPDATE session_inbox SET next_attempt_at = ? WHERE id = ?',
+        Date.now(),
+        accepted.message.id
+      );
+      await runDeliveryAlarm();
+      expect(recovery.ensure).toHaveBeenCalledOnce();
+      expect(recovery.start).not.toHaveBeenCalled();
+      expect(budget()).toMatchObject({ attempts: before.attempts, status: before.status });
+      expect(delivery(accepted.message.id)).toMatchObject({
+        state: 'retry_wait',
+        nextAttemptAt: keepUntil,
+      });
+      expect(wakeAsks()).toEqual([]);
+      expect(wakeMessages()).toEqual([]);
+      // The chat shows the hold instead: its banner reads the task's provider-limit admission.
+      expect(d1.prepare('SELECT admission_state AS state FROM tasks WHERE id=?').get(TASK)).toEqual(
+        { state: 'provider_limit_blocked' }
+      );
+
+      // Nobody resumed before the saved workspace expired: the person's message is really lost
+      // now, so it is reported even though the hold is still there.
+      vi.setSystemTime(keepUntil + 1);
+      await runDeliveryAlarm();
+      expect(delivery(accepted.message.id)).toMatchObject({
+        state: 'expired',
+        terminal: 'ttl_expired',
+      });
+      expect(waitRow().phase).toBe('blocked');
+      expect(wakeAsks()).toEqual([{ status: 'open' }]);
+      expect(wakeMessages()).toHaveLength(1);
+    });
+    it('an expired waiting hold is refused before the claim and recorded as blocked', async () => {
+      seedInboxOwner();
+      // A short known reset: the hold's deadline is 30 minutes after its retry time.
+      const response = await callback({
+        ...producedCallbacks[0].callback,
+        providerLimitResetsAt: Date.now() + 20 * MINUTE,
+      });
+      expect(response.status).toBe(200);
+      await sleepTheTask();
+      const wait = waitRow();
+      expect(wait.phase).toBe('waiting');
+      await useRealWake();
+      const budget = () =>
+        d1
+          .prepare(
+            'SELECT recovery_attempts AS attempts, recovery_failed_at AS failedAt FROM session_snapshots WHERE chat_session_id = ?'
+          )
+          .get(CHAT) as { attempts: number; failedAt: string | null };
+      const before = budget();
+
+      // The deadline passes with no alarm having blocked the wait (a sleeping task is not swept).
+      vi.setSystemTime(wait.deadlineAt + MINUTE);
+      const accepted = await followUp('Are you back?');
+      // The accept-time hold already parks it (the DO treats an expired wait as blocked); a wake
+      // attempt from elsewhere (a nudge, a delayed schedule) must still not spend the budget.
+      expect(delivery(accepted.message.id).nextAttemptAt).toBeGreaterThan(Date.now());
+      sql.exec(
+        'UPDATE session_inbox SET next_attempt_at = ? WHERE id = ?',
+        Date.now(),
+        accepted.message.id
+      );
+      await runDeliveryAlarm();
+
+      expect(recovery.ensure).toHaveBeenCalledOnce();
+      expect(recovery.start).not.toHaveBeenCalled();
+      expect(budget().attempts).toBe(before.attempts);
+      // Recorded and presented as blocked: the chat offers Resume.
+      expect(waitRow().phase).toBe('blocked');
+      expect(d1.prepare('SELECT admission_state AS state FROM tasks WHERE id=?').get(TASK)).toEqual(
+        { state: 'provider_limit_blocked' }
+      );
+      // The person's message is kept (parked, not retried) and no wake error is filed.
+      expect(delivery(accepted.message.id).state).toBe('retry_wait');
+      expect(wakeAsks()).toEqual([]);
+      expect(wakeMessages()).toEqual([]);
+    });
+  });
 });

@@ -10,6 +10,7 @@ import type { Env } from '../../env';
 import { getUserId } from '../../middleware/auth';
 import { requireProjectCapability } from '../../middleware/project-auth';
 import { ApplyProjectMemberOffboardingSchema, jsonValidator } from '../../schemas';
+import { moveDepartedMemberTasksToTeam } from '../../services/inbox/departed-member-tasks';
 import { applyProjectMemberOffboarding } from '../../services/project-offboarding-apply';
 import { createProjectMemberOffboardingPreview } from '../../services/project-offboarding-preview';
 import { revokeSessionAccessForDepartedMember } from '../../services/session-access';
@@ -62,6 +63,8 @@ projectMemberOffboardingRoutes.post(
       // session; this also deletes their stored grants (and grants on sessions they own) so a
       // later re-approval cannot bring them back.
       await revokeSessionAccessForDepartedMember(c.env, projectId, memberUserId);
+      // Their open human tasks go to the team; the agents that assigned them are told.
+      await moveDepartedMemberTasksToTeam(c.env, projectId, memberUserId);
     }
 
     return c.json(response);

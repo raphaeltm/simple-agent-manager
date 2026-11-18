@@ -2,7 +2,9 @@ import { ApiClientError, request } from './client';
 
 /** Mirrors `PublicPlatformCapabilities` in apps/api/src/services/platform-capabilities.ts. */
 export interface PlatformCapabilities {
+  /** Voice input (mic) in the chat, comment and SAM composers. */
   speechToText: boolean;
+  /** Server read-aloud on agent messages and task summaries. */
   textToSpeech: boolean;
   /** Whether a monthly AI dollar cap can be set (needs Cloudflare AI Gateway). */
   monthlyCostCap: boolean;
@@ -12,7 +14,7 @@ export interface PlatformCapabilities {
   liveLogStream: boolean;
   /** Whether app deployments can run here (needs Cloudflare DNS for node and app routes). */
   appDeployments: boolean;
-  /** Whether agents can call Cloudflare-hosted models (needs Workers AI). False on self-host. */
+  /** Whether agents can call Cloudflare-hosted models (needs Workers AI). */
   agentModelCalls: boolean;
 }
 

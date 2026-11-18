@@ -218,5 +218,4 @@ export function toOpenAIMessages(rows: MessageRow[]): OpenAIMessage[] {
   return messages;
 }
 
-// One Anthropic URL builder for the proxy and the SAM agent (rule 24).
 export { buildAnthropicGatewayUrl } from '../../services/ai-proxy-shared';

@@ -28,7 +28,7 @@ import {
 import { AGENT_EMAIL_LOCAL_PART } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
-import { getReverseTunnelGatewaySecret } from '../node-reverse-tunnel-config';
+import { getReverseTunnelGatewaySecret } from '../../selfhost/reverse-tunnel/config';
 
 export type SelfHostInboundEnv = EmailTransportEnv &
   Pick<Env, 'AGENT_EMAIL_INBOUND_SMTP' | 'REVERSE_TUNNEL_GATEWAY_SECRET'>;

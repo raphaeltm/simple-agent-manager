@@ -15,12 +15,7 @@ export {
   buildBudgetSettingsKey,
   MONTHLY_COST_CAP_UNAVAILABLE_MESSAGE,
 } from './ai-budget-settings';
-export {
-  ANTHROPIC_CACHE_WRITE_PRICE_MULTIPLIER,
-  findPricedModel,
-  type PricedTokenUsage,
-  priceModelUsageUsd,
-} from './ai-cost-pricing';
+export { findPricedModel, priceModelUsageUsd } from './ai-cost-pricing';
 export {
   aiGatewayOnlyHeaders,
   hasCloudflareAccountApi,
@@ -44,7 +39,11 @@ export {
   type UsageByProvider,
 } from './ai-gateway-logs';
 export { checkModelTierAllowance, describeModelTierDenial } from './ai-model-tier-gate';
-export { type AiModelUsageRow, getLocalUsageBreakdown, incrementModelUsage } from './ai-model-usage';
+export {
+  type AiModelUsageRow,
+  getLocalUsageBreakdown,
+  incrementModelUsage,
+} from './ai-model-usage';
 export {
   buildMonthlyCostCacheKey,
   checkMonthlyCostCap,
@@ -53,16 +52,15 @@ export {
   type MonthlyCostCapCheck,
 } from './ai-monthly-cost-cap';
 export { type MonthlyCostCronResult, runMonthlyCostAggregation } from './ai-monthly-cost-cron';
+export type { WorkersAIChatCompletionOptions, WorkersAIChatMessage } from './ai-proxy-shared';
 export {
   buildAIGatewayMetadata,
   buildAnthropicCountTokensUrl,
   buildAnthropicGatewayUrl,
+  buildWorkersAIGatewayUrl,
+  fetchWorkersAIChatCompletion,
   isAnthropicModel,
   readSafeGatewayErrorDiagnostic,
-  UPSTREAM_ERROR_BODY_PARSE_MAX_BYTES,
-  UPSTREAM_ERROR_REASON_MAX_LENGTH,
-  upstreamErrorLogFields,
-  type WorkersAIChatMessage,
   WorkersAIGatewayError,
 } from './ai-proxy-shared';
 export {
@@ -90,8 +88,17 @@ export {
   attachTokenUsageAccounting,
   attachUpstreamTokenUsageAccounting,
   estimateInputTokensFromMessages,
-  estimateTokensFromText,
+  type MeasuredTokenUsage,
+  measuredTokenUsage,
   optionalExecutionContext,
 } from './ai-token-usage-accounting';
 export { type AiProxyEnv } from './env';
+export {
+  type ChatCompletionsTarget,
+  chatTarget,
+  chatTargetHeaders,
+  fetchChatTarget,
+  isCloudflareChatTarget,
+  LlmUnavailableError,
+} from './llm-chat-target';
 export { type AiProxyPorts } from './ports';

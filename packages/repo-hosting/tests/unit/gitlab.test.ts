@@ -2,7 +2,7 @@ import { DEFAULT_OUTBOUND_MAX_REDIRECTS } from '@simple-agent-manager/worker-cor
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
-import { verifyGitLabProjectAccess } from '../../src/gitlab';
+import { getGitLabRawFile, verifyGitLabProjectAccess } from '../../src/gitlab';
 import { configureRepoHostingPort } from '../../src/ports';
 
 const platformConfig = {
@@ -11,6 +11,7 @@ const platformConfig = {
 
 // The worker resolves GitLab OAuth settings through its platform-config port.
 configureRepoHostingPort('platformConfig', {
+  outboundMaxRedirects: async () => 3,
   githubApp: vi.fn(),
   githubOAuth: vi.fn(),
   gitlabOAuth: (env) => platformConfig.getGitLabOAuthConfig(env),
@@ -32,6 +33,46 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   globalThis.fetch = originalFetch;
+});
+
+describe('GitLab API redirect policy', () => {
+  it('removes the bearer on a cross-origin redirect', async () => {
+    const requests: Request[] = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      requests.push(request);
+      return requests.length === 1
+        ? new Response(null, { status: 302, headers: { location: 'https://cdn.example/file' } })
+        : new Response('content');
+    });
+    await expect(
+      getGitLabRawFile({} as Env, 'gitlab-secret', 1, 'main', 'a.txt')
+    ).resolves.toMatchObject({ bytes: new TextEncoder().encode('content') });
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.headers.get('authorization')).toBe('Bearer gitlab-secret');
+    expect(requests[1]?.headers.get('authorization')).toBeNull();
+    expect(requests.every((r) => r.redirect === 'manual')).toBe(true);
+  });
+  it.each(['https://127.0.0.1', 'https://metadata.google.internal'])(
+    'refuses API host %s before fetching',
+    async (host) => {
+      platformConfig.getGitLabOAuthConfig.mockResolvedValue({ apiBaseUrl: `${host}/api/v4`, host });
+      globalThis.fetch = vi.fn();
+      await expect(getGitLabRawFile({} as Env, 'secret', 1, 'main', 'a')).rejects.toThrow(
+        /refused/
+      );
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    }
+  );
+  it('caps repeated same-origin redirects at the configured limit', async () => {
+    globalThis.fetch = vi.fn(
+      async () => new Response(null, { status: 307, headers: { location: '/loop' } })
+    );
+    await expect(getGitLabRawFile({} as Env, 'secret', 1, 'main', 'a')).rejects.toThrow(
+      'exceeded 3 redirects'
+    );
+    expect(globalThis.fetch).toHaveBeenCalledTimes(4);
+  });
 });
 
 describe('verifyGitLabProjectAccess', () => {

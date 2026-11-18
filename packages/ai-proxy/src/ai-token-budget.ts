@@ -6,7 +6,6 @@
  * environments, but it is no longer the primary counter because KV read-modify-
  * write updates are not atomic under concurrent requests.
  */
-
 import type { UserAiBudgetSettings } from '@simple-agent-manager/shared';
 import {
   DEFAULT_AI_PROXY_DAILY_INPUT_TOKEN_LIMIT,
@@ -16,6 +15,7 @@ import {
 import { log } from '@simple-agent-manager/worker-core';
 
 import { getUserBudgetSettings } from './ai-budget-settings';
+import { hasLocalAiCostMetering } from './ai-gateway-availability';
 import { checkMonthlyCostCap } from './ai-monthly-cost-cap';
 import type { AiProxyEnv } from './env';
 
@@ -368,7 +368,13 @@ export async function incrementProviderUsage(
 
   const ttl =
     parseInt(env?.AI_USAGE_BUDGET_TTL_SECONDS || '', 10) || DEFAULT_AI_USAGE_BUDGET_TTL_SECONDS;
-  await kv.put(key, JSON.stringify(existing), { expirationTtl: ttl });
+  // Local monthly caps read these daily rows. Retain them through the end of their month
+  // plus the existing grace TTL; a later BYO write must not shorten a priced row's lifetime.
+  const now = new Date();
+  const monthEnd = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+  const retention =
+    env && hasLocalAiCostMetering(env) ? Math.ceil((monthEnd - now.getTime()) / 1000) + ttl : ttl;
+  await kv.put(key, JSON.stringify(existing), { expirationTtl: retention });
 }
 
 export async function getProviderUsage(

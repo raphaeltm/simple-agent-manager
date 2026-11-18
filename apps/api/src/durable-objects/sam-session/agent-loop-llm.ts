@@ -15,7 +15,6 @@ import {
   fetchChatTarget,
   LlmUnavailableError,
   resolveCloudflareWorkersAiTarget,
-  withStreamUsageRequested,
 } from '../../services/llm-chat-target';
 import { aiGatewayOnlyHeaders } from '../../services/platform-capabilities';
 import { getPlatformAgentCredential } from '../../services/platform-credentials';
@@ -52,8 +51,7 @@ export async function callLLM(
   userId: string,
   conversationId: string,
   baseSystemPrompt: string,
-  tools: AnthropicToolDef[],
-  endpoint: ChatCompletionsTarget | null
+  { tools, endpoint }: { tools: AnthropicToolDef[]; endpoint: ChatCompletionsTarget | null }
 ): Promise<Response> {
   const model = config.model;
   const systemPrompt = config.systemPromptAppend
@@ -185,7 +183,7 @@ async function callAnthropicLLM(
 }
 
 /** Call an OpenAI-format chat completions target (Workers AI or an OpenAI-compatible endpoint). */
-async function callOpenAIChatLLM(
+function callOpenAIChatLLM(
   target: ChatCompletionsTarget,
   systemPrompt: string,
   messages: OpenAIMessage[],
@@ -200,14 +198,12 @@ async function callOpenAIChatLLM(
     method: 'POST',
     signal,
     headers: chatTargetHeaders(target, { 'cf-aig-metadata': aigMetadata }),
-    body: JSON.stringify(
-      withStreamUsageRequested(target, {
-        model: target.model,
-        max_tokens: maxTokens,
-        messages: fullMessages,
-        tools: openAITools.length > 0 ? openAITools : undefined,
-        stream: true,
-      })
-    ),
+    body: JSON.stringify({
+      model: target.model,
+      max_tokens: maxTokens,
+      messages: fullMessages,
+      tools: openAITools.length > 0 ? openAITools : undefined,
+      stream: true,
+    }),
   });
 }

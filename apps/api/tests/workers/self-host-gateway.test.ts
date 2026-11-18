@@ -13,8 +13,8 @@ import { signPortAccessToken, signTerminalToken } from '../../src/services/jwt';
 import {
   deriveReverseTunnelCredential,
   hashReverseTunnelCredential,
-} from '../../src/services/node-reverse-tunnel-config';
-import { ensureReverseTunnelLease } from '../../src/services/node-reverse-tunnel-leases';
+} from '../../src/selfhost/reverse-tunnel/config';
+import { ensureReverseTunnelLease } from '../../src/selfhost/reverse-tunnel/leases';
 import { seedNode, seedSignedInUser, seedUser, seedWorkspace } from './helpers/seed-d1';
 
 // Built at runtime so no secret-shaped literal sits in the source (gitleaks).

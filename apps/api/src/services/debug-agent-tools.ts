@@ -201,7 +201,6 @@ export async function complete(
   messages: ChatMessage[],
   maxTokens: number
 ): Promise<Completion> {
-  // One budget for the whole call, armed before the endpoint settings read.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutMs);
   try {
@@ -209,7 +208,7 @@ export async function complete(
       env,
       'diagnosis',
       config.model,
-      controller.signal
+      config.timeoutMs
     );
     if (!target) throw new LlmUnavailableError('diagnosis');
     const response = await fetchChatTarget(target, {

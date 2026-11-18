@@ -24,7 +24,8 @@ import { ToastProvider } from './hooks/useToast';
 import { lazyNamed, memoizeRouteImport } from './lib/lazy-with-retry';
 import { prefetchProjectRoute } from './lib/project-route-prefetch';
 import { queryClient } from './lib/query-client';
-import { isProjectChatRoute } from './lib/shell-routes';
+import { platformCapabilitiesQueryOptions } from './lib/query-options';
+import { isProjectChatRoute, isProjectOverviewRoute } from './lib/shell-routes';
 // Initial landing set — statically imported per .claude/rules/60-request-io-and-bundle-budgets.md.
 // Every other page below is code-split via lazyNamed(). Do NOT add static page imports here.
 import { Dashboard } from './pages/Dashboard';
@@ -42,6 +43,7 @@ const AdminComputeQuotas = lazyNamed(
 );
 const AdminComputeUsage = lazyNamed(() => import('./pages/AdminComputeUsage'), 'AdminComputeUsage');
 const AdminCosts = lazyNamed(() => import('./pages/AdminCosts'), 'AdminCosts');
+const AdminHealthCost = lazyNamed(() => import('./pages/AdminHealthCost'), 'AdminHealthCost');
 const AdminDiagnoses = lazyNamed(() => import('./pages/AdminDiagnoses'), 'AdminDiagnoses');
 const AdminApprovals = lazyNamed(() => import('./pages/AdminApprovals'), 'AdminApprovals');
 const AdminDiagnosis = lazyNamed(() => import('./pages/AdminDiagnosis'), 'AdminDiagnosis');
@@ -79,7 +81,15 @@ const Nodes = lazyNamed(() => import('./pages/Nodes'), 'Nodes');
 const loadProjectShell = memoizeRouteImport(() => import('./pages/Project'));
 const loadProjectChat = memoizeRouteImport(() => import('./pages/project-chat'));
 const loadProjectSettings = memoizeRouteImport(() => import('./pages/ProjectSettings'));
+const loadProjectOverview = memoizeRouteImport(() => import('./pages/project-overview'));
 const ProjectShell = lazyNamed(loadProjectShell, 'Project');
+
+/** Start a route chunk's download when the browser is idle (memoized imports make repeats free). */
+function preloadWhenIdle(load: () => Promise<unknown>) {
+  const run = () => void load().catch(() => undefined);
+  if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(run);
+  else setTimeout(run, 1);
+}
 /**
  * The project shell's chunk fallback. On a chat route it is the chat's own loading
  * layout, so the spinner is already where the project and transcript spinners that
@@ -111,18 +121,24 @@ function Project() {
     void loadProjectSettings().catch(() => undefined);
   } else if (isProjectChatRoute(pathname)) {
     void loadProjectChat().catch(() => undefined);
+  } else if (isProjectOverviewRoute(pathname)) {
+    void loadProjectOverview().catch(() => undefined);
+    // Chat is one tap from the landing page: fetch its chunk once the Overview's is under way.
+    preloadWhenIdle(loadProjectChat);
   }
   return <ProjectShell />;
 }
 const ProjectChat = lazyNamed(loadProjectChat, 'ProjectChat');
 const ProjectActivity = lazyNamed(() => import('./pages/ProjectActivity'), 'ProjectActivity');
-const ProjectOverview = lazyNamed(() => import('./pages/project-overview'), 'ProjectOverview');
+const ProjectOverview = lazyNamed(loadProjectOverview, 'ProjectOverview');
 const ProjectInsights = lazyNamed(() => import('./pages/insights'), 'ProjectInsights');
 const InsightsFlowTab = lazyNamed(() => import('./pages/insights/FlowTab'), 'FlowTab');
-const InsightsComingSoonTab = lazyNamed(
-  () => import('./pages/insights/ComingSoonTab'),
-  'ComingSoonTab'
+const InsightsAgentSetupsTab = lazyNamed(
+  () => import('./pages/insights/AgentSetupsTab'),
+  'AgentSetupsTab'
 );
+const InsightsAccountsTab = lazyNamed(() => import('./pages/insights/AccountsTab'), 'AccountsTab');
+const InsightsPeopleTab = lazyNamed(() => import('./pages/insights/PeopleTab'), 'PeopleTab');
 const ProjectAgentChat = lazyNamed(() => import('./pages/ProjectAgentChat'), 'ProjectAgentChat');
 const ProjectCreate = lazyNamed(() => import('./pages/ProjectCreate'), 'ProjectCreate');
 const ProjectDeploymentEnvironmentDetail = lazyNamed(
@@ -278,6 +294,12 @@ export function devOnlyRoutesEnabled() {
 
 export default function App() {
   const showDevOnlyRoutes = devOnlyRoutesEnabled();
+  // Which platform services this installation has (public, cached for minutes). Fetched once at
+  // start so composers and model settings rarely wait on it; until it answers every service is
+  // assumed present (hooks/usePlatformCapabilities.ts).
+  useEffect(() => {
+    void queryClient.prefetchQuery(platformCapabilitiesQueryOptions());
+  }, []);
 
   return (
     <ErrorBoundary>
@@ -320,14 +342,15 @@ export default function App() {
                         path="/projects/:id"
                         element={page(<Project />, <ProjectRouteFallback />)}
                       >
-                        <Route index element={<Navigate to="chat" replace />} />
+                        {/* Opening a project lands on its Overview (inbox slice F2); chat is one tap away. */}
+                        <Route index element={<Navigate to="overview" replace />} />
                         <Route path="overview" element={page(<ProjectOverview />)} />
                         <Route path="insights" element={page(<ProjectInsights />)}>
                           <Route index element={<Navigate to="flow" replace />} />
                           <Route path="flow" element={page(<InsightsFlowTab />)} />
-                          <Route path="agent-setups" element={page(<InsightsComingSoonTab />)} />
-                          <Route path="accounts" element={page(<InsightsComingSoonTab />)} />
-                          <Route path="people" element={page(<InsightsComingSoonTab />)} />
+                          <Route path="agent-setups" element={page(<InsightsAgentSetupsTab />)} />
+                          <Route path="accounts" element={page(<InsightsAccountsTab />)} />
+                          <Route path="people" element={page(<InsightsPeopleTab />)} />
                         </Route>
                         <Route
                           path="chat"
@@ -467,6 +490,7 @@ export default function App() {
                         <Route path="infrastructure" element={page(<AdminInfrastructure />)} />
                         <Route path="storage" element={page(<AdminStorage />)} />
                         <Route path="ai-proxy" element={page(<AdminAIProxy />)} />
+                        <Route path="health-cost" element={page(<AdminHealthCost />)} />
                         <Route path="costs" element={page(<AdminCosts />)} />
                         <Route path="usage" element={page(<AdminComputeUsage />)} />
                         <Route path="quotas" element={page(<AdminComputeQuotas />)} />

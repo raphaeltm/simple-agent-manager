@@ -38,6 +38,7 @@ interface TaskTerminalTransitionRow {
   workspace_id: string | null;
   chat_session_id: string | null;
   parent_task_id: string | null;
+  updated_at: string;
 }
 
 export interface TransitionTaskToTerminalOptions {
@@ -46,6 +47,12 @@ export interface TransitionTaskToTerminalOptions {
   status: TaskTerminalStatus;
   reason: string | null;
   source: string;
+  /** The row that authorized a watchdog verdict; null workspace means exactly null. */
+  expectedTaskVersion?: {
+    status: string;
+    workspaceId: string | null;
+    updatedAt: string;
+  };
   expectedWorkspaceId?: string | null;
   expectedChatSessionId?: string | null;
   expectedNodeId?: string | null;
@@ -115,7 +122,7 @@ async function loadTaskRow(
 ): Promise<TaskTerminalTransitionRow | null> {
   return db
     .prepare(
-      `SELECT id, project_id, status, workspace_id, chat_session_id, parent_task_id
+      `SELECT id, project_id, status, workspace_id, chat_session_id, parent_task_id, updated_at
        FROM tasks
        WHERE id = ?
        LIMIT 1`
@@ -167,6 +174,15 @@ export async function transitionTaskToTerminal(
   const task = await loadTaskRow(env.DATABASE, options.taskId);
   if (!task) return 'not_found';
   if (task.project_id !== options.projectId) return 'scope_mismatch';
+  const version = options.expectedTaskVersion;
+  if (
+    version &&
+    (task.status !== version.status ||
+      task.workspace_id !== version.workspaceId ||
+      task.updated_at !== version.updatedAt)
+  ) {
+    return 'not_terminalizable';
+  }
   if (
     options.expectedWorkspaceId !== undefined &&
     options.expectedWorkspaceId !== null &&
@@ -232,6 +248,7 @@ export async function transitionTaskToTerminal(
      WHERE id = ?
        AND project_id = ?
        AND status = ?
+       ${version ? 'AND status = ? AND workspace_id IS ? AND updated_at = ?' : ''}
        ${
          options.expiredSnapshotId
            ? `AND EXISTS (
@@ -284,6 +301,7 @@ export async function transitionTaskToTerminal(
     options.taskId,
     options.projectId,
     task.status,
+    ...(version ? [version.status, version.workspaceId, version.updatedAt] : []),
     ...(options.expiredSnapshotId ? [options.expiredSnapshotId, now] : []),
     options.expectedWorkspaceId ?? null,
     options.expectedWorkspaceId ?? null,

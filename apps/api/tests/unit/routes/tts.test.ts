@@ -137,6 +137,37 @@ describe('POST /api/tts/synthesize', () => {
     );
   });
 
+  it('answers 404 FEATURE_UNAVAILABLE without the Workers AI binding', async () => {
+    const res = await app.request('/api/tts/synthesize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'Hello world', storageId: 'msg-123' }),
+    }, createEnv({ AI: undefined as unknown as Ai }));
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ error: 'FEATURE_UNAVAILABLE' });
+    expect(synthesizeSpeech).not.toHaveBeenCalled();
+  });
+
+  it('passes the resolved Workers AI binding to synthesis', async () => {
+    vi.mocked(synthesizeSpeech).mockResolvedValue({
+      audioBody: new ArrayBuffer(8),
+      contentType: 'audio/mpeg',
+      cached: false,
+      summarized: false,
+    });
+    const env = createEnv();
+
+    const res = await app.request('/api/tts/synthesize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'Hello world', storageId: 'msg-123' }),
+    }, env);
+
+    expect(res.status).toBe(200);
+    expect(vi.mocked(synthesizeSpeech).mock.calls[0]?.[2]).toBe(env.AI);
+  });
+
   it('returns 400 when text is missing', async () => {
     const res = await app.request('/api/tts/synthesize', {
       method: 'POST',

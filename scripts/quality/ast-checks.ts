@@ -393,6 +393,7 @@ function main() {
       // Lifted from apps/api/src/lib when merging main into the self-host branch; keep their checks.
       resolve(ROOT, 'packages/worker-core/src/network-hosts/**/*.ts'),
       resolve(ROOT, 'packages/worker-core/src/shared-flight.ts'),
+      resolve(ROOT, 'packages/cron/src/**/*.ts'),
     ]);
   }
 

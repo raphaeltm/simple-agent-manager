@@ -57,7 +57,19 @@ export async function getLocalMonthlyAiCostUsd(
   userId: string,
   env: AiProxyEnv
 ): Promise<number> {
-  const entries = await getProviderUsage(kv, userId, currentUtcMonthStart(), env);
+  // One DO RPC when available. Otherwise at most 31 independent daily KV reads in one
+  // wave; the calendar month is the hard bound (no unbounded-history fan-out).
+  const now = new Date();
+  const entries = env.AI_TOKEN_BUDGET_COUNTER
+    ? await getProviderUsage(kv, userId, currentUtcMonthStart(now), env)
+    : (
+        await Promise.all(
+          Array.from({ length: now.getUTCDate() }, (_, day) => {
+            const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), day + 1));
+            return getProviderUsage(kv, userId, date, env, date);
+          })
+        )
+      ).flat();
   return entries.reduce((sum, entry) => sum + (entry.estimatedCostUsd || 0), 0);
 }
 

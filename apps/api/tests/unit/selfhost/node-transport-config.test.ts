@@ -15,8 +15,8 @@ import {
   GATEWAY_ORIGINAL_HOST_HEADER,
   GATEWAY_SECRET_HEADER,
 } from '../../../src/routes/self-host-gateway';
-import { FRPS_PLUGIN_OPS } from '../../../src/services/node-reverse-tunnel-authz';
-import * as config from '../../../src/services/node-reverse-tunnel-config';
+import { FRPS_PLUGIN_OPS } from '../../../src/selfhost/reverse-tunnel/authz';
+import * as config from '../../../src/selfhost/reverse-tunnel/config';
 import { GATEWAY_HEADER } from '../../../src/services/node-websocket-gateway';
 
 const root = join(import.meta.dirname, '../../../../../deploy/selfhost');

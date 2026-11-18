@@ -199,7 +199,7 @@ apiTokenRoutes.post(
       .set({ lastUsedAt: new Date() })
       .where(eq(schema.apiTokens.id, tokenRecord.id));
 
-    return buildSessionLoginResponse(c.env, user);
+    return buildSessionLoginResponse(c.env, user, c.req.raw.headers);
   }
 );
 

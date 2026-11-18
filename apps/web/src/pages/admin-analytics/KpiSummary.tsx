@@ -1,16 +1,18 @@
 import { type FC } from 'react';
 
-import type {
-  AnalyticsDauResponse,
-  AnalyticsEventsResponse,
-  AnalyticsFunnelResponse,
-} from '../../lib/api';
+import type { AnalyticsDauResponse, AnalyticsEventsResponse } from '../../lib/api';
 
 interface Props {
   dau: AnalyticsDauResponse | null;
-  funnel: AnalyticsFunnelResponse | null;
   events: AnalyticsEventsResponse | null;
 }
+
+/** Static class names so Tailwind generates them; KpiSummary renders at most three cards. */
+const DESKTOP_COLUMNS: Record<number, string> = {
+  1: 'lg:grid-cols-1',
+  2: 'lg:grid-cols-2',
+  3: 'lg:grid-cols-3',
+};
 
 interface KpiCard {
   label: string;
@@ -18,7 +20,7 @@ interface KpiCard {
   sub?: string;
 }
 
-export const KpiSummary: FC<Props> = ({ dau, funnel, events }) => {
+export const KpiSummary: FC<Props> = ({ dau, events }) => {
   const cards: KpiCard[] = [];
 
   // DAU today (last data point)
@@ -47,20 +49,6 @@ export const KpiSummary: FC<Props> = ({ dau, funnel, events }) => {
     });
   }
 
-  // Funnel: top conversion (only show when there's meaningful data)
-  if (funnel?.funnel?.length && funnel.funnel.length >= 2) {
-    const first = funnel.funnel.at(0);
-    const last = funnel.funnel.at(-1);
-    if (first && last && first.unique_users > 0) {
-      const rate = Math.round((last.unique_users / first.unique_users) * 100);
-      cards.push({
-        label: 'Funnel Conversion',
-        value: `${rate}%`,
-        sub: `${first.unique_users.toLocaleString()} \u2192 ${last.unique_users.toLocaleString()}`,
-      });
-    }
-  }
-
   // Total events
   if (events?.events?.length) {
     const total = events.events.reduce((s, e) => s + e.count, 0);
@@ -74,12 +62,20 @@ export const KpiSummary: FC<Props> = ({ dau, funnel, events }) => {
 
   if (!cards.length) return null;
 
+  // One desktop column per card, so a partial load (DAU only, events only) leaves no hole.
+  const desktopColumns = DESKTOP_COLUMNS[cards.length] ?? 'lg:grid-cols-3';
+  // On phones (two columns), an odd last card fills its row instead of leaving a hole.
+  const oddLastIndex = cards.length % 2 === 1 ? cards.length - 1 : -1;
+
   return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      {cards.map((card) => (
+    <div className={`grid grid-cols-2 gap-3 ${desktopColumns}`}>
+      {cards.map((card, index) => (
         <div
           key={card.label}
-          className="rounded-lg border border-border-default bg-surface-secondary p-4"
+          className={[
+            'rounded-lg border border-border-default bg-surface-secondary p-4',
+            index === oddLastIndex ? 'col-span-2 lg:col-span-1' : '',
+          ].join(' ')}
         >
           <div className="text-xs font-medium text-fg-muted uppercase tracking-wide">
             {card.label}

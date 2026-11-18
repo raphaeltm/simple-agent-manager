@@ -43,6 +43,8 @@ describe('GET /api/agents', () => {
     return {
       DATABASE: {} as D1Database,
       ENCRYPTION_KEY: 'test-encryption-key',
+      AI_GATEWAY_ID: 'test-gateway',
+      CF_ACCOUNT_ID: 'test-account',
       KV: { get: vi.fn(), put: vi.fn(), delete: vi.fn() } as unknown as KVNamespace,
       // Cloudflare: an addressable AI Gateway keeps the proxy on with no admin setting read.
       AI_GATEWAY_ID: 'sam',

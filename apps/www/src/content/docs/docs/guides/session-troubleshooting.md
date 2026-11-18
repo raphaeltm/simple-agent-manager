@@ -8,8 +8,13 @@ label in the session list. Find what you are seeing below. The section it points
 your work is safe and what to do next. Everything here applies to both
 [Instant and VM sessions](/docs/guides/instant-sessions/) unless it says otherwise.
 
-- **Needs input** in the session list. The agent, or SAM, is waiting for an answer from the person
-  who started the chat. → [Find what it's waiting for](#the-agent-is-waiting-for-you)
+- **Needs input** in the session list, or an item in your [Inbox](/docs/guides/inbox/). The agent,
+  or SAM, is waiting for an answer from the person who started the chat.
+  → [Find what it's waiting for](#the-agent-is-waiting-for-you)
+- **A Problem in your Inbox**, such as **"Fix login" couldn't start** or **Couldn't wake "Ship
+  billing"**. SAM filed it because something of yours failed; its button is the fix.
+  → [Problems SAM files for you](/docs/guides/inbox/#problems-sam-files-for-you), then the matching
+  section below ([wake failed](#wake-failed), [task failed](#when-a-task-fails))
 - **"Waiting for provider limit reset at…"**, **Waiting** or **Needs you** on the task's Dashboard
   card, or a red **BLOCKED** badge on the chat in the session list. The agent hit a usage limit;
   SAM carries on after the reset, unless it says **Blocked**. (A subtask with that badge also reads
@@ -47,6 +52,9 @@ your work is safe and what to do next. Everything here applies to both
   transcript is safe. → [Send a message to try again](#a-snapshot-could-not-be-fully-restored)
 - **"SAM restored this sleeping conversation from a degraded snapshot…"** (VM). The chat is back,
   but some unpushed work may not be. → [Check what's missing](#a-snapshot-could-not-be-fully-restored)
+- **"SAM could not restore this conversation's workspace: its last sleep saved no snapshot or Git
+  recovery point."** (VM). The chat is back in a fresh workspace, without the earlier files.
+  → [Continue from the transcript](#sam-could-not-save-a-complete-snapshot)
 - **"SAM is putting this session to sleep without saving all of its files."** (VM). Snapshots kept failing,
   so SAM slept the chat on a Git recovery point. → [See what was kept](#sam-could-not-save-a-complete-snapshot)
 - **“SAM is terminating this idle workspace after repeated snapshot failures.”** The transcript and
@@ -124,7 +132,9 @@ phone, open the session list with the list icon at the right of the project-name
 on that icon says how many chats need attention. Open the chat and look for one of these:
 
 - **A card in the chat** — a permission request, under the step it's about, or a question or a link
-  to open, at the end of the chat. Answer it there; the agent carries on once it has your answer. If
+  to open, at the end of the chat. Each one also sends you a notification and appears in your
+  [Inbox](/docs/guides/inbox/), where a permission can be answered directly. Answer it there or on
+  the card; the agent carries on once it has your answer. If
   the card says the request expired or was cancelled, the agent was told no, so send a message
   saying how to continue. SAM respects pending requests until their response deadline; waiting for
   your answer is not treated as a stall. See
@@ -164,6 +174,13 @@ credential, a limit still fails a **Task** and stops a **Chat**; see
 reset SAM wakes it with a message telling the agent the wait is over. The agent checks what was
 already done before it carries on, so it doesn't blindly repeat the step that hit the limit. SAM
 never switches to another model, profile, or credential to get around a limit.
+
+**A message you send while it waits is kept.** SAM doesn't report **Wake failed** for a chat that
+is waiting for a limit reset, and it doesn't drop your message after the usual hour: it holds the
+message until the reset (plus that hour), then delivers it when the chat wakes. Don't send it
+again. While a task shows **Needs you** (below), a message doesn't wake the chat; SAM holds it
+until you resume the task, for as long as the saved workspace is kept, and delivers it then. If a
+message you sent can't be delivered in that time, the chat reports **Wake failed** as usual.
 
 - **If Claude Code or Codex didn't say when its limit resets**, the message reads **Waiting for provider
   limit reset (time unknown); bounded retry 1/3 at 14:05 UTC.** SAM tries again after 5 minutes,
@@ -324,7 +341,8 @@ When SAM has scheduled its next attempt, the status adds **Next try at** and the
 only **Waiting for server capacity...**, SAM has not recorded a reason yet. SAM keeps trying; if
 the wait drags on, delete machines you no longer need from the **Nodes** page. A message you sent is held for an
 hour: if the wake is still waiting then, the chat reports **Wake failed: Session is waking** (see
-[Wake failed](#wake-failed)).
+[Wake failed](#wake-failed)). A wake held for a provider limit reset is the exception (see
+[Waiting for a provider limit reset](#waiting-for-a-provider-limit-reset)).
 
 Until a **Wake failed** message appears, SAM still holds your message and keeps retrying the wake,
 even if the status is gone when you reopen the chat. Don't send the message again: a second copy
@@ -419,8 +437,10 @@ filesystem recovery point could be verified. SAM stops the runtime to avoid ongo
 charges, keeps this conversation and any successful backups, and explains the degraded recovery
 in the chat. Unpublished files, uncommitted work, installed tools and saved agent state may be lost.
 Send a message to continue in a fresh workspace; the agent uses the transcript to reconstruct
-missing work. It cannot promise an exact restore. Instant sessions also use this fresh continuation
-after repeated snapshot failures.
+missing work. It cannot promise an exact restore. On a VM, the chat then says SAM **could not
+restore this conversation's workspace** and that the agent is starting fresh in a new checkout.
+Check GitHub for anything the agent already pushed before asking it to redo work. Instant sessions
+also use this fresh continuation after repeated snapshot failures.
 
 ## SAM could not finish putting the session to sleep
 
@@ -486,7 +506,8 @@ or a subtask reporting back. The system message starts with **Wake failed:** and
 when SAM refused the wake outright it reads `Wake failed: <reason> (<code>)`, and when it ran out of
 time retrying, it repeats the last reason it hit. The session list keeps the chat marked
 **Wake failed** until you reply. Anything you sent is still in the transcript; the agent never
-received it.
+received it. SAM also files a **Problem** in your Inbox, **Couldn't wake** and the chat's name, with
+**Wake the chat** (VM chats only) and **Open chat**; it closes by itself once the chat wakes.
 
 <picture>
   <source media="(max-width: 40em)" srcset="/images/docs/chat-wake-failed-mobile.png 2x" />
@@ -557,6 +578,12 @@ happens while the workspace is still running, SAM tries to keep the workspace: i
 workspace, and puts the chat to sleep. That usually takes a few minutes, but if the agent was in the
 middle of a turn SAM waits for it to end, for up to eight hours. Until then the chat stays awake with
 the failure card showing: wait for it to go to sleep rather than using **Retry**.
+
+SAM also files a **Problem** in your Inbox within about five minutes: **"…" couldn't start** or
+**"…" stopped before it finished**. Its **Retry** (offered to the project's owner when the failure
+can be retried) starts a new task with the original request right away, in a new chat and
+workspace; the tool rail's **Retry** pre-fills a new chat for you to check and send instead. To continue the work this chat already did, use **Open chat** and reply
+there once it is asleep, as below.
 
 SAM's stalled-turn check respects unanswered permission requests and questions until their
 response deadline. Waiting for your answer is not treated as an agent stall. If SAM detects a

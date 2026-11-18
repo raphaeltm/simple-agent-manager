@@ -1,7 +1,7 @@
 /**
  * The turn-end rule every agent session gets from `get_instructions` (inbox slice D, idea
  * 01M7G03ZCQ6TM6CMEYDRKQ8ST9 spec section 5). It is loaded into every session of every project,
- * so it stays one paragraph (about 1.1 KB) and is not repeated elsewhere; tool descriptions and
+ * so it stays one paragraph (about 1.2 KB) and is not repeated elsewhere; tool descriptions and
  * the MCP server instructions only point at the tools. It names SAM tools only, never a
  * repository's own skills or conventions (policy "idea execution must be repository-agnostic").
  */
@@ -14,5 +14,5 @@ export const INBOX_TURN_END_INSTRUCTION =
   'If you want them to evaluate something, file a review (`inbox_write` method `review`). ' +
   'Before filing, call `inbox_read` method `list`; if an open item already covers it, do not file another. ' +
   'File one ask per item, with a one-sentence title, a short reason, and links to the ideas, Library files, policies, PRs or previews the person needs. ' +
-  'Use a blocking ask only when you cannot continue; otherwise file a non-blocking one and keep working. ' +
+  'Use a blocking ask only when you cannot continue; otherwise file a non-blocking one, or for work only a person can do `assign` a task (`inbox_write` method `assign`), and keep working. ' +
   'You will be woken in this chat when the person answers.';

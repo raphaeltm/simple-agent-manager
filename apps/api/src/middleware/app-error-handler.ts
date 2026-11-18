@@ -96,7 +96,7 @@ function scheduleErrorPersistence(
         workspaceId: identifiers.workspaceId ?? null,
         taskId: identifiers.taskId ?? null,
         sessionId: identifiers.sessionId ?? null,
-        ipAddress: clientIpFromHeaders((name) => c.req.header(name)),
+        ipAddress: clientIpFromHeaders((name) => c.req.header(name)) ?? null,
         userAgent: c.req.header('User-Agent') ?? null,
       },
       c.env

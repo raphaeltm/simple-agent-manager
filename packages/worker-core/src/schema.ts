@@ -828,6 +828,10 @@ export const asks = sqliteTable(
     escalationCount: integer('escalation_count').notNull().default(0),
     /** Hard limit on how long an undelivered ask may be extended. */
     maxExpiresAt: integer('max_expires_at'),
+    /** Human tasks: JSON array of ticked step indexes (0254); NULL when none is ticked. */
+    stepsCheckedJson: text('steps_checked_json'),
+    /** Kind 'error' (slice E, migration 0248): times the thing failed while the item was open. */
+    failureCount: integer('failure_count').notNull().default(1),
   },
   (table) => ({
     openEscalationIdx: index('idx_asks_open_escalation')
@@ -846,6 +850,12 @@ export const asks = sqliteTable(
       table.status,
       table.createdAt
     ),
+    // Insights · People "answered by the first person asked" (migration 0258).
+    projectStatusResolvedIdx: index('idx_asks_project_status_resolved').on(
+      table.projectId,
+      table.status,
+      table.resolvedAt
+    ),
     sessionStatusIdx: index('idx_asks_session_status').on(table.sourceSessionId, table.status),
     openExpiryIdx: index('idx_asks_open_expiry')
       .on(table.expiresAt)
@@ -853,13 +863,69 @@ export const asks = sqliteTable(
     unnotifiedIdx: index('idx_asks_unnotified')
       .on(table.resolvedAt)
       .where(sql`notified_at IS NULL AND status IN ('answered', 'done', 'archived', 'expired')`),
+    // System error items (migration 0248).
+    errorTaskIdx: index('idx_asks_error_task')
+      .on(table.sourceTaskId, table.createdAt)
+      .where(sql`kind = 'error'`),
+    errorKeyIdx: index('idx_asks_error_key')
+      .on(table.dedupeKey)
+      .where(sql`kind = 'error' AND dedupe_key IS NOT NULL`),
     projectDedupeIdx: uniqueIndex('idx_asks_project_dedupe')
       .on(table.projectId, table.dedupeKey)
       .where(sql`dedupe_key IS NOT NULL`),
   })
 );
 
+/**
+ * The generated brief on a Project Overview (inbox slice I, migration 0255). One row per project,
+ * the brief's only home. Written by `refreshProjectBriefIfDue` (apps/api), read by
+ * `readProjectBrief` (packages/operations). Times are epoch milliseconds.
+ */
+export const projectBriefs = sqliteTable('project_briefs', {
+  projectId: text('project_id')
+    .primaryKey()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  /** NULL when the project was quiet at the last check. */
+  briefJson: text('brief_json'),
+  refAsksJson: text('ref_asks_json').notNull().default('[]'),
+  refChatsJson: text('ref_chats_json').notNull().default('[]'),
+  refAutomationsJson: text('ref_automations_json').notNull().default('[]'),
+  refAccountsJson: text('ref_accounts_json').notNull().default('[]'),
+  fingerprint: text('fingerprint'),
+  generatedAt: integer('generated_at'),
+  checkedAt: integer('checked_at'),
+  stale: integer('stale').notNull().default(0),
+  pendingSince: integer('pending_since'),
+  /** Per-UTC-day generation budget: a daily cap by design, reset by a new day only. */
+  generationDay: text('generation_day'),
+  generationCount: integer('generation_count').notNull().default(0),
+  lastError: text('last_error'),
+  lastErrorAt: integer('last_error_at'),
+  updatedAt: integer('updated_at').notNull(),
+});
+
 export type AskRow = typeof asks.$inferSelect;
+
+/** Lifecycle of an ask, one row per change (human tasks, migration 0254). No discussion text. */
+export const askActivity = sqliteTable(
+  'ask_activity',
+  {
+    id: text('id').primaryKey(),
+    askId: text('ask_id')
+      .notNull()
+      .references(() => asks.id, { onDelete: 'cascade' }),
+    projectId: text('project_id').notNull(),
+    /** 'user' | 'agent' | 'system' */
+    actorKind: text('actor_kind').notNull(),
+    actorId: text('actor_id'),
+    kind: text('kind').notNull(),
+    detailJson: text('detail_json'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => ({
+    askCreatedIdx: index('idx_ask_activity_ask_created').on(table.askId, table.createdAt, table.id),
+  })
+);
 
 export const projectRuntimeEnvVars = sqliteTable(
   'project_runtime_env_vars',
@@ -1302,6 +1368,10 @@ export const tasks = sqliteTable(
       table.priority,
       table.updatedAt
     ),
+    // Inbox system error sweep (migration 0248): recently failed tasks.
+    failedUpdatedIdx: index('idx_tasks_failed_updated')
+      .on(table.updatedAt)
+      .where(sql`status = 'failed'`),
     activeUpdatedIdIdx: index('idx_tasks_active_updated_id')
       .on(table.updatedAt, table.id)
       .where(sql`status IN ('queued', 'delegated', 'in_progress')`),
@@ -1477,6 +1547,44 @@ export const pullRequestHeads = sqliteTable(
       table.projectId,
       table.repository,
       table.headSha
+    ),
+  })
+);
+
+/**
+ * One review request cycle per reviewer of a pull request (migration 0258), written by the GitHub
+ * webhook ingest (`services/github-pull-request-reviews.ts`). Insights · People reads it for review
+ * pickup time, per project only: `reviewerKey` exists to match a review to its request.
+ */
+export const pullRequestReviewRequests = sqliteTable(
+  'pull_request_review_requests',
+  {
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    prNumber: integer('pr_number').notNull(),
+    /** 'user' | 'team' */
+    reviewerKind: text('reviewer_kind').notNull(),
+    reviewerKey: text('reviewer_key').notNull(),
+    requestedAt: text('requested_at').notNull(),
+    firstReviewAt: text('first_review_at'),
+    removedAt: text('removed_at'),
+  },
+  (table) => ({
+    pk: primaryKey({
+      columns: [
+        table.projectId,
+        table.repository,
+        table.prNumber,
+        table.reviewerKind,
+        table.reviewerKey,
+        table.requestedAt,
+      ],
+    }),
+    projectRequested: index('idx_pull_request_review_requests_project_requested').on(
+      table.projectId,
+      table.requestedAt
     ),
   })
 );
@@ -3517,6 +3625,20 @@ export const triggerExecutions = sqliteTable(
       .on(table.triggerId, table.status)
       .where(sql`status IN ('queued', 'running')`),
     triggerIdIdx: index('idx_trigger_executions_trigger_id').on(table.triggerId),
+    // Inbox system error sweep (migration 0248): recently failed runs.
+    failedCompletedIdx: index('idx_trigger_executions_failed_completed')
+      .on(table.completedAt)
+      .where(sql`status = 'failed'`),
+    // Inbox automation sweep (migration 0248): an automation's newest finished run.
+    finishedSequenceIdx: index('idx_trigger_executions_trigger_finished')
+      .on(table.triggerId, table.sequenceNumber)
+      .where(sql`status IN ('completed', 'failed')`),
+    /** Newest runs of one trigger without a sort (migration 0255; the Overview brief's facts). */
+    triggerSequenceIdx: index('idx_trigger_executions_trigger_sequence').on(
+      table.triggerId,
+      table.sequenceNumber,
+      table.createdAt
+    ),
     queueExpiryIdx: index('idx_trigger_queue_expiry')
       .on(table.queueExpiresAt)
       .where(sql`status IN ('waiting','queued')`),
@@ -4428,6 +4550,8 @@ export const sessionSummaries = sqliteTable(
       table.updatedAt
     ),
     projectIdx: index('idx_session_summaries_project').on(table.projectId, table.updatedAt),
+    /** A task's chat (migration 0255; the Overview brief's failed chats). */
+    taskIdx: index('idx_session_summaries_task').on(table.taskId),
     projectCreatorIdx: index('idx_session_summaries_project_creator').on(
       table.projectId,
       table.createdByUserId,
@@ -6007,3 +6131,80 @@ export const lifecyclePhaseTimings = sqliteTable(
     createdIdx: index('idx_lifecycle_phase_timings_created').on(table.createdAt),
   })
 );
+
+/**
+ * Insights slice U: measured token usage per run (chat session) x model x credential key.
+ * Migration 0253. Writers: `apps/api/src/services/agent-run-usage.ts`. Reads:
+ * `packages/operations/src/insights-run-usage.ts`. Counters are cumulative; see the migration.
+ */
+export const agentRunUsage = sqliteTable(
+  'agent_run_usage',
+  {
+    id: integer('id').primaryKey(),
+    projectId: text('project_id').notNull(),
+    chatSessionId: text('chat_session_id').notNull(),
+    workspaceId: text('workspace_id'),
+    agentSessionId: text('agent_session_id'),
+    source: text('source').notNull(),
+    usageEpoch: text('usage_epoch').notNull(),
+    model: text('model').notNull().default(''),
+    credentialKey: text('credential_key').notNull().default(''),
+    credentialSource: text('credential_source'),
+    agentType: text('agent_type'),
+    inputTokens: integer('input_tokens').notNull().default(0),
+    outputTokens: integer('output_tokens').notNull().default(0),
+    cacheReadTokens: integer('cache_read_tokens').notNull().default(0),
+    cacheWriteTokens: integer('cache_write_tokens').notNull().default(0),
+    reasoningTokens: integer('reasoning_tokens'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    keyIdx: uniqueIndex('idx_agent_run_usage_key').on(
+      table.projectId,
+      table.chatSessionId,
+      table.source,
+      table.usageEpoch,
+      table.model,
+      table.credentialKey
+    ),
+    projectUpdatedIdx: index('idx_agent_run_usage_project_updated').on(
+      table.projectId,
+      table.updatedAt
+    ),
+  })
+);
+
+/**
+ * Daily usage-derived Cloudflare cost estimate, one row per UTC day per product line (Insights
+ * slice CF, migration 0256). Written by `runCloudflareCostSnapshot`
+ * (apps/api/src/services/cloudflare-cost-snapshot.ts), read by `packages/operations`
+ * `insights-installation-cloudflare`. `fetchedAt` is epoch ms; costs are USD estimates.
+ */
+export const installationCostDaily = sqliteTable(
+  'installation_cost_daily',
+  {
+    source: text('source').notNull(),
+    day: text('day').notNull(),
+    productLine: text('product_line').notNull(),
+    usageQuantity: real('usage_quantity').notNull(),
+    usageUnit: text('usage_unit').notNull(),
+    estimatedCostUsd: real('estimated_cost_usd').notNull(),
+    fetchedAt: integer('fetched_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.source, table.day, table.productLine] }),
+  })
+);
+
+/** The latest cost snapshot attempt per source (migration 0256), so the card can explain itself. */
+export const installationCostSync = sqliteTable('installation_cost_sync', {
+  source: text('source').primaryKey(),
+  status: text('status').notNull(),
+  lastAttemptAt: integer('last_attempt_at').notNull(),
+  lastSuccessAt: integer('last_success_at'),
+  errorMessage: text('error_message'),
+  firstDay: text('first_day'),
+  lastDay: text('last_day'),
+  rowsWritten: integer('rows_written').notNull().default(0),
+});

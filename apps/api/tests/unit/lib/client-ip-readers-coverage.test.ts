@@ -6,7 +6,7 @@
  * the client wrote. Behaviour is covered by client-ip.test.ts and the call-site tests; this is a
  * structural scan (rule 02 allows those for static structure) so a NEW raw read turns CI red.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync,readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -14,7 +14,8 @@ import { describe, expect, it } from 'vitest';
 import { collectSourceFiles, SRC_ROOT } from '../../helpers/source-tree';
 
 /** A header read by name, in any case: `.header('cf-connecting-ip')`, `.get("X-Forwarded-For")`. */
-const RAW_READ = /\.(?:header|get)\(\s*['"`](?:cf-connecting-ip|x-forwarded-for)['"`]\s*\)/i;
+const RAW_READ =
+  /\.(?:header|get)\(\s*['"`](?:cf-connecting-ip|x-forwarded-for|x-real-ip)['"`]\s*\)/i;
 
 /** Files allowed to name the headers, each with the reason. */
 const ALLOWLIST: Record<string, string> = {
@@ -22,10 +23,25 @@ const ALLOWLIST: Record<string, string> = {
 };
 
 describe('client IP readers', () => {
-  const files = collectSourceFiles(SRC_ROOT);
+  const packagesRoot = path.resolve(SRC_ROOT, '../../../packages');
+  const roots = [
+    SRC_ROOT,
+    ...readdirSync(packagesRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(packagesRoot, entry.name, 'src'))
+      .filter((root) => {
+        try {
+          return readdirSync(root).length > 0;
+        } catch {
+          return false;
+        }
+      }),
+  ];
+  const files = roots.flatMap((root) => collectSourceFiles(root));
 
   it('scans the real source tree', () => {
-    expect(files.length).toBeGreaterThan(300);
+    expect(files.length).toBeGreaterThan(1000);
+    expect(roots.length).toBeGreaterThan(10);
   });
 
   it('read the client address only through clientIpFromHeaders', () => {
@@ -39,6 +55,7 @@ describe('client IP readers', () => {
   it('the scan pattern catches a raw read (control)', () => {
     expect(RAW_READ.test(`const ip = c.req.header('CF-Connecting-IP');`)).toBe(true);
     expect(RAW_READ.test(`headers.get("x-forwarded-for")`)).toBe(true);
+    expect(RAW_READ.test(`headers.get('X-Real-IP')`)).toBe(true);
     // Setting the outbound header on the VM hop is not a read.
     expect(RAW_READ.test(`headers.set('X-Forwarded-For', ip)`)).toBe(false);
   });

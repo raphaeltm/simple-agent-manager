@@ -14,6 +14,7 @@
  */
 import {
   aiGatewayOnlyHeaders,
+  LlmUnavailableError,
   hasCloudflareAccountApi,
   hasLocalAiCostMetering,
   isMonthlyCostCapAvailable,
@@ -21,12 +22,16 @@ import {
 } from '@simple-agent-manager/ai-proxy';
 
 import type { Env } from '../env';
+import { resolveD1BindingIdentity } from '../lib/d1-session';
 import { errors } from '../middleware/error';
 import { emailTransportKind } from './agent-email/provider';
 import { hasInboundAgentEmail } from './agent-email/self-host-inbound';
 import { isAnalyticsD1SinkEnabled } from './analytics-d1-sink';
+import { cache } from './admin-settings-resolution';
 import { resolveArtifactsBackend } from './hosted-git/backend';
+import { validLlmBaseUrl } from './llm-endpoint-settings';
 import { resolveR2PresignConfig } from './r2-presign-config';
+import { getTTSConfig } from './tts-config';
 
 /** One platform service. The name is also the `feature` field of a FEATURE_UNAVAILABLE error. */
 export type PlatformCapability =
@@ -224,8 +229,10 @@ export function resolvePlatformCapabilities(env: CapabilityEnv): PlatformCapabil
     appDeployments: cloudflareDns,
     workersObservability: cloudflareAccountApi,
     r2Presign: resolveR2PresignConfig(env) !== null,
+    // Whisper runs on Workers AI (routes/transcribe.ts).
     speechToText: workersAi,
-    textToSpeech: workersAi && env.TTS_ENABLED !== 'false',
+    // Synthesis runs on Workers AI, and the operator can switch it off (routes/tts.ts).
+    textToSpeech: workersAi && getTTSConfig(env).enabled === true,
     liveLogStream: hasLiveLogStream(env),
   };
 }
@@ -254,27 +261,11 @@ export interface PublicPlatformCapabilities {
   agentModelCalls: boolean;
 }
 
-/**
- * Which speech services an admin pointed at an OpenAI-compatible endpoint (`speech.*` settings,
- * read by `resolveSpeechEndpoint()` in speech-endpoints.ts). Only consulted without the Workers AI
- * binding, so a Cloudflare deployment never reads them.
- */
-export interface SpeechEndpointAvailability {
-  transcription: boolean;
-  synthesis: boolean;
-}
-
-const NO_SPEECH_ENDPOINTS: SpeechEndpointAvailability = { transcription: false, synthesis: false };
-
-export function publicPlatformCapabilities(
-  env: CapabilityEnv,
-  speechEndpoints: SpeechEndpointAvailability = NO_SPEECH_ENDPOINTS
-): PublicPlatformCapabilities {
+export function publicPlatformCapabilities(env: CapabilityEnv): PublicPlatformCapabilities {
   const capabilities = resolvePlatformCapabilities(env);
-  const ttsAllowed = env.TTS_ENABLED !== 'false';
   return {
-    speechToText: capabilities.speechToText || speechEndpoints.transcription,
-    textToSpeech: capabilities.textToSpeech || (ttsAllowed && speechEndpoints.synthesis),
+    speechToText: capabilities.speechToText,
+    textToSpeech: capabilities.textToSpeech,
     monthlyCostCap: capabilities.monthlyCostCap,
     logSearch: capabilities.workersObservability,
     liveLogStream: capabilities.liveLogStream,
@@ -292,5 +283,28 @@ export const APP_DEPLOYMENTS_UNAVAILABLE_MESSAGE =
 export function assertAppDeploymentsAvailable(env: CapabilityEnv): void {
   if (!resolvePlatformCapabilities(env).appDeployments) {
     throw errors.featureUnavailable('appDeployments', APP_DEPLOYMENTS_UNAVAILABLE_MESSAGE);
+  }
+}
+
+/**
+ * Endpoint capability is the configured base URL itself, from the existing module-scope TTL
+ * snapshot. Cloudflare's unconfigured path does one snapshot read per isolate TTL, zero key
+ * reads, and zero additional D1 reads per call. No second cache can outlive admin invalidation.
+ * Remember configuration across expired snapshots: an outage must not reroute private prompts.
+ */
+export async function resolveLlmEndpointCapability(env: Env): Promise<string | null> {
+  const db = resolveD1BindingIdentity(env.DATABASE);
+  try {
+    const rows = await cache.read(db);
+    const row = rows.find((row) => row.key === 'llm.openAICompatible.baseUrl');
+    if (!row) {
+      return null;
+    }
+    const value: unknown = row.value;
+    if (!validLlmBaseUrl(value)) throw new Error('Invalid endpoint configuration');
+    return String(value);
+  } catch {
+    // Unknown configuration must not send prompts to a provider the operator may have replaced.
+    throw new LlmUnavailableError('aiProxy', 'settings_unreadable');
   }
 }
