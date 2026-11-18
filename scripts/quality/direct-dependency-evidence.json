@@ -247,6 +247,26 @@
     "golang.org/x/vuln/cmd/govulncheck": {
       "registryUrl": "https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck",
       "necessity": "Pins the official govulncheck CLI used by the diff-local Go vulnerability gate."
+    },
+    "blitiri.com.ar/go/spf": {
+      "registryUrl": "https://pkg.go.dev/blitiri.com.ar/go/spf",
+      "homepageUrl": "https://blitiri.com.ar/git/r/spf",
+      "necessity": "sam-mx (self-host inbound agent email) checks the sending host SPF record before accepting mail for an agent address (auth.go)."
+    },
+    "github.com/emersion/go-msgauth": {
+      "registryUrl": "https://pkg.go.dev/github.com/emersion/go-msgauth",
+      "homepageUrl": "https://github.com/emersion/go-msgauth",
+      "necessity": "sam-mx verifies DKIM signatures before relaying inbound agent email to the Worker, and parses DMARC records when relaxed alignment is enabled (auth.go)."
+    },
+    "github.com/emersion/go-smtp": {
+      "registryUrl": "https://pkg.go.dev/github.com/emersion/go-smtp",
+      "homepageUrl": "https://github.com/emersion/go-smtp",
+      "necessity": "sam-mx is an SMTP server; go-smtp provides the protocol server and session handling for inbound agent email (main.go, session.go)."
+    },
+    "golang.org/x/net": {
+      "registryUrl": "https://pkg.go.dev/golang.org/x/net",
+      "homepageUrl": "https://go.googlesource.com/net",
+      "necessity": "sam-mx uses publicsuffix.EffectiveTLDPlusOne to find the organizational domain for relaxed DMARC alignment and the DMARC record fallback (auth.go)."
     }
   }
 }

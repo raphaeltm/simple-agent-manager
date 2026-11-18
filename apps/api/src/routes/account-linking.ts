@@ -8,9 +8,9 @@ import { errors } from '../middleware/error';
 import { jsonValidator } from '../schemas/_validator';
 import { assertLinkSession, linkProofHash, linkProofIdentifier } from '../services/account-linking';
 import { resolveAdminSetting } from '../services/admin-settings-resolution';
-import { agentEmailDomain } from '../services/agent-email/address';
-import { agentEmailSenderFor } from '../services/agent-email/provider';
+import { resolveSystemEmailTransport } from '../services/agent-email/system-email';
 import { rateLimitSignInCodes, withinEmailBudget } from '../services/email-sign-in';
+import { SECURITY_ALERT_LOCAL_PART } from '../services/security-alerts';
 
 export const accountLinkingRoutes = new Hono<{ Bindings: Env }>();
 
@@ -34,8 +34,9 @@ accountLinkingRoutes.post(
       if (isAPIError(error)) throw errors.forbidden('Sign in again before connecting an account');
       throw error;
     }
-    const sender = agentEmailSenderFor(c.env);
-    if (!current.user.emailVerified || !sender) {
+    // The transport sign-in codes use: the Cloudflare binding, or SMTP on a self-hosted box.
+    const transport = current.user.emailVerified ? await resolveSystemEmailTransport(c.env) : null;
+    if (!transport) {
       throw errors.forbidden(
         'Connecting an account requires a confirmed account email and email delivery. Sign in with your existing provider to confirm your email, or contact your installation administrator.'
       );
@@ -60,8 +61,8 @@ accountLinkingRoutes.post(
     const url = new URL(`https://app.${c.env.BASE_DOMAIN}/settings/github`);
     url.hash = new URLSearchParams({ linkToken: token, provider }).toString();
     try {
-      await sender.send({
-        from: { email: `security@${agentEmailDomain(c.env.BASE_DOMAIN)}`, name: 'SAM security' },
+      await transport.sender.send({
+        from: { email: transport.systemFrom(SECURITY_ALERT_LOCAL_PART), name: 'SAM security' },
         to: current.user.email,
         subject: `Confirm connecting ${provider === 'github' ? 'GitHub' : 'GitLab'} to SAM`,
         text: `To confirm it is you, open this link in the same browser where you requested the connection, then choose Confirm connection:\n\n${url}\n\nThis one-time sign-in check expires in ${seconds / 60} minutes. If you did not request this, ignore this email.`,

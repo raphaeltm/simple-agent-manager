@@ -213,6 +213,28 @@
         "e80c7e20e86a0c09d48491a9ad0f681a161185399834abf689c491cc58404d18",
         "751da363c1e618b01b169097dbbc341d6dd0e3e2cceef8beaa5092403a04a45d"
       ]
+    },
+    {
+      "classification": "code-identifier",
+      "reason": "Self-host inbound email (L21, #2887): deploy/selfhost/sam-mx config.go agentAddressKeyChars is the public agent-address alphabet (Crockford-style base32 characters), not key material. Exact findings only: the current line and the same line at its earlier position in the port commit 1c023420a.",
+      "owner": "security",
+      "reviewedAt": "2026-11-18T15:45:00.000Z",
+      "expiresAt": "2026-12-18T15:45:00.000Z",
+      "digests": [
+        "9129fd74cffbdc8442feed3af75699051839080524f42afdafdcbaedc227ef56",
+        "eab7bddde682c4104f263aefb4b6004bff8ce1ba7a01c73787b347142fa7241d"
+      ]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "Self-host inbound email (L21, #2887) tests: a fixed agent address key (a routing identifier inside a public email address) in selfhost-inbound-email.test.ts, and a literal gateway shared secret ending in -test used only by the sam-mx receiver test against an httptest server. Exact current findings only.",
+      "owner": "security",
+      "reviewedAt": "2026-11-18T15:45:00.000Z",
+      "expiresAt": "2026-12-18T15:45:00.000Z",
+      "digests": [
+        "3ea24e85ceb78d673fcb02e42f5d44dfabe7a97fa680f090d0fcf1e79c0eff74",
+        "e2345bc2c8f9744b9067ec77eebb1d7baa52999404834bfb429fb63579062263"
+      ]
     }
   ]
 }
