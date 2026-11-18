@@ -2372,6 +2372,8 @@ exchange_token=%s
 url_encode_query_value() {
   printf '%%s' "$1" | sed 's/%%/%%25/g; s/&/%%26/g; s/=/%%3D/g; s/?/%%3F/g; s/#/%%23/g; s/+/%%2B/g; s/ /%%20/g'
 }
+encoded_protocol=$(url_encode_query_value "$requested_protocol")
+credential_query="${credential_query}&protocol=${encoded_protocol}"
 if [ -n "$requested_host" ]; then
   encoded_host=$(url_encode_query_value "$requested_host")
   if [ -n "$credential_query" ]; then

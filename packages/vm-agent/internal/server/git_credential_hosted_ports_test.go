@@ -32,13 +32,30 @@ func TestHostedArtifactsCredentialPorts(t *testing.T) {
 			{"response mismatch", "api.sam.example", "api.sam.example:443", "evil.example", 204, 1},
 		} {
 			t.Run(mode+"/"+tc.name, func(t *testing.T) {
-				assertHostedArtifactsCredentialPort(t, mode, tc.bound, tc.request, tc.resolved, tc.status, tc.calls)
+				assertHostedArtifactsCredentialPort(t, mode, "https", tc.bound, tc.request, tc.resolved, tc.status, tc.calls)
 			})
 		}
 	}
 }
 
-func assertHostedArtifactsCredentialPort(t *testing.T, mode, bound, requested, resolved string, status, calls int) {
+func TestHostedArtifactsCredentialProtocols(t *testing.T) {
+	for _, mode := range []string{"vm", "standalone", "standalone response"} {
+		for _, protocol := range []string{"http", "", "https"} {
+			t.Run(mode+"/"+protocol, func(t *testing.T) {
+				status, calls := 204, 0
+				if mode == "standalone response" {
+					calls = 1
+				}
+				if protocol == "https" {
+					status, calls = 200, 1
+				}
+				assertHostedArtifactsCredentialPort(t, mode, protocol, "api.sam.example", "api.sam.example", "api.sam.example", status, calls)
+			})
+		}
+	}
+}
+
+func assertHostedArtifactsCredentialPort(t *testing.T, mode, protocol, bound, requested, resolved string, status, calls int) {
 	t.Helper()
 	var fetched atomic.Int32
 	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -46,7 +63,9 @@ func assertHostedArtifactsCredentialPort(t *testing.T, mode, bound, requested, r
 		if r.Method != http.MethodPost || r.URL.Path != "/api/workspaces/ws-ports/git-token" || r.Header.Get("Authorization") != "Bearer callback" {
 			t.Error("incorrect authenticated git-token callback")
 		}
-		_ = json.NewEncoder(w).Encode(gitTokenResponse{Provider: "artifacts", Token: "hosted-token", Host: resolved, Username: "x"})
+		// Match the production Artifacts callback: cloneUrl and username, no
+		// provider discriminator. GitLab supplies an explicit provider instead.
+		_ = json.NewEncoder(w).Encode(gitTokenResponse{Token: "hosted-token", CloneURL: "https://" + resolved + "/git/repo.git", Username: "x"})
 	}))
 	defer control.Close()
 	s := &Server{config: &config.Config{ControlPlaneURL: control.URL, WorkspaceID: "ws-ports", CallbackToken: "callback", RepoProvider: "artifacts", RepositoryHost: bound}}
@@ -57,12 +76,17 @@ func assertHostedArtifactsCredentialPort(t *testing.T, mode, bound, requested, r
 		s.workspaces = map[string]*WorkspaceRuntime{"ws-ports": {ID: "ws-ports", RepoProvider: "artifacts", RepositoryHost: bound, CallbackToken: "callback"}}
 	} else {
 		s.config.Role = config.RoleStandalone
+		if mode == "standalone response" {
+			// Legacy/absent local provider metadata must not bypass the resolved
+			// Artifacts credential's response-side HTTPS requirement.
+			s.config.RepoProvider = ""
+		}
 	}
-	req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-ports&host="+url.QueryEscape(requested), nil)
+	req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-ports&protocol="+url.QueryEscape(protocol)+"&host="+url.QueryEscape(requested), nil)
 	req.Header.Set("Authorization", "Bearer callback")
 	rec := httptest.NewRecorder()
-	if mode == "standalone" {
-		code, output := fillHostedStandaloneCredential(t, s, requested)
+	if mode != "vm" {
+		code, output := fillHostedStandaloneCredential(t, s, requested, protocol)
 		rec.Code = code
 		_, _ = rec.Body.WriteString(output)
 	} else {
@@ -82,7 +106,7 @@ func assertHostedArtifactsCredentialPort(t *testing.T, mode, bound, requested, r
 
 // Enter the standalone exchange the way a subsequent fetch/push does: Git calls
 // the production shell helper, which authenticates to the real local handler.
-func fillHostedStandaloneCredential(t *testing.T, agent *Server, host string) (int, string) {
+func fillHostedStandaloneCredential(t *testing.T, agent *Server, host, protocol string) (int, string) {
 	t.Helper()
 	const workspace = "ws-ports"
 	lockStandaloneExchange(t, workspace)
@@ -104,10 +128,15 @@ func fillHostedStandaloneCredential(t *testing.T, agent *Server, host string) (i
 		t.Fatal(err)
 	}
 	cmd := exec.Command("git", "-c", "credential.helper="+helper, "-c", "credential.useHttpPath=true", "credential", "fill")
+	if protocol == "" {
+		// Git refuses an absent protocol before invoking helpers; drive the real
+		// helper directly to verify the exchange also refuses that input.
+		cmd = exec.Command(helper, "get")
+	}
 	cmd.Env = hermeticEnv("SAM_WORKSPACE_ID="+workspace, "SAM_GIT_CREDENTIAL_ENDPOINT="+local.URL+"/git-credential", "HOME="+t.TempDir(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0")
-	cmd.Stdin = strings.NewReader("protocol=https\nhost=" + host + "\npath=git/repo.git\n\n")
+	cmd.Stdin = strings.NewReader("protocol=" + protocol + "\nhost=" + host + "\npath=git/repo.git\n\n")
 	output, err := cmd.Output()
-	if (code.Load() == http.StatusOK) != (err == nil) {
+	if protocol != "" && (code.Load() == http.StatusOK) != (err == nil) {
 		t.Fatalf("Git credential fill success disagrees with the exchange status %d", code.Load())
 	}
 	return int(code.Load()), string(output)

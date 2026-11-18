@@ -47,7 +47,7 @@ func assertHostedArtifactsHelper(t *testing.T, protocol, host string, allowed bo
 		}
 		return
 	}
-	if readErr != nil || !strings.Contains(string(args), "host="+host) || !strings.Contains(string(output), "password=test-only") {
+	if readErr != nil || !strings.Contains(string(args), "host="+host) || !strings.Contains(string(args), "protocol=https") || !strings.Contains(string(output), "password=test-only") {
 		t.Fatal("HTTPS authority did not reach the local credential exchange unchanged")
 	}
 	if strings.Contains(script, cfg.CallbackToken) {
