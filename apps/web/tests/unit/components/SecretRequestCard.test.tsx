@@ -114,7 +114,7 @@ describe('secret request card in chat', () => {
         status: 'fulfilled',
         resolvedByName: 'Raph',
         resolvedAt: '2026-11-12T10:05:00.000Z',
-        secretExpiresAt: '2026-11-12T11:05:00.000Z',
+        secretExpiresAt: new Date(Date.now() + 3_600_000).toISOString(),
       }),
       agentNotified: true,
     });

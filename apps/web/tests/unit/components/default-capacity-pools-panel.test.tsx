@@ -154,6 +154,267 @@ describe('DefaultCapacityPoolsPanel', () => {
     }
   );
 
+  describe('default workspace fit warning', () => {
+    /**
+     * The installation's resolved placement settings, as the pool response carries them
+     * (`resolveSafeCapacityPoolPlacementSettingsSummary()`). The fixture pool allows a 2 vCPU /
+     * 4 GB and a 4 vCPU / 8 GB machine.
+     */
+    function withInstallationSettings(
+      platformDefaults: { minVcpu: number; minMemoryGb: number },
+      hostMemoryReserveMb: number
+    ) {
+      const base = response('installation', summary('installation'));
+      // Keep candidate foreign keys aligned with the installation source in this response.
+      base.effective!.candidates = base.effective!.candidates.map((candidate) => ({
+        ...candidate,
+        capacitySourceId: base.effective!.sources[0]!.id,
+      }));
+      return {
+        ...base,
+        placementSettings: {
+          version: 1,
+          sourceGeneration: 1,
+          legacyWorkloadAdapterVersion: 1,
+          selectionWeights: { priority: 1, price: 1, fit: 1, capacity: 1, candidateOrder: 1 },
+          rolloutCohortPercent: 100,
+          source: {
+            legacyWorkloadMapping: 'default' as const,
+            platformDefaults: 'persisted' as const,
+            selection: 'default' as const,
+          },
+          resourceDefaults: {
+            legacyWorkloadMapping: {} as never,
+            platformDefaults: { ...platformDefaults, minDiskGb: 15, exclusiveNode: false },
+          },
+          hostMemoryReserveMb,
+        },
+      };
+    }
+
+    it('warns on the personal page when the shared pool cannot fit the installation default', async () => {
+      // Installation override: default workspaces ask for 8 GB. The 8 GB machine keeps 1 GB
+      // for its host, so nothing allowed can place one.
+      mocks.fetchUserDefaultCapacityPools.mockResolvedValue(
+        withInstallationSettings({ minVcpu: 2, minMemoryGb: 8 }, 1024)
+      );
+
+      renderPanel({ scope: 'user' });
+
+      const warning = await screen.findByText(/No allowed machine can run a default workspace/);
+      expect(warning).toHaveTextContent('It needs 2 vCPU, 8 GB of memory and 15 GB of disk');
+      expect(warning).toHaveTextContent('keeps 1 GB of memory for itself');
+      expect(warning).toHaveTextContent('at least 2 vCPU, 9 GB of memory and 15 GB of disk');
+      expect(screen.getByText(/Your work uses the shared compute pool/)).toBeInTheDocument();
+    });
+
+    it('warns when the installation host reserve leaves too little memory', async () => {
+      mocks.fetchUserDefaultCapacityPools.mockResolvedValue(
+        withInstallationSettings({ minVcpu: 2, minMemoryGb: 4 }, 5120)
+      );
+
+      renderPanel({ scope: 'user' });
+
+      expect(
+        await screen.findByText(/No allowed machine can run a default workspace/)
+      ).toHaveTextContent('keeps 5 GB of memory for itself');
+    });
+
+    it.each([
+      ['last-known-unavailable', true],
+      ['available', false],
+    ] as const)(
+      'uses only currently available fitting machines (%s)',
+      async (availability, warns) => {
+        const body = withInstallationSettings({ minVcpu: 2, minMemoryGb: 4 }, 1024);
+        body.effective!.candidates = body.effective!.candidates.map((candidate) => ({
+          ...candidate,
+          catalogAvailability:
+            candidate.providerInstanceType === 'cpx31' ? availability : 'available',
+          providerInstanceCatalogSource: 'api',
+        }));
+        mocks.fetchUserDefaultCapacityPools.mockResolvedValue(body);
+
+        renderPanel({ scope: 'user' });
+
+        expect(await screen.findByText(/Allowed machines/)).toBeInTheDocument();
+        const warning = screen.queryByText(/No allowed machine can run a default workspace/);
+        if (warns) expect(warning).toBeInTheDocument();
+        else expect(warning).not.toBeInTheDocument();
+      }
+    );
+
+    it('does not let an available disabled candidate rescue an unavailable active candidate in the same cell', async () => {
+      const body = withInstallationSettings({ minVcpu: 2, minMemoryGb: 4 }, 1024);
+      const fitting = body.effective!.candidates.find(
+        (candidate) => candidate.providerInstanceType === 'cpx31'
+      )!;
+      body.effective!.candidates = body.effective!.candidates.map((candidate) => ({
+        ...candidate,
+        catalogAvailability: candidate.id === fitting.id ? 'last-known-unavailable' : 'available',
+        providerInstanceCatalogSource: 'api',
+      }));
+      body.effective!.candidates.push({
+        ...fitting,
+        id: 'fitting-disabled',
+        status: 'disabled',
+        catalogAvailability: 'available',
+        providerInstanceCatalogSource: 'api',
+      });
+      mocks.fetchUserDefaultCapacityPools.mockResolvedValue(body);
+
+      renderPanel({ scope: 'user' });
+
+      expect(
+        await screen.findByText(/No allowed machine can run a default workspace/)
+      ).toBeInTheDocument();
+    });
+
+    it('shows the pool state warning instead when the pool cannot be used at all', async () => {
+      const body = withInstallationSettings({ minVcpu: 2, minMemoryGb: 8 }, 1024);
+      body.effective = { ...body.effective!, effectiveState: 'catalog-unavailable' };
+      mocks.fetchUserDefaultCapacityPools.mockResolvedValue(body);
+
+      renderPanel({ scope: 'user' });
+
+      expect(
+        await screen.findByText("SAM couldn't read the provider's machine list. Try Refresh.")
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText(/No allowed machine can run a default workspace/)
+      ).not.toBeInTheDocument();
+    });
+
+    /** The shared pool with its 8 GB machine moved to a second account, switched off or not. */
+    function withSecondAccount(switchedOff: boolean) {
+      const body = withInstallationSettings({ minVcpu: 2, minMemoryGb: 4 }, 1024);
+      const effective = body.effective!;
+      const second = { ...effective.sources[0]!, id: 'source-off', platformCredentialId: 'pc-2' };
+      body.effective = {
+        ...effective,
+        pool: { ...effective.pool, excludedSourceIds: switchedOff ? ['source-off'] : [] },
+        sources: [...effective.sources, second],
+        candidates: effective.candidates.map((candidate) =>
+          candidate.providerInstanceType === 'cpx31'
+            ? { ...candidate, capacitySourceId: 'source-off' }
+            : candidate
+        ),
+      };
+      return body;
+    }
+
+    it('ignores machines of a switched-off account, which placement never uses', async () => {
+      // Left on: the 4 GB machine keeps 1 GB, so only the switched-off 8 GB one could fit.
+      mocks.fetchUserDefaultCapacityPools.mockResolvedValue(withSecondAccount(true));
+
+      renderPanel({ scope: 'user' });
+
+      expect(
+        await screen.findByText(/No allowed machine can run a default workspace/)
+      ).toBeInTheDocument();
+    });
+
+    it.each([
+      ['disabled', true],
+      ['active', false],
+    ] as const)('requires an active fitting capacity source (%s)', async (status, warns) => {
+      const body = withSecondAccount(false);
+      body.effective!.sources = body.effective!.sources.map((source) =>
+        source.id === 'source-off' ? { ...source, status } : source
+      );
+      mocks.fetchUserDefaultCapacityPools.mockResolvedValue(body);
+
+      renderPanel({ scope: 'user' });
+
+      expect(await screen.findByText(/Allowed machines/)).toBeInTheDocument();
+      const warning = screen.queryByText(/No allowed machine can run a default workspace/);
+      if (warns) expect(warning).toBeInTheDocument();
+      else expect(warning).not.toBeInTheDocument();
+    });
+
+    it('counts the same machine when its account is on (control)', async () => {
+      mocks.fetchUserDefaultCapacityPools.mockResolvedValue(withSecondAccount(false));
+
+      renderPanel({ scope: 'user' });
+
+      expect(await screen.findByText(/Allowed machines/)).toBeInTheDocument();
+      expect(
+        screen.queryByText(/No allowed machine can run a default workspace/)
+      ).not.toBeInTheDocument();
+    });
+
+    /** What an ordinary user without a pool receives: the shared pool's safe summary only. */
+    function safeSharedSummary(memoryMb: number, platformDefaults: { minMemoryGb: number }) {
+      const { placementSettings } = withInstallationSettings(
+        { minVcpu: 2, minMemoryGb: platformDefaults.minMemoryGb },
+        1024
+      );
+      return {
+        ...response(null, null),
+        placementSettings,
+        effectiveSummary: {
+          scope: 'installation' as const,
+          state: 'configured-ready' as const,
+          strategy: 'balanced' as const,
+          exhaustionPolicy: 'queue' as const,
+          availableCandidateCount: 1,
+          nativeOfferings: [
+            {
+              provider: 'hetzner' as const,
+              location: 'fsn1',
+              providerInstanceType: 'cx23',
+              displayName: 'cx23',
+              vcpu: 2,
+              memoryMb,
+              diskGb: 40,
+              price: '€4.49/mo',
+            },
+          ],
+        },
+      };
+    }
+
+    it('warns an ordinary user whose shared pool cannot fit the installation default', async () => {
+      mocks.fetchUserDefaultCapacityPools.mockResolvedValue(
+        safeSharedSummary(4096, { minMemoryGb: 4 })
+      );
+
+      renderPanel({ scope: 'user' });
+
+      expect(await screen.findByText("You're using shared machines")).toBeInTheDocument();
+      expect(screen.getByText(/No allowed machine can run a default workspace/)).toHaveTextContent(
+        'at least 2 vCPU, 5 GB of memory and 15 GB of disk'
+      );
+    });
+
+    it('stays quiet for an ordinary user whose shared pool fits (control)', async () => {
+      mocks.fetchUserDefaultCapacityPools.mockResolvedValue(
+        safeSharedSummary(8192, { minMemoryGb: 4 })
+      );
+
+      renderPanel({ scope: 'user' });
+
+      expect(await screen.findByText("You're using shared machines")).toBeInTheDocument();
+      expect(
+        screen.queryByText(/No allowed machine can run a default workspace/)
+      ).not.toBeInTheDocument();
+    });
+
+    it('stays quiet when an allowed machine fits the installation default', async () => {
+      mocks.fetchUserDefaultCapacityPools.mockResolvedValue(
+        withInstallationSettings({ minVcpu: 2, minMemoryGb: 4 }, 1024)
+      );
+
+      renderPanel({ scope: 'user' });
+
+      // Liveness: the pool rendered, so the absence below is not a page that never loaded.
+      expect(await screen.findByText('Allowed machines (2)')).toBeInTheDocument();
+      expect(
+        screen.queryByText(/No allowed machine can run a default workspace/)
+      ).not.toBeInTheDocument();
+    });
+  });
+
   it('shows the personal pool read-only on a project without its own pool', async () => {
     mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('user', summary('user')));
 
