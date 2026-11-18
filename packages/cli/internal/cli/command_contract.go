@@ -118,7 +118,7 @@ func (w structuredErrorWriter) Write(p []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	_, err = w.destination.Write(append(data, '\n'))
+	_, err = io.WriteString(w.destination, terminalSafeJSON(data)+"\n")
 	if err != nil {
 		return 0, err
 	}
@@ -135,7 +135,7 @@ func (w structuredErrorWriter) writeError(err error) {
 	}
 	b, e := json.Marshal(value)
 	if e == nil {
-		_, _ = w.destination.Write(append(b, '\n'))
+		_, _ = io.WriteString(w.destination, terminalSafeJSON(b)+"\n")
 	}
 }
 
@@ -195,6 +195,7 @@ func isKnownCommandAction(action string) bool {
 
 // Informational events retain credential redaction without error classification.
 func writeDiagnostic(destination io.Writer, data []byte) {
+	data = []byte(terminalSafeJSON(data))
 	switch writer := destination.(type) {
 	case redactingWriter:
 		inner := writer.destination

@@ -3560,6 +3560,21 @@ export async function recordQuestionAsked(
   );
 }
 
+/** The person archived a question held in D1 `asks`: a live update only, nothing reaches the agent. */
+export async function recordQuestionArchived(
+  env: Env,
+  projectId: string,
+  input: Parameters<ProjectData['recordQuestionArchived']>[0]
+): Promise<void> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'recordQuestionArchived',
+    (stub) => stub.recordQuestionArchived(input),
+    'mutation'
+  );
+}
+
 /** The agent cancelled its blocking question in D1 `asks` (inbox slice D). */
 export async function recordQuestionWithdrawn(
   env: Env,

@@ -157,10 +157,20 @@ const TOKENS_REPORTED: RunReceipt['tokens'] = {
   state: 'reported',
   source: 'harness',
   limited: false,
-  total: { input: 312_000, output: 41_500, cacheRead: 2_140_000, cacheWrite: 86_000, reasoning: null },
+  total: {
+    input: 312_000,
+    output: 41_500,
+    cacheRead: 2_140_000,
+    cacheWrite: 86_000,
+    reasoning: null,
+  },
   spend: { state: 'estimate', usd: 4.12, unpricedModels: [] },
   models: [
-    { ...modelUsage('claude-opus-5-5', 300_000, 40_000, 2_100_000), cacheWrite: 86_000, estimatedSpendUsd: 3.98 },
+    {
+      ...modelUsage('claude-opus-5-5', 300_000, 40_000, 2_100_000),
+      cacheWrite: 86_000,
+      estimatedSpendUsd: 3.98,
+    },
     { ...modelUsage('claude-haiku-5-5', 12_000, 1_500, 40_000), estimatedSpendUsd: 0.14 },
   ],
 };
@@ -171,10 +181,20 @@ const STRESS_RECEIPT = makeReceipt({
     state: 'reported',
     source: 'ai_proxy',
     limited: true,
-    total: { input: 9_876_543_210, output: 123_456_789, cacheRead: 0, cacheWrite: 0, reasoning: 77 },
+    total: {
+      input: 9_876_543_210,
+      output: 123_456_789,
+      cacheRead: 0,
+      cacheWrite: 0,
+      reasoning: 77,
+    },
     spend: { state: 'not_applicable' },
     models: [
-      modelUsage(`openrouter/${'very-long-model-identifier-'.repeat(8)}v2`, 9_000_000_000, 100_000_000),
+      modelUsage(
+        `openrouter/${'very-long-model-identifier-'.repeat(8)}v2`,
+        9_000_000_000,
+        100_000_000
+      ),
       modelUsage('<script>alert(1)</script> — émoji 🚀 model', 800_000_000, 20_000_000),
       modelUsage(null, 76_543_210, 3_456_789),
       ...Array.from({ length: 12 }, (_, i) => modelUsage(`helper-model-${i}`, 1_000 * i, 100 * i)),
@@ -632,6 +652,29 @@ test.describe('Run receipt — chat tool rail', () => {
     if ((page.viewportSize()?.width ?? 0) >= 1280) await docsShot(page, 'run-receipt');
     await capture(page, 'run-receipt-tokens');
   });
+
+  for (const theme of ['dark', 'light'] as const) {
+    test(`discloses refused usage with no accepted rows (${theme})`, async ({ page }) => {
+      const drawer = await openReceipt(page, {
+        theme,
+        receipt: makeReceipt({ tokens: { state: 'not_reported', limited: true } }),
+      });
+      await expect(drawer.getByText('Incomplete', { exact: true })).toBeVisible();
+      await expect(drawer.getByText('Usage rows could not be recorded')).toBeVisible();
+      await assertInViewport(page);
+      await capture(page, `run-receipt-incomplete-${theme}`);
+    });
+    test(`labels incomplete tokens and spend as floors (${theme})`, async ({ page }) => {
+      const drawer = await openReceipt(page, {
+        theme,
+        receipt: makeReceipt({ tokens: { ...TOKENS_REPORTED, limited: true } }),
+      });
+      await expect(drawer.getByText('2.6M+', { exact: true })).toBeVisible();
+      await expect(drawer.getByTestId('receipt-token-spend')).toContainText('At least ~$4.12');
+      await assertInViewport(page);
+      await capture(page, `run-receipt-limited-spend-${theme}`);
+    });
+  }
 
   test('long text, special characters and a floor count wrap inside the panel', async ({
     page,

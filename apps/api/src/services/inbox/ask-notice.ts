@@ -38,11 +38,9 @@ export function buildInboxAskPrompt(
   const answer = answerText(row.answerJson);
   if (row.kind === 'question') {
     // A request_human_input question (slice G). Its expiry stops the task instead of a notice
-    // (`deliverInboxAskNotice`).
+    // (`deliverInboxAskNotice`), and archiving it tells the agent nothing (2026-11-17), so only
+    // an answer reaches here.
     const question = `your question ("${row.title}")`;
-    if (outcome === 'archived') {
-      return `The person archived ${question} from their inbox and will not act on it. Do not wait for an answer: continue without it, or end your turn and say what is left undone.`;
-    }
     return answer
       ? `The person answered ${question}:\n\n${answer}`
       : `The person answered ${question}.`;
@@ -53,6 +51,11 @@ export function buildInboxAskPrompt(
     return answer
       ? `The person reviewed your ${item} and replied:\n\n${answer}`
       : `The person reviewed your ${item}: it looks good.`;
+  }
+  if (row.kind === 'result' && outcome === 'answered' && answer) {
+    // "Got it" closes a result without a notice (`answerAsk`), so an answered result that
+    // reaches here carries the person's reply.
+    return `The person replied to your ${item}:\n\n${answer}`;
   }
   switch (outcome) {
     case 'answered':

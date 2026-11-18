@@ -121,7 +121,7 @@ func runWorkspaceForward(ctx context.Context, runtime Runtime, parsed parsedArgs
 	}
 
 	// Print forwarding table
-	fmt.Fprintf(runtime.Stderr, "\nForwarding %d port(s) for workspace %s:\n", len(forwarders), workspaceID)
+	fmt.Fprintf(runtime.Stderr, "\nForwarding %d port(s) for workspace %s:\n", len(forwarders), sanitizeTerminalLine(workspaceID))
 	for _, f := range forwarders {
 		fmt.Fprintf(runtime.Stderr, "  http://%s:%d -> remote port %d\n", f.localHost, f.localPort, f.remotePort)
 	}
@@ -283,7 +283,7 @@ func acceptConnections(ctx context.Context, runtime Runtime, client APIClient, c
 
 	target, err := url.Parse(cfg.remoteURL)
 	if err != nil {
-		fmt.Fprintf(runtime.Stderr, "  invalid remote URL %s: %v\n", cfg.remoteURL, err)
+		fmt.Fprintf(runtime.Stderr, "  invalid remote URL %s: %v\n", sanitizeTerminalLine(cfg.remoteURL), sanitizeTerminalLine(err.Error()))
 		return
 	}
 
@@ -301,7 +301,7 @@ func acceptConnections(ctx context.Context, runtime Runtime, client APIClient, c
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, proxyErr error) {
 			fmt.Fprintf(runtime.Stderr, "  [%s] proxy error for %s %s: %v\n",
-				time.Now().Format("15:04:05"), r.Method, r.URL.Path, proxyErr)
+				time.Now().Format("15:04:05"), sanitizeTerminalLine(r.Method), sanitizeTerminalLine(r.URL.Path), sanitizeTerminalLine(proxyErr.Error()))
 			w.WriteHeader(http.StatusBadGateway)
 		},
 	}
@@ -317,11 +317,11 @@ func acceptConnections(ctx context.Context, runtime Runtime, client APIClient, c
 				return
 			}
 			fmt.Fprintf(runtime.Stderr, "  [%s] %s %s -> localhost:%d\n",
-				time.Now().Format("15:04:05"), r.Method, r.URL.Path, cfg.remotePort)
+				time.Now().Format("15:04:05"), sanitizeTerminalLine(r.Method), sanitizeTerminalLine(r.URL.Path), cfg.remotePort)
 			token, tokenErr := tc.getToken(r.Context())
 			if tokenErr != nil {
 				fmt.Fprintf(runtime.Stderr, "  [%s] token unavailable for %s %s\n",
-					time.Now().Format("15:04:05"), r.Method, r.URL.Path)
+					time.Now().Format("15:04:05"), sanitizeTerminalLine(r.Method), sanitizeTerminalLine(r.URL.Path))
 				http.Error(w, "local forward token unavailable", http.StatusBadGateway)
 				return
 			}

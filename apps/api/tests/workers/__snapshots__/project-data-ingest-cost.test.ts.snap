@@ -155,6 +155,11 @@ exports[`message ingest row cost in real workerd > profiles long-session batches
         "statement": "INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
         "written": 1,
       },
+      {
+        "read": 0,
+        "statement": "SELECT value FROM do_meta WHERE key = ?",
+        "written": 0,
+      },
     ],
     "written": 11,
   },
@@ -305,6 +310,11 @@ exports[`message ingest row cost in real workerd > profiles long-session batches
         "read": 1,
         "statement": "INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
         "written": 1,
+      },
+      {
+        "read": 0,
+        "statement": "SELECT value FROM do_meta WHERE key = ?",
+        "written": 0,
       },
     ],
     "written": 11,
