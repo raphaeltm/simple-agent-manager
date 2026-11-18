@@ -7,7 +7,6 @@ description: 'Orchestrate multi-step workflows by decomposing and dispatching su
 
 Read the full workflow from `.claude/commands/workflow.md` and execute it.
 
-
 For CI waits, default to `check_suite.completed` + `workflow_run.completed` for the
 full 40-character PR head SHA. Opt in to `check_run.completed` only for early
 per-job failure or job-specific progress. Reconcile all current GitHub checks on

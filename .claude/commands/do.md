@@ -13,7 +13,6 @@ You are an autonomous task executor. The user has described a task above. Your j
 
 ---
 
-
 For CI waits, default to `check_suite.completed` + `workflow_run.completed` for the
 full 40-character PR head SHA. Opt in to `check_run.completed` only for early
 per-job failure or job-specific progress. Reconcile all current GitHub checks on
