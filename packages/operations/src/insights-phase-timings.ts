@@ -18,9 +18,17 @@ import { OperationError } from './errors';
 
 const DAY_MS = 86_400_000;
 
-/** Rows read to compute percentiles, newest first. Callers may pass a smaller or larger cap. */
-export const DEFAULT_PHASE_STATS_SAMPLE_LIMIT = 5_000;
-export const MAX_PHASE_STATS_SAMPLE_LIMIT = 20_000;
+/**
+ * Newest rows read per (operation, phase) to compute percentiles. Callers may pass another cap.
+ * Work bound (rule 81): pairs come from a closed vocabulary (the VM phases under workspace, sleep
+ * and wake, plus runner steps under runner_start and runner_wake; about 30 pairs per skill or
+ * profile in practice). One call reads at most pairs x (sample + 1) index entries and rows: about
+ * 15k at the default, 60k at the maximum, whatever the retained history.
+ */
+export const DEFAULT_PHASE_STATS_SAMPLE_LIMIT = 500;
+export const MAX_PHASE_STATS_SAMPLE_LIMIT = 2_000;
+/** Rows one stats read returns in total, whatever the number of phases (a memory bound). */
+export const MAX_PHASE_STATS_TOTAL_ROWS = 20_000;
 export const DEFAULT_PHASE_STATS_WINDOW_DAYS = 30;
 export const MAX_PHASE_STATS_WINDOW_DAYS = 365;
 /** Distinct phases one stats call may ask for (the VM vocabulary plus runner steps fit). */
@@ -33,13 +41,14 @@ export interface PhaseDurationStatsInput {
   /** Exactly one of skillId / agentProfileId. */
   skillId?: string;
   agentProfileId?: string;
-  /** Phases to summarise, e.g. `['git_clone', 'devcontainer_up']`. */
-  phases: readonly string[];
+  /** Phases to summarise, e.g. `['git_clone', 'devcontainer_up']`. Omitted: every stored phase. */
+  phases?: readonly string[];
   /** Restrict to one operation (`workspace`, `wake`, `runner_start`, ...). Default: all. */
   operation?: string;
   /** Rows older than `lifecycleLatency.retentionDays` (default 30) are purged, so a longer window
    *  returns at most the retained days. */
   windowDays?: number;
+  /** Newest successful rows read per (operation, phase). */
   sampleLimit?: number;
   now?: number;
 }
@@ -50,11 +59,15 @@ export interface PhaseDurationStat {
   count: number;
   medianMs: number;
   p90Ms: number;
+  /** This pair had more successful rows in the window than `count`: median and p90 are over its
+   *  newest `count` rows (cut by its sample, or by the total row bound). */
+  truncated: boolean;
 }
 
 export interface PhaseDurationStatsResult {
   windowDays: number;
-  /** True when the sample cap cut off older rows in the window. */
+  /** True when any stat is `truncated`, or the total row bound was reached (which can also drop
+   *  a pair entirely). Every pair that is returned holds its newest rows. */
   truncated: boolean;
   /** Only phases with at least one successful sample; ordered by operation, then phase. */
   stats: PhaseDurationStat[];
@@ -126,8 +139,9 @@ export function nearestRankPercentile(sorted: readonly number[], fraction: numbe
 
 /**
  * Median and p90 duration per phase for one skill or one profile in one project over the last
- * `windowDays`, from successful phases only (a failed phase's time says nothing about the usual).
- * One query on `idx_lifecycle_phase_timings_skill_phase` / `_profile_phase`.
+ * `windowDays`, from successful phases only (a failed phase's time says nothing about the usual),
+ * over at most `sampleLimit` newest rows per (operation, phase). One query on
+ * `idx_lifecycle_phase_timings_skill_pair` / `_profile_pair` (migration 0260).
  */
 export async function phaseDurationStats(
   db: D1Database,
@@ -139,8 +153,8 @@ export async function phaseDurationStats(
   }
   const byColumn = input.skillId !== undefined ? 'skill_id' : 'agent_profile_id';
   const byId = requireId(input.skillId ?? input.agentProfileId, byColumn);
-  const phases = [...new Set(input.phases)];
-  if (phases.length === 0 || phases.length > MAX_PHASE_STATS_PHASES) {
+  const phases = input.phases === undefined ? null : [...new Set(input.phases)];
+  if (phases !== null && (phases.length === 0 || phases.length > MAX_PHASE_STATS_PHASES)) {
     throw new OperationError(
       'invalid_input',
       `Pass between 1 and ${MAX_PHASE_STATS_PHASES} phases`
@@ -157,30 +171,117 @@ export async function phaseDurationStats(
     MAX_PHASE_STATS_SAMPLE_LIMIT
   );
   const since = (input.now ?? Date.now()) - windowDays * DAY_MS;
-  const operationFilter = input.operation !== undefined ? 'AND operation = ?' : '';
-  const bindings: Array<string | number> = [projectId, byId, ...phases];
+
+  // The database work is bounded by the (operation, phase) pairs, not by history. The pairs come
+  // from index seeks, one per stored pair. Each pair's sample is one range of the pair index,
+  // whose key holds every filter (operation, phase, outcome, created_at), so it reads its newest
+  // successful rows and stops at its LIMIT: a year of rows costs what a day costs, and a rare
+  // operation or a run of failures cannot make it walk further.
+  // The cap is per (operation, phase), never global: a newest-first LIMIT over every phase lets
+  // one frequent group crowd the others out of the sample (rule 65). One extra row per group shows
+  // whether that group was cut. The total bound is ordered by row number, so it trims every
+  // group's oldest rows first.
+  // Pairs are listed in index order with MIN seeks, never with a row-value comparison, which
+  // SQLite seeks on its first column only (and would re-walk the current operation's rows each
+  // step): the next phase of the same operation, else the first phase of the next operation.
+  const scope = `project_id = ? AND ${byColumn} = ?`;
+  const nextPhase = `(SELECT MIN(phase) FROM lifecycle_phase_timings
+     WHERE ${scope} AND operation = pairs.operation AND phase > pairs.phase)`;
+  const nextOperation = `(SELECT MIN(operation) FROM lifecycle_phase_timings
+     WHERE ${scope} AND operation > pairs.operation)`;
+  const phaseFilter = phases === null ? '' : `AND p.phase IN (${phases.map(() => '?').join(', ')})`;
+  const operationFilter = input.operation !== undefined ? 'AND p.operation = ?' : '';
+  const scopeBinds = [projectId, byId];
+  const bindings: Array<string | number> = [
+    // Anchor: the first operation, then its first phase.
+    ...scopeBinds,
+    ...scopeBinds,
+    // Step: nextPhase twice, nextOperation twice, then the next operation's first phase.
+    ...scopeBinds,
+    ...scopeBinds,
+    ...scopeBinds,
+    ...scopeBinds,
+    ...scopeBinds,
+    // Each pair's sample: the row's own project (defence in depth), then the index range.
+    projectId,
+    ...scopeBinds,
+    since,
+    sampleLimit + 1,
+    ...(phases ?? []),
+  ];
   if (input.operation !== undefined) bindings.push(input.operation);
-  bindings.push(since, sampleLimit);
+  // One row past the total bound: its presence, not a full page, is what proves the bound cut.
+  bindings.push(MAX_PHASE_STATS_TOTAL_ROWS + 1);
 
   const result = await db
     .prepare(
-      `SELECT operation, phase, duration_ms
-         FROM lifecycle_phase_timings
-        WHERE project_id = ?
-          AND ${byColumn} = ?
-          AND phase IN (${phases.map(() => '?').join(', ')})
-          ${operationFilter}
-          AND outcome = 'success'
-          AND created_at >= ?
-        ORDER BY created_at DESC
-        LIMIT ?`
+      `WITH RECURSIVE pairs(operation, phase) AS (
+         SELECT first.operation,
+                (SELECT MIN(phase) FROM lifecycle_phase_timings
+                  WHERE ${scope} AND operation = first.operation)
+           FROM (SELECT MIN(operation) AS operation FROM lifecycle_phase_timings
+                  WHERE ${scope}) AS first
+         UNION ALL
+         SELECT CASE WHEN ${nextPhase} IS NOT NULL THEN pairs.operation ELSE ${nextOperation} END,
+                COALESCE(
+                  ${nextPhase},
+                  (SELECT MIN(phase) FROM lifecycle_phase_timings
+                    WHERE ${scope} AND operation = ${nextOperation})
+                )
+           FROM pairs WHERE pairs.operation IS NOT NULL
+       ),
+       sampled AS (
+         SELECT t.id, t.operation, t.phase, t.duration_ms, t.created_at
+           FROM pairs p
+           -- CROSS JOIN fixes the loop order: pairs outside, rows by id inside. D1 keeps no
+           -- planner statistics, and a plain JOIN let SQLite scan the whole table instead.
+           CROSS JOIN lifecycle_phase_timings t
+             ON t.project_id = ?
+            AND t.id IN (
+               SELECT s.id FROM lifecycle_phase_timings s
+                WHERE s.project_id = ?
+                  AND s.${byColumn} = ?
+                  AND s.operation = p.operation
+                  AND s.phase = p.phase
+                  AND s.outcome = 'success'
+                  AND s.created_at >= ?
+                -- id breaks equal timestamps, so the cut is the same on every plan (rule 65);
+                -- the index ends in the rowid, so this order still needs no sort.
+                ORDER BY s.created_at DESC, s.id DESC
+                LIMIT ?)
+          WHERE p.operation IS NOT NULL
+            ${phaseFilter}
+            ${operationFilter}
+       )
+       SELECT operation, phase, duration_ms, rn, pair_rows FROM (
+         SELECT operation, phase, duration_ms,
+                ROW_NUMBER() OVER (
+                  PARTITION BY operation, phase ORDER BY created_at DESC, id DESC
+                ) AS rn,
+                -- Rows the pair read before the total bound (at most sample + 1), so each stat
+                -- can say whether it is complete however the total bound cut the response.
+                COUNT(*) OVER (PARTITION BY operation, phase) AS pair_rows
+           FROM sampled
+       )
+       ORDER BY rn, operation, phase
+       LIMIT ?`
     )
     .bind(...bindings)
     .all<Record<string, unknown>>();
-  const rows = result.results ?? [];
+  const read = result.results ?? [];
+  const totalBoundReached = read.length > MAX_PHASE_STATS_TOTAL_ROWS;
+  const rows = totalBoundReached ? read.slice(0, MAX_PHASE_STATS_TOTAL_ROWS) : read;
 
   const groups = new Map<string, { operation: string; phase: string; durations: number[] }>();
+  // The total bound trims by row number, so it can also drop a pair entirely: the response says
+  // so even when every pair that came back is complete.
+  // Per pair, how many rows it read before the total bound. A stat with fewer durations than that
+  // was cut, by its own sample (the extra row) or by the total bound.
+  const pairRows = new Map<string, number>();
   for (const raw of rows) {
+    const pairKey = `${String(raw.operation)}\u0000${String(raw.phase)}`;
+    if (typeof raw.pair_rows === 'number') pairRows.set(pairKey, raw.pair_rows);
+    if (typeof raw.rn === 'number' && raw.rn > sampleLimit) continue;
     // One malformed row costs that row, not the read (`apps/api/.claude/rules/50`).
     const parsed = v.safeParse(DurationRowSchema, raw);
     if (!parsed.success) {
@@ -207,10 +308,15 @@ export async function phaseDurationStats(
         count: sorted.length,
         medianMs: nearestRankPercentile(sorted, 0.5),
         p90Ms: nearestRankPercentile(sorted, 0.9),
+        truncated: (pairRows.get(`${operation}\u0000${phase}`) ?? 0) > sorted.length,
       };
     })
     .sort((a, b) => a.operation.localeCompare(b.operation) || a.phase.localeCompare(b.phase));
-  return { windowDays, truncated: rows.length >= sampleLimit, stats };
+  return {
+    windowDays,
+    truncated: totalBoundReached || stats.some((stat) => stat.truncated),
+    stats,
+  };
 }
 
 /**
