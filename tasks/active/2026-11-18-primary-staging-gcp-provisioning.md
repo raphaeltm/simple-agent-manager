@@ -37,8 +37,12 @@ Primary trust repaired without breaking staging2 when human IAM task completes; 
 
 ## Local validation and review
 
-WIF isolation regression: original behavior failed8/9, fresh-create controlpassed. Candidate focused60tests and24Workers pass; additional final-write race controls bring node hardening to38tests. In an isolated mutation worktree, removing only the final proof/placement predicates makes both races fail (cleared proof resurrected and status overwritten). Security, Cloudflare, constitution, docs reviews pass; test reviewer rechecking race evidence. API typecheck/build and docs298-pagebuild pass. FullAPI suite running. Context budgetpasses.
+WIF isolation regression: original behavior failed 8/9; the fresh-create control passed. Candidate focused 60 tests and 24 Workers tests pass; additional final-write race controls bring node hardening to 38 tests. In an isolated mutation worktree, removing only the final proof/placement predicates makes both races fail (cleared proof resurrected and status overwritten). Removing only the strong binding predicate fails the mismatch case while three other binding controls pass. All six mutation controls pass after restoring the candidate.
+
+Security, Cloudflare, constitution, docs and test reviews pass. API lint, typecheck/build and the 298-page docs build pass. Full API suite running. Context budget passes. Task-completion implementation audit found no additional code/test gaps (A/B/E/F pass, D not applicable); overall WARN because live IAM/provisioning and canonical noise verification remain unfulfilled. This is not completion or archive approval.
 
 PR2880 https://github.com/raphaeltm/simple-agent-manager/pull/2880. Task-file directmainpush rejected by protected Durable Object Workers check, so taskrecord travels in thisPR. No implementation bypass. Primary staging reservation position4; turn01:36:59Z, durable wake4c1e8738-08b7-4a41-bfa2-79423add4fa4.
+
+The first complete candidate was marked ready at approximately 00:47Z, with full CI and the trusted CodeRabbit label request running in parallel. CI/review subscriptions and a bounded scheduled fallback resume this chat; staging has its separate scheduled turn. No test VMs have been created. The single dedicated-WIF IAM inbox task remains open.
 
 Canonical24h gateaftercleanup: historical nodeerrors67/57/47, sessionverification59, snapshot33, price10; preserve evidence and wait for natural aging after recurrence is fixed. Never claim a shorter windowclears thisgate.
