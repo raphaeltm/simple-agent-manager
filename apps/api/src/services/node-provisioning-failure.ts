@@ -28,6 +28,7 @@ import { recordRejectedAllocationAbsence } from './node-rejection-proof';
 import type { NodeTunnelProvisioningPhase } from './node-tunnel-provisioning';
 import { recordTunnelProvisioningFailure } from './node-tunnel-provisioning-failure';
 import { persistError } from './observability';
+import type { ExactProviderCredentialBinding } from './provider-credentials';
 
 interface NodeProvisioningFailureInput {
   env: Env;
@@ -41,6 +42,7 @@ interface NodeProvisioningFailureInput {
   providerCreateRequested: boolean;
   providerContext?: ProviderRequestContext;
   attemptedProvider?: CredentialProvider;
+  resolvedCredentialBinding?: ExactProviderCredentialBinding;
   providerCreateRejected: boolean;
   providerAllocationRejected: boolean;
   providerRejectionProofAt: string | null;
@@ -165,8 +167,9 @@ async function finalizeNodeProvisioningFailure(
       input.node,
       {
         providerName: input.attemptedProvider,
-        // Match the original placement snapshot; never re-resolve a rotated credential.
-        exactCredentialBinding: undefined,
+        // Match the binding used by the identity claim, including a fresh binding upgrade.
+        // Never re-resolve a rotated credential or read current values to satisfy the CAS.
+        exactCredentialBinding: input.resolvedCredentialBinding,
       },
       input.provisioningRuntimeIncarnationId
     );

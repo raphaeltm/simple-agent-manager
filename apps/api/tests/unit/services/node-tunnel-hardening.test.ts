@@ -642,9 +642,12 @@ describe('a durable allocation that ends before any create POST releases its tun
 });
 
 describe('terminal GCP failures before the provider create was dispatched', () => {
-  it('records exact absence after STS rejection and strict teardown needs no new token', async () => {
+  it('records exact absence after a resolved binding upgrade and strict teardown needs no new token', async () => {
     const node = await freshNode();
-    mocks.createProvider.mockResolvedValue({ ...provider, providerName: 'gcp' });
+    mocks.createProvider.mockResolvedValue({
+      ...provider, providerName: 'gcp',
+      exactCredentialBinding: { credentialSource: 'user', credentialReference: 'credentials:resolved', credentialVersion: 7, credentialFingerprint: 'sha256:resolved' },
+    });
     const failure = markProviderCreateNotDispatched(
       new GcpApiError({
         step: 'sts_exchange',
@@ -671,6 +674,23 @@ describe('terminal GCP failures before the provider create was dispatched', () =
       providerVm: 'no-instance',
     });
     expect(mocks.createProvider).toHaveBeenCalledTimes(calls);
+  });
+
+  it('refuses absence when the resolved binding changes after the identity claim', async () => {
+    const node = await freshNode();
+    mocks.createProvider.mockResolvedValue({
+      ...provider, providerName: 'gcp',
+      exactCredentialBinding: { credentialSource: 'user', credentialReference: 'credentials:resolved', credentialVersion: 7, credentialFingerprint: 'sha256:resolved' },
+    });
+    mocks.createVM.mockImplementationOnce(async () => {
+      const bound = sqlite.prepare('SELECT placement_credential_fingerprint AS fingerprint FROM nodes WHERE id=?').get(node.id);
+      expect(bound).toEqual({ fingerprint: 'sha256:resolved' });
+      sqlite.prepare('UPDATE nodes SET placement_credential_fingerprint=? WHERE id=?').run('sha256:rotated', node.id);
+      throw markProviderCreateNotDispatched(new GcpApiError({ step: 'sts_exchange', statusCode: 400, message: 'STS refused' }));
+    });
+    await provisionNode(node.id, env);
+    expect(mocks.createVM).toHaveBeenCalledTimes(1);
+    expect(readNode(node.id)).toMatchObject({ status: 'error', proof: null });
   });
 
   it.each([
