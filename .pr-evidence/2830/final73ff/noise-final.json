@@ -1,0 +1,50 @@
+{
+  "window": {
+    "from": "2026-11-18T05:52:50.238Z",
+    "to": "2026-11-18T05:53:34.087Z"
+  },
+  "groups": [
+    {
+      "category": "Session verification is temporarily unavailable. Retry.",
+      "total": 87,
+      "first": 1794898945880,
+      "last": 1794969440499,
+      "during_verification": 0
+    },
+    {
+      "category": "Failed to destroy stale destroying handoff node: Cannot reconcile providerless VM 01M7MZRES1XSTZ0F93ERSGFWAW: provider i",
+      "total": 67,
+      "first": 1794929458782,
+      "last": 1794961243758,
+      "during_verification": 0
+    },
+    {
+      "category": "Failed to destroy max-lifetime node: Cannot reconcile providerless VM 01M7MRXH47RYZKK2JSZR1Y2DWZ: provider inventory com",
+      "total": 57,
+      "first": 1794934245609,
+      "last": 1794961242751,
+      "during_verification": 0
+    },
+    {
+      "category": "Failed to destroy stale destroying handoff node: Cannot reconcile providerless VM 01M7N4FJ5D88XV0T68Z3A4XM0B: provider i",
+      "total": 47,
+      "first": 1794939050374,
+      "last": 1794961244731,
+      "during_verification": 0
+    },
+    {
+      "category": "Workspace snapshot completion was not durably verified (complete final generation required)",
+      "total": 33,
+      "first": 1794933480720,
+      "last": 1794936868406,
+      "during_verification": 0
+    },
+    {
+      "category": "Scheduled sweep \"gcp_price_table\" failed: GCP price refresh failed for 1 credential(s), 1 with a fault",
+      "total": 16,
+      "first": 1794923755833,
+      "last": 1794980491048,
+      "during_verification": 0
+    }
+  ]
+}
