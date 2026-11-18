@@ -392,38 +392,40 @@ export function listProjectThreadCandidates(
 }
 
 /**
- * Count only threads this viewer may see. Inbox-item ids come from the API's D1 authorization
- * query; batching keeps every SQLite statement under the bind ceiling.
+ * Count the threads this viewer may see, matching the kinds and status filter the ranking reads.
+ * Message and library-file threads are readable by every project reader; inbox-item threads only
+ * when the API's D1 authorization query returned their item. Ids are counted in batches under the
+ * bind ceiling.
  */
 export function countReadableProjectThreads(
   sql: SqlStorage,
   status: string | null,
   readableInboxItemIds: readonly string[]
 ): number {
-  const statusClause = status ? ' AND status = ?' : '';
-  const statusParams = status ? [status] : [];
-  const nonItemRow = sql
-    .exec(
-      `SELECT COUNT(*) AS count FROM anchored_comment_threads
-       WHERE anchor_kind <> 'inbox_item'${statusClause}`,
-      ...statusParams
-    )
-    .toArray()[0];
-  let total = typeof nonItemRow?.count === 'number' ? nonItemRow.count : 0;
-
-  const readableIds = [...new Set(readableInboxItemIds)];
-  const batchSize = D1_MAX_BOUND_PARAMETERS - statusParams.length;
-  for (const batch of chunk(readableIds, batchSize)) {
-    const placeholders = batch.map(() => '?').join(', ');
+  const count = (conditions: string[], params: Array<string | number>): number => {
+    if (status) {
+      conditions.push('t.status = ?');
+      params.push(status);
+    }
+    // Named `whereClause` deliberately — see `listThreadRecords`.
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
     const row = sql
-      .exec(
-        `SELECT COUNT(*) AS count FROM anchored_comment_threads
-         WHERE anchor_kind = 'inbox_item' AND inbox_item_id IN (${placeholders})${statusClause}`,
-        ...batch,
-        ...statusParams
-      )
+      .exec(`SELECT COUNT(*) AS count FROM anchored_comment_threads t ${whereClause}`, ...params)
       .toArray()[0];
-    if (typeof row?.count === 'number') total += row.count;
+    return typeof row?.count === 'number' ? row.count : 0;
+  };
+
+  const projectKinds = STORED_COMMENT_ANCHOR_KINDS.filter((kind) => kind !== 'inbox_item');
+  let total = count(
+    [`t.anchor_kind IN (${projectKinds.map(() => '?').join(', ')})`],
+    [...projectKinds]
+  );
+  const batchSize = D1_MAX_BOUND_PARAMETERS - (status ? 1 : 0);
+  for (const batch of chunk([...new Set(readableInboxItemIds)], batchSize)) {
+    total += count(
+      ["t.anchor_kind = 'inbox_item'", `t.inbox_item_id IN (${batch.map(() => '?').join(', ')})`],
+      [...batch]
+    );
   }
   return total;
 }

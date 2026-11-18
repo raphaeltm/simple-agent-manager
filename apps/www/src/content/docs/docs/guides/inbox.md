@@ -152,7 +152,8 @@ or archived, and reads the comments at those wakes.
 
 A teammate who cannot read the agent's chat still sees the task, its steps, links and discussion,
 never the chat transcript. Task discussion also appears on the project's Comments page for the
-people who can read the task. If you leave the project, your open tasks go to the team and the agent
+people who can read the task; for everyone else it neither takes a place on the page nor counts in
+its total (`listProjectCommentInbox`, `packages/project-data/src/do/project-comment-inbox.ts`). If you leave the project, your open tasks go to the team and the agent
 is told. If the agent's chat is archived or its work has finished, the task stays open for you; the
 changes are recorded but no longer wake that chat.
 
