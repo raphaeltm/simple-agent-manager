@@ -179,6 +179,7 @@ function toForwardAuthResponse(inner: Request, response: Response, host: string)
 export function createSelfHostGatewayRoutes(dispatch: GatewayDispatch) {
   const routes = new Hono<{ Bindings: ReverseTunnelEnv }>().basePath(SELF_HOST_GATEWAY_PATH_PREFIX);
   routes.onError(handleAppError);
+  routes.notFound(notFound);
 
   routes.post('/frps-plugin', async (c) => {
     if (!getReverseTunnelGatewaySecret(c.env)) return notFound();

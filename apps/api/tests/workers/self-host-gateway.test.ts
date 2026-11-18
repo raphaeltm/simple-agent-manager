@@ -104,6 +104,21 @@ async function verdict(response: Response): Promise<Verdict> {
   return (await response.json()) as Verdict;
 }
 
+describe('gateway unmatched requests', () => {
+  it.each([
+    ['GET', '/unknown'],
+    ['GET', '/frps-plugin'],
+    ['POST', '/node-websocket'],
+  ])('returns a structured refusal for %s %s', async (method, path) => {
+    const response = await call(new Request(`${API}/api/self-host/gateway${path}`, { method }));
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get('Content-Type')).toContain('application/json');
+    expect(await response.json()).toEqual({ error: 'NOT_FOUND', message: 'Not found' });
+    expect(upstream).not.toHaveBeenCalled();
+  });
+});
+
 describe('frps plugin endpoint', () => {
   it('serializes the Login allow as unchange:false with the server-chosen run_id, and fences later ops on it', async () => {
     await seedUser('rt-owner');

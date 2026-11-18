@@ -161,3 +161,7 @@ and selfhost/route.ts is outside the Worker graph. Fresh full final-head CI incl
 remains required. Any further shared Worker behavior change voids carry-over. Production #2841
 merge hold was lifted at channel seq 231; serialized merge announcement and post-merge SHA
 remain required. This final archive commit changes only task documentation.
+
+### Final standalone-router review (2026-11-18)
+
+Codex comment4607359311 identified plain-text404 responses for unknown gateway paths and wrong methods. The selfhost-only gateway now registers the existing JSON404 helper as its standalone notFound handler. Three real wrapped-Worker path/method cases failed on the old handler and pass after registration; both gateway and unwrapped Cloudflare suites pass38/38. Typecheck, focused ESLint and no-secret-readback pass. Cloudflare/security and test/completion reviewers PASS. Coordinator event74383d06 explicitly extends the staging carry-over: this module is reachable only through the selfhost entry, outside the Cloudflare Worker graph. Fresh final-head fullCI remains required.
