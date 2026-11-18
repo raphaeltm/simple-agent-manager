@@ -68,6 +68,13 @@ export function setupRunsStatement(
          (k.id IN (SELECT task_id FROM reworked)) AS reworked,
          k.workspace_reservation, k.task_reservation,
          m.mem_rows, m.mem_peak, m.mem_oom, t.tokens,
+         -- Probe picked runs, including chats with no accepted usage rows. The run window
+         -- selected k; an older refusal still makes its lifetime chat totals incomplete.
+         (EXISTS (SELECT 1 FROM agent_run_usage_admission_hits h
+           WHERE h.project_id = ? AND h.chat_session_id = k.chat_session_id)
+          AND NOT EXISTS (SELECT 1 FROM agent_run_usage proxy
+           WHERE proxy.project_id = ? AND proxy.chat_session_id = k.chat_session_id
+             AND proxy.source = 'ai_proxy')) AS usage_admission_limited,
          coalesce(ap.name, apn.name) AS profile_name,
          CASE WHEN ap.id IS NOT NULL THEN
                 CASE WHEN ap.project_id = ? THEN 'project' WHEN ap.user_id = ? THEN 'you'
@@ -114,7 +121,9 @@ export function setupRunsStatement(
       p,
       // tok
       p,
-      // select list: profile owner, skill owner, skill default, skill resources
+      // select list: marker and proxy scope, profile owner, skill owner, skill default, skill resources
+      p,
+      p,
       p,
       options.viewerId,
       p,

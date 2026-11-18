@@ -1099,7 +1099,7 @@ Query `range` is `7d`, `30d` or `90d` (default `30d`; anything else is `400`). R
 membership. Sent with `Cache-Control: private, no-store`: the body carries the caller's own account
 names and limit windows. Returns `ProjectAccountsResponse`
 (`packages/shared/src/types/insights-accounts.ts`):
-`{ projectId, range, since, until, bucket, buckets, accounts, stallEpisodes, totals, usageLimited, unavailable, generatedAt }`.
+`{ projectId, range, since, until, bucket, buckets, accounts, stallEpisodes, totals, usageLimited, usageAdmissionLimited?, unavailable, generatedAt }`.
 
 - `accounts`: most runs first. Each is `{ key, name, owner, kind, agentType, credentials, runs, merged, runsByBucket, stalls, usage, tokens, spend }`.
   `owner` is `you`, `teammate`, `project`, `platform` or `not_recorded`; `kind` is `subscription`,
@@ -1121,6 +1121,8 @@ names and limit windows. Returns `ProjectAccountsResponse`
   `outcome` is `resumed`, `ended` (the run ended while waiting), `blocked` or `ongoing`. `truncated` means the scan cap
   (`insights.accountsStallScanCap`) left older limit waits out.
 - `usageLimited`: the usage read hit `insights.accountsUsageRowCap`, so tokens and spend are a floor.
+- `usageAdmissionLimited`: some run in the usage window lost harness usage. This optional page-level
+  warning does not mark every account as incomplete; complete account labels stay exact.
 - `unavailable`: sections whose read failed this time (`runs`, `stalls`, `usage`, `tokens`).
 
 ### `GET /api/projects/:projectId/insights/setups`
@@ -1130,7 +1132,7 @@ Query `range` is `7d`, `30d` or `90d` (default `30d`) and `groupBy` is `profile`
 `model` (default `profile`); anything else is `400`. Requires project membership. Sent with
 `Cache-Control: private, no-store`: the body names the caller's own personal profiles and skills.
 Returns `ProjectSetupsResponse` (`packages/shared/src/types/insights-setups.ts`):
-`{ projectId, range, groupBy, since, until, rework, sample, groups, suggestions, suggestionMinRuns, unavailable, generatedAt }`.
+`{ projectId, range, groupBy, since, until, rework, sample, groups, suggestions, suggestionMinRuns, usageAdmissionLimited?, unavailable, generatedAt }`.
 
 - `groups`: most runs first, with the rows for no profile/skill and an unrecorded model last. Each
   is `{ key, label, owner, agentType, usedFor, runs, finished, mergedClean, mergedCleanRate, merged, medianToPullRequestMs, pullRequests, nudges, tokens, memory }`.
@@ -1144,6 +1146,9 @@ Returns `ProjectSetupsResponse` (`packages/shared/src/types/insights-setups.ts`)
 - `suggestions`: each is `default_profile` (`{ skill, profile, compared, currentDefault, apply }`) or
   `request_size` (`{ skill, currentGb, suggestedGb, runs, p90Bytes, maxBytes, oomKills, apply }`).
   `apply` is `{ skillId, patch }`, the body to send to `PATCH /api/projects/:projectId/skills/:skillId`.
+- `usageAdmissionLimited`: a selected run has incomplete harness token data; the page warns that
+  token totals and comparisons may be understated. Complete proxy measurements take precedence.
+  Older servers may omit this field.
 - `unavailable`: sections whose read failed this time (`runs`, `nudges`).
 
 ### `GET /api/projects/:projectId/insights/people`
