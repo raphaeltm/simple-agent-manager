@@ -31,7 +31,7 @@ import type { Env } from '../../env';
 
 /**
  * Must equal `MIN_REVERSE_TUNNEL_GATEWAY_SECRET_LENGTH` in selfhost/reverse-tunnel/config.ts
- * (pinned by tests/integration/selfhost-inbound-email.test.ts).
+ * (pinned by tests/unit/selfhost/inbound-email-gateway-secret.test.ts).
  */
 export const MIN_GATEWAY_SECRET_LENGTH = 32;
 

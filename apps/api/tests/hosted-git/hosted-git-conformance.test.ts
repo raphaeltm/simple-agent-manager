@@ -675,13 +675,13 @@ describe('vertical: project creation to a workspace clone and push', () => {
     const body = (await res.json()) as {
       token: string;
       cloneUrl: string;
-      host?: string;
       username?: string;
     };
     expect(res.status, JSON.stringify(body)).toBe(200);
     // What the VM agent's credential helper needs for a host it does not know by name.
+    // Main's L16 response: the VM agent derives the credential host from cloneUrl.
     expect(body.cloneUrl).toBe(project.repository);
-    expect(body.host).toBe(`api.${HOSTED_GIT_TEST_BASE_DOMAIN}`);
+    expect(new URL(body.cloneUrl).host).toBe(`api.${HOSTED_GIT_TEST_BASE_DOMAIN}`);
     expect(body.username).toBe('x');
 
     const work = await freshDir('workspace');
