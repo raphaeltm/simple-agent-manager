@@ -36,6 +36,16 @@ describe('sleeping task consumers after real VM teardown', () => {
     activity = { activity: 'idle', activityAt: START.getTime() };
     fixture = createSessionSleepFixture('in_progress', () => activity);
     ({ sqlite, env } = fixture);
+    mocks.cancelUnissuedSessionPrompts.mockImplementation(
+      async (_env, projectId, sessionId, taskId) => {
+        const current = sqlite
+          .prepare('SELECT id FROM tasks WHERE id=? AND project_id=? AND chat_session_id=?')
+          .get(taskId, projectId, sessionId);
+        return current
+          ? { matched: true, cancelled: 0 }
+          : { matched: false, reason: 'task_mismatch', cancelled: 0 };
+      }
+    );
     sqlite
       .prepare(
         "UPDATE tasks SET parent_task_id = 'parent-task', chat_session_id = 'chat-1' WHERE id = 'task-1'"
@@ -201,7 +211,9 @@ describe('sleeping task consumers after real VM teardown', () => {
         )
         .all()
     ).toEqual([{ from_status: 'sleeping', to_status: 'cancelled' }]);
-    expect(mocks.stopSession).toHaveBeenCalledWith(env, 'project-1', 'chat-1');
+    expect(mocks.stopSession).toHaveBeenCalledWith(env, 'project-1', 'chat-1', {
+      guard: { taskId: 'task-1' },
+    });
     expect(fixture.sessionStatus).toBe('stopped');
     expect(mocks.cleanupTaskRun).toHaveBeenCalled();
     expect(mocks.sendPrompt).not.toHaveBeenCalled();

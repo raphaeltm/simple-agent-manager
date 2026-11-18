@@ -7,7 +7,7 @@ import { parsePositiveInt } from '../../../lib/route-helpers';
 import { OPERATOR_DEFAULTS } from '../../../services/admin-settings-registry';
 import { getOperatorSettings, type OperatorSettings } from '../../../services/operator-settings';
 import { handleActionRoute } from './action-routes';
-import { runOperatorAgent } from './agent';
+import { OperatorMonthlyCostCapError, runOperatorAgent } from './agent';
 import { OperatorLive } from './live';
 import { assertOperatorAccount, assertOperatorExecution } from './operations';
 import { actionProjection, projectAccessCache } from './projection';
@@ -320,7 +320,9 @@ export class OperatorController {
           turn.id,
           'interrupted',
           null,
-          'SAM could not finish this turn. Review recorded actions before continuing; uncertain actions are not automatically repeated.'
+          error instanceof OperatorMonthlyCostCapError
+            ? error.message
+            : 'SAM could not finish this turn. Review recorded actions before continuing; uncertain actions are not automatically repeated.'
         );
     } finally {
       clearTimeout(timer);

@@ -23,6 +23,7 @@ import {
   isExpiredProviderLimitWait,
 } from './provider-limit-reconciliation';
 import { presentBlockedProviderLimitWait } from './provider-limit-recovery';
+import { providerLimitRecoveryApprovalD1Fence } from './provider-limit-recovery-approval';
 import {
   assertReplacementDeletionConfirmed,
   WorkspaceDeletionUnconfirmedError,
@@ -66,7 +67,8 @@ export async function reactivateSleepingTask(
   taskId: string,
   placementResolution: RecoveryPlacementResolution,
   recoveryAttemptId: string,
-  sourceTaskGuard?: SessionRecoverySourceTaskGuard
+  sourceTaskGuard?: SessionRecoverySourceTaskGuard,
+  sleepingRepair?: { workspaceId: string | null }
 ): Promise<schema.Task> {
   const existing = await db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).get();
   if (!existing || existing.projectId !== context.project.id) {
@@ -81,10 +83,22 @@ export async function reactivateSleepingTask(
 
   const now = new Date().toISOString();
   const capacityPlacementSnapshot = placementResolution.capacityPlacementSnapshot;
+  const approvalFence = providerLimitRecoveryApprovalD1Fence(
+    'tasks',
+    sourceTaskGuard?.providerLimitApproval
+  );
+  const dependentApprovalFence = providerLimitRecoveryApprovalD1Fence(
+    'task',
+    sourceTaskGuard?.providerLimitApproval
+  );
   {
     // D1 batches are transactional. The task update is the parent-state
     // compare-and-set: if an automated wake has terminalized or no longer owns this
     // conversation when the transaction begins, every later statement is a no-op.
+    // The observed row version also fences repeated stops of terminal tasks.
+    // A fresh human follow-up reads the newer version and can still resume.
+    // A fresh human follow-up may reactivate an observed terminal outcome, but
+    // cannot overwrite cancellation that landed while placement was awaited.
     const results = await database.batch([
       database
         .prepare(
@@ -106,7 +120,10 @@ export async function reactivateSleepingTask(
                   updated_at = ?
             WHERE id = ?
               AND project_id = ?
+              AND status = ? AND updated_at IS ?
               AND (? = 0 OR status NOT IN ('completed', 'failed', 'cancelled'))
+              ${sleepingRepair ? "AND status = 'sleeping' AND workspace_id IS ?" : ''}
+              ${approvalFence.sql}
               AND EXISTS (
                 SELECT 1 FROM session_snapshots snapshot
                  WHERE snapshot.chat_session_id = ?
@@ -128,7 +145,11 @@ export async function reactivateSleepingTask(
           now,
           taskId,
           context.project.id,
+          context.sourceTask?.status ?? existing.status,
+          context.sourceTask?.updatedAt ?? existing.updatedAt,
           sourceTaskGuard ? 1 : 0,
+          ...(sleepingRepair ? [sleepingRepair.workspaceId] : []),
+          ...approvalFence.params,
           chatSessionId,
           recoveryAttemptId,
           chatSessionId,
@@ -156,6 +177,7 @@ export async function reactivateSleepingTask(
                 SELECT 1 FROM tasks task
                  WHERE task.id = ?
                    AND task.status = 'queued'
+                   ${dependentApprovalFence.sql}
                    AND EXISTS (SELECT 1 FROM session_snapshots snapshot
                      WHERE snapshot.chat_session_id = ? AND snapshot.recovery_task_id = task.id
                        AND snapshot.recovery_attempt_id = ? AND snapshot.recovery_status = 'waking')
@@ -168,6 +190,7 @@ export async function reactivateSleepingTask(
           context.snapshot.userId,
           context.snapshot.workspaceId,
           taskId,
+          ...dependentApprovalFence.params,
           chatSessionId,
           recoveryAttemptId
         ),
@@ -180,11 +203,20 @@ export async function reactivateSleepingTask(
              FROM tasks task
             WHERE task.id = ?
               AND task.status = 'queued'
+                   ${dependentApprovalFence.sql}
                    AND EXISTS (SELECT 1 FROM session_snapshots snapshot
                      WHERE snapshot.chat_session_id = ? AND snapshot.recovery_task_id = task.id
                        AND snapshot.recovery_attempt_id = ? AND snapshot.recovery_status = 'waking')`
         )
-        .bind(ulid(), existing.status, now, taskId, chatSessionId, recoveryAttemptId),
+        .bind(
+          ulid(),
+          existing.status,
+          now,
+          taskId,
+          ...dependentApprovalFence.params,
+          chatSessionId,
+          recoveryAttemptId
+        ),
     ]);
     if ((results[0]?.meta.changes ?? 0) === 0) throw new SourceTaskNotWakeableError();
   }
@@ -196,7 +228,7 @@ export async function reactivateSleepingTask(
   return created;
 }
 
-async function resolveRecoveryPlacement(
+export async function resolveRecoveryPlacement(
   db: Db,
   env: Env,
   context: RecoveryContext,
@@ -271,8 +303,15 @@ export async function ensureSessionRecovery(
   options: SessionRecoveryOptions = {}
 ): Promise<SessionRecoveryResult> {
   const db = drizzle(env.DATABASE, { schema });
-  const refuse = (reason: string, detail?: string | null) =>
-    recordSessionRecoveryRefusal(db, env, chatSessionId, reason, detail);
+  const refuse = (reason: string, detail?: string | null): Promise<SessionRecoveryResult> => {
+    // A timed-out background wake may finish after new consent replaced it.
+    // Its refusal must not rewrite the newer snapshot's diagnostics/fence.
+    if (sourceTaskGuard?.providerLimitApproval) {
+      log.warn('session_recovery.provider_limit_refused', { projectId, chatSessionId, reason });
+      return Promise.resolve({ status: 'unavailable', reason });
+    }
+    return recordSessionRecoveryRefusal(db, env, chatSessionId, reason, detail);
+  };
   const context = await loadRecoveryContext(db, projectId, chatSessionId);
   if (!context) return refuse('sleeping_snapshot_missing');
   if (options.evictionFence && !(await evictionRecoveryFenceMatches(env, options.evictionFence))) {
@@ -357,6 +396,9 @@ export async function ensureSessionRecovery(
   }
 
   const recoveryAttemptId = ulid();
+  if (options.isDeliveryStillAuthorized && !(await options.isDeliveryStillAuthorized())) {
+    return { status: 'unavailable', reason: 'source_task_not_wakeable' };
+  }
   const claim = await claimSessionSnapshotRecovery(db, env, {
     chatSessionId,
     userId: context.snapshot.userId,
@@ -460,3 +502,8 @@ export async function ensureSessionRecovery(
     );
   }
 }
+
+export {
+  canRepairSessionRecoveryRunner,
+  startMissingSessionRecoveryRunner,
+} from './session-recovery-owner-runner';

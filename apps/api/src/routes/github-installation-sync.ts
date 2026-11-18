@@ -5,7 +5,6 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
-import { errors } from '../middleware/error';
 import {
   type AuthenticatedGitHubUser,
   getAuthenticatedUserOrganizations,
@@ -29,6 +28,7 @@ import {
   summarizeAccessibleInstallations,
   summarizeInstallationRows,
 } from '../services/github-route-helpers';
+import { githubUserTokenUnavailableError } from '../services/github-token-errors';
 import { getGitHubUserAccessToken } from '../services/github-user-access-token';
 
 type VerifiedInstallations = [AuthenticatedGitHubUser, UserAccessibleInstallation[]];
@@ -56,7 +56,7 @@ export async function getRequiredGitHubUserAccessToken(
     tokenPresent: Boolean(accessToken),
   });
   if (!accessToken) {
-    throw errors.forbidden('GitHub user token unavailable');
+    throw await githubUserTokenUnavailableError(c.env, userId);
   }
   return accessToken;
 }

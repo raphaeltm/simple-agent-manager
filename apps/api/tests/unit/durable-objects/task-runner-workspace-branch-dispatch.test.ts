@@ -54,11 +54,18 @@ function makeState(branch: string, outputBranch: string): TaskRunnerState {
   } as TaskRunnerState;
 }
 
-function makeContext(): TaskRunnerContext {
+function makeContext(projectRow?: { repoProvider: string; repository: string }): TaskRunnerContext {
   const prepare = vi.fn((query: string) => ({
     bind: vi.fn(() => ({
       first: vi.fn(async () => {
         if (query.includes('SELECT dispatched_at')) return { dispatched_at: null };
+        if (query.includes('FROM projects') && projectRow) {
+          // Return only the columns the statement actually selects.
+          return {
+            repoProvider: projectRow.repoProvider,
+            ...(/\brepository\b/.test(query) ? { repository: projectRow.repository } : {}),
+          };
+        }
         if (query.includes('FROM projects'))
           return { repoProvider: 'github', installationId: 'installation-1' };
         return null;
@@ -91,6 +98,19 @@ describe('TaskRunner workspace branch dispatch', () => {
     mocks.createWorkspaceOnNode.mockResolvedValue({
       workspaceId: 'workspace-1',
       status: 'creating',
+    });
+  });
+
+  it('passes the Artifacts clone URL from its existing project read to the git-source resolver', async () => {
+    const remote = 'https://api.sam.example/git/demo-01abc.git';
+    await handleWorkspaceDispatch(
+      makeState('sam/out-1', 'sam/out-1'),
+      makeContext({ repoProvider: 'artifacts', repository: remote })
+    );
+    expect(mocks.resolveWorkspaceGitSource).toHaveBeenCalledWith(expect.anything(), {
+      id: 'project-1',
+      repoProvider: 'artifacts',
+      repository: remote,
     });
   });
 

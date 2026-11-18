@@ -1,4 +1,10 @@
 // FILE SIZE EXCEPTION: Keep platform model routing metadata in one auditable registry.
+/** Canonical provider endpoints: these identify the vendor whose catalog list price applies. */
+export const AI_PROVIDER_BASE_URLS = {
+  anthropic: 'https://api.anthropic.com',
+  openai: 'https://api.openai.com/v1',
+} as const;
+
 // =============================================================================
 // AI Task Title Generation
 // =============================================================================

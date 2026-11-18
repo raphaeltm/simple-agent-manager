@@ -131,6 +131,7 @@ import {
   handleUpdateAgentProfile,
 } from './profile-tools';
 import { handleAckEventDelivery, handleGetEvent } from './project-event-tools';
+import { handleProjectInsights } from './project-insights-tool';
 import { handleListRuntimeEnv, handleRequestSecret } from './secret-request-tools';
 import {
   handleGetResourceHistory,
@@ -235,6 +236,7 @@ export const MCP_TOOL_HANDLERS: ReadonlyMap<string, McpToolHandler> = new Map<
   ['list_tasks', handleListTasks],
   ['get_task_details', handleGetTaskDetails],
   ['search_tasks', handleSearchTasks],
+  ['project_insights', handleProjectInsights],
   ['list_sessions', handleListSessions],
   ['get_session_messages', handleGetSessionMessages],
   ['get_resource_history', handleGetResourceHistory],

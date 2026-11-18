@@ -1,5 +1,6 @@
 import type { DeploymentPublishJobSettingName } from '@simple-agent-manager/app-deployment';
 import type {
+  InsightsAgentSettingName,
   InsightsCloudflareCostSettingName,
   InsightsInstallationSettingName,
   InsightsPageSettingName,
@@ -12,6 +13,7 @@ import { type GcpCatalogSettingName } from './admin-settings-gcp-catalog-definit
 import { type InfomaniakSettingName } from './admin-settings-infomaniak-definitions';
 import { type InstructionBudgetSettingName } from './admin-settings-instructions-definitions';
 import type { NodeTunnelSettingName } from './admin-settings-node-tunnel-definitions';
+import type { OrchestratorSettingName } from './admin-settings-orchestrator-definitions';
 import { type OutboundSettingName } from './admin-settings-outbound-definitions';
 import { type AgentEmailSettingName } from './agent-email/setting-definitions';
 import { type AgentModelSettingKey } from './agent-models/settings-definition';
@@ -35,6 +37,7 @@ export type AdminSettingValue = boolean | number | string | readonly string[] | 
 export type AdminSettingType = 'boolean' | 'integer' | 'string' | 'string-list' | 'enum';
 
 export type AdminSettingName =
+  | 'security.accountLinkProofTtlSeconds'
   | LlmEndpointSettingName
   | AiProxySettingName
   | DeploymentPublishJobSettingName
@@ -55,10 +58,12 @@ export type AdminSettingName =
   | InsightsInstallationSettingName
   | InsightsCloudflareCostSettingName
   | ProjectBriefSettingName
+  | InsightsAgentSettingName
   | RuntimeSecretRequestSettingName
   | AgentEmailSettingName
   | FleetOpsSettingName
   | NodeTunnelSettingName
+  | OrchestratorSettingName
   | GcpCatalogSettingName
   | InfomaniakSettingName
   | InstructionBudgetSettingName

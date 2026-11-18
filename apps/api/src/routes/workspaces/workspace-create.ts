@@ -550,7 +550,11 @@ export function registerWorkspaceCreateRoute(crudRoutes: Hono<{ Bindings: Env }>
             resolvedReservation,
             createdAt: now,
           },
-          linkedProject: { id: linkedProject.id, repoProvider: linkedProject.repoProvider },
+          linkedProject: {
+            id: linkedProject.id,
+            repoProvider: linkedProject.repoProvider,
+            repository: linkedProject.repository,
+          },
           taskId: chatTaskId,
           chatSessionId,
           mustProvisionNode,

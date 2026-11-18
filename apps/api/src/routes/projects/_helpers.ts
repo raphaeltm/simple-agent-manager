@@ -6,13 +6,14 @@ import type { Context } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
-import { AppError, errors } from '../../middleware/error';
+import { errors } from '../../middleware/error';
 import { parseCacheTtlSeconds } from '../../services/cache-config';
 import {
   getUserInstallationRepositories,
   type GitHubRepositoryAccess,
 } from '../../services/github-app';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
+import { githubUserTokenUnavailableError } from '../../services/github-token-errors';
 import {
   getGitHubUserAccessToken,
   getGitHubUserAccessTokenForOwner,
@@ -274,11 +275,7 @@ export async function requireGitHubUserAccessToken(
 ): Promise<string> {
   const accessToken = await getGitHubUserAccessToken(c, userId);
   if (!accessToken) {
-    throw new AppError(
-      401,
-      'GITHUB_REAUTH_REQUIRED',
-      'Your GitHub authorization has expired — please sign out and back in'
-    );
+    throw await githubUserTokenUnavailableError(c.env, userId);
   }
   return accessToken;
 }
@@ -410,11 +407,7 @@ export async function requireRepositoryOwnerAccess(
   const externalInstallationId = getExternalInstallationId(installation);
   const accessToken = await getGitHubUserAccessTokenForOwner(env, userId, flow);
   if (!accessToken) {
-    throw new AppError(
-      401,
-      'GITHUB_REAUTH_REQUIRED',
-      'Your GitHub authorization has expired — please sign out and back in'
-    );
+    throw await githubUserTokenUnavailableError(env, userId);
   }
   const verifiedRepo = await assertRepositoryAccess(
     accessToken,

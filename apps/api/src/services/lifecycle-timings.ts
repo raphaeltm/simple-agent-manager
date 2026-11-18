@@ -1,3 +1,5 @@
+import type { LifecyclePhaseOperation } from '@simple-agent-manager/shared';
+
 import { log } from '../lib/logger';
 
 // Protocol vocabulary, not caller-defined labels: never log paths, commands or errors.
@@ -65,10 +67,6 @@ export function boundedLifecycleTimings(value: unknown): LifecycleTiming[] {
   }
   return [...result.values()];
 }
-
-/** Every operation a stored phase timing can name. Runner rows never share a name with VM rows. */
-export type LifecyclePhaseOperation =
-  'provision' | 'workspace' | 'sleep' | 'wake' | 'runner_start' | 'runner_wake';
 
 /** Ids the caller already holds. Task, skill and profile are resolved inside the INSERT. */
 export interface LifecyclePhaseIdentity {

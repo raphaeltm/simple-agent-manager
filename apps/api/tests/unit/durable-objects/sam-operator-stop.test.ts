@@ -72,6 +72,10 @@ function fixture(sessionBacked: boolean, actor = 'owner') {
       get: () => ({
         ensureProjectId: async () => undefined,
         getSession: async () => session,
+        cancelUnissuedSessionPrompts: async (sessionId: string, taskId: string) =>
+          sessionId === session.id && taskId === session.taskId
+            ? { matched: true, cancelled: 0 }
+            : { matched: false, reason: 'task_mismatch', cancelled: 0 },
         getSessionAccess: async ({ userId }: { userId: string }) => ({
           session,
           access: {
