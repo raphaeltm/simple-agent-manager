@@ -230,3 +230,12 @@ Dispatch sequence:
 - **DO NOT** poll less frequently than every 600 seconds in compatibility mode
 - **DO NOT** skip writing to `.workflow-state.md` (you WILL lose context)
 - **DO NOT** merge PRs under time pressure without all quality gates
+
+## CI waits
+
+For CI waits, default to `check_suite.completed` + `workflow_run.completed` for the
+full 40-character PR head SHA. Opt in to `check_run.completed` only for early
+per-job failure or job-specific progress. Reconcile all current GitHub checks on
+every resume; one suite/workflow completion includes failures and is not all-CI
+success. Keep one bounded fallback schedule for missing terminal webhooks; follow
+`docs/guides/ci-wait-recovery.md` for registration, reconciliation and cleanup.

@@ -7,6 +7,14 @@ description: 'End-to-end autonomous task executor. Takes a task description and 
 
 Read the full workflow from `.claude/commands/do.md` and execute it. Use `.claude/rules/00-rule-routing.md` and the nearest `AGENTS.md` to find the rules for the changed paths, and read them before editing.
 
+
+For CI waits, default to `check_suite.completed` + `workflow_run.completed` for the
+full 40-character PR head SHA. Opt in to `check_run.completed` only for early
+per-job failure or job-specific progress. Reconcile all current GitHub checks on
+every resume; one suite/workflow completion includes failures and is not all-CI
+success. Keep one bounded fallback schedule for missing terminal webhooks; follow
+`docs/guides/ci-wait-recovery.md` for registration, reconciliation and cleanup.
+
 ## Quick Summary
 
 1. **Research** — understand the request, search the codebase, read related docs

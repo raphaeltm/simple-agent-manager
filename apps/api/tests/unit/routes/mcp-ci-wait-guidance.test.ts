@@ -73,3 +73,30 @@ describe('agent-facing CI wait contract', () => {
     expect(instructions).toContain('report the exact blocker');
   });
 });
+
+describe('default CI wait guidance', () => {
+  const create = PROJECT_EVENT_SUBSCRIPTION_TOOLS.find(
+    (tool) => tool.name === 'create_project_event_subscription'
+  )!;
+  it.each([
+    [
+      'get_instructions',
+      buildEventingInstructions({
+        coordinationChannel: null,
+        agentMessageChannelsEnabled: false,
+      }).join(' '),
+    ],
+    ['subscription tool', create.description],
+  ])('%s preserves terminal defaults, explicit job opt-in and recovery', (_surface, text) => {
+    expect(text).toContain('default');
+    expect(text).toContain('"check_suite.completed", "workflow_run.completed"');
+    expect(text).not.toContain('"check_run.completed", "check_suite.completed"');
+    expect(text).toContain(
+      'Opt in to "check_run.completed" only for early per-job failure or job-specific progress'
+    );
+    expect(text).toContain('full 40-character PR head SHA');
+    expect(text).toContain('all current checks');
+    expect(text).toContain('bounded fallback');
+    expect(text).toContain('reconcile GitHub');
+  });
+});

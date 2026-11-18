@@ -162,7 +162,7 @@ Without the `/do` instruction, a dispatched agent may skip critical phases like 
 
 ## CI Wait Recovery
 
-For CI subscriptions and PR shepherd owner reconciliation, follow
-[CI wait recovery](../../docs/guides/ci-wait-recovery.md): exact completion event
-names, full head SHAs, current checks before/after waits, and one independent
-fallback. Expiry or a stale continuation is not evidence of a future wake.
+Default CI waits: `check_suite.completed` + `workflow_run.completed` on the full
+SHA; opt in to `check_run.completed` for early per-job failure/progress. Follow
+[CI wait recovery](../../docs/guides/ci-wait-recovery.md): reconcile GitHub on
+resume and keep one bounded fallback. Expiry does not wake.

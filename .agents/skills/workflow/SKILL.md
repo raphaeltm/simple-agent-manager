@@ -7,6 +7,14 @@ description: 'Orchestrate multi-step workflows by decomposing and dispatching su
 
 Read the full workflow from `.claude/commands/workflow.md` and execute it.
 
+
+For CI waits, default to `check_suite.completed` + `workflow_run.completed` for the
+full 40-character PR head SHA. Opt in to `check_run.completed` only for early
+per-job failure or job-specific progress. Reconcile all current GitHub checks on
+every resume; one suite/workflow completion includes failures and is not all-CI
+success. Keep one bounded fallback schedule for missing terminal webhooks; follow
+`docs/guides/ci-wait-recovery.md` for registration, reconciliation and cleanup.
+
 ## Quick Summary
 
 1. **Decompose** — break the user's request into discrete subtasks with dependencies

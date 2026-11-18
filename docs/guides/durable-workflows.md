@@ -53,14 +53,16 @@ A step with `kind: "wait"` listens to the existing project event stream. Give it
   "kind": "wait",
   "after": ["draft"],
   "wait": {
-    "description": "The GitHub check completes for commit abc123",
+    "description": "A GitHub CI summary completes for the commit",
     "source": "github",
-    "eventTypes": ["check_run.completed"],
-    "subject": { "type": "commit", "id": "abc123" },
+    "eventTypes": ["check_suite.completed", "workflow_run.completed"],
+    "subject": { "type": "commit", "id": "0123456789abcdef0123456789abcdef01234567" },
     "timeoutMs": 1800000
   }
 }
 ```
+
+Replace the example with the full PR head SHA. Opt in to `check_run.completed` only for early per-job failure or job-specific progress. A terminal summary includes failures and covers only one app suite/workflow run; the next agent must reconcile GitHub on resume, including all current checks and statuses, before proceeding. For agent CI subscriptions retain the independent bounded fallback schedule in [CI wait recovery](ci-wait-recovery.md); a workflow wait has its own finite timeout and must not be treated as proof that all CI passed.
 
 A wait begins listening only after its prerequisites complete and the ProjectData subscription is registered. Events before registration do not satisfy it. The first canonical matching event matched by ProjectData at or before the timeout wins; repeated delivery of that event keeps the same event ID and does not advance the step twice. At the timeout, the orchestrator checks matches before failing the wait. Events received after the timeout do not count. A failed or timed-out wait blocks dependent steps under the same prerequisite rules as a failed agent step. Waiting uses the project orchestrator alarm, with no VM or continuously running parent. The matched event identity, type, time, and optional title are saved for display. Event payloads and metadata are untrusted and are never passed to subsequent agent prompts as instructions. Private agent message channels are not valid wait sources.
 
