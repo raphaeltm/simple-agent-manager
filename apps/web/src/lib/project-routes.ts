@@ -1,0 +1,73 @@
+/**
+ * In-app paths to a project's resources.
+ *
+ * One builder per destination, so a route change is one edit rather than a grep. Every segment
+ * is encoded: an id reaches the client from the server, and an unencoded one could contribute
+ * path segments of its own.
+ *
+ * `projectChatPath` started life in `automation-routes.ts`, which is still where Automation's
+ * own URLs live; it moved here once the chat, library and ideas links were needed outside
+ * Automation too, and `automation-routes.ts` re-exports it so its existing importers are
+ * unaffected.
+ */
+const projectRoot = (projectId: string) => `/projects/${encodeURIComponent(projectId)}`;
+
+/** The project itself (its default view). */
+export const projectPath = (projectId: string) => projectRoot(projectId);
+
+/** The project's Overview, its landing page (`projectPath` redirects here). */
+export const projectOverviewPath = (projectId: string) => `${projectRoot(projectId)}/overview`;
+
+/**
+ * Query parameter on an inbox item URL saying where it was opened from, so the item view's Back
+ * returns there. `useInboxWalk` copies every parameter when it moves between items, so the value
+ * survives answering, stepping and archiving.
+ */
+export const INBOX_FROM_PARAM = 'from';
+export const INBOX_FROM_OVERVIEW = 'overview';
+
+/**
+ * History state on an inbox entry whose previous history entry is the Overview: the Overview
+ * pushed it. Moving between items replaces the entry and keeps the state; opening another item
+ * pushes a new entry without it. Back pops only while it is set, so it can never pop to an item.
+ */
+export const OVERVIEW_BEHIND_STATE = 'samOverviewBehind';
+
+/** One item in the project inbox's item view, opened from the Overview's Needs you. */
+export const projectInboxItemFromOverviewPath = (projectId: string, ref: string) => {
+  const params = new URLSearchParams({ item: ref, [INBOX_FROM_PARAM]: INBOX_FROM_OVERVIEW });
+  return `${projectRoot(projectId)}/inbox?${params.toString()}`;
+};
+
+/** A chat in the project: the chats automations start, and the chats linked work points at. */
+export const projectChatPath = (projectId: string, sessionId: string) =>
+  `${projectRoot(projectId)}/chat/${encodeURIComponent(sessionId)}`;
+
+/** The project's Agent Context page (memory and policies). */
+export const projectAgentContextPath = (projectId: string) =>
+  `${projectRoot(projectId)}/agent-context`;
+
+/** One idea's page. */
+export const projectIdeaPath = (projectId: string, ideaId: string) =>
+  `${projectRoot(projectId)}/ideas/${encodeURIComponent(ideaId)}`;
+
+/** Query parameter naming the comment thread a library file preview opens on. */
+export const LIBRARY_COMMENT_THREAD_PARAM = 'commentThread';
+
+/**
+ * The project library, opened on one file's preview, optionally with its comments panel open on
+ * one thread.
+ *
+ * The library page reads `?preview=<fileId>[&commentThread=<threadId>]` and opens the modal for
+ * it, fetching the file directly when it is not on the current page of results
+ * (`pages/ProjectLibrary.tsx`).
+ */
+export const projectLibraryFilePath = (
+  projectId: string,
+  fileId: string,
+  commentThreadId?: string
+) => {
+  const params = new URLSearchParams({ preview: fileId });
+  if (commentThreadId) params.set(LIBRARY_COMMENT_THREAD_PARAM, commentThreadId);
+  return `${projectRoot(projectId)}/library?${params.toString()}`;
+};

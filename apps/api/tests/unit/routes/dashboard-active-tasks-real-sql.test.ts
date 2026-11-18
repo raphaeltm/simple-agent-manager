@@ -227,6 +227,37 @@ describe('GET /dashboard/active-tasks against real SQL', () => {
     fakeSessionLookup();
   });
 
+  it('carries the current opaque provider wait generation through real SQL and the dashboard route', async () => {
+    const database = seedDatabase();
+    const writeWait = async (version: string) =>
+      database
+        .prepare(
+          "UPDATE tasks SET admission_state='provider_limit_blocked',admission_reason='Blocked: wait budget exhausted',provider_limit_wait_json=? WHERE id='task-queued-fresh'"
+        )
+        .bind(JSON.stringify({ scheduleKey: version }))
+        .run();
+    await writeWait('window-1');
+    await database
+      .prepare(
+        "UPDATE tasks SET admission_state='provider_limit_blocked',provider_limit_wait_json='invalid JSON' WHERE id='task-recent-1'"
+      )
+      .run();
+    let body = await requestActiveTasks({ DATABASE: database });
+    expect(body.tasks.find((task) => task.id === 'task-queued-fresh')).toMatchObject({
+      providerLimitReason: 'Blocked: wait budget exhausted',
+      providerLimitVersion: 'window-1',
+    });
+    expect(body.tasks.find((task) => task.id === 'task-recent-1')).not.toHaveProperty(
+      'providerLimitVersion'
+    );
+    await writeWait('window-2');
+    body = await requestActiveTasks({ DATABASE: database });
+    expect(body.tasks.find((task) => task.id === 'task-queued-fresh')).toMatchObject({
+      providerLimitReason: 'Blocked: wait budget exhausted',
+      providerLimitVersion: 'window-2',
+    });
+  });
+
   it('returns the six most recently active tasks, not the six most recently started', async () => {
     const body = await requestActiveTasks();
 

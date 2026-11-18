@@ -1,7 +1,7 @@
 /**
  * Vertical slice tests for the project-data DO proxy service.
  *
- * Exercises the service layer (apps/api/src/services/project-data.ts) which
+ * Exercises the service layer (packages/project-data/src/client/project-data.ts) which
  * wraps RPC calls to the ProjectData Durable Object. Successful calls go through:
  *   service function → getStub(env, projectId) → ensureProjectId() → DO method
  * Expected rejection cases call the same synchronous core guard through the
@@ -14,11 +14,11 @@
  *
  * See: .claude/rules/35-vertical-slice-testing.md
  */
+import { DEFAULT_MAX_MESSAGES_PER_SESSION } from '@simple-agent-manager/project-data/internal/do/messages';
+import * as sessionState from '@simple-agent-manager/project-data/internal/do/sessions';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 
-import { DEFAULT_MAX_MESSAGES_PER_SESSION } from '../../src/durable-objects/project-data/messages';
-import * as sessionState from '../../src/durable-objects/project-data/sessions';
 import type { Env } from '../../src/env';
 // Import service functions under test
 import * as svc from '../../src/services/project-data';
@@ -1251,74 +1251,6 @@ describe('project-data service: idle cleanup scheduling', () => {
 
     const result = await svc.getCleanupAt(testEnv, pid, sessionId);
     expect(result).toBeNull();
-  });
-});
-
-// =========================================================================
-// 4. Session–Idea Linking (many-to-many)
-// =========================================================================
-
-describe('project-data service: session-idea linking', () => {
-  it('linkSessionIdea and getIdeasForSession', async () => {
-    const pid = 'svc-idea-link';
-    const sessionId = await svc.createSession(testEnv, pid, null, 'Idea session');
-
-    await svc.linkSessionIdea(testEnv, pid, sessionId, 'idea-1', 'Context A');
-    await svc.linkSessionIdea(testEnv, pid, sessionId, 'idea-2', null);
-
-    const ideas = await svc.getIdeasForSession(testEnv, pid, sessionId);
-    expect(ideas).toHaveLength(2);
-
-    const idea1 = ideas.find((i) => i.taskId === 'idea-1');
-    expect(idea1).toBeTruthy();
-    expect(idea1!.context).toBe('Context A');
-
-    const idea2 = ideas.find((i) => i.taskId === 'idea-2');
-    expect(idea2).toBeTruthy();
-    expect(idea2!.context).toBeNull();
-  });
-
-  it('getSessionsForIdea returns linked sessions', async () => {
-    const pid = 'svc-idea-sessions';
-    const s1 = await svc.createSession(testEnv, pid, null, 'Session 1');
-    const s2 = await svc.createSession(testEnv, pid, null, 'Session 2');
-
-    await svc.linkSessionIdea(testEnv, pid, s1, 'idea-shared', 'From S1');
-    await svc.linkSessionIdea(testEnv, pid, s2, 'idea-shared', 'From S2');
-
-    const sessions = await svc.getSessionsForIdea(testEnv, pid, 'idea-shared');
-    expect(sessions).toHaveLength(2);
-    const sessionIds = sessions.map((s) => s.sessionId);
-    expect(sessionIds).toContain(s1);
-    expect(sessionIds).toContain(s2);
-  });
-
-  it('unlinkSessionIdea removes the link', async () => {
-    const pid = 'svc-idea-unlink';
-    const sessionId = await svc.createSession(testEnv, pid, null, 'Unlink session');
-
-    await svc.linkSessionIdea(testEnv, pid, sessionId, 'idea-unlink', 'Will remove');
-
-    let ideas = await svc.getIdeasForSession(testEnv, pid, sessionId);
-    expect(ideas).toHaveLength(1);
-
-    await svc.unlinkSessionIdea(testEnv, pid, sessionId, 'idea-unlink');
-
-    ideas = await svc.getIdeasForSession(testEnv, pid, sessionId);
-    expect(ideas).toHaveLength(0);
-  });
-
-  it('getIdeasForSession returns empty for session with no ideas', async () => {
-    const pid = 'svc-idea-empty';
-    const sessionId = await svc.createSession(testEnv, pid, null, 'No ideas');
-
-    const ideas = await svc.getIdeasForSession(testEnv, pid, sessionId);
-    expect(ideas).toHaveLength(0);
-  });
-
-  it('getSessionsForIdea returns empty for unlinked idea', async () => {
-    const sessions = await svc.getSessionsForIdea(testEnv, 'svc-idea-no-links', 'idea-nowhere');
-    expect(sessions).toHaveLength(0);
   });
 });
 

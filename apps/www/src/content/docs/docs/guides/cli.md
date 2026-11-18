@@ -20,9 +20,8 @@ curl -fsSL "https://api.example.com/api/cli/download?os=darwin&arch=arm64" -o sa
 ```
 
 The one-liner picks Apple Silicon on any Mac; on an Intel Mac, use **Other platforms → macOS
-Intel**, or change `arch=arm64` to `arch=amd64`. Ignore the quick-start steps further down that
-page: they're out of date, and their sign-in step points the CLI at the hosted service even on a
-self-hosted installation. Sign in as described below instead.
+Intel**, or change `arch=arm64` to `arch=amd64`. The page's quick start shows the commands below
+with your installation's API address filled in.
 
 ## Sign in
 
@@ -37,7 +36,8 @@ select **Authorize**, and go back to the terminal: the CLI prints who you signed
 
 - **Self-hosted SAM:** add your installation's API address the first time, for example
   `sam auth login --api-url https://api.your-domain.com`. It's your SAM web address with `app.`
-  changed to `api.`. Without it, the CLI uses the hosted service.
+  changed to `api.`. Without it, the CLI uses `https://api.simple-agent-manager.org`, the maintainer's
+  own instance, which will not accept your account.
 - **Scripts and CI:** create an API token under **Settings → Access → API Tokens** and set it as
   `SAM_API_TOKEN` (and, for a self-hosted SAM, `SAM_API_URL` to the API address) in the
   environment. The CLI then signs in for each command and saves nothing, so `sam project use`
@@ -70,12 +70,13 @@ shortens IDs to their first seven characters, which `sam chat <session-id>` and 
 don't accept: copy the full ID from `sam chat --json`, or from the chat's address in SAM
 (`…/chat/<session-id>`).
 
-`sam chat new` always starts a **Chat**. For work you want delivered as a pull request, submit a
-**Task**, usually with a profile that runs on a VM so the agent can build and test (see
-[Chat or Task](/docs/guides/chat-features/#chat-or-task)), then wait for it:
+`sam chat new` always starts a **Chat**, which stays open for your replies. For work a script should
+wait on until it's finished, submit a **Task**, usually with a profile that runs on a VM so the agent
+can build and test (see [Chat or Task](/docs/guides/chat-features/#chat-or-task)), then wait for it.
+SAM doesn't open pull requests itself, so ask for one in the prompt:
 
 ```sh
-sam tasks submit --mode task --agent-profile "Build and test" --prompt "Add retries to the webhook sender"
+sam tasks submit --mode task --agent-profile "Build and test" --prompt "Add retries to the webhook sender, then open a pull request"
 sam tasks wait <task-id> --timeout 30m
 ```
 
@@ -85,6 +86,10 @@ app would start an Instant chat; to start on Instant, name an
 [Instant](/docs/guides/instant-sessions/) profile. Without `--mode task`, `sam tasks submit` follows
 the profile's **Task Mode**. `sam tasks wait` stops waiting at the timeout but doesn't cancel the
 task. Add `--json` to any command for output a script can read.
+Human-readable output shows unsafe terminal controls from SAM data as visible `\uXXXX` text;
+JSON and transcript exports to stdout escape controls within JSON strings while preserving
+the original decoded values for scripts. Local-forward diagnostics follow the same terminal
+policy; forwarded HTTP response bodies and downloaded files retain their original bytes.
 
 ## More commands
 

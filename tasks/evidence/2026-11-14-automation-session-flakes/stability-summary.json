@@ -1,0 +1,117 @@
+{
+  "fileRuns": 120,
+  "assertionsPassed": 3840,
+  "assertionsFailed": 0,
+  "allCohortsHave30Runs": true,
+  "allFinalSourceHashesEqual": true,
+  "cohorts": [
+    {
+      "app": "web",
+      "mode": "normal",
+      "fileRuns": 30,
+      "assertionsPassed": 1170,
+      "assertionsFailed": 0,
+      "skipped": 0,
+      "targetCaseMs": {
+        "min": 183.29731599999968,
+        "median": 192.5991899999999,
+        "max": 248.59842200000003
+      },
+      "fileProcessSeconds": {
+        "min": 7.732,
+        "median": 8.066500000000001,
+        "max": 8.495
+      },
+      "loadCpuSeconds": 0,
+      "sourceSha256": {
+        "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+        "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+        "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+        "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+        "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+        "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+      }
+    },
+    {
+      "app": "api",
+      "mode": "normal",
+      "fileRuns": 30,
+      "assertionsPassed": 750,
+      "assertionsFailed": 0,
+      "skipped": 0,
+      "targetCaseMs": {
+        "min": 116.36344099999951,
+        "median": 128.52678749999905,
+        "max": 182.63102699999945
+      },
+      "fileProcessSeconds": {
+        "min": 12.848,
+        "median": 13.553,
+        "max": 14.106
+      },
+      "loadCpuSeconds": 0,
+      "sourceSha256": {
+        "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+        "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+        "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+        "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+        "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+        "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+      }
+    },
+    {
+      "app": "web",
+      "mode": "loaded",
+      "fileRuns": 30,
+      "assertionsPassed": 1170,
+      "assertionsFailed": 0,
+      "skipped": 0,
+      "targetCaseMs": {
+        "min": 321.74372799999946,
+        "median": 350.5538354999994,
+        "max": 525.3372749999999
+      },
+      "fileProcessSeconds": {
+        "min": 14.551,
+        "median": 16.4085,
+        "max": 19.718
+      },
+      "loadCpuSeconds": 721.7299999999999,
+      "sourceSha256": {
+        "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+        "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+        "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+        "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+        "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+        "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+      }
+    },
+    {
+      "app": "api",
+      "mode": "loaded",
+      "fileRuns": 30,
+      "assertionsPassed": 750,
+      "assertionsFailed": 0,
+      "skipped": 0,
+      "targetCaseMs": {
+        "min": 201.93406699999832,
+        "median": 251.64281899999696,
+        "max": 378.94242099999974
+      },
+      "fileProcessSeconds": {
+        "min": 27.941,
+        "median": 29.3405,
+        "max": 31.41
+      },
+      "loadCpuSeconds": 1218.1899999999998,
+      "sourceSha256": {
+        "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+        "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+        "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+        "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+        "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+        "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+      }
+    }
+  ]
+}

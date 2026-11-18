@@ -202,6 +202,8 @@ type promptRetryResponse struct {
 	beforeReply func(*promptRetryFakeAgent)
 	errMessage  string
 	stopReason  string
+	// result holds extra PromptResponse fields sent on the wire (usage, _meta).
+	result map[string]interface{}
 }
 
 type promptRetryScript struct {
@@ -280,12 +282,14 @@ func (a *promptRetryFakeAgent) reply(id json.RawMessage, response promptRetryRes
 	if strings.TrimSpace(stopReason) == "" {
 		stopReason = "end_turn"
 	}
+	result := map[string]interface{}{"stopReason": stopReason}
+	for key, value := range response.result {
+		result[key] = value
+	}
 	a.writeJSON(map[string]interface{}{
 		"jsonrpc": "2.0",
 		"id":      id,
-		"result": map[string]interface{}{
-			"stopReason": stopReason,
-		},
+		"result":  result,
 	})
 }
 

@@ -7,17 +7,18 @@ import {
   resolveDeploymentManifestReservation,
   type ResolvedResourceReservation,
 } from '@simple-agent-manager/shared';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull, notInArray } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { InferOutput } from 'valibot';
 import * as v from 'valibot';
 import { parse as parseYaml } from 'yaml';
 
+import { createDeploymentProviderPort } from '../../app-deployment-ports/providers';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log, serializeError } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
-import { parseWithSchema, readRequestJsonRecord } from '../../lib/runtime-validation';
+import { parseWithSchema } from '../../lib/runtime-validation';
 import { ulid } from '../../lib/ulid';
 import { AppError, errors } from '../../middleware/error';
 import {
@@ -31,6 +32,8 @@ import {
   DEPLOYMENT_MODEL_RUNNER_VM_SIZE,
   resolveDeploymentPlacement,
 } from '../../services/deployment-provisioning';
+import { visiblePublishJobPredicate } from '../../services/deployment-publish-jobs';
+import { PUBLISH_JOB_TERMINAL_STATUSES } from '../../services/deployment-publish-jobs';
 import {
   createMissingDeclaredVolumes,
   markDeploymentReleaseVolumeAttachFailed,
@@ -42,7 +45,7 @@ import {
   placeReleaseOnDeploymentNode,
   updateDeploymentEnvironmentForLatestRelease,
 } from '../deployment-release-submission';
-import { verifyWorkspacePublishCallback } from './_callback-auth';
+import { verifyPublishCallback } from './_publish-callback-auth';
 
 /**
  * Compose-publish release ingestion callback — mounted BEFORE projectsRoutes in
@@ -116,11 +119,13 @@ const composePublishSubmittedBySchema = v.object({
  * inject a foreign top-level field (notably `routes` — a real
  * DeploymentManifest field this submission has no legitimate reason to
  * carry) that `buildReleaseRouteDiscovery`
- * (services/deployment-routing.ts) would otherwise treat as an authoritative
+ * (`@simple-agent-manager/app-deployment` deployment-routing) would otherwise treat as an authoritative
  * build-on-node manifest. See .claude/rules/11-fail-fast-patterns.md and
  * .claude/rules/51-runtime-boundary-validation.md.
  */
 const composePublishReleaseSubmissionSchema = v.object({
+  publishJobId: v.optional(v.pipe(v.string(), v.minLength(1))),
+  attempt: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
   environment: v.optional(v.string()),
   environmentId: v.optional(v.string()),
   reference: v.optional(v.string()),
@@ -206,19 +211,18 @@ function resolveComposePublishReservation(
 }
 
 composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c) => {
-  const { projectId, workspaceId, userId, db, assertCurrent } =
-    await verifyWorkspacePublishCallback(
-      c,
-      'compose_publish_release',
-      'Invalid token scope for compose-publish release'
-    );
-
-  let submissionBody: Record<string, unknown>;
-  try {
-    submissionBody = await readRequestJsonRecord(c.req.raw, 'compose_publish_release.submission');
-  } catch {
-    throw errors.badRequest('Invalid release submission body');
-  }
+  const {
+    projectId,
+    workspaceId,
+    userId,
+    db,
+    assertCurrent,
+    body: submissionBody,
+  } = await verifyPublishCallback(
+    c,
+    'compose_publish_release',
+    'Invalid token scope for compose-publish release'
+  );
 
   let submission: InferOutput<typeof composePublishReleaseSubmissionSchema>;
   try {
@@ -231,6 +235,9 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     throw errors.badRequest('Invalid release submission body');
   }
 
+  if (submission.publishJobId !== undefined && submission.attempt === undefined) {
+    throw errors.badRequest('Release submission with publishJobId requires attempt');
+  }
   const environment = cleanOptionalString(submission.environment);
   const environmentId = cleanOptionalString(submission.environmentId);
   if (!environment || !environmentId) {
@@ -358,7 +365,30 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
   }
   if (requiresVolumes && placement) {
     await assertCurrent();
-    await createMissingDeclaredVolumes(db, c.env, userId, {
+    if (submission.publishJobId) {
+      const [job] = await db
+        .select({ id: schema.deploymentPublishJobs.id })
+        .from(schema.deploymentPublishJobs)
+        .where(
+          and(
+            eq(schema.deploymentPublishJobs.id, submission.publishJobId),
+            visiblePublishJobPredicate(),
+            eq(schema.deploymentPublishJobs.attempt, submission.attempt ?? 0),
+            eq(schema.deploymentPublishJobs.projectId, projectId),
+            eq(schema.deploymentPublishJobs.workspaceId, workspaceId),
+            eq(schema.deploymentPublishJobs.requestedBy, userId),
+            eq(schema.deploymentPublishJobs.environmentId, environmentId),
+            notInArray(schema.deploymentPublishJobs.status, [...PUBLISH_JOB_TERMINAL_STATUSES]),
+            isNull(schema.deploymentPublishJobs.releaseId)
+          )
+        )
+        .limit(1);
+      if (!job) throw errors.conflict('Publish job release fence does not match');
+    }
+    // Provisioning can still race cancellation. Volumes belong to the environment;
+    // createMissingDeclaredVolumes reuses existing names on the next release.
+    // The later atomic release fence remains authoritative after provider I/O.
+    await createMissingDeclaredVolumes(db, createDeploymentProviderPort(c.env), userId, {
       environmentId,
       volumes: volumeDeclarations,
       location: placement.location,
@@ -417,6 +447,16 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     const insertedRelease = await insertDeploymentReleaseWhilePlacementUnlocked({
       db,
       env: c.env,
+      // Rollout: old agents omit publishJobId and retain the legacy unfenced path.
+      publishJob: submission.publishJobId
+        ? {
+            id: submission.publishJobId,
+            attempt: submission.attempt ?? 1,
+            projectId,
+            workspaceId,
+            requestedBy: userId,
+          }
+        : undefined,
       values: {
         id: releaseId,
         environmentId,
@@ -433,7 +473,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     });
     if (!insertedRelease) {
       throw errors.conflict(
-        'Another deployment placement operation is in progress. Please retry this release.'
+        'Publish job is terminal, stale, already linked, or deployment placement is in progress.'
       );
     }
     await assertCurrent();

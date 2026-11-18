@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict';
 
+function isUuid(value) {
+  return (
+    typeof value === 'string' &&
+    /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value)
+  );
+}
+
 export function auditPrompt(marker) {
   return `This is an authorized staging smoke test. Reply exactly ${marker}. Do not use tools, modify files, create tasks, or write to GitHub or external services. Input: {{github.title}}`;
 }
@@ -119,4 +126,169 @@ export async function readAuditMessages(fetchPage, maxPages = 10) {
     after = next;
   }
   throw new Error('Audit message inventory incomplete');
+}
+
+/** Bounded staging queue/affinity fixtures; no caller-supplied payload or prompt is signed. */
+export function auditSignedDeliveryIntents(fixture, targetEnvironment) {
+  assert(
+    targetEnvironment !== 'production' || !fixture.deliveries,
+    'Batch and comment fixtures are staging-only'
+  );
+  const deliveries = fixture.deliveries ?? [
+    { deliveryId: fixture.deliveryId, eventType: 'issues', subjectNumber: 1 },
+  ];
+  assert(
+    Array.isArray(deliveries) && deliveries.length > 0 && deliveries.length <= 2,
+    'Use one or two bounded audit deliveries'
+  );
+  assert(
+    new Set(deliveries.map((item) => item.deliveryId)).size === deliveries.length,
+    'Batch delivery IDs must be unique'
+  );
+  return deliveries.map((item, index) => {
+    assert(isUuid(item.deliveryId), 'Invalid fixture delivery ID');
+    assert(
+      [
+        'issues',
+        'issue_comment',
+        'pull_request_review',
+        'pull_request_review_comment',
+        'check_run',
+        'check_suite',
+        'workflow_run',
+      ].includes(item.eventType),
+      'Unsupported audit event'
+    );
+    assert(
+      Number.isSafeInteger(item.subjectNumber) && item.subjectNumber > 0,
+      'Invalid audit subject'
+    );
+    const reviewEvent = item.eventType.startsWith('pull_request_review');
+    const contentId = Number.parseInt(item.deliveryId.replaceAll('-', '').slice(0, 12), 16) + 1;
+    if (['check_run', 'check_suite', 'workflow_run'].includes(item.eventType)) {
+      assert(targetEnvironment === 'staging', 'CI fixtures are staging-only');
+      assert(
+        typeof item.headSha === 'string' && /^[a-f0-9]{40}$/.test(item.headSha),
+        'Full CI commit SHA required'
+      );
+      return {
+        deliveryId: item.deliveryId,
+        eventType: item.eventType,
+        payload: JSON.stringify({
+          action: 'completed',
+          installation: { id: fixture.installationId },
+          repository: { id: fixture.repositoryId, full_name: fixture.repository },
+          sender: { login: 'sam-staging-audit', type: 'User' },
+          [item.eventType]: {
+            id: contentId,
+            name: fixture.marker,
+            head_sha: item.headSha,
+            status: 'completed',
+            conclusion: 'success',
+          },
+        }),
+      };
+    }
+    const user = { login: 'sam-staging-audit', type: 'User' };
+    const subjectUrl = `https://github.com/${fixture.repository}/pull/${item.subjectNumber}`;
+    return {
+      deliveryId: item.deliveryId,
+      eventType: item.eventType,
+      payload: JSON.stringify({
+        action:
+          item.eventType === 'issues'
+            ? 'opened'
+            : item.eventType === 'pull_request_review'
+              ? 'submitted'
+              : 'created',
+        installation: { id: fixture.installationId },
+        repository: { id: fixture.repositoryId, full_name: fixture.repository },
+        sender: {
+          login:
+            targetEnvironment === 'production' ? 'simple-agent-manager[bot]' : 'sam-staging-audit',
+          type: targetEnvironment === 'production' ? 'Bot' : 'User',
+        },
+        ...(!reviewEvent
+          ? {
+              issue: {
+                id: item.subjectNumber,
+                number: item.subjectNumber,
+                title: `${fixture.marker} Résumé 🐙`,
+                body: fixture.marker,
+                labels: [{ name: fixture.marker }],
+                state: 'open',
+                ...(item.eventType === 'issue_comment'
+                  ? {
+                      pull_request: {
+                        url: `https://api.github.com/repos/${fixture.repository}/pulls/${item.subjectNumber}`,
+                      },
+                    }
+                  : {}),
+              },
+            }
+          : {
+              pull_request: {
+                number: item.subjectNumber,
+                title: `${fixture.marker} review`,
+                html_url: subjectUrl,
+                labels: [{ name: fixture.marker }],
+                draft: false,
+                head: { ref: 'audit-fixture', sha: 'a'.repeat(40) },
+                base: { ref: 'main' },
+              },
+            }),
+        ...(reviewEvent
+          ? item.eventType === 'pull_request_review'
+            ? {
+                review: {
+                  id: contentId,
+                  body: `/sam ${fixture.marker} feedback`,
+                  state: 'changes_requested',
+                  html_url: `${subjectUrl}#pullrequestreview-${contentId}`,
+                  author_association: 'MEMBER',
+                  user,
+                },
+              }
+            : {
+                comment: {
+                  id: contentId,
+                  body: `/sam ${fixture.marker} inline`,
+                  html_url: `${subjectUrl}#discussion_r${contentId}`,
+                  path: 'fixture.ts',
+                  line: 7,
+                  original_line: 7,
+                  author_association: 'MEMBER',
+                  user,
+                },
+              }
+          : {}),
+        ...(item.eventType === 'issue_comment'
+          ? {
+              comment: {
+                id: Number.parseInt(item.deliveryId.replaceAll('-', '').slice(0, 12), 16) + 1,
+                body: `/sam ${fixture.marker} comment ${index + 1}`,
+              },
+            }
+          : {}),
+      }),
+    };
+  });
+}
+
+export function validateAuditFixture(fixture) {
+  assert(/^github-trigger-audit-[a-f0-9-]{36}$/.test(fixture.marker), 'Invalid fixture marker');
+  assert(isUuid(fixture.deliveryId), 'Invalid fixture delivery ID');
+  assert(
+    /^[0-9A-Z]{26}$/.test(fixture.projectId) && /^[0-9A-Z]{26}$/.test(fixture.triggerId),
+    'Invalid fixture IDs'
+  );
+  assert(/^[\w.-]+\/[\w.-]+$/.test(fixture.repository), 'Invalid repository name');
+  assert(
+    Number.isSafeInteger(fixture.repositoryId) && fixture.repositoryId > 0,
+    'Invalid repository ID'
+  );
+  assert(
+    Number.isSafeInteger(fixture.installationId) && fixture.installationId > 0,
+    'Invalid installation ID'
+  );
 }

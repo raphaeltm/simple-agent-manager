@@ -42,12 +42,18 @@ function send(reason = 'origin_ca_bootstrap') {
   );
 }
 describe('boot failure callback', () => {
-  it('accepts the live node JWT through combined router wiring', async () => {
-    const res = await send();
+  it.each([
+    'origin_ca_bootstrap',
+    'vm_agent_download',
+    'cloudflared_install',
+    'tunnel_firewall',
+    'tunnel_connector',
+  ])('records %s through authenticated callback routing', async (reason) => {
+    const res = await send(reason);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ accepted: true });
     expect(sqlite.prepare('SELECT error_message,health_status FROM nodes').get()).toEqual({
-      error_message: 'Node boot failed: origin_ca_bootstrap',
+      error_message: `Node boot failed: ${reason}`,
       health_status: 'unhealthy',
     });
     expect(verifyCallbackToken).toHaveBeenCalledWith('canary-secret', expect.anything(), {

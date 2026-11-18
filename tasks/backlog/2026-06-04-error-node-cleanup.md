@@ -1,5 +1,7 @@
 # Failed-Provisioning Node Cleanup
 
+> **Reconciliation 2026-11-02:** partial progress for deployment nodes only. #2472 (`1fcbb9239`) added `apps/api/src/scheduled/deployment-node-cleanup.ts`, which retries strict provider deletion with backoff for managed deployment-role VM nodes in `destroying`/`deleting`/`error` that no live deployment environment holds (`:22-35`). Because a failed deployment provisioning unlinks the environment (`deployment-provisioning.ts:90-115`), failed deployment nodes should now be reaped; this is inferred, since no test seeds that case. Still open: workspace-role and other `error` nodes, which rely only on the 4h max-lifetime sweep; a configurable error-age threshold; and tests for the error-node path.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

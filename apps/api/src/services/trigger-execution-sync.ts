@@ -8,10 +8,32 @@
  * Best-effort: errors are logged but never propagated to the caller.
  */
 import { TRIGGER_EXECUTION_HARD_MAX_FAILURE_PREFIX } from '@simple-agent-manager/shared';
+import { and, eq, like, or, type SQL } from 'drizzle-orm';
 
+import * as schema from '../db/schema';
 import { createModuleLogger } from '../lib/logger';
 
 const log = createModuleLogger('trigger-execution-sync');
+
+/**
+ * The executions a terminal task may overwrite: one still `running`, or one the
+ * hard-residence backstop already failed. Every other status (`completed`, `skipped`,
+ * `dropped`, `routed`, an ordinary `failed`, ...) is final for this sync and must not be
+ * clobbered. This is the drizzle form of the raw predicate in
+ * {@link syncTriggerExecutionStatus}; both must stay identical.
+ */
+export function triggerExecutionSyncableWhere(triggerExecutionId: string): SQL | undefined {
+  return and(
+    eq(schema.triggerExecutions.id, triggerExecutionId),
+    or(
+      eq(schema.triggerExecutions.status, 'running'),
+      and(
+        eq(schema.triggerExecutions.status, 'failed'),
+        like(schema.triggerExecutions.errorMessage, `${TRIGGER_EXECUTION_HARD_MAX_FAILURE_PREFIX}%`)
+      )
+    )
+  );
+}
 
 /**
  * Sync trigger execution status for a task that has reached a terminal state.

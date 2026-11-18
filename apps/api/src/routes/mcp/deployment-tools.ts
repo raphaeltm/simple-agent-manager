@@ -1,6 +1,7 @@
 import { and, count, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
+import { createDeploymentSecretCipher } from '../../app-deployment-ports/secret-cipher';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { parsePositiveInt } from '../../lib/route-helpers';
@@ -679,7 +680,7 @@ export async function handleSetDeploymentEnvironmentConfig(
     envKey,
     value,
     isSecret,
-    encryptionKey: getCredentialEncryptionKey(env),
+    cipher: createDeploymentSecretCipher(getCredentialEncryptionKey(env)),
   });
 
   const config = await buildDeploymentEnvironmentConfigResponse(db, resolved.environment.id);

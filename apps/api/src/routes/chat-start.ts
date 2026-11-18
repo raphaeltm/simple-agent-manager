@@ -1,7 +1,8 @@
-import type { CredentialProvider, CredentialSource } from '@simple-agent-manager/shared';
+import { requireOpenIdeaForWorkStart } from '@simple-agent-manager/operations';
+import { inheritedCredentialAttributionForCaller } from '@simple-agent-manager/scheduler-core';
+import type { CredentialSource } from '@simple-agent-manager/shared';
 import { ACP_SESSION_DEFAULTS } from '@simple-agent-manager/shared';
 import { DEFAULT_TASK_TITLE_MAX_LENGTH } from '@simple-agent-manager/shared';
-import { isValidProvider } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -14,8 +15,10 @@ import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
 import { jsonValidator, StartChatSessionSchema } from '../schemas';
+import { resolveTaskAgentOverrides } from '../services/agent-profiles';
 import { acceptInstantSession, continueInstantSessionLaunch } from '../services/instant-session';
 import { enrichMessageWithMentions } from '../services/mention-enrichment';
+import { validateRunAgentConfiguration } from '../services/run-agent-configuration';
 import { resolveSkillProfile } from '../services/skills';
 import { markTaskFailedIfNonTerminal } from '../services/task-failure';
 import { truncateTitle } from '../services/task-title';
@@ -54,15 +57,6 @@ function appendSystemPrompt(
 ): string {
   const suffix = systemPromptAppend?.trim();
   return suffix ? `${message}\n\n${suffix}` : message;
-}
-
-function resolveProvider(
-  profileProvider: string | null | undefined,
-  projectProvider: string | null | undefined
-): CredentialProvider | null {
-  if (profileProvider && isValidProvider(profileProvider)) return profileProvider;
-  if (projectProvider && isValidProvider(projectProvider)) return projectProvider;
-  return null;
 }
 
 async function resolveParentLineage(
@@ -134,15 +128,20 @@ chatStartRoutes.post(
       throw errors.badRequest(`message must be ${maxMessageLength} characters or less`);
     }
 
+    // Before any effects: a closed, foreign-project or non-idea `sourceIdeaId` must be
+    // rejected with nothing created. `acceptInstantSession` records the link once the
+    // session exists, before the agent gets its first prompt.
+    const sourceIdea = body.sourceIdeaId
+      ? await requireOpenIdeaForWorkStart(c.env, projectId, body.sourceIdeaId)
+      : null;
+
     const resolvedProfile =
       body.agentProfileId || body.skillId
         ? await resolveSkillProfile(db, projectId, body.agentProfileId, body.skillId, userId, c.env)
         : null;
-    const provider = resolveProvider(resolvedProfile?.provider, project.defaultProvider);
     const runtime = await resolveWorkspaceRuntime(db, c.env, {
       userId,
       projectId,
-      provider,
       explicitRuntime: resolvedProfile?.runtime ?? null,
     });
 
@@ -165,12 +164,30 @@ chatStartRoutes.post(
       project.defaultAgentType ??
       c.env.DEFAULT_TASK_AGENT_TYPE ??
       'opencode';
+    // Before any effect: an effort the resolved agent cannot run is rejected here.
+    const agentRun = resolveTaskAgentOverrides(agentType, body, resolvedProfile ?? {});
+    const agentConfigurationId = await validateRunAgentConfiguration(db, {
+      userId,
+      configurationId: body.agentConfigurationId,
+      agentType,
+    });
 
     const parentTask = await resolveParentLineage(
       db,
       projectId,
       body.parentTaskId,
       parsePositiveInt(c.env.ACP_SESSION_MAX_FORK_DEPTH, ACP_SESSION_DEFAULTS.MAX_FORK_DEPTH)
+    );
+    const instantAttribution = inheritedCredentialAttributionForCaller(
+      parentTask
+        ? {
+            userId: parentTask.credentialAttributionUserId ?? parentTask.userId,
+            projectId: parentTask.credentialAttributionProjectId ?? null,
+            source: (parentTask.credentialAttributionSource as CredentialSource | null) ?? 'user',
+          }
+        : null,
+      userId,
+      projectId
     );
     const taskId = ulid();
     const now = new Date().toISOString();
@@ -188,13 +205,14 @@ chatStartRoutes.post(
       agentProfileHint: resolvedProfile?.profileId ?? null,
       skillId: resolvedProfile?.skillId ?? null,
       skillHint: body.skillId ?? null,
+      agentConfigurationId,
       taskMode: 'conversation',
       triggeredBy: 'user',
-      credentialAttributionUserId:
-        parentTask?.credentialAttributionUserId ?? parentTask?.userId ?? userId,
-      credentialAttributionProjectId: parentTask?.credentialAttributionProjectId ?? null,
-      credentialAttributionSource:
-        (parentTask?.credentialAttributionSource as CredentialSource | null) ?? 'user',
+      // Never another member's credentials: a teammate's parent task must not make this one
+      // bill them (gap G5). Same normalization as `submitTask`.
+      credentialAttributionUserId: instantAttribution.userId,
+      credentialAttributionProjectId: instantAttribution.projectId,
+      credentialAttributionSource: instantAttribution.source,
       createdBy: userId,
       createdAt: now,
       updatedAt: now,
@@ -221,9 +239,9 @@ chatStartRoutes.post(
       agentType,
       agentProfileId: resolvedProfile?.profileId ?? null,
       skillId: resolvedProfile?.skillId ?? null,
+      sourceIdeaId: sourceIdea?.ideaId ?? null,
       overrides: {
-        model: resolvedProfile?.model ?? null,
-        effort: resolvedProfile?.effort ?? null,
+        ...agentRun,
         permissionMode: resolvedProfile?.permissionMode ?? null,
       },
     };

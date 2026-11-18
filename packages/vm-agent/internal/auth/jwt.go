@@ -29,6 +29,19 @@ type Claims struct {
 	RemotePort     int    `json:"remotePort,omitempty"`
 	Mode           string `json:"mode,omitempty"`
 	LocalAuthority string `json:"localAuthority,omitempty"`
+	// CallbackGeneration ("cgen") is the control plane's opaque per-workspace
+	// callback credential generation embedded in workspace callback tokens. The
+	// control plane rotates it when the same workspace ID is reactivated so the
+	// previous runtime's tokens stop working. Absent on tokens minted before
+	// rotation existed and for workspaces never rotated. It is unrelated to the
+	// agent's eviction generation, which fences restart against eviction.
+	CallbackGeneration string `json:"cgen,omitempty"`
+	// SessionNotAfter (unix seconds) is set on terminal tokens minted by a control-plane session
+	// that has a hard lifetime (agent sign-in through workload identity). A VM agent session
+	// created from such a token must end by then, so the browser session it backs cannot outlive
+	// the control-plane session. Absent (zero) on every other token: the session keeps the
+	// configured SESSION_TTL.
+	SessionNotAfter int64 `json:"sessionNotAfter,omitempty"`
 }
 
 // JWTValidator validates JWTs using a remote JWKS endpoint.

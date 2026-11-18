@@ -1,0 +1,90 @@
+---
+/** HTML version of a comment thread on a project library document (the ledger migration plan). */
+import './mock.css';
+---
+
+<div class="mk lib">
+  <p class="lib-file"><span class="lib-ico">▤</span>ledger-migration-plan.md</p>
+  <div class="lib-panel">
+    <p class="lib-head"><b>Comments</b><span class="mk-meta">×</span></p>
+    <div class="lib-thread">
+      <p class="who"><span class="mk-avatar">TA</span><b>Tomás Alvarez</b><span class="mk-meta">1h ago</span><span class="mk-badge mk-badge--amber">Open</span></p>
+      <p class="quote">Backfill runs as a background job in batches of 5,000 rows.</p>
+      <p>The backfill batches of 5,000 rows will still lock big merchants for a while. Can we throttle it further during business hours?</p>
+      <div class="reply">
+        <p class="who"><span class="mk-avatar">CD</span><b>Camille Durand</b><span class="mk-meta">1h ago</span></p>
+        <p>Let’s cap it at 500 rows per batch during business hours and widen it back overnight.</p>
+      </div>
+      <p class="actions"><span class="mk-btn mk-btn--ghost">Reply</span><span class="mk-btn mk-btn--ghost">Resolve</span></p>
+    </div>
+  </div>
+</div>
+
+<style>
+  .lib {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    font-size: 12px;
+  }
+
+  .lib-file {
+    display: flex;
+    gap: 8px;
+    font-weight: 700;
+  }
+
+  .lib-ico {
+    color: var(--mk-green);
+  }
+
+  .lib-panel {
+    display: grid;
+    gap: 8px;
+  }
+
+  .lib-head {
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .lib-thread {
+    display: grid;
+    gap: 7px;
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid var(--mk-line);
+    background: var(--mk-surface);
+  }
+
+  .who {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .who .mk-badge {
+    margin-left: auto;
+  }
+
+  .quote {
+    padding-left: 8px;
+    font-style: italic;
+    color: var(--mk-muted);
+    border-left: 2px solid var(--mk-blue);
+  }
+
+  .reply {
+    display: grid;
+    gap: 3px;
+    margin-left: 8px;
+    padding-left: 8px;
+    border-left: 1px solid var(--mk-line);
+    color: var(--mk-muted);
+  }
+
+  .actions {
+    display: flex;
+    gap: 6px;
+  }
+</style>

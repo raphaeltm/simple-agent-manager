@@ -15,6 +15,10 @@ import type {
   ProjectEventSubscriptionOwnerScope,
   ProjectEventWakeInstructions,
 } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_PROJECT_EVENT_REQUESTED_DELIVERY,
+  INBOX_EVENT_SOURCE,
+} from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { errors } from '../middleware/error';
@@ -63,8 +67,18 @@ export async function createProjectEventSubscriptionForCaller(
   request: ProjectEventSubscriptionCreateRequest
 ): Promise<ProjectEventSubscriptionCreateResponse> {
   assertNoCallerProjectId(request as Record<string, unknown>);
+  // Inbox-item watches are made only by `inbox_write` assign/attach, which check that the chat
+  // may read the task and cap the watchers (inbox slice H1). A direct subscription would skip both.
+  const sources = request.filter?.source;
+  if ((Array.isArray(sources) ? sources : [sources]).includes(INBOX_EVENT_SOURCE)) {
+    throw errors.forbidden(
+      'Inbox task events are watched with inbox_write method assign or attach, not a subscription'
+    );
+  }
   const context = await resolveSurfaceContext(env, caller);
-  const requestedDelivery = normalizeRequestedDelivery(request.requestedDelivery);
+  const requestedDelivery = normalizeRequestedDelivery(
+    request.requestedDelivery ?? DEFAULT_PROJECT_EVENT_REQUESTED_DELIVERY
+  );
 
   let owner: ProjectEventSubscriptionOwner;
   let target: NonNullable<ProjectEventDeliveryPreference['target']>;
@@ -89,6 +103,7 @@ export async function createProjectEventSubscriptionForCaller(
     ownerTaskId: context.callerKind === 'agent' ? context.sourceTaskId : null,
     reason: request.reason ?? null,
     expiresAt,
+    minWakeIntervalMs: request.minWakeIntervalMs ?? null,
   });
   return {
     ...result,

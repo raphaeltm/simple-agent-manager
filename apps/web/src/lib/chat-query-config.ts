@@ -30,3 +30,13 @@ export const RECENT_CHATS_LIMIT = configuredInteger(env.VITE_RECENT_CHATS_LIMIT,
 
 /** Sessions loaded by the `/chats` page. */
 export const ALL_CHATS_LIMIT = configuredInteger(env.VITE_ALL_CHATS_LIMIT, 100, 1);
+
+/**
+ * Sessions loaded into a project chat sidebar. Override via VITE_CHAT_SESSION_LIST_LIMIT.
+ * Here rather than beside the chat page because the project route prefetches that list
+ * from the eagerly loaded router.
+ */
+const DEFAULT_CHAT_SESSION_LIST_LIMIT = 100;
+export const CHAT_SESSION_LIST_LIMIT = parseInt(
+  env.VITE_CHAT_SESSION_LIST_LIMIT || String(DEFAULT_CHAT_SESSION_LIST_LIMIT)
+);

@@ -5,7 +5,7 @@ import * as v from 'valibot';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { parseWithSchema, readRequestJsonRecord } from '../../lib/runtime-validation';
+import { parseWithSchema } from '../../lib/runtime-validation';
 import { ulid } from '../../lib/ulid';
 import { AppError, errors } from '../../middleware/error';
 import {
@@ -17,7 +17,7 @@ import {
 } from '../../services/compose-image-artifacts';
 import { assertAgentDeploymentAllowedForProfile } from '../../services/deployment-control';
 import type { WorkspaceDeletionCallbackKind } from '../../services/workspace-deletion-callback-signal';
-import { verifyWorkspacePublishCallback } from './_callback-auth';
+import { verifyPublishCallback } from './_publish-callback-auth';
 
 const composeImageArtifactsCallbackRoute = new Hono<{ Bindings: Env }>();
 
@@ -37,7 +37,7 @@ const artifactPlatformSchema = v.object({
   variant: v.optional(v.string()),
 });
 
-/** Matches ComposeImageArtifactRequest (services/compose-image-artifacts.ts)
+/** Matches ComposeImageArtifactRequest (`@simple-agent-manager/app-deployment` compose-image-artifacts)
  * exactly. serviceName/sourceRef are required here (not deferred to
  * createComposeImageArtifactUploads's internal check) so a missing field
  * fails closed with 400 instead of the plain Error createComposeImageArtifactUploads
@@ -80,18 +80,13 @@ async function verifyArtifactPolicy(
   c: Context<{ Bindings: Env }>,
   logPrefix: WorkspaceDeletionCallbackKind
 ) {
-  const verified = await verifyWorkspacePublishCallback(
+  const verified = await verifyPublishCallback(
     c,
     logPrefix,
     'Invalid token scope for compose image artifact upload'
   );
 
-  let requestBody: Record<string, unknown>;
-  try {
-    requestBody = await readRequestJsonRecord(c.req.raw, `${logPrefix}.body`);
-  } catch {
-    throw errors.badRequest('Artifact request body is required');
-  }
+  const requestBody = verified.body;
 
   let policyFields: InferOutput<typeof artifactPolicyBodySchema>;
   try {
@@ -151,7 +146,7 @@ composeImageArtifactsCallbackRoute.post('/:id/compose-image-artifacts/init', asy
   if (services.length === 0) {
     throw errors.badRequest('Artifact upload init requires at least one service');
   }
-  const uploadId = ulid();
+  const uploadId = verified.job ? `${verified.job.id}-${verified.job.attempt}` : ulid();
 
   await verified.assertCurrent();
   const uploads = await createComposeImageArtifactUploads(c.env, {

@@ -15,7 +15,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 import { getDecryptedAgentKey } from '../../../src/routes/credentials';
 import { projectCredentialsRoutes } from '../../../src/routes/projects/credentials';
-import { resolveForConsumer } from '../../../src/services/composable-credentials/resolve';
+import {
+  explainForConsumer,
+  resolveForConsumer,
+} from '../../../src/services/composable-credentials/resolve';
 
 vi.mock('drizzle-orm/d1');
 vi.mock('../../../src/middleware/auth', () => ({
@@ -26,7 +29,10 @@ vi.mock('../../../src/middleware/auth', () => ({
 const projectAuthMocks = vi.hoisted(() => ({
   requireProjectCapability: vi.fn(),
 }));
-vi.mock('../../../src/middleware/project-auth', () => ({
+vi.mock('../../../src/middleware/project-auth', async (importOriginal) => ({
+  OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY: (
+    await importOriginal<typeof import('../../../src/middleware/project-auth')>()
+  ).OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY,
   requireProjectCapability: projectAuthMocks.requireProjectCapability,
 }));
 vi.mock('../../../src/lib/ulid', () => ({
@@ -38,6 +44,12 @@ vi.mock('../../../src/services/encryption', () => ({
 }));
 vi.mock('../../../src/services/composable-credentials/resolve', () => ({
   resolveForConsumer: vi.fn().mockResolvedValue(null),
+  explainForConsumer: vi.fn().mockResolvedValue({ resolved: null, halted: false, steps: [] }),
+}));
+// Profile pins are covered by tests/integration/profile-account-pins-capability.test.ts.
+vi.mock('../../../src/services/composable-credentials/profile-context', () => ({
+  resolveSessionProfileCredentialContext: vi.fn().mockResolvedValue(null),
+  resolveProfileCredentialContext: vi.fn().mockResolvedValue(null),
 }));
 vi.mock('../../../src/services/composable-credentials/lazy-backfill', () => ({
   lazyBackfillIfNeeded: vi.fn().mockResolvedValue(false),
@@ -462,6 +474,36 @@ describe('Project Credentials Routes', () => {
     });
   });
 
+  describe('DELETE /:id/cloud-credentials/gcp', () => {
+    it("forgets the deleted Google Cloud credential's API health record", async () => {
+      mockDB.returning.mockResolvedValueOnce([{ id: 'project-gcp-cred' }]);
+      kv.delete.mockClear();
+
+      const res = await app.request(
+        '/api/projects/proj-1/cloud-credentials/gcp',
+        { method: 'DELETE' },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(kv.delete).toHaveBeenCalledWith('gcp-api-health:v1:project-gcp-cred');
+    });
+
+    it('does not touch API health records for other providers', async () => {
+      mockDB.returning.mockResolvedValueOnce([{ id: 'project-hetzner-cred' }]);
+      kv.delete.mockClear();
+
+      const res = await app.request(
+        '/api/projects/proj-1/cloud-credentials/hetzner',
+        { method: 'DELETE' },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(kv.delete).not.toHaveBeenCalledWith(expect.stringContaining('gcp-api-health'));
+    });
+  });
+
   describe('DELETE /:id/credentials/:agentType/:credentialKind', () => {
     it('returns 404 when project is not owned', async () => {
       projectAuthMocks.requireProjectCapability.mockRejectedValueOnce(
@@ -519,32 +561,37 @@ describe('getDecryptedAgentKey — resolution order', () => {
   beforeEach(() => {
     mockDB = makeMockDB();
     vi.mocked(resolveForConsumer).mockResolvedValue(null);
+    vi.mocked(explainForConsumer).mockResolvedValue({ resolved: null, halted: false, steps: [] });
   });
 
   it('maps CC settings baseUrl and dialect for Anthropic-compatible passthrough credentials', async () => {
-    vi.mocked(resolveForConsumer).mockResolvedValueOnce({
-      consumer: { kind: 'agent', agentType: 'claude-code' },
-      configuration: {
-        id: 'cfg-anthropic-alt',
-        ownerId: 'u1',
-        name: 'Anthropic-compatible',
+    vi.mocked(explainForConsumer).mockResolvedValueOnce({
+      resolved: {
         consumer: { kind: 'agent', agentType: 'claude-code' },
-        credentialId: 'cred-anthropic-alt',
-        settings: {
-          baseUrl: 'https://anthropic-alt.example/anthropic',
-          dialect: 'anthropic',
+        configuration: {
+          id: 'cfg-anthropic-alt',
+          ownerId: 'u1',
+          name: 'Anthropic-compatible',
+          consumer: { kind: 'agent', agentType: 'claude-code' },
+          credentialId: 'cred-anthropic-alt',
+          settings: {
+            baseUrl: 'https://anthropic-alt.example/anthropic',
+            dialect: 'anthropic',
+          },
+          isActive: true,
         },
-        isActive: true,
+        credential: {
+          id: 'cred-anthropic-alt',
+          ownerId: 'u1',
+          name: 'Anthropic-compatible key',
+          kind: 'api-key',
+          secret: { kind: 'api-key', apiKey: 'sk-anthropic-compatible' },
+          isActive: true,
+        },
+        source: 'user-attachment',
       },
-      credential: {
-        id: 'cred-anthropic-alt',
-        ownerId: 'u1',
-        name: 'Anthropic-compatible key',
-        kind: 'api-key',
-        secret: { kind: 'api-key', apiKey: 'sk-anthropic-compatible' },
-        isActive: true,
-      },
-      source: 'user-attachment',
+      halted: false,
+      steps: [],
     });
 
     const result = await getDecryptedAgentKey(
@@ -552,7 +599,7 @@ describe('getDecryptedAgentKey — resolution order', () => {
       'u1',
       'claude-code',
       'test-key',
-      'p1',
+      'p1'
     );
 
     expect(result).toMatchObject({
@@ -564,141 +611,6 @@ describe('getDecryptedAgentKey — resolution order', () => {
     });
   });
 
-  it('returns project-scoped credential when projectId is provided and project row exists', async () => {
-    // First query: project-scoped lookup returns an active credential
-    mockDB.limit.mockResolvedValueOnce([
-      {
-        id: 'c1',
-        userId: 'u1',
-        projectId: 'p1',
-        encryptedToken: 'enc',
-        iv: 'iv',
-        credentialKind: 'api-key',
-        isActive: true,
-      },
-    ]);
-
-    const result = await getDecryptedAgentKey(
-      mockDB as unknown as Parameters<typeof getDecryptedAgentKey>[0],
-      'u1',
-      'claude-code',
-      'test-key',
-      'p1'
-    );
-
-    expect(result).not.toBeNull();
-    expect(result?.credential).toBe('sk-ant-live-value');
-    expect(result?.credentialKind).toBe('api-key');
-    expect(result?.credentialSource).toBe('project');
-  });
-
-  it('falls back to user-scoped credential when project has no override', async () => {
-    // First query: project-scoped returns nothing
-    // Second query: user-scoped (project_id IS NULL) returns a credential
-    mockDB.limit.mockResolvedValueOnce([]).mockResolvedValueOnce([
-      {
-        id: 'c2',
-        userId: 'u1',
-        projectId: null,
-        encryptedToken: 'enc',
-        iv: 'iv',
-        credentialKind: 'oauth-token',
-      },
-    ]);
-
-    const result = await getDecryptedAgentKey(
-      mockDB as unknown as Parameters<typeof getDecryptedAgentKey>[0],
-      'u1',
-      'claude-code',
-      'test-key',
-      'p1'
-    );
-
-    expect(result).not.toBeNull();
-    expect(result?.credentialKind).toBe('oauth-token');
-    expect(result?.credentialSource).toBe('user');
-  });
-
-  it('skips project lookup when projectId is null', async () => {
-    // No project lookup should happen — only one query (user-scoped)
-    mockDB.limit.mockResolvedValueOnce([
-      {
-        id: 'c3',
-        userId: 'u1',
-        projectId: null,
-        encryptedToken: 'enc',
-        iv: 'iv',
-        credentialKind: 'api-key',
-      },
-    ]);
-
-    const result = await getDecryptedAgentKey(
-      mockDB as unknown as Parameters<typeof getDecryptedAgentKey>[0],
-      'u1',
-      'claude-code',
-      'test-key',
-      null
-    );
-
-    expect(result).not.toBeNull();
-    // Only user-scoped lookup ran — limit called once
-    expect(mockDB.limit).toHaveBeenCalledTimes(1);
-  });
-
-  it('returns null when neither project, user, nor platform credentials exist', async () => {
-    // project → empty, user → empty, platform → empty
-    mockDB.limit
-      .mockResolvedValueOnce([]) // project
-      .mockResolvedValueOnce([]) // user
-      .mockResolvedValueOnce([]); // platform
-
-    const result = await getDecryptedAgentKey(
-      mockDB as unknown as Parameters<typeof getDecryptedAgentKey>[0],
-      'u1',
-      'claude-code',
-      'test-key',
-      'p1'
-    );
-    expect(result).toBeNull();
-  });
-
-  // Regression: HIGH #2 (runtime path). An inactive project-scoped row must NOT
-  // silently fall through to the user-scoped credential — doing so would leak
-  // a user-wide credential into project execution when the user had explicitly
-  // deactivated it at project scope.
-  it('returns null (blocks user fallback) when project row exists but is inactive', async () => {
-    mockDB.limit.mockResolvedValueOnce([
-      {
-        id: 'c-inactive',
-        userId: 'u1',
-        projectId: 'p1',
-        encryptedToken: 'enc',
-        iv: 'iv',
-        credentialKind: 'oauth-token',
-        isActive: false,
-      },
-    ]);
-    // Even if a user-scoped row exists, it must not be returned.
-    mockDB.limit.mockResolvedValueOnce([
-      {
-        id: 'c-user',
-        userId: 'u1',
-        projectId: null,
-        encryptedToken: 'enc',
-        iv: 'iv',
-        credentialKind: 'oauth-token',
-        isActive: true,
-      },
-    ]);
-
-    const result = await getDecryptedAgentKey(
-      mockDB as unknown as Parameters<typeof getDecryptedAgentKey>[0],
-      'u1',
-      'claude-code',
-      'test-key',
-      'p1'
-    );
-
-    expect(result).toBeNull();
-  });
+  // The legacy-table precedence (project row, inactive project halt, user row, platform) runs
+  // against a real SQL engine in tests/unit/services/legacy-agent-credentials.test.ts.
 });

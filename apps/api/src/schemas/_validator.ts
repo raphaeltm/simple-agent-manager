@@ -3,11 +3,7 @@
  * to match the existing API error response format: { error: string, message: string }.
  */
 import { vValidator } from '@hono/valibot-validator';
-import type {
-  GenericSchema,
-  GenericSchemaAsync,
-  InferOutput,
-} from 'valibot';
+import type { GenericSchema, GenericSchemaAsync, InferOutput } from 'valibot';
 import * as v from 'valibot';
 
 import { log } from '../lib/logger';
@@ -98,3 +94,11 @@ export async function parseOptionalBody<T extends GenericSchema>(
 
 /** Type helper to extract the validated output type from a schema */
 export type ValidatedBody<T extends GenericSchema | GenericSchemaAsync> = InferOutput<T>;
+
+/**
+ * Upper bound for a caller-echoed resource identifier (a ULID, a UUID). Matches the
+ * existing bound in `schemas/report.ts`. It is a shape guard, not a check of anything:
+ * the value's real validation is the scoped `WHERE id = ? AND project_id = ?` lookup
+ * that follows (`.claude/rules/51-runtime-boundary-validation.md`).
+ */
+export const MAX_RESOURCE_ID_LENGTH = 128;

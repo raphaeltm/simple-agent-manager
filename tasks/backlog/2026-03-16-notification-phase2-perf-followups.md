@@ -1,5 +1,11 @@
 # Notification Phase 2 — Performance & Correctness Follow-ups
 
+> **Reconciliation 2026-10-26:** Nothing in scope shipped. #2443 (`a3a802caa`) added three lines
+> to the `needs_input` dedup update in `apps/api/src/durable-objects/notification.ts`, so the
+> pointers below moved by +3: `isNotificationEnabled` is now `:427-484`, `enforceLimit`
+> `:248,698-707` and `stubResponse` `:662-678`. The `'suppressed'` caller is still
+> `human-input-tool.ts:168`.
+
 > **Reconciliation 2026-10-12:** Nothing in scope shipped. Pointer fix: #2213 (`57aaa057b`) moved
 > `request_human_input` into `apps/api/src/routes/mcp/human-input-tool.ts`, so the `'suppressed'`
 > id check cited below at `instruction-tools.ts:663` is now `human-input-tool.ts:168`. Still open:

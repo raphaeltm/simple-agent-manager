@@ -51,7 +51,7 @@ export const NORTHWIND = {
   projectName: 'Payments API',
   repository: 'northwind-labs/payments-api',
   defaultBranch: 'main',
-  owner: { id: 'user-priya', name: 'Priya Natarajan', email: 'priya@northwindlabs.dev' },
+  owner: { id: 'user-priya', name: 'Camille Durand', email: 'camille@northwindlabs.dev' },
   members: [
     { id: 'user-marcus', name: 'Marcus Chen', email: 'marcus@northwindlabs.dev' },
     { id: 'user-elena', name: 'Elena Rossi', email: 'elena@northwindlabs.dev' },

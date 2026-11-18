@@ -1,4 +1,8 @@
-import { DEFAULT_CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT,
+  RUN_USAGE_MAX_MODELS_PER_REPORT,
+  RUN_USAGE_MAX_TOKENS_PER_COUNTER,
+} from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 const UsageIdentifierSchema = v.pipe(v.string(), v.minLength(1), v.maxLength(160));
@@ -55,6 +59,7 @@ export const AcpSessionActivityReportSchema = v.object({
     )
   ),
   runtimeWorkProgressAt: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
+  steeringSupported: v.optional(v.boolean()),
 });
 
 export const AcpSessionUsageLimitObservationSchema = v.object({
@@ -71,6 +76,39 @@ export const AcpSessionUsageLimitObservationSchema = v.object({
   freshnessMs: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
 });
 
+/**
+ * A token counter in one usage report. The ceiling (one trillion) is far above any real run and
+ * keeps summed reads well inside SQLite's integer range whatever a reporter sends.
+ */
+const TokenCountSchema = v.pipe(
+  v.number(),
+  v.integer(),
+  v.minValue(0),
+  v.maxValue(RUN_USAGE_MAX_TOKENS_PER_COUNTER)
+);
+
+/**
+ * Insights slice U: cumulative token totals of one VM-agent usage epoch, per model. Optional, so an
+ * old agent (no field) and a new agent (field present) both pass; an old control plane strips it.
+ */
+export const AcpSessionTokenUsageSchema = v.object({
+  epoch: UsageIdentifierSchema,
+  models: v.pipe(
+    v.array(
+      v.object({
+        // '' or absent: the harness did not say which model ran.
+        model: v.optional(v.pipe(v.string(), v.maxLength(160))),
+        inputTokens: TokenCountSchema,
+        outputTokens: TokenCountSchema,
+        cacheReadTokens: v.optional(TokenCountSchema),
+        cacheWriteTokens: v.optional(TokenCountSchema),
+        reasoningTokens: v.optional(TokenCountSchema),
+      })
+    ),
+    v.maxLength(RUN_USAGE_MAX_MODELS_PER_REPORT)
+  ),
+});
+
 export const AcpSessionUsageReportSchema = v.object({
   nodeId: UsageIdentifierSchema,
   agentType: v.optional(UsageIdentifierSchema),
@@ -83,6 +121,7 @@ export const AcpSessionUsageReportSchema = v.object({
     v.array(AcpSessionUsageLimitObservationSchema),
     v.maxLength(DEFAULT_CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT)
   ),
+  tokenUsage: v.optional(AcpSessionTokenUsageSchema),
 });
 
 export const AcpSessionForkSchema = v.object({

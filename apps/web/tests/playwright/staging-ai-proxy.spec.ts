@@ -1,5 +1,5 @@
 /**
- * Staging verification for AI Proxy admin UI and trial pathway.
+ * Staging verification for AI Proxy admin UI and the platform AI pathway.
  */
 import { expect, test } from '@playwright/test';
 

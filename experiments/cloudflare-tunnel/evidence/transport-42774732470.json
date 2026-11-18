@@ -1,0 +1,155 @@
+{
+  "run": "42774732470-1",
+  "checks": [
+    {
+      "name": "existing-vm-route-exclusion",
+      "passed": true
+    },
+    {
+      "name": "updated-token-can-create-named-tunnel",
+      "passed": true
+    },
+    {
+      "name": "worker-vm-443",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "origin_observation": {
+        "origin": "sam-tunnel-proof-42774732470-1",
+        "path": "/health",
+        "remoteLoopback": true,
+        "samRelayMarker": true,
+        "forwardedHostPresent": true,
+        "probeKeyLeaked": false
+      }
+    },
+    {
+      "name": "direct-vm-443-verified-tls",
+      "passed": false,
+      "status": null,
+      "error": "ClientConnectorSSLError",
+      "origin_observation": null
+    },
+    {
+      "name": "worker-vm-8443",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "origin_observation": {
+        "origin": "sam-tunnel-proof-42774732470-1",
+        "path": "/health",
+        "remoteLoopback": true,
+        "samRelayMarker": true,
+        "forwardedHostPresent": true,
+        "probeKeyLeaked": false
+      }
+    },
+    {
+      "name": "direct-vm-8443-verified-tls",
+      "passed": false,
+      "status": null,
+      "error": "ClientConnectorSSLError",
+      "origin_observation": null
+    },
+    {
+      "name": "worker-flat-443",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "origin_observation": {
+        "origin": "sam-tunnel-proof-42774732470-1",
+        "path": "/health",
+        "remoteLoopback": true,
+        "samRelayMarker": true,
+        "forwardedHostPresent": true,
+        "probeKeyLeaked": false
+      }
+    },
+    {
+      "name": "direct-flat-443-verified-tls",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "origin_observation": {
+        "origin": "sam-tunnel-proof-42774732470-1",
+        "path": "/health",
+        "remoteLoopback": true,
+        "samRelayMarker": false,
+        "forwardedHostPresent": false,
+        "probeKeyLeaked": false
+      }
+    },
+    {
+      "name": "worker-flat-8443",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "origin_observation": {
+        "origin": "sam-tunnel-proof-42774732470-1",
+        "path": "/health",
+        "remoteLoopback": true,
+        "samRelayMarker": true,
+        "forwardedHostPresent": true,
+        "probeKeyLeaked": false
+      }
+    },
+    {
+      "name": "direct-flat-8443-verified-tls",
+      "passed": true,
+      "status": 200,
+      "error": null,
+      "origin_observation": {
+        "origin": "sam-tunnel-proof-42774732470-1",
+        "path": "/health",
+        "remoteLoopback": true,
+        "samRelayMarker": false,
+        "forwardedHostPresent": false,
+        "probeKeyLeaked": false
+      }
+    },
+    {
+      "name": "worker-rejects-unauthenticated",
+      "passed": true,
+      "status": 401
+    },
+    {
+      "name": "origin-rejects-direct-unauthenticated",
+      "passed": true,
+      "status": 401
+    },
+    {
+      "name": "two-local-http-ports-one-tunnel",
+      "passed": true
+    },
+    {
+      "name": "streaming-first-byte-before-completion",
+      "passed": true,
+      "first_byte_seconds": 0.023,
+      "total_seconds": 2.025
+    },
+    {
+      "name": "websocket-text-binary-and-35s-idle",
+      "passed": true
+    },
+    {
+      "name": "connector-stopped-no-direct-ip-fallback",
+      "passed": true,
+      "status": 530
+    },
+    {
+      "name": "connector-restart-same-tunnel-and-dns",
+      "passed": true
+    },
+    {
+      "name": "cleanup",
+      "passed": true,
+      "errors": []
+    },
+    {
+      "name": "cleanup",
+      "passed": true,
+      "errors": []
+    }
+  ],
+  "scope": "isolated CI origin and Worker in staging zone; not a managed SAM VM"
+}

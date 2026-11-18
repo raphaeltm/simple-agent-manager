@@ -27,6 +27,7 @@ import {
 } from '@simple-agent-manager/shared';
 
 import type * as schema from '../db/schema';
+import { log } from '../lib/logger';
 
 type StringGuard<T extends string> = (value: unknown) => value is T;
 
@@ -124,12 +125,72 @@ export function toCapacityPool(row: schema.CapacityPool): CapacityPoolDto {
       isCapacityExhaustionPolicy
     ),
     maxNodes: row.maxNodes,
+    sourceOrder: parseCapacityPoolSourceOrder(row.id, row.sourceOrderJson),
+    excludedSourceIds: parseCapacityPoolExcludedSources(row.id, row.excludedSourceIdsJson),
     lastReconciledAt: row.lastReconciledAt,
     migrationVersion: row.migrationVersion,
     migrationState: row.migrationState,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+/**
+ * The stored provider order, or null when unset. A malformed value reads as unset (every source
+ * equal) rather than failing the pool read, and is logged so it can be fixed.
+ */
+export function parseCapacityPoolSourceOrder(
+  poolId: string,
+  raw: string | null | undefined
+): string[] | null {
+  if (raw === null || raw === undefined) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    // Unlike the switched-off list (parseCapacityPoolExcludedSources), one bad entry rejects the
+    // whole order: a partial order would silently re-rank accounts.
+    if (
+      Array.isArray(parsed) &&
+      parsed.every((id): id is string => typeof id === 'string' && id.length > 0)
+    ) {
+      return parsed.length > 0 ? parsed : null;
+    }
+  } catch {
+    // fall through to the warning below
+  }
+  log.warn('capacity_pool.source_order_invalid', { poolId });
+  return null;
+}
+
+/**
+ * Accounts switched off in this pool, or an empty list when none are. Reads the column the way
+ * the placement authority SQL does (`json_each` in placement-authority.ts): every non-empty
+ * string entry is an excluded id. The migration's CHECK only admits a JSON array, and the update
+ * path only writes arrays of ids, so anything else is logged and skipped rather than failing
+ * the pool read, which would stop every placement and not just this account's.
+ */
+export function parseCapacityPoolExcludedSources(
+  poolId: string,
+  raw: string | null | undefined
+): string[] {
+  if (raw === null || raw === undefined) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = null;
+  }
+  if (!Array.isArray(parsed)) {
+    log.warn('capacity_pool.excluded_sources_invalid', { poolId });
+    return [];
+  }
+  const ids = parsed.filter((id): id is string => typeof id === 'string' && id.length > 0);
+  if (ids.length !== parsed.length) {
+    log.warn('capacity_pool.excluded_sources_invalid', {
+      poolId,
+      skipped: parsed.length - ids.length,
+    });
+  }
+  return ids;
 }
 
 export function toCapacityPoolCandidate(

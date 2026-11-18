@@ -3,18 +3,24 @@ import { type Context, Hono } from 'hono';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import {
-  checkRateLimit,
-  createRateLimitKey,
-  getCurrentWindowStart,
-  isRateLimitReached,
-} from '../middleware/rate-limit';
+import { getCurrentWindowStart } from '../middleware/rate-limit';
 import { enqueueGenericWebhookProjectEvent } from '../services/generic-webhook-project-event-producer';
 import {
   admitAndSubmitTriggerExecution,
   type TriggerTaskSubmitter,
 } from '../services/trigger-admission';
 import { renderTemplate } from '../services/trigger-template';
+import {
+  BodyTooLargeError,
+  clientIp,
+  invalidTokenLimitReached,
+  invalidTokenResponse,
+  publicError,
+  readBoundedBody,
+  recordRejected,
+  takeRateLimit,
+  webhookDeliveryDispositionResponse,
+} from '../services/webhook-ingress-http';
 import {
   areWebhookTriggersEnabled,
   getWebhookTriggerLimits,
@@ -35,111 +41,13 @@ import {
   findWebhookTriggerByToken,
   finishWebhookDelivery,
   linkWebhookDeliveryExecution,
-  recordWebhookRejectedDelivery,
 } from '../services/webhook-trigger-store';
 
 type WebhookProjectEventAdmission = Awaited<ReturnType<typeof enqueueGenericWebhookProjectEvent>>;
 
-class BodyTooLargeError extends Error {}
-
-async function readBoundedBody(request: Request, maxBytes: number): Promise<Uint8Array> {
-  const reader = request.body?.getReader();
-  if (!reader) return new Uint8Array();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  let chunk = await reader.read();
-  while (!chunk.done) {
-    size += chunk.value.byteLength;
-    if (size > maxBytes) {
-      await reader.cancel();
-      throw new BodyTooLargeError();
-    }
-    chunks.push(chunk.value);
-    chunk = await reader.read();
-  }
-  const body = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return body;
-}
-
 function bearerToken(authorization: string | undefined): string | null {
   const match = authorization?.match(/^Bearer ([^\s]+)$/i);
   return match?.[1]?.trim() || null;
-}
-
-function clientIp(request: Request): string {
-  return (
-    request.headers.get('CF-Connecting-IP') ??
-    request.headers.get('X-Forwarded-For')?.split(',')[0]?.trim() ??
-    'unknown'
-  );
-}
-
-async function takeRateLimit(
-  env: Env,
-  prefix: string,
-  identifier: string,
-  limit: number,
-  windowSeconds: number
-): Promise<{ limited: boolean; windowStart: number }> {
-  const windowStart = getCurrentWindowStart(windowSeconds);
-  const key = createRateLimitKey(prefix, identifier, windowStart);
-  return {
-    limited: !(await checkRateLimit(env.KV, key, limit, windowSeconds)).allowed,
-    windowStart,
-  };
-}
-
-function publicError(status: 400 | 404 | 413 | 415 | 429 | 503, message: string): Response {
-  return Response.json({ accepted: false, message }, { status });
-}
-
-async function invalidTokenResponse(
-  env: Env,
-  ipKey: string,
-  limits: ReturnType<typeof getWebhookTriggerLimits>
-) {
-  const { limited } = await takeRateLimit(
-    env,
-    'webhook-invalid',
-    ipKey,
-    limits.invalidTokenRateLimit,
-    limits.rateLimitWindowSeconds
-  );
-  return limited ? publicError(429, 'Too many requests') : publicError(404, 'Not found');
-}
-
-async function invalidTokenLimitReached(
-  env: Env,
-  ipKey: string,
-  limits: ReturnType<typeof getWebhookTriggerLimits>
-): Promise<boolean> {
-  const windowStart = getCurrentWindowStart(limits.rateLimitWindowSeconds);
-  return isRateLimitReached(
-    env.KV,
-    createRateLimitKey('webhook-invalid', ipKey, windowStart),
-    limits.invalidTokenRateLimit,
-    windowStart
-  );
-}
-
-async function recordRejected(
-  env: Env,
-  input: Parameters<typeof recordWebhookRejectedDelivery>[1]
-): Promise<void> {
-  try {
-    await recordWebhookRejectedDelivery(env, input);
-  } catch (error) {
-    log.warn('webhook_trigger.rejection_audit_failed', {
-      triggerId: input.triggerId,
-      outcome: input.outcome,
-      errorType: error instanceof Error ? error.name : 'UnknownError',
-    });
-  }
 }
 
 async function handleWebhookIngress(
@@ -172,12 +80,14 @@ async function handleWebhookIngress(
 
   const receivedAt = new Date().toISOString();
   const rejectionWindow = getCurrentWindowStart(limits.rateLimitWindowSeconds);
-  if (!resolved.trigger.agentProfileId) {
+  // Unreadable stored conditions must not start a run for every event.
+  const filters = resolved.config.filters;
+  if (!resolved.trigger.agentProfileId || filters === null) {
     await recordRejected(c.env, {
       triggerId: resolved.trigger.id,
       outcome: 'configuration_error',
       httpStatus: 503,
-      errorCode: 'missing_agent_profile',
+      errorCode: !resolved.trigger.agentProfileId ? 'missing_agent_profile' : 'invalid_filters',
       windowStart: rejectionWindow,
       receivedAt,
     });
@@ -241,23 +151,9 @@ async function handleWebhookIngress(
     bodyBytes: bodyBytes.byteLength,
     receivedAt,
   });
-  if (delivery.disposition === 'duplicate') {
-    return c.json(
-      {
-        accepted: true,
-        duplicate: true,
-        deliveryId: delivery.id,
-        executionId: delivery.executionId,
-      },
-      202
-    );
-  }
-  if (delivery.disposition === 'in_flight') {
-    return publicError(503, 'Webhook is still processing');
-  }
-  if (delivery.disposition === 'failed') {
-    return publicError(503, 'Webhook could not be processed');
-  }
+  // `body_reused` only answers a signed request whose ID is in a header; token calls never ask.
+  if (delivery.disposition === 'body_reused') throw new Error('Unexpected body reuse refusal');
+  if (delivery.disposition !== 'reserved') return webhookDeliveryDispositionResponse(delivery);
 
   const finalize = async (
     outcome: WebhookDeliveryOutcome,
@@ -281,7 +177,7 @@ async function handleWebhookIngress(
   try {
     const filterResult = evaluateWebhookFilters(
       body,
-      resolved.config.filters,
+      filters,
       resolved.config.filterMode,
       limits.maxFilterPathDepth
     );

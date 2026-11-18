@@ -1,16 +1,16 @@
 /** Real Workers restoration fixture; only external VM HTTP is doubled. */
+import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
+import {
+  claimDuePromptDeliveries,
+  type PromptDeliveryResult,
+} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import { runPromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-runner';
 import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { expect, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { resolveDurableExecutionConfig } from '../../../src/durable-objects/project-data/durable-execution-config';
-import {
-  claimDuePromptDeliveries,
-  type PromptDeliveryResult,
-} from '../../../src/durable-objects/project-data/prompt-delivery';
-import { runPromptDeliveryClaim } from '../../../src/durable-objects/project-data/prompt-delivery-runner';
 import type { TaskRunner } from '../../../src/durable-objects/task-runner';
 import type { Env } from '../../../src/env';
 import { getSelectedAgentCredentialReference } from '../../../src/routes/credentials';
@@ -23,6 +23,7 @@ import { signCallbackToken } from '../../../src/services/jwt';
 import { resolveTaskStartPlacementCredentialAttribution } from '../../../src/services/placement-resolver';
 import { resolveSessionRuntimeContract } from '../../../src/services/session-runtime-contract';
 import { DefaultVmPromptDeliveryAdapter } from '../../../src/services/vm-prompt-delivery-adapter';
+import { ensurePoolsWithStarterMachines } from '../../helpers/capacity-pool-picks';
 import { projectStub, sqlRows, testEnv } from './agent-message-channels';
 import { pauseAlarms, pauseNodeAlarms, type StateWriteHook } from './durable-alarm-control';
 import {
@@ -55,6 +56,9 @@ export async function agentOnVm(taskMode: TaskMode, agentType = 'claude-code') {
   await seedInstallation(id, userId, { installationIdValue: id, accountName: userId });
   await seedProject(projectId, userId, id);
   await seedNode(nodeId, userId);
+  await env.DATABASE.prepare('UPDATE nodes SET runtime_incarnation_id=? WHERE id=?')
+    .bind(`incarnation-${nodeId}`, nodeId)
+    .run();
   await pauseNodeAlarms(nodeId);
   const stub = projectStub(projectId);
   await stub.ensureProjectId(projectId);
@@ -65,6 +69,9 @@ export async function agentOnVm(taskMode: TaskMode, agentType = 'claude-code') {
 
   const chatSessionId = await stub.createSession(workspaceId, 'Task', taskId, userId);
   await seedWorkspace(workspaceId, nodeId, userId, { projectId, chatSessionId });
+  await env.DATABASE.prepare('UPDATE workspaces SET eviction_generation=? WHERE id=?')
+    .bind(`generation-${workspaceId}`, workspaceId)
+    .run();
   await seedTask(taskId, projectId, userId, {
     workspaceId,
     chatSessionId,
@@ -105,7 +112,7 @@ export async function agentOnVm(taskMode: TaskMode, agentType = 'claude-code') {
   )
     .bind(`agent-cred-${id}`, userId, agentType, agentKey.ciphertext, agentKey.iv, now, now)
     .run();
-  const token = await signCallbackToken(workspaceId, testEnv);
+  const token = await signCallbackToken(workspaceId, testEnv, { callbackGeneration: null });
   const injected = await SELF.fetch(
     `https://api.test.example.com/api/workspaces/${workspaceId}/agent-key`,
     {
@@ -263,6 +270,13 @@ export async function readyReplacementNode(f: Fixture) {
     .from(schema.projects)
     .where(eq(schema.projects.id, f.projectId))
     .get())!;
+  // The replacement places onto the user's pool, and a new pool picks nothing by itself.
+  await ensurePoolsWithStarterMachines(db as never, {
+    userId: f.userId,
+    projectId: f.projectId,
+    includeInstallation: false,
+    owner: { userId: f.userId, projectId: f.projectId },
+  });
   const resolution = await resolveTaskStartPlacementCredentialAttribution(
     db,
     {
@@ -321,7 +335,9 @@ export async function deleteSleptWorkspace(nodeId: string, taskId: string): Prom
   const stub = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(nodeId));
   await runInDurableObject(stub, async (instance, ctx) => {
     const entry = await ctx.storage.get<{ deleteAt: number }>(`ws-delete:${row!.workspace_id}`);
-    expect(entry).toBeDefined();
+    // Immediate verified-sleep cleanup may already have completed. A missing
+    // queue entry alone is never evidence of physical deletion.
+    if (!entry) return;
     const clock = vi.spyOn(Date, 'now').mockReturnValue(entry!.deleteAt + 1);
     const pending: Promise<unknown>[] = [];
     const waitUntil = vi.spyOn(ctx, 'waitUntil').mockImplementation((promise) => {
@@ -334,5 +350,17 @@ export async function deleteSleptWorkspace(nodeId: string, taskId: string): Prom
       waitUntil.mockRestore();
       clock.mockRestore();
     }
+  });
+  const proof = await env.DATABASE.prepare(
+    `SELECT node_id, eviction_generation, runtime_deletion_confirmed_at, runtime_deletion_proof
+     FROM workspaces WHERE id=?`
+  )
+    .bind(row!.workspace_id)
+    .first();
+  expect(proof, 'sleep cleanup requires durable strict physical deletion proof').toMatchObject({
+    node_id: nodeId,
+    eviction_generation: `generation-${row!.workspace_id}`,
+    runtime_deletion_confirmed_at: expect.any(String),
+    runtime_deletion_proof: 'vm_agent_confirmed',
   });
 }

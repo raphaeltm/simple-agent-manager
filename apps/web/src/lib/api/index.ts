@@ -13,7 +13,6 @@ export type {
   AdminErrorsFilter,
   AdminLogQueryParams,
   AdminProjectEventInspectorResponse,
-  AdminTrialsConfigResponse,
   AIProxyConfigResponse,
   BillingMode,
   CostByModel,
@@ -24,6 +23,7 @@ export type {
   PlatformConfigStatus,
   PlatformConfigStatusResponse,
   PlatformIntegrationConfigInput,
+  PlatformIntegrationGroup,
   PlatformIntegrationStatus,
 } from './admin';
 export type {
@@ -34,9 +34,6 @@ export type {
   AnalyticsEventsResponse,
   AnalyticsFeatureAdoptionResponse,
   AnalyticsForwardStatusResponse,
-  AnalyticsFunnelResponse,
-  AnalyticsGeoResponse,
-  AnalyticsRetentionResponse,
   AnalyticsWebsiteTrafficResponse,
   WebsiteTrafficHost,
   WebsiteTrafficSection,
@@ -68,7 +65,6 @@ export {
   fetchAdminNodeUsage,
   fetchAdminPlatformConfig,
   fetchAdminProjectEventInspector,
-  fetchAdminTrialsConfig,
   fetchAdminUserComputeUsage,
   fetchAdminUserNodeUsage,
   fetchAdminUserQuota,
@@ -79,9 +75,6 @@ export {
   fetchAnalyticsEvents,
   fetchAnalyticsFeatureAdoption,
   fetchAnalyticsForwardStatus,
-  fetchAnalyticsFunnel,
-  fetchAnalyticsGeo,
-  fetchAnalyticsRetention,
   fetchAnalyticsWebsiteTraffic,
   fetchSignupApprovalConfig,
   getAdminLogStreamUrl,
@@ -95,13 +88,18 @@ export {
   saveAdminDebugDiagnosisAsIdea,
   updateAdminDefaultQuota,
   updateAdminPlatformConfig,
-  updateAdminTrialsConfig,
   updateAdminUserQuota,
   updateAIProxyBillingMode,
   updateAIProxyConfig,
   updatePlatformCredential,
   updateSignupApprovalConfig,
 } from './admin';
+export { getInstallationHealth, refreshCloudflareCost } from './admin-health-cost';
+export {
+  decideOperationsApproval,
+  fetchOperationsApproval,
+  fetchOperationsApprovals,
+} from './admin-operations-approvals';
 export {
   abandonAdminProjectDataArchiveMigration,
   closeAdminProjectDataArchiveCircuitBreaker,
@@ -109,6 +107,23 @@ export {
   fetchAdminProjectDataArchiveProblemMigrations,
   fetchAdminProjectDataStorageTelemetry,
 } from './admin-project-data-storage';
+export type {
+  AdminAgentEmailStatus,
+  AgentEmailLoopbackReceived,
+  AgentEmailLoopbackSent,
+} from './agent-email';
+export {
+  fetchAdminAgentEmail,
+  fetchAgentEmailSetupPlan,
+  getAgentEmailConfig,
+  runAgentEmailSetup,
+  sendAgentEmailLoopback,
+} from './agent-email';
+export {
+  getAgentModelCatalog,
+  getProjectAgentModelSettings,
+  updateProjectAgentModelSettings,
+} from './agent-models';
 export {
   createAgentProfile,
   createSkill,
@@ -126,6 +141,7 @@ export {
   getAgentSettings,
   getAnalyticsApiUrl,
   getClientErrorsApiUrl,
+  getProfilePickerState,
   getProfileRuntimeConfig,
   getSkillRuntimeConfig,
   getTranscribeApiUrl,
@@ -141,6 +157,7 @@ export {
   saveProjectCloudCredential,
   toggleAgentCredential,
   updateAgentProfile,
+  updateProfilePicker,
   updateSkill,
   upsertProfileRuntimeEnvVar,
   upsertProfileRuntimeFile,
@@ -194,6 +211,7 @@ export type {
   MessageCommentAction,
   MessageCommentAnchor,
   MessageCommentAuthor,
+  MessageCommentContext,
   MessageCommentRealtimeEvent,
   MessageCommentReply,
   MessageCommentStatus,
@@ -204,6 +222,7 @@ export type {
 export {
   createMessageCommentReply,
   createMessageCommentThread,
+  getMessageCommentContext,
   listMessageComments,
   reopenMessageCommentThread,
   resolveMessageCommentThread,
@@ -218,13 +237,19 @@ export {
   createCCAttachment,
   createCCConfiguration,
   createCCCredential,
+  createProfilePin,
   deleteCCAttachment,
   deleteCCConfiguration,
   deleteCCCredential,
+  deleteProfilePin,
   getResolutionStatus,
+  getSessionAgentCredential,
   listCCAttachments,
   listCCConfigurations,
   listCCCredentials,
+  listProfilePinCandidates,
+  listProfilePins,
+  makeCCDefault,
   updateCCAttachment,
   updateCCConfiguration,
   updateCCCredential,
@@ -266,8 +291,9 @@ export type {
   DeploymentEnvironmentStopResponse,
   DeploymentObservedState,
   DeploymentPublicRoute,
+  DeploymentReleaseEvent,
+  DeploymentReleaseSubmittedBy,
   DeploymentReleaseSummary,
-  DeploymentSecretEntry,
   DeploymentVolume,
   ProjectDeploymentGcpResponse,
   UpsertDeploymentEnvironmentConfigVarRequest,
@@ -281,7 +307,6 @@ export {
   deleteDeploymentEnvironment,
   deleteDeploymentEnvironmentConfigVar,
   deleteDeploymentEnvironmentVolume,
-  deleteDeploymentSecret,
   deleteProjectDeploymentGcp,
   detachDeploymentEnvironmentVolumes,
   getDeploymentEnvironmentConfig,
@@ -294,9 +319,9 @@ export {
   listDeploymentEnvironments,
   listDeploymentEnvironmentVolumes,
   listDeploymentPublicRoutes,
-  listDeploymentSecrets,
+  listDeploymentReleaseEvents,
+  listDeploymentReleases,
   listGcpProjectsForDeploy,
-  setDeploymentSecret,
   setupProjectDeploymentGcp,
   startDeploymentEnvironment,
   stopDeploymentEnvironment,
@@ -340,6 +365,26 @@ export {
   listRepositories,
 } from './github';
 export { listGitLabBranches, listGitLabProjects } from './gitlab';
+export type { IdeaUpdateNote, IdeaUpdatesPage } from './idea-updates';
+export { listIdeaUpdates, postIdeaUpdate } from './idea-updates';
+export type { IdeaDetail, IdeaLinkedSession, IdeaListTotals, IdeasListResponse } from './ideas';
+export {
+  createProjectIdea,
+  getProjectIdea,
+  keepProjectIdeaOpen,
+  listProjectIdeas,
+  setProjectIdeaStatus,
+} from './ideas';
+export {
+  answerInboxItem,
+  archiveInboxItem,
+  getInboxCount,
+  getInboxItem,
+  listInbox,
+  reassignInboxTask,
+} from './inbox';
+export { getProjectAccounts, getProjectFlow, getProjectPeople, getProjectSetups } from './insights';
+export { getRunReceipt } from './insights-receipt';
 export {
   addObservation,
   createKnowledgeEntity,
@@ -365,6 +410,15 @@ export {
   uploadLibraryFile,
 } from './library';
 export {
+  emptyCappedList,
+  getIdeaLinks,
+  getLibraryFileLinks,
+  getSessionLinks,
+  normalizeFileContext,
+  normalizeIdeaContext,
+  normalizeSessionContext,
+} from './links';
+export {
   createMcpConnection,
   deleteMcpConnection,
   listMcpConnections,
@@ -386,11 +440,13 @@ export {
   saveCachedCommands,
 } from './misc';
 export {
+  confirmNodeManualDeletion,
   createNode,
   deleteNode,
   getNode,
   getNodeLogs,
   getNodeLogStreamUrl,
+  getNodeResourceUsage,
   getNodeSystemInfo,
   listNodeContainers,
   listNodeEvents,
@@ -400,12 +456,10 @@ export {
 export {
   dismissNotification,
   getNotificationPreferences,
-  getNotificationUnreadCount,
   getNotificationWsUrl,
   getVapidPublicKey,
   listNotifications,
   listWebPushSubscriptions,
-  markAllNotificationsRead,
   markNotificationRead,
   subscribeWebPush,
   unsubscribeWebPush,
@@ -413,6 +467,7 @@ export {
 } from './notifications';
 export type { ListPoliciesResponse, ProjectPolicy } from './policies';
 export { deletePolicy, getPolicy, listPolicies, updatePolicy } from './policies';
+export { getProjectOverview } from './project-overview';
 export type {
   AccountMapResponse,
   DevcontainerConfigEntry,
@@ -431,6 +486,7 @@ export {
   discoverSubmoduleRepos,
   getAccountMap,
   getArtifactsEnabled,
+  getInstantRuntimeEnabled,
   getProject,
   getProjectCredentialAttributionHealth,
   getProjectInvitePreview,
@@ -469,6 +525,15 @@ export type {
   WorkspaceResourceToolSpan,
 } from './resource-timeline';
 export { getSessionResourceTimeline, getSessionResourceTimelineChunk } from './resource-timeline';
+export { declineSecretRequest, fulfillSecretRequest, getSecretRequest } from './secret-requests';
+export {
+  getSessionAccess,
+  resumeChatSessionAgent,
+  revokeSessionAccess,
+  shareSessionAccess,
+  sleepChatSession,
+} from './session-access';
+export { resetIdleTimer, sendFollowUpPrompt } from './session-prompts';
 export type {
   ActivityEventResponse,
   ActivityEventsListResponse,
@@ -496,14 +561,12 @@ export {
   listActivityEvents,
   listChatMessages,
   listChatSessions,
-  resetIdleTimer,
   resolveAttentionAnswer,
-  sendFollowUpPrompt,
   startInstantChatSession,
   stopChatSession,
 } from './sessions';
 export type { SetupCompleteResponse, SetupStatusResponse, SetupVerifyResponse } from './setup';
-export { completeSetup, fetchSetupStatus, saveSetupConfig, verifySetupToken } from './setup';
+export { completeSetup, fetchSetupStatus, verifySetupToken } from './setup';
 export type {
   ListProjectTasksParams,
   RequestAttachmentUploadResponse,
@@ -521,12 +584,13 @@ export {
   deleteProjectTask,
   getProjectTask,
   getTaskSessions,
-  linkSessionIdea,
   listProjectTasks,
   listTaskEvents,
   removeTaskDependency,
   requestAttachmentUpload,
+  resumeProviderLimitTask,
   runProjectTask,
+  startProviderLimitTaskAnyway,
   submitTask,
   updateProjectTask,
   updateProjectTaskStatus,
@@ -542,6 +606,7 @@ export {
   previewWebhookTrigger,
   rotateWebhookTriggerToken,
   runTrigger,
+  setWebhookSigningSecret,
   testTrigger,
   updateTrigger,
 } from './triggers';
@@ -553,9 +618,9 @@ export {
   resetUserAiBudget,
   updateUserAiBudget,
 } from './usage';
+export { getWorkflowRun, listWorkflowRuns } from './workflows';
 export {
   createAgentSession,
-  createWorkspace,
   deleteWorkspace,
   getPortAccessUrl,
   getTerminalToken,

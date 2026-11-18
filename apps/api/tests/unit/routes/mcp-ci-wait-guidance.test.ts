@@ -1,7 +1,7 @@
+import { filterMatchesProjectEvent } from '@simple-agent-manager/project-data/internal/do/project-events-normalization';
 import type { ProjectEventFilterV1 } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
-import { filterMatchesProjectEvent } from '../../../src/durable-objects/project-data/project-events-normalization';
 import { buildEventingInstructions } from '../../../src/routes/mcp/instruction-eventing-guidance';
 import { PROJECT_EVENT_SUBSCRIPTION_TOOLS } from '../../../src/routes/mcp/tool-definitions-event-subscription-tools';
 
@@ -18,7 +18,11 @@ describe('agent-facing CI wait contract', () => {
     'advertises a completion filter that matches %s, not a bare name or short SHA',
     (type) => {
       const eventType = `${type}.completed`;
-      for (const text of [create.description, fields.eventType.description, instructions]) {
+      for (const text of [
+        create.description,
+        fields.eventType.anyOf[0].description,
+        instructions,
+      ]) {
         expect(text).toContain(eventType);
       }
       const filter: ProjectEventFilterV1 = {
@@ -50,10 +54,10 @@ describe('agent-facing CI wait contract', () => {
       expect(text).toContain('full 40-character PR head SHA');
       expect(text).toContain('immediately after subscribing');
       expect(text).toContain('after every resume');
-      expect(text).toContain('create_project_schedule');
+      expect(text).toContain('`schedules_write` method `create`');
       expect(text).toContain('bounded fallback check');
     }
-    expect(fields.subjectId.description).toContain('never an abbreviated SHA');
+    expect(fields.subjectId.anyOf[0].description).toContain('never an abbreviated SHA');
     expect(create.inputSchema.properties.expiresAt.description).toContain(
       'Expiry does not itself wake'
     );

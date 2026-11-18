@@ -10,6 +10,7 @@ import { and, eq, lt } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { type Context, Hono } from 'hono';
 
+import { createDeploymentSecretCipher } from '../app-deployment-ports/secret-cipher';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { extractBearerToken } from '../lib/auth-helpers';
@@ -120,7 +121,11 @@ deployReleaseCallbackRoute.get('/:id/deployment-env', async (c) => {
     throw errors.notFound('Deployment environment');
   }
 
-  const config = await loadDeploymentInterpolationEnv(db, environmentId, getEncryptionKey(c.env));
+  const config = await loadDeploymentInterpolationEnv(
+    db,
+    environmentId,
+    createDeploymentSecretCipher(getEncryptionKey(c.env))
+  );
   return c.json({
     environmentId,
     interpolationEnv: config.values,
@@ -277,7 +282,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
   const environmentConfig = await loadDeploymentInterpolationEnv(
     db,
     environmentId,
-    getEncryptionKey(c.env)
+    createDeploymentSecretCipher(getEncryptionKey(c.env))
   );
 
   if (release.source === 'compose-publish') {

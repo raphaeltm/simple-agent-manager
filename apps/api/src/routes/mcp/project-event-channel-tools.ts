@@ -21,6 +21,7 @@ import {
   jsonRpcSuccess,
   type McpTokenData,
 } from './_helpers';
+import { parseMinWakeIntervalSeconds } from './wake-interval-param';
 
 export type ChannelTool =
   | 'publish_channel_event'
@@ -42,6 +43,7 @@ const FIELDS: Record<ChannelTool, readonly string[]> = {
     'requestedDelivery',
     'reason',
     'expiresAt',
+    'minWakeIntervalSeconds',
   ],
   catch_up_event_channel: ['subscriptionId', 'limit'],
 };
@@ -112,6 +114,7 @@ export async function handleChannelTool(
           requestedDelivery: delivery(params.requestedDelivery),
           reason: optional(params.reason, 'reason'),
           expiresAt: integer(params.expiresAt, 'expiresAt'),
+          minWakeIntervalMs: parseMinWakeIntervalSeconds(params.minWakeIntervalSeconds),
         });
         break;
       case 'catch_up_event_channel':

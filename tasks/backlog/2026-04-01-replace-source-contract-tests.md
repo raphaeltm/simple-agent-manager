@@ -1,5 +1,12 @@
 # Replace Source-Contract Tests with Behavioral Integration Tests
 
+> **Reconciliation 2026-10-26:** No source-contract test was replaced. #2386 (`f61e07d2a`) moved
+> the submit logic into `apps/api/src/services/submit-task-implementation.ts`, and the 11 tests
+> repointed by #2294 now read that file (e.g. `project-agent-defaults.test.ts:392`; its
+> `dispatch-tool.ts` read is now `:404`). #2414 (`0620c1595`) swapped one route read in
+> `unit/cf-container-runtime-contract` for a service read, but that file still reads route source:
+> 27 files remain, and the detector (`check-source-contract-tests.ts:52-55`) is unchanged.
+
 > **Reconciliation 2026-10-12:** No source-contract test was replaced. #2294 (`a95b46191`) moved
 > task submission into `apps/api/src/services/submit-task.ts` and repointed the
 > `routes/tasks/submit.ts` string reads in 11 of the 28 listed files to that service file (for

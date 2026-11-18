@@ -1,251 +1,110 @@
-/** Phase 1 only. Existing readers are wired here after the recovery wave releases integration. */
-import type { Env } from '../env';
-import {
-  CONNECTOR_DEFAULTS,
-  type ConnectorSettingKey,
-  validateConnectorSetting,
-} from './connector-settings-definition';
-import { ENV_KEYS, SECRET_KINDS, SETTING_KEYS } from './platform-config-store';
-
-export type AdminSettingValue = boolean | number | string | readonly string[] | null;
-export type AdminSettingType = 'boolean' | 'integer' | 'string' | 'string-list' | 'enum';
-export type AdminSettingName =
-  | `connector.${ConnectorSettingKey}`
-  | 'integration.github.clientId'
-  | 'integration.github.clientSecret'
-  | 'integration.google.clientId'
-  | 'integration.google.clientSecret'
-  | 'integration.googleInfrastructure.clientId'
-  | 'integration.googleInfrastructure.clientSecret'
-  | 'integration.gitlab.host'
-  | 'integration.gitlab.clientId'
-  | 'integration.gitlab.clientSecret'
-  | 'operations.cronSweepsEnabled'
-  | 'operations.doAlarmsEnabled'
-  | 'operations.stalledTaskClassifierEnabled'
-  | 'trials.enabled';
-export interface AdminSettingDefinition {
-  readonly name: AdminSettingName;
-  readonly type: AdminSettingType;
-  readonly defaultValue: AdminSettingValue;
-  readonly category: 'OAuth' | 'Connector' | 'Operations' | 'Trials';
-  readonly description: string;
-  readonly secret: boolean;
-  readonly risky: boolean;
-  readonly legacyEnvironment?: keyof Env;
-  readonly legacyKv?: 'cron' | 'alarms' | 'trials';
-  readonly credential?: { readonly provider: string; readonly kind: string };
-  readonly range?: { readonly min: number; readonly max: number };
-  readonly choices?: readonly string[];
-  readonly validate: (value: unknown) => boolean;
-}
-
-const connectorDescriptions: Record<ConnectorSettingKey, string> = {
-  enabled: 'Allow authenticated external clients to use the SAM Connector.',
-  writeEnabled: 'Allow external Connector clients to perform write operations.',
-  clientRegistration: 'Choose open or allowlisted OAuth client registration.',
-  allowedRedirectHosts: 'Allowed OAuth redirect hosts; loopback allows local clients.',
-  accessTokenTtlSeconds: 'Connector access token lifetime in seconds.',
-  refreshTokenTtlSeconds: 'Connector refresh token lifetime in seconds.',
-  readRateLimitPerMinute: 'Maximum Connector reads per minute.',
-  writeRateLimitPerMinute: 'Maximum Connector writes per minute.',
-  maxStartsPerUserPerHour: 'Maximum Connector task starts per user per hour.',
-  maxStartsPerUserPerDay: 'Maximum Connector task starts per user per day.',
-};
-
-const connectorEnvironment: Record<ConnectorSettingKey, keyof Env> = {
-  enabled: 'CONNECTOR_ENABLED',
-  writeEnabled: 'CONNECTOR_WRITE_ENABLED',
-  clientRegistration: 'CONNECTOR_CLIENT_REGISTRATION',
-  allowedRedirectHosts: 'CONNECTOR_ALLOWED_REDIRECT_HOSTS',
-  accessTokenTtlSeconds: 'CONNECTOR_ACCESS_TOKEN_TTL_SECONDS',
-  refreshTokenTtlSeconds: 'CONNECTOR_REFRESH_TOKEN_TTL_SECONDS',
-  readRateLimitPerMinute: 'CONNECTOR_READ_RATE_LIMIT_PER_MINUTE',
-  writeRateLimitPerMinute: 'CONNECTOR_WRITE_RATE_LIMIT_PER_MINUTE',
-  maxStartsPerUserPerHour: 'CONNECTOR_MAX_STARTS_PER_USER_PER_HOUR',
-  maxStartsPerUserPerDay: 'CONNECTOR_MAX_STARTS_PER_USER_PER_DAY',
-};
-
-function connectorDefinition(key: ConnectorSettingKey): AdminSettingDefinition {
-  const value = CONNECTOR_DEFAULTS[key];
-  let type: AdminSettingType = 'integer';
-  if (key === 'clientRegistration') type = 'enum';
-  else if (Array.isArray(value)) type = 'string-list';
-  else if (typeof value === 'boolean') type = 'boolean';
-  return {
-    name: `connector.${key}`,
-    type,
-    // Reuse the shipped defaults; integration will move their ownership here without duplication.
-    defaultValue: Array.isArray(value) ? Object.freeze([...value]) : value,
-    category: 'Connector',
-    description: connectorDescriptions[key],
-    secret: false,
-    risky: true,
-    legacyEnvironment: connectorEnvironment[key],
-    ...(type === 'integer'
-      ? { range: { min: key.endsWith('TtlSeconds') ? 60 : 1, max: 2147483647 } }
-      : {}),
-    ...(type === 'enum' ? { choices: ['open', 'allowlist'] } : {}),
-    validate: (input) => validateConnectorSetting(key, input),
-  };
-}
-
-function oauthDefinition(
-  name: AdminSettingName,
-  legacyEnvironment: keyof Env,
-  description: string,
-  credential?: AdminSettingDefinition['credential']
-): AdminSettingDefinition {
-  return {
-    name,
-    type: 'string',
-    defaultValue: null,
-    category: 'OAuth',
-    description,
-    secret: Boolean(credential),
-    risky: true,
-    legacyEnvironment,
-    credential,
-    validate: (value) => typeof value === 'string' && value.trim().length >= (credential ? 8 : 6),
-  };
-}
-
-function switchDefinition(
-  name: AdminSettingName,
-  defaultValue: boolean,
-  category: AdminSettingDefinition['category'],
-  description: string,
-  legacy: Pick<AdminSettingDefinition, 'legacyEnvironment' | 'legacyKv'>
-): AdminSettingDefinition {
-  return {
-    name,
-    type: 'boolean',
-    defaultValue,
-    category,
-    description,
-    secret: false,
-    risky: true,
-    ...legacy,
-    validate: (value) => typeof value === 'boolean',
-  };
-}
-
-function validGitLabHost(value: unknown): boolean {
-  if (typeof value !== 'string') return false;
-  try {
-    const url = new URL(value.trim());
-    const local = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(url.hostname);
-    return (
-      (url.protocol === 'https:' || (url.protocol === 'http:' && local)) &&
-      !url.username &&
-      !url.password &&
-      !url.search &&
-      !url.hash &&
-      url.pathname === '/'
-    );
-  } catch {
-    return false;
-  }
-}
-
-const definitions: AdminSettingDefinition[] = [
-  ...Object.keys(CONNECTOR_DEFAULTS).map((key) => connectorDefinition(key as ConnectorSettingKey)),
-  oauthDefinition(
-    SETTING_KEYS.githubClientId,
-    ENV_KEYS.githubClientId,
-    'GitHub login OAuth client ID.'
-  ),
-  oauthDefinition(
-    'integration.github.clientSecret',
-    ENV_KEYS.githubClientSecret,
-    'GitHub login OAuth client secret.',
-    { provider: 'github', kind: SECRET_KINDS.githubClientSecret }
-  ),
-  oauthDefinition(
-    SETTING_KEYS.googleClientId,
-    ENV_KEYS.googleClientId,
-    'Google login OAuth client ID; separate from infrastructure access.'
-  ),
-  oauthDefinition(
-    'integration.google.clientSecret',
-    ENV_KEYS.googleClientSecret,
-    'Google login OAuth client secret.',
-    { provider: 'google', kind: SECRET_KINDS.googleClientSecret }
-  ),
-  oauthDefinition(
-    SETTING_KEYS.googleInfrastructureClientId,
-    ENV_KEYS.googleInfrastructureClientId,
-    'Google infrastructure OAuth client ID; separate from login.'
-  ),
-  oauthDefinition(
-    'integration.googleInfrastructure.clientSecret',
-    ENV_KEYS.googleInfrastructureClientSecret,
-    'Google infrastructure OAuth client secret.',
-    { provider: 'google-infrastructure', kind: SECRET_KINDS.googleInfrastructureClientSecret }
-  ),
-  oauthDefinition(
-    SETTING_KEYS.gitlabClientId,
-    ENV_KEYS.gitlabClientId,
-    'GitLab login OAuth client ID.'
-  ),
-  oauthDefinition(
-    'integration.gitlab.clientSecret',
-    ENV_KEYS.gitlabClientSecret,
-    'GitLab login OAuth client secret.',
-    { provider: 'gitlab', kind: SECRET_KINDS.gitlabClientSecret }
-  ),
-  {
-    ...oauthDefinition(
-      SETTING_KEYS.gitlabHost,
-      ENV_KEYS.gitlabHost,
-      'GitLab OAuth host, without paths or credentials.'
-    ),
-    validate: validGitLabHost,
-  },
-  switchDefinition(
-    'operations.cronSweepsEnabled',
-    true,
-    'Operations',
-    'Allow recurring cron recovery and cleanup sweeps.',
-    { legacyKv: 'cron' }
-  ),
-  switchDefinition(
-    'operations.doAlarmsEnabled',
-    true,
-    'Operations',
-    'Allow Durable Object alarm work; disabled alarms re-arm for later.',
-    { legacyKv: 'alarms' }
-  ),
-  switchDefinition(
-    'trials.enabled',
-    false,
-    'Trials',
-    'Allow anonymous trials. Fresh installs remain disabled.',
-    { legacyKv: 'trials' }
-  ),
-  switchDefinition(
-    'operations.stalledTaskClassifierEnabled',
-    true,
-    'Operations',
-    'Allow stalled-task classification; existing liveness checks remain active.',
-    { legacyEnvironment: 'STALLED_TASK_CLASSIFIER_ENABLED' }
-  ),
+import type { AdminSettingDefinition } from './admin-setting-definitions';
+import { ACCOUNT_LINKING_SETTINGS } from './admin-settings-account-linking-definitions';
+import { CORE_SETTINGS } from './admin-settings-core-definitions';
+import { CREDENTIAL_SETUP_SETTINGS } from './admin-settings-credential-setup-definitions';
+import { DEPLOYMENT_PUBLISH_SETTINGS } from './admin-settings-deployment-publish-definitions';
+import { FEATURE_SETTINGS } from './admin-settings-features-definitions';
+import { GCP_CATALOG_SETTINGS } from './admin-settings-gcp-catalog-definitions';
+import { INFOMANIAK_SETTINGS } from './admin-settings-infomaniak-definitions';
+import { INSTRUCTION_BUDGET_SETTINGS } from './admin-settings-instructions-definitions';
+import { LIFECYCLE_LATENCY_SETTINGS } from './admin-settings-lifecycle-latency-definitions';
+import { MESSAGE_MERGE_SETTINGS } from './admin-settings-message-merge-definitions';
+import { NODE_TUNNEL_SETTINGS } from './admin-settings-node-tunnel-definitions';
+import { OPERATIONS_TELEMETRY_SETTINGS } from './admin-settings-operations-telemetry-definitions';
+import { OPERATOR_SETTINGS } from './admin-settings-operator-definitions';
+import { ORCHESTRATOR_SETTINGS } from './admin-settings-orchestrator-definitions';
+import { OUTBOUND_SETTINGS } from './admin-settings-outbound-definitions';
+import { OVERVIEW_BRIEF_SETTINGS } from './admin-settings-overview-brief-definitions';
+import { PROJECT_EVENT_SETTINGS } from './admin-settings-project-event-definitions';
+import { AI_PROXY_SETTINGS } from './ai-proxy-settings';
+import { llmEndpointSettingDefinitions } from './llm-endpoint-settings';
+export {
+  type AdminSettingDefinition,
+  type AdminSettingName,
+  type AdminSettingType,
+  type AdminSettingValue,
+  DEFAULT_COMMENT_CONTEXT_MAX_ROWS,
+  DEFAULT_COMMENT_CONTEXT_MESSAGES,
+  DEFAULT_COMMENT_MENTIONS_MAX,
+  DEFAULT_PROFILE_PIN_CANDIDATE_LIMIT,
+  DEFAULT_PROFILE_USAGE_WINDOW_DAYS,
+  DEFAULT_SESSION_ACCESS_MAX_GRANTS,
+  IDEA_UPDATE_DEFAULTS,
+  MAX_SAM_OPERATOR_EVENT_PAGE_SIZE,
+  OPERATOR_DEFAULTS,
+} from './admin-setting-definitions';
+const definitions = [
+  ...ACCOUNT_LINKING_SETTINGS,
+  ...llmEndpointSettingDefinitions(),
+  ...AI_PROXY_SETTINGS,
+  ...MESSAGE_MERGE_SETTINGS,
+  ...PROJECT_EVENT_SETTINGS,
+  ...DEPLOYMENT_PUBLISH_SETTINGS,
+  ...CORE_SETTINGS,
+  ...CREDENTIAL_SETUP_SETTINGS,
+  ...NODE_TUNNEL_SETTINGS,
+  ...FEATURE_SETTINGS,
+  ...GCP_CATALOG_SETTINGS,
+  ...INFOMANIAK_SETTINGS,
+  ...OPERATOR_SETTINGS,
+  ...ORCHESTRATOR_SETTINGS,
+  ...LIFECYCLE_LATENCY_SETTINGS,
+  ...OPERATIONS_TELEMETRY_SETTINGS,
+  ...OUTBOUND_SETTINGS,
+  ...INSTRUCTION_BUDGET_SETTINGS,
+  ...OVERVIEW_BRIEF_SETTINGS,
 ];
 
+function frozenDefinition(definition: AdminSettingDefinition): AdminSettingDefinition {
+  return Object.freeze({
+    ...definition,
+    ...(definition.range ? { range: Object.freeze(definition.range) } : {}),
+    ...(definition.choices ? { choices: Object.freeze(definition.choices) } : {}),
+    ...(definition.credential ? { credential: Object.freeze(definition.credential) } : {}),
+  });
+}
+
+/** Settings every build has. */
 export const ADMIN_SETTINGS_REGISTRY: readonly AdminSettingDefinition[] = Object.freeze(
-  definitions.map((definition) =>
-    Object.freeze({
-      ...definition,
-      ...(definition.range ? { range: Object.freeze(definition.range) } : {}),
-      ...(definition.choices ? { choices: Object.freeze(definition.choices) } : {}),
-      ...(definition.credential ? { credential: Object.freeze(definition.credential) } : {}),
-    })
-  )
+  definitions.map(frozenDefinition)
 );
+
+let registry: readonly AdminSettingDefinition[] = ADMIN_SETTINGS_REGISTRY;
+let installed = new WeakSet<AdminSettingDefinition>();
+
+/**
+ * Adds settings only a separately built entry has (the self-host build's speech endpoints,
+ * selfhost/speech/). Called once at entry initialization, before any request. The Cloudflare
+ * Worker installs nothing, so its registry is exactly `ADMIN_SETTINGS_REGISTRY`. Installing the
+ * same definition objects again is a no-op; a name that is already registered otherwise throws.
+ */
+export function installAdminSettingDefinitions(added: readonly AdminSettingDefinition[]): void {
+  const fresh = added.filter((definition) => !installed.has(definition));
+  const names = new Set(registry.map((definition) => definition.name));
+  for (const definition of fresh) {
+    if (names.has(definition.name)) {
+      throw new Error(`Admin setting ${definition.name} is already registered`);
+    }
+    names.add(definition.name);
+  }
+  for (const definition of fresh) installed.add(definition);
+  registry = Object.freeze([...registry, ...fresh.map(frozenDefinition)]);
+}
+
+/** Test seam: back to the settings every build has. */
+export function resetInstalledAdminSettingDefinitionsForTests(): void {
+  registry = ADMIN_SETTINGS_REGISTRY;
+  installed = new WeakSet();
+}
+
+/** Every setting this build has: the shared registry plus any installed by the build's entry. */
+export function adminSettingsRegistry(): readonly AdminSettingDefinition[] {
+  return registry;
+}
 
 /** Never resolve untrusted names through inherited object properties. */
 export function findAdminSetting(name: string): AdminSettingDefinition | undefined {
-  return ADMIN_SETTINGS_REGISTRY.find((definition) => definition.name === name);
+  return registry.find((definition) => definition.name === name);
 }
 
 /** Metadata only. Secret effective values must be separately projected to configured/source. */

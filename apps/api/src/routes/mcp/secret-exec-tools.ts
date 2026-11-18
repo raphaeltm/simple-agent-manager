@@ -1,4 +1,9 @@
-import type { SecretExecRequest, SecretExecResult } from '@simple-agent-manager/shared';
+import {
+  type SecretExecRequest,
+  type SecretExecResult,
+  WORKLOAD_IDENTITY_AUDIENCE_MAX_LENGTH,
+  WORKLOAD_IDENTITY_TOKEN_ENV,
+} from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
 
@@ -6,6 +11,13 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { errors } from '../../middleware/error';
+import { recordOperationalJob } from '../../services/operational-job-observations';
+import { UNSUPPORTED_SECRET_EXEC_ENV_NAMES } from '../../services/secret-exec-env-names';
+import { getWorkloadIdentityMetadata } from '../../services/workload-identity-context';
+import {
+  signWorkloadIdentityToken,
+  validateWorkloadAudience,
+} from '../../services/workload-identity-token';
 import {
   getSecretExecutionEnv,
   resolveWorkspaceRuntimeAssetContext,
@@ -24,16 +36,7 @@ const literal = v.pipe(
   v.string(),
   v.check((s) => !s.includes('\0'))
 );
-const unsupportedEnvNames = new Set([
-  'ENV',
-  'BASH_ENV',
-  'UID',
-  'EUID',
-  'PPID',
-  'SHELLOPTS',
-  'BASHOPTS',
-  'BASH_VERSINFO',
-]);
+const unsupportedEnvNames = UNSUPPORTED_SECRET_EXEC_ENV_NAMES;
 const envKey = v.pipe(v.string(), v.regex(/^[A-Za-z_][A-Za-z0-9_]*$/));
 export const SecretExecSchema = v.pipe(
   v.strictObject({
@@ -41,6 +44,15 @@ export const SecretExecSchema = v.pipe(
     command: v.optional(literal),
     shell: v.optional(v.picklist(['bash', 'sh'])),
     secretNames: v.array(envKey),
+    oidc: v.optional(
+      v.strictObject({
+        audience: v.pipe(
+          literal,
+          v.minLength(1),
+          v.maxLength(WORKLOAD_IDENTITY_AUDIENCE_MAX_LENGTH)
+        ),
+      })
+    ),
     cwd: v.optional(
       v.pipe(
         literal,
@@ -105,6 +117,7 @@ function stableRequest(request: SecretExecRequest): string {
       Object.entries(request.env ?? {}).sort(([a], [b]) => a.localeCompare(b))
     ),
     timeoutMs: request.timeoutMs,
+    oidc: request.oidc,
   });
 }
 /** Future decision/classifier seam: validation and authorization precede secret resolution. */
@@ -139,6 +152,17 @@ export async function handleSecretExec(
           'Invalid execution request: use exactly argv or command with explicit bash/sh; names, cwd, env and timeout must be valid'
         );
       const request = parsed.output;
+      if (request.oidc) {
+        try {
+          validateWorkloadAudience(request.oidc.audience);
+        } catch {
+          return jsonRpcError(
+            requestId,
+            INVALID_PARAMS,
+            'OIDC audience must be a nonempty external audience without whitespace'
+          );
+        }
+      }
       const fingerprint = await hash(stableRequest(request));
       const jobId = `sx-${await hash(`${token.workspaceId}\0${token.agentSessionId}\0${request.idempotencyKey ?? crypto.randomUUID()}`)}`;
       const { envVars } = await getSecretExecutionEnv(
@@ -163,6 +187,19 @@ export async function handleSecretExec(
           );
         }
       }
+      const selectedNames = [...new Set(request.secretNames)];
+      if (request.oidc) {
+        if (!token.chatSessionId) throw errors.forbidden('OIDC requires a linked chat session');
+        const identity = await getWorkloadIdentityMetadata(
+          env,
+          token.projectId,
+          token.chatSessionId,
+          token
+        );
+        const value = await signWorkloadIdentityToken(env, identity.claims, request.oidc.audience);
+        envVars.push({ key: WORKLOAD_IDENTITY_TOKEN_ENV, value, isSecret: true });
+        selectedNames.push(WORKLOAD_IDENTITY_TOKEN_ENV);
+      }
       result = await proxySecretExecOnVm(env, token, 'start', jobId, {
         jobId,
         agentSessionId: token.agentSessionId,
@@ -176,7 +213,7 @@ export async function handleSecretExec(
         cwd: request.cwd,
         env: request.env,
         timeoutMs: request.timeoutMs,
-        secretNames: [...new Set(request.secretNames)],
+        secretNames: selectedNames,
         managedEnv: envVars,
       });
     } else {
@@ -187,6 +224,24 @@ export async function handleSecretExec(
     }
     const snapshot = v.safeParse(ResultSchema, result);
     if (!snapshot.success) throw new Error('Invalid execution response');
+    if (token.chatSessionId) {
+      // Metadata capture must never change an already-executed command's outcome.
+      try {
+        await recordOperationalJob(
+          env,
+          {
+            projectId: token.projectId,
+            chatSessionId: token.chatSessionId,
+            userId: token.userId,
+            workspaceId: token.workspaceId,
+            agentSessionId: token.agentSessionId,
+          },
+          snapshot.output
+        );
+      } catch {
+        /* Read surfaces explicitly disclose incomplete observation coverage. */
+      }
+    }
     return jsonRpcSuccess(requestId, {
       content: [{ type: 'text', text: JSON.stringify(snapshot.output) }],
     });

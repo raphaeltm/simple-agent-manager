@@ -1,0 +1,66 @@
+/**
+ * The header's "View PR" link and the idle-cleanup countdown.
+ *
+ * Extracted from `SessionHeader` so adding the PR's state did not push that file further past
+ * the 500-line ceiling (`.claude/rules/18-file-size-limits.md`); the behaviour of the two
+ * pieces is unchanged apart from the state badge and the PR number.
+ *
+ * "View PR" used to be a bare link: it told you a pull request existed and nothing about
+ * whether it was open, merged or closed — the one thing you want to know before clicking
+ * through to GitHub. The state comes from SAM's own stored PR tracking via the chat's linked
+ * work, so no GitHub request is made to render it, and the badge is simply absent while the
+ * state is unknown rather than guessing.
+ */
+import { GitPullRequest } from 'lucide-react';
+
+import { sanitizeUrl } from '../../lib/url-utils';
+import { PullRequestStateBadge } from '../linked-work';
+import type { SessionState } from './types';
+import { formatCountdown } from './types';
+import type { HeaderPullRequest } from './useSessionLinkedWork';
+
+export function SessionHeaderPullRequestRow({
+  sessionState,
+  idleCountdownMs,
+  pullRequest,
+}: Readonly<{
+  sessionState: SessionState;
+  idleCountdownMs: number | null;
+  /** The chat's primary pull request, with its number and state when SAM knows them. */
+  pullRequest: HeaderPullRequest | null;
+}>) {
+  const showCountdown = sessionState === 'idle' && idleCountdownMs !== null;
+  if (!pullRequest && !showCountdown) return null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      {showCountdown && (
+        <span
+          className={`sam-type-caption font-mono ${
+            (idleCountdownMs ?? 0) < 5 * 60 * 1000 ? 'text-danger-fg' : 'text-warning-fg'
+          }`}
+        >
+          Cleanup in {formatCountdown(idleCountdownMs ?? 0)}
+        </span>
+      )}
+
+      {pullRequest && (
+        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <a
+            // `tasks.output_pr_url` is agent-reported; only http(s) becomes a live link.
+            href={sanitizeUrl(pullRequest.url)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="sam-type-caption inline-flex min-h-7 shrink-0 items-center gap-1 font-medium text-accent no-underline hover:underline"
+            data-testid="session-view-pr"
+          >
+            <GitPullRequest size={12} aria-hidden="true" />
+            {/* The number is omitted rather than guessed when the URL is not one SAM parses. */}
+            {pullRequest.number === null ? 'View PR' : `View PR #${pullRequest.number}`}
+          </a>
+          <PullRequestStateBadge state={pullRequest.state} />
+        </span>
+      )}
+    </div>
+  );
+}

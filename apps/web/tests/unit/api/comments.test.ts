@@ -153,6 +153,85 @@ describe('message comment API client', () => {
     );
   });
 
+  it('sends picked mentions as member IDs only, and omits the field when nobody was picked', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({ thread: backendThread() }));
+    // The composer's picks carry a display name for the optimistic copy; it must never be
+    // sent as identity input — the server snapshots names itself.
+    const picked = { userId: 'user-ada', displayName: 'Ada Lovelace' };
+
+    await createMessageCommentThread('proj-1', 'sess-1', {
+      clientId: 'client-thread-1',
+      anchor: { kind: 'message', messageId: 'msg-1', quote: null },
+      body: '@Ada Lovelace please check',
+      action: 'note',
+      mentions: [picked],
+    });
+    await createMessageCommentReply('proj-1', 'sess-1', 'c1', {
+      clientId: 'client-reply-1',
+      body: 'thanks @Grace Hopper',
+      action: 'note',
+      mentions: [{ userId: 'user-grace' }],
+    });
+    await createMessageCommentReply('proj-1', 'sess-1', 'c1', {
+      clientId: 'client-reply-2',
+      body: 'no one mentioned',
+      action: 'note',
+      mentions: [],
+    });
+
+    const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+    expect(bodies[0]).toEqual({
+      messageId: 'msg-1',
+      quote: null,
+      body: '@Ada Lovelace please check',
+      clientMutationId: 'client-thread-1',
+      mentions: [{ userId: 'user-ada' }],
+    });
+    expect(bodies[1]).toEqual({
+      body: 'thanks @Grace Hopper',
+      clientMutationId: 'client-reply-1',
+      mentions: [{ userId: 'user-grace' }],
+    });
+    expect(bodies[2]).not.toHaveProperty('mentions');
+  });
+
+  it('maps server mention snapshots onto threads and replies, dropping malformed entries', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        threads: [
+          backendThread({
+            mentions: [
+              { userId: 'user-ada', displayName: 'Ada Lovelace' },
+              { userId: '', displayName: 'Nobody' },
+              'garbage',
+            ],
+            replies: [
+              {
+                id: 'r1',
+                author: { kind: 'human', id: 'user-2', name: 'Grace' },
+                body: 'cc @Alan Turing',
+                createdAt: 2,
+                mentions: [{ userId: 'user-alan', displayName: null }],
+              },
+              {
+                id: 'r2',
+                author: { kind: 'human', id: 'user-2', name: 'Grace' },
+                body: 'no mentions',
+                createdAt: 3,
+              },
+            ],
+          }),
+        ],
+      })
+    );
+
+    const { comments } = await listMessageComments('proj-1', 'sess-1');
+
+    expect(comments[0]?.mentions).toEqual([{ userId: 'user-ada', displayName: 'Ada Lovelace' }]);
+    expect(comments[0]?.replies[0]?.mentions).toEqual([{ userId: 'user-alan', displayName: null }]);
+    expect(comments[0]?.replies[1]).not.toHaveProperty('mentions');
+  });
+
   it('maps project-wide comments and reference labels from the single endpoint', async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({

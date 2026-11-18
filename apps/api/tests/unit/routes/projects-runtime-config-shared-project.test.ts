@@ -11,6 +11,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../src/middleware/auth', () => ({
+  // Agent sign-in session guards: inert for these ordinary-session route tests.
+  rejectAgentSignInSession: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  assertNotAgentSignInSession: () => undefined,
+
   requireAuth: () => vi.fn((c: any, next: any) => next()),
   requireApproved: () => vi.fn((c: any, next: any) => next()),
   getUserId: () => 'member-user',
@@ -35,11 +39,20 @@ describe('projects runtime config shared project rows', () => {
         stored_value TEXT NOT NULL,
         value_iv TEXT,
         is_secret INTEGER NOT NULL DEFAULT 0,
+        expires_at INTEGER,
+        secret_request_id TEXT,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
       CREATE UNIQUE INDEX idx_project_runtime_env_project_key
         ON project_runtime_env_vars (project_id, env_key);
+      -- Joined for agent-collected provenance (migration 0236).
+      CREATE TABLE runtime_secret_requests (
+        id TEXT PRIMARY KEY, project_id TEXT, env_key TEXT, reason TEXT,
+        requesting_task_id TEXT, requesting_chat_session_id TEXT,
+        resolved_by TEXT, resolved_at INTEGER
+      );
+      CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT, email TEXT);
 
       CREATE TABLE project_runtime_files (
         id TEXT PRIMARY KEY,

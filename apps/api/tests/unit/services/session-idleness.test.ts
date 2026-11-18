@@ -220,6 +220,77 @@ describe('classifySessionIdleness', () => {
     });
   });
 
+  describe('the completed-task drain follows the work clock, not re-reports', () => {
+    const completedAt = new Date(NOW.getTime() - 20 * 60 * 1000).toISOString();
+
+    it('releases a completed task whose hung turn keeps re-reporting (production 2026-11-03)', () => {
+      // `activityAt` is 30 s old because the VM re-reports every minute; no work since
+      // the turn started 25 min ago.
+      expect(
+        classify({
+          taskStatus: 'completed',
+          taskCompletedAt: completedAt,
+          state: {
+            activity: 'prompting',
+            activityAt: NOW.getTime() - 30_000,
+            promptStartedAt: NOW.getTime() - 25 * 60 * 1000,
+            workAt: NOW.getTime() - 25 * 60 * 1000,
+          },
+        })
+      ).toMatchObject({ idle: true, conclusive: true, reason: 'completed_prompt_stale' });
+    });
+
+    it('keeps draining while the agent still persists work after complete_task (control)', () => {
+      expect(
+        classify({
+          taskStatus: 'completed',
+          taskCompletedAt: completedAt,
+          state: {
+            activity: 'prompting',
+            activityAt: NOW.getTime() - 30_000,
+            promptStartedAt: NOW.getTime() - 25 * 60 * 1000,
+            workAt: NOW.getTime() - 2 * 60 * 1000,
+          },
+        })
+      ).toMatchObject({
+        idle: false,
+        reason: 'prompt_turn_active',
+        retryAt: new Date(NOW.getTime() - 2 * 60 * 1000 + IDLE_AFTER_MS),
+      });
+    });
+
+    it('keeps draining while harness work progresses (control)', () => {
+      expect(
+        classify({
+          taskStatus: 'completed',
+          taskCompletedAt: completedAt,
+          state: {
+            activity: 'prompting',
+            activityAt: NOW.getTime() - 30_000,
+            workAt: NOW.getTime() - 25 * 60 * 1000,
+            runtimeWorkState: 'inactive',
+            runtimeWorkProgressAt: NOW.getTime() - 60_000,
+          },
+        })
+      ).toMatchObject({ idle: false, reason: 'prompt_turn_active' });
+    });
+
+    it('falls back to the turn start for rows written before the work clock existed', () => {
+      expect(
+        classify({
+          taskStatus: 'completed',
+          taskCompletedAt: completedAt,
+          state: {
+            activity: 'prompting',
+            activityAt: NOW.getTime() - 30_000,
+            promptStartedAt: NOW.getTime() - 25 * 60 * 1000,
+            workAt: null,
+          },
+        })
+      ).toMatchObject({ idle: true, reason: 'completed_prompt_stale' });
+    });
+  });
+
   it('sleeps a completed task immediately once it reports idle', () => {
     expect(
       classify({
@@ -288,6 +359,91 @@ describe('classifySessionIdleness', () => {
           state: { activity: 'prompting', activityAt: OLD_IDLE_ACTIVITY_AT },
         })
       ).toMatchObject({ idle: false, reason: 'prompt_turn_active' });
+    });
+  });
+  // Production 2026-11-04 (idea 01M6K6QTEE7T9KNYB7317D7Y8E): a conversation's turn hung for
+  // 9h54m. The VM kept re-reporting `prompting`, so only the work clock can tell it is stale.
+  describe('a hung turn on a running task is bounded by the work clock', () => {
+    const STALE_TURN_MS = 30 * 60 * 1000;
+    const hung = (workAgoMs: number, extra: NonNullable<ClassifyInput['state']> = {}) =>
+      idleState({
+        activity: 'prompting',
+        // A same-turn re-report a minute ago: last-report clocks are fresh.
+        activityAt: NOW.getTime() - 60_000,
+        promptStartedAt: NOW.getTime() - 10 * 60 * 60 * 1000,
+        workAt: NOW.getTime() - workAgoMs,
+        ...extra,
+      });
+
+    it.each(['prompt-turn-ended', 'idle-interval-elapsed'] as const)(
+      'releases a turn with no work for longer than the bound under %s',
+      (policy) => {
+        expect(
+          classify({ policy, staleTurnMs: STALE_TURN_MS, state: hung(STALE_TURN_MS + 1_000) })
+        ).toMatchObject({ idle: true, conclusive: true, reason: 'prompt_turn_stale' });
+      }
+    );
+
+    // A required sleep's cancel restarts the agent, which reports `recovering`; a restart that
+    // never finishes is bounded the same way, and a fresh one is not.
+    it('bounds a `recovering` agent by the same work clock', () => {
+      expect(
+        classify({
+          staleTurnMs: STALE_TURN_MS,
+          state: hung(STALE_TURN_MS + 1_000, { activity: 'recovering' }),
+        })
+      ).toMatchObject({ idle: true, reason: 'prompt_turn_stale', activity: 'recovering' });
+      expect(
+        classify({
+          staleTurnMs: STALE_TURN_MS,
+          state: hung(60_000, { activity: 'recovering' }),
+        })
+      ).toMatchObject({ idle: false, reason: 'prompt_turn_active' });
+    });
+
+    it('keeps a turn that did real work inside the bound (control)', () => {
+      expect(
+        classify({ staleTurnMs: STALE_TURN_MS, state: hung(STALE_TURN_MS - 60_000) })
+      ).toMatchObject({ idle: false, reason: 'prompt_turn_active' });
+    });
+
+    it('keeps a silent turn whose harness work still holds a fresh lease (control)', () => {
+      const state = hung(STALE_TURN_MS * 2, {
+        runtimeWorkState: 'active',
+        runtimeWorkCount: 1,
+        runtimeWorkUpdatedAt: NOW.getTime() - 30_000,
+        runtimeWorkProgressAt: NOW.getTime() - 60_000,
+      });
+      expect(classify({ staleTurnMs: STALE_TURN_MS, state })).toMatchObject({
+        idle: false,
+        reason: 'runtime_work_lease_active',
+      });
+    });
+
+    it('waits out the longer idle interval under the scheduling policy', () => {
+      const short = 5 * 60 * 1000;
+      const state = hung(short + 60_000);
+      expect(classify({ policy: 'prompt-turn-ended', staleTurnMs: short, state })).toMatchObject({
+        idle: true,
+      });
+      expect(
+        classify({ policy: 'idle-interval-elapsed', staleTurnMs: short, state })
+      ).toMatchObject({ idle: false, reason: 'prompt_turn_active' });
+    });
+
+    it.each([undefined, null, 0])('stays unbounded when the bound is %s', (staleTurnMs) => {
+      expect(classify({ staleTurnMs, state: hung(STALE_TURN_MS * 20) })).toMatchObject({
+        idle: false,
+        reason: 'prompt_turn_active',
+      });
+    });
+
+    it('refuses to guess when the state carries no work evidence at all', () => {
+      const state = { activity: 'prompting' };
+      expect(classify({ staleTurnMs: STALE_TURN_MS, state })).toMatchObject({
+        idle: false,
+        reason: 'prompt_turn_active',
+      });
     });
   });
 });

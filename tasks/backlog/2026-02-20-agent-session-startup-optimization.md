@@ -1,5 +1,11 @@
 # Agent Session Startup Optimization
 
+> **Reconciliation 2026-10-26:** Still open: no merge since 10-12 touched key/settings fetching,
+> pre-install, caching or `SetSessionModel`/`SetSessionMode`. Pointer fixes: the contract
+> resolution is now `apps/api/src/services/agent-session-bootstrap.ts:267-288` (#2337,
+> `8fedc6c5b`), `ensureAgentInstalled` is `session_host.go:645` (Codex runtime call at `:657`), and
+> the remaining settings fetch is `session_host_selection.go:233`.
+
 > **Reconciliation 2026-10-12:** #2261 (ab76c0f42) has the control plane resolve each session's
 > settings and pass them with `settingsResolved: true`
 > (`apps/api/src/services/agent-session-bootstrap.ts:265-286`), so `loadAgentSettings` skips the

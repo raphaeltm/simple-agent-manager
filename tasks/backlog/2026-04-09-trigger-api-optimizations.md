@@ -1,5 +1,17 @@
 # Trigger API Optimizations
 
+> **Reconciliation 2026-11-02:** Still open; pointers moved. #2447 (`87549f5aa`) moved the
+> consecutive-failure query into `apps/api/src/services/trigger-failure-window.ts`
+> (`consecutiveFailureCount`). `services/trigger-admission.ts:232-259` now calls it in a loop with a
+> fenced auto-pause `UPDATE`, and that loop still runs before the reservation insert at `:265`.
+> The three env vars are still absent from `apps/api/.env.example`.
+
+> **Reconciliation 2026-10-26:** Still open; pointers moved. #2413 (`99b3ac5b8`) moved
+> `createTrigger` to `apps/api/src/services/trigger-create.ts:174-305`. In
+> `services/trigger-admission.ts` (also changed by #2327 and #2335) the consecutive-failure loop is
+> now `:258-281`, still before the reservation `INSERT` at `:287-288`. The three vars are still
+> absent from `apps/api/.env.example`.
+
 > **Reconciliation 2026-10-12:** #2258 (`2de93fe80`) removed the raw SQL from MCP
 > `handleCreateTrigger`. It now writes through the shared Drizzle `createTrigger` service
 > (`apps/api/src/routes/mcp/trigger-create-tool.ts:80,92-99`,

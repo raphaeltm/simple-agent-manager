@@ -1,0 +1,55 @@
+{
+  "outcome": "failed",
+  "start": "2026-10-29T10:13:12.624Z",
+  "finished": "2026-10-29T10:48:51.378Z",
+  "sourceCommit": "78c2bb67a503c8f1e7879c0b72734f0f9de5e948",
+  "error": "Cold build proof failed; see last bounded phase evidence",
+  "launcherExitCode": 1,
+  "elapsedLauncherSeconds": 2138.754,
+  "proofWorker": "sam-build-proof-0d3e21f91763",
+  "instanceType": "standard-3",
+  "configuredMaximumSeconds": 3300,
+  "configuredComputeEstimateUpperUsd": 0.201696,
+  "conservativeIncrementalEstimateUsd": 2,
+  "authorizedBudgetUsd": 5,
+  "actualBilledUsd": null,
+  "terminalState": {
+    "status": "failed",
+    "deadline": 1793272106585,
+    "fit": {
+      "phase": "codex-source-build",
+      "at": 1793269000475,
+      "diskUsedBytes": 3444514816,
+      "diskAvailableBytes": 12400877568,
+      "peakDiskUsedBytes": 9378832384
+    },
+    "probeError": "Error",
+    "errorTail": "e:///sam/job/codex-build/adapter/node_modules/vitest/dist/module-evaluator.js:258:4)\n    at VitestModuleRunner.directRequest (file:///sam/job/codex-build/adapter/node_modules/vite/dist/node/module-runner.js:1270:59)\n    at VitestModuleRunner.cachedRequest (file:///sam/job/codex-build/adapter/node_modules/vite/dist/node/module-runner.js:1177:73)\n    at VitestModuleRunner.import (file:///sam/job/codex-build/adapter/node_modules/vite/dist/node/module-runner.js:1132:10)\n    at file:///sam/job/codex-build/adapter/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3446:5\n    at collectTests (file:///sam/job/codex-build/adapter/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3422:3)\n    at startTests (file:///sam/job/codex-build/adapter/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:4156:17)\n    at file:///sam/job/codex-build/adapter/node_modules/vitest/dist/chunks/base.Cc3oda2V.js:90:6\n\nstderr | src/__tests__/StdUtils.test.ts > createJSONRPCReader > reads several messages of one chunk and skips blank and malformed lines\n[SYSTEM_ERROR] Dropped a Codex app-server line that is not JSON (4 chars): SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)\nSyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)\n    at JSON.parse (<anonymous>)\n    at LineSplitter.onLine (/sam/job/codex-build/adapter/src/StdUtils.ts:42:32)\n    at LineSplitter.push (/sam/job/codex-build/adapter/src/StdUtils.ts:100:18)\n    at PassThrough.onData (/sam/job/codex-build/adapter/src/StdUtils.ts:54:53)\n    at PassThrough.emit (node:events:519:28)\n    at addChunk (node:internal/streams/readable:561:12)\n    at readableAddChunkPushByteMode (node:internal/streams/readable:512:3)\n    at PassThrough.Readable.push (node:internal/streams/readable:392:5)\n    at node:internal/streams/transform:178:12\n    at PassThrough._transform (node:internal/streams/passthrough:46:3)\n\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 2 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  src/__tests__/CodexACPAgent/CodexAcpClient.test.ts > ACP server test > handles logout command\n FAIL  src/__tests__/CodexACPAgent/CodexAcpClient.test.ts > ACP server test > handles logout command\n FAIL  src/__tests__/CodexACPAgent/CodexAcpClient.test.ts > ACP server test > handles logout command\nError: Test timed out in 40000ms.\nIf this is a long-running test, pass a timeout value as the last argument or configure it globally with \"testTimeout\".\n \u276f src/__tests__/CodexACPAgent/CodexAcpClient.test.ts:3539:5\n    3537|     });\n    3538|\n    3539|     it('handles logout command', async () => {\n       |     ^\n    3540|         const codexAcpAgent = fixture.getCodexAcpAgent();\n    3541|         await codexAcpAgent.initialize({protocolVersion: 1});\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/6]\u23af\n\n FAIL  src/__tests__/CodexACPAgent/CodexAcpClient.test.ts > ACP server test > handles skills command\n FAIL  src/__tests__/CodexACPAgent/CodexAcpClient.test.ts > ACP server test > handles skills command\n FAIL  src/__tests__/CodexACPAgent/CodexAcpClient.test.ts > ACP server test > handles skills command\nError: Test timed out in 40000ms.\nIf this is a long-running test, pass a timeout value as the last argument or configure it globally with \"testTimeout\".\n \u276f src/__tests__/CodexACPAgent/CodexAcpClient.test.ts:3730:5\n    3728|     });\n    3729|\n    3730|     it('handles skills command', async () => {\n       |     ^\n    3731|         const codexAcpAgent = fixture.getCodexAcpAgent();\n    3732|         await codexAcpAgent.initialize({protocolVersion: 1});\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[2/6]\u23af\n\n"
+  },
+  "peakDiskUsedBytes": 9378832384,
+  "peakMemoryBytes": null,
+  "failedTests": [
+    {
+      "file": "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts",
+      "name": "handles logout command",
+      "timeoutMs": 40000
+    },
+    {
+      "file": "src/__tests__/CodexACPAgent/CodexAcpClient.test.ts",
+      "name": "handles skills command",
+      "timeoutMs": 40000
+    }
+  ],
+  "cleanup": {
+    "verifiedAt": "2026-10-29T10:49:52.236Z",
+    "workerSettingsHttpStatus": 404,
+    "applicationsListHttpStatus": 200,
+    "exactProofApplications": []
+  },
+  "evidenceRetention": "Foreground shell timeout loops; readable progress file captured throughout; terminal result and cleanup committed after completion.",
+  "launcherAdjustments": [
+    "55-minute remote compute deadline leaves margin within one-hour managed execution",
+    "Record safe probe errors instead of swallowing them",
+    "Append credential-free stdout/stderr to local progress file and write terminal result/exit-code"
+  ]
+}

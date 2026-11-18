@@ -1,3 +1,7 @@
+import {
+  DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING_LIMIT,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS_LIMIT,
+} from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -6,6 +10,7 @@ import type { Env } from '../../../src/env';
 import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
 import { TRIGGER_TOOLS } from '../../../src/routes/mcp/tool-definitions-trigger-tools';
 import { handleCreateTrigger, handleUpdateTrigger } from '../../../src/routes/mcp/trigger-tools';
+import { invalidateAdminSettings } from '../../../src/services/admin-settings';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import { seedProjectWithMember, seedUser } from './capacity-pool-test-seeds';
 
@@ -59,6 +64,28 @@ describe('MCP create_trigger with canonical persistence', () => {
     expect(sqlite.prepare('SELECT count(*) AS count FROM triggers').get()).toEqual({ count: 0 });
   });
 
+  it('sets concurrency, skip behavior and description atomically on create', async () => {
+    const result = await handleCreateTrigger(
+      'parity',
+      { ...github, description: 'Explicit controls', maxConcurrent: 3, skipIfRunning: false },
+      token,
+      env
+    );
+    expect(result.error).toBeUndefined();
+    expect(content(result)).toMatchObject({
+      description: 'Explicit controls',
+      maxConcurrent: 3,
+      skipIfRunning: false,
+    });
+    expect(
+      sqlite.prepare('SELECT description, max_concurrent, skip_if_running FROM triggers').get()
+    ).toEqual({ description: 'Explicit controls', max_concurrent: 3, skip_if_running: 0 });
+    const definition = TRIGGER_TOOLS.find((tool) => tool.name === 'create_trigger')!;
+    expect(definition.inputSchema.properties).toHaveProperty('maxConcurrent');
+    expect(definition.inputSchema.properties).toHaveProperty('skipIfRunning');
+    expect(definition.inputSchema.properties).toHaveProperty('description');
+  });
+
   it('preserves cron callers that omit sourceType and UTC default', async () => {
     const result = await handleCreateTrigger('1', cron, token, env);
     expect(result.error).toBeUndefined();
@@ -69,6 +96,143 @@ describe('MCP create_trigger with canonical persistence', () => {
     });
     expect(content(result).nextFireAt).toBeTruthy();
     expect(content(result).cronHumanReadable).toBeTruthy();
+  });
+  it('returns stored queue settings and defaults from creation', async () => {
+    const defaults = content(await handleCreateTrigger('defaults', github, token, env));
+    expect(defaults.githubConfig).toMatchObject({
+      subjectAffinity: false,
+      queueMaxPending: 50,
+      queueTtlSeconds: 86400,
+    });
+  });
+  it('returns queue settings at the shared safety ceilings', async () => {
+    const settings = {
+      subjectAffinity: true,
+      queueMaxPending: DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING_LIMIT,
+      queueTtlSeconds: DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS_LIMIT,
+    };
+    const custom = content(
+      await handleCreateTrigger(
+        'custom',
+        { ...github, githubConfig: { ...github.githubConfig, ...settings } },
+        token,
+        env
+      )
+    );
+    expect(custom.githubConfig).toMatchObject(settings);
+  });
+  it.each([
+    ['queueMaxPending', DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING_LIMIT + 1],
+    ['queueTtlSeconds', DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS_LIMIT + 1],
+  ])('rejects creation and update beyond the %s ceiling', async (field, value) => {
+    const invalid = { ...github.githubConfig, [field]: value };
+    expect(
+      (await handleCreateTrigger('invalid', { ...github, githubConfig: invalid }, token, env)).error
+        ?.code
+    ).toBe(-32602);
+    const created = content(await handleCreateTrigger('valid', github, token, env));
+    expect(
+      (
+        await handleUpdateTrigger(
+          'invalid-update',
+          { triggerId: created.triggerId, githubConfig: invalid },
+          token,
+          env
+        )
+      ).error?.code
+    ).toBe(-32602);
+  });
+  it.each([
+    { pending: 2000, ttl: 60 * 86400 },
+    { pending: 3, ttl: 60 },
+  ])(
+    'honors higher and lower admin ceilings on create and update: %j',
+    async ({ pending, ttl }) => {
+      const put = sqlite.prepare(
+        'INSERT INTO platform_settings(key,value,updated_at) VALUES(?,?,?)'
+      );
+      put.run('operations.githubTriggerQueueMaxPendingLimit', String(pending), 'now');
+      put.run('operations.githubTriggerQueueTtlSecondsLimit', String(ttl), 'now');
+      invalidateAdminSettings(env);
+      const defaults = content(await handleCreateTrigger('admin-default', github, token, env));
+      expect(defaults.githubConfig.queueMaxPending).toBe(Math.min(50, pending));
+      expect(defaults.githubConfig.queueTtlSeconds).toBe(Math.min(86400, ttl));
+      const atLimit = { ...github.githubConfig, queueMaxPending: pending, queueTtlSeconds: ttl };
+      const created = await handleCreateTrigger(
+        'limit',
+        { ...github, name: 'At limit', githubConfig: atLimit },
+        token,
+        env
+      );
+      expect(created.error).toBeUndefined();
+      expect(content(created).githubConfig).toMatchObject({
+        queueMaxPending: pending,
+        queueTtlSeconds: ttl,
+      });
+      for (const [field, value] of [
+        ['queueMaxPending', pending + 1],
+        ['queueTtlSeconds', ttl + 1],
+      ] as const) {
+        const invalid = { ...atLimit, [field]: value };
+        expect(
+          (
+            await handleCreateTrigger(
+              'over',
+              { ...github, name: 'Over limit', githubConfig: invalid },
+              token,
+              env
+            )
+          ).error?.code
+        ).toBe(-32602);
+        expect(
+          (
+            await handleUpdateTrigger(
+              'update-over',
+              { triggerId: defaults.triggerId, githubConfig: invalid },
+              token,
+              env
+            )
+          ).error?.code
+        ).toBe(-32602);
+      }
+      const updated = await handleUpdateTrigger(
+        'update-limit',
+        { triggerId: defaults.triggerId, githubConfig: atLimit },
+        token,
+        env
+      );
+      expect(updated.error).toBeUndefined();
+      expect(content(updated).githubConfig).toMatchObject({
+        queueMaxPending: pending,
+        queueTtlSeconds: ttl,
+      });
+    }
+  );
+  it('updates queue controls and preserves them during later filter-only edits', async () => {
+    const created = content(await handleCreateTrigger('queue-create', github, token, env));
+    const settings = { subjectAffinity: true, queueMaxPending: 7, queueTtlSeconds: 120 };
+    const updated = await handleUpdateTrigger(
+      'queue-update',
+      { triggerId: created.triggerId, githubConfig: { ...github.githubConfig, ...settings } },
+      token,
+      env
+    );
+    expect(updated.error).toBeUndefined();
+    expect(content(updated).githubConfig).toMatchObject(settings);
+    const filtered = await handleUpdateTrigger(
+      'queue-filter',
+      {
+        triggerId: created.triggerId,
+        githubConfig: { eventType: 'issues', filters: { labels: ['bug'] } },
+      },
+      token,
+      env
+    );
+    expect(filtered.error).toBeUndefined();
+    expect(content(filtered).githubConfig).toMatchObject({
+      ...settings,
+      filters: { labels: ['bug'] },
+    });
   });
   it('creates and replaces GitHub config without cron scheduling', async () => {
     const result = await handleCreateTrigger('1', github, token, env);
@@ -93,6 +257,9 @@ describe('MCP create_trigger with canonical persistence', () => {
     expect(updated.error).toBeUndefined();
     expect(content(updated).githubConfig).toEqual({
       eventType: 'push',
+      subjectAffinity: false,
+      queueMaxPending: 50,
+      queueTtlSeconds: 86400,
       filters: { branches: ['main'] },
     });
     const cleared = await handleUpdateTrigger(

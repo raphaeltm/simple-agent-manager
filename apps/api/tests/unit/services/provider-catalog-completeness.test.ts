@@ -16,6 +16,7 @@ import { listProviderCatalogOfferings } from '../../../src/services/provider-cat
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
+  vi.useRealTimers();
   globalThis.fetch = originalFetch;
   vi.restoreAllMocks();
 });
@@ -57,6 +58,61 @@ function hetznerServerType(name: string) {
 }
 
 describe('provider catalog completeness at the provider boundary', () => {
+  it('clamps a stalled live request to the refresh pass and does not launch fallback after expiry', async () => {
+    vi.useFakeTimers();
+    const provider = new HetznerProvider('token');
+    let signal: AbortSignal | undefined;
+    const lookup = vi.spyOn(provider, 'listInstanceOfferings').mockImplementation((_, options) => {
+      signal = options?.signal;
+      return new Promise(() => {});
+    });
+    const result = listProviderCatalogOfferings('hetzner', provider, 60_000, {
+      deadlineAt: Date.now() + 50,
+    }).catch((error: Error) => error);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(await result).toMatchObject({ name: 'TimeoutError' });
+    expect(signal?.aborted).toBe(true);
+    expect(lookup).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives a slow fallback only the remaining shared pass budget', async () => {
+    vi.useFakeTimers();
+    const provider = new HetznerProvider('token');
+    let fallbackSignal: AbortSignal | undefined;
+    const lookup = vi
+      .spyOn(provider, 'listInstanceOfferings')
+      .mockImplementationOnce(
+        () => new Promise((_, reject) => setTimeout(() => reject(new Error('live failed')), 40))
+      )
+      .mockImplementationOnce((_, options) => {
+        fallbackSignal = options?.signal;
+        return new Promise(() => {});
+      });
+    const result = listProviderCatalogOfferings('hetzner', provider, 60_000, {
+      deadlineAt: Date.now() + 50,
+    }).catch((error: Error) => error);
+    await vi.advanceTimersByTimeAsync(40);
+    expect(lookup).toHaveBeenCalledTimes(2);
+    expect(fallbackSignal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(await result).toMatchObject({ message: 'live failed' });
+    expect(fallbackSignal?.aborted).toBe(true);
+  });
+
+  it('bounds a stalled live catalog and retains an incomplete static fallback', async () => {
+    globalThis.fetch = vi.fn(() => new Promise(() => {}));
+    vi.useFakeTimers();
+    const result = listProviderCatalogOfferings('hetzner', new HetznerProvider('token'), 100);
+    await vi.advanceTimersByTimeAsync(100);
+    const catalog = await result;
+    expect(catalog.offerings.length).toBeGreaterThan(0);
+    expect(catalog.refreshStatus).toMatchObject({
+      succeeded: false,
+      origin: 'static',
+      complete: false,
+    });
+  });
+
   it('treats a successful EMPTY Hetzner server_types response as a complete API inventory', async () => {
     mockHetznerServerTypes([]);
     const provider = new HetznerProvider('token');

@@ -254,6 +254,8 @@ describe('session snapshot progress persistence', () => {
         schema.sessionSnapshots,
         schema.agentSessions,
         schema.projectDataSessionLocations,
+        schema.workspaces,
+        schema.nodes,
       ]);
       sqlite
         .prepare(
@@ -312,7 +314,12 @@ describe('session snapshot progress persistence', () => {
   it('does not let a capture reopen the generation after teardown claims stopping', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.agentSessions]);
+      createSchemaTables(sqlite, [
+        schema.sessionSnapshots,
+        schema.agentSessions,
+        schema.workspaces,
+        schema.nodes,
+      ]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -352,7 +359,12 @@ describe('session snapshot progress persistence', () => {
   it('rejects preparation when sleep finalizes between the read and capture update', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.agentSessions]);
+      createSchemaTables(sqlite, [
+        schema.sessionSnapshots,
+        schema.agentSessions,
+        schema.workspaces,
+        schema.nodes,
+      ]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -422,7 +434,12 @@ describe('session snapshot progress persistence', () => {
   it('preserves a degraded checkpoint while opening a replacement capture generation', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.agentSessions]);
+      createSchemaTables(sqlite, [
+        schema.sessionSnapshots,
+        schema.agentSessions,
+        schema.workspaces,
+        schema.nodes,
+      ]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -478,7 +495,12 @@ describe('session snapshot progress persistence', () => {
   it('records progress and terminalizes the active generation even when a previous snapshot is available', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.agentSessions]);
+      createSchemaTables(sqlite, [
+        schema.sessionSnapshots,
+        schema.agentSessions,
+        schema.workspaces,
+        schema.nodes,
+      ]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -558,7 +580,12 @@ describe('session snapshot progress persistence', () => {
   it('abandons a stalled capture instead of replacing a generation that holds a Git commit', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.agentSessions]);
+      createSchemaTables(sqlite, [
+        schema.sessionSnapshots,
+        schema.agentSessions,
+        schema.workspaces,
+        schema.nodes,
+      ]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -622,7 +649,12 @@ describe('session snapshot progress persistence', () => {
     const sqlite = new Database(':memory:');
     try {
       const sha = '4ea140588150773ce3aace786aeef7f4049ce100fa649c94fbbddb960f1da942';
-      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.agentSessions]);
+      createSchemaTables(sqlite, [
+        schema.sessionSnapshots,
+        schema.agentSessions,
+        schema.workspaces,
+        schema.nodes,
+      ]);
       const r2 = { put: vi.fn(), delete: vi.fn(async () => undefined), head: vi.fn() };
       const testEnv = env({
         DATABASE: createSqliteD1(sqlite),
@@ -681,7 +713,12 @@ describe('session snapshot progress persistence', () => {
   it('records capture failure only for the active capture generation', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.agentSessions]);
+      createSchemaTables(sqlite, [
+        schema.sessionSnapshots,
+        schema.agentSessions,
+        schema.workspaces,
+        schema.nodes,
+      ]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots
@@ -1400,7 +1437,12 @@ describe('session snapshot recovery lifecycle', () => {
   it('re-sleep resets recovery_attempts so a fresh cycle starts clean', async () => {
     const sqlite = new Database(':memory:');
     try {
-      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.agentSessions]);
+      createSchemaTables(sqlite, [
+        schema.sessionSnapshots,
+        schema.agentSessions,
+        schema.workspaces,
+        schema.nodes,
+      ]);
       sqlite
         .prepare(
           `INSERT INTO session_snapshots

@@ -1,0 +1,10 @@
+{
+  "guard": "owner requestedBy equality in context reservation/completion",
+  "mutation": "remove eq(j.requestedBy, owner.requestedBy)",
+  "command": "vitest run build-context-state.test.ts -t \"owner reserves|requestedBy\"",
+  "mutatedExitCode": 1,
+  "ownerControl": "owner reserves and completes exactly once",
+  "attack": "cross-scope requestedBy rejects init/complete",
+  "sourceRestoredSha256": "ac85bbcc731ff369a7229ec0a114397b0002ee51a221d1b2553e43a67645219a",
+  "sourceRestored": true
+}

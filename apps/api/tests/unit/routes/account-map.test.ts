@@ -34,6 +34,14 @@ vi.mock('../../../src/services/project-data', () => ({
 vi.mock('../../../src/services/agent-activity', () => ({
   listAgentActivityTasks: vi.fn(),
 }));
+vi.mock('@simple-agent-manager/operations/internal/link-core', () => ({
+  listLinksForTargets: vi.fn(),
+}));
+vi.mock('../../../src/services/admin-settings', () => ({
+  resolveAdminSettingDetailsMany: vi
+    .fn()
+    .mockResolvedValue([{ value: 10 }, { value: 100 }, { value: 100 }, { value: 50 }]),
+}));
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -70,6 +78,7 @@ function buildMockDB(projects: any[], nodes: any[], workspaces: any[], tasks: an
     from: vi.fn().mockReturnThis(),
     innerJoin: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
+    orderBy: vi.fn().mockReturnThis(),
     limit: vi.fn().mockImplementation(() => {
       const result = results[callIdx % results.length];
       callIdx++;
@@ -81,7 +90,11 @@ function buildMockDB(projects: any[], nodes: any[], workspaces: any[], tasks: an
 }
 
 const mockEnv = {
-  DATABASE: {} as D1Database,
+  DATABASE: {
+    prepare: vi.fn().mockReturnValue({
+      bind: vi.fn().mockReturnValue({ all: vi.fn().mockResolvedValue({ results: [] }) }),
+    }),
+  } as unknown as D1Database,
   PROJECT_DATA: {
     idFromName: vi.fn().mockReturnValue({ toString: () => 'do-id' }),
     get: vi.fn(),
@@ -152,6 +165,9 @@ describe('GET /account-map', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (agentActivityService.listAgentActivityTasks as any).mockResolvedValue([]);
+    (mockEnv.DATABASE.prepare as any).mockReturnValue({
+      bind: vi.fn().mockReturnValue({ all: vi.fn().mockResolvedValue({ results: [] }) }),
+    });
   });
 
   it('returns empty response when user has no entities', async () => {
@@ -231,7 +247,8 @@ describe('GET /account-map', () => {
   });
 
   it('defaults to activeOnly=true and uses scoped cache key', async () => {
-    buildMockDB([], [], [], []);
+    buildMockDB([projectFixture()], [], [], []);
+    (projectDataService.listSessions as any).mockResolvedValue({ sessions: [], total: 0 });
 
     const app = buildApp();
     const res = await app.request('/account-map', {}, mockEnv);
@@ -239,7 +256,7 @@ describe('GET /account-map', () => {
     expect(res.status).toBe(200);
 
     // Cache key should include :active suffix
-    expect(mockEnv.KV.get).toHaveBeenCalledWith('account-map:v2:user-123:active', 'json');
+    expect(mockEnv.KV.get).toHaveBeenCalledWith('account-map:v5:user-123:active', 'json');
     expect(agentActivityService.listAgentActivityTasks).toHaveBeenCalledWith(
       mockEnv,
       expect.objectContaining({ activeOnly: true, userId: 'user-123' })
@@ -247,7 +264,8 @@ describe('GET /account-map', () => {
   });
 
   it('uses :all cache key when activeOnly=false', async () => {
-    buildMockDB([], [], [], []);
+    buildMockDB([projectFixture()], [], [], []);
+    (projectDataService.listSessions as any).mockResolvedValue({ sessions: [], total: 0 });
 
     const app = buildApp();
     const res = await app.request('/account-map?activeOnly=false', {}, mockEnv);
@@ -255,7 +273,7 @@ describe('GET /account-map', () => {
     expect(res.status).toBe(200);
 
     // Cache key should include :all suffix
-    expect(mockEnv.KV.get).toHaveBeenCalledWith('account-map:v2:user-123:all', 'json');
+    expect(mockEnv.KV.get).toHaveBeenCalledWith('account-map:v5:user-123:all', 'json');
     expect(agentActivityService.listAgentActivityTasks).toHaveBeenCalledWith(
       mockEnv,
       expect.objectContaining({ activeOnly: false, userId: 'user-123' })
@@ -321,8 +339,9 @@ describe('GET /account-map', () => {
           status: 'error',
           messageCount: 0,
         }),
+        sessionFixture({ id: 'sess-sleeping', topic: 'Sleeping chat', status: 'sleeping' }),
       ],
-      total: 3,
+      total: 4,
     });
 
     const app = buildApp();
@@ -330,9 +349,8 @@ describe('GET /account-map', () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as any;
-    // Only the active session should be returned
-    expect(body.sessions).toHaveLength(1);
-    expect(body.sessions[0].id).toBe('sess-active');
+    // Active and sleeping (resumable) chats stay; stopped and errored ones wait for Show finished.
+    expect(body.sessions.map((s: any) => s.id).sort()).toEqual(['sess-active', 'sess-sleeping']);
   });
 
   it('returns all sessions when activeOnly=false', async () => {
@@ -373,5 +391,60 @@ describe('GET /account-map', () => {
     const body = (await res.json()) as any;
     expect(body.projects).toHaveLength(1);
     expect(body.sessions).toEqual([]);
+    expect(body.truncation.incomplete).toBe(true);
+    expect(mockEnv.KV.put).not.toHaveBeenCalled();
+  });
+  it("passes each chat's open attention marker and only https task PR links", async () => {
+    const tasks = [
+      agentTaskFixture({ id: 'task-pr', outputPrUrl: 'https://github.com/o/r/pull/7' }),
+      agentTaskFixture({ id: 'task-js', workspaceId: null, outputPrUrl: 'javascript:alert(1)' }),
+      agentTaskFixture({ id: 'task-none', workspaceId: null, outputPrUrl: null }),
+    ];
+    buildMockDB([projectFixture()], [], [], tasks);
+    (projectDataService.listSessions as any).mockResolvedValue({
+      sessions: [
+        sessionFixture({
+          id: 'sess-waiting',
+          attention: {
+            markerId: 'm-1',
+            kind: 'needs_input',
+            createdAt: 1_700_000_000_000,
+            expiresAt: null,
+            reason: 'Which branch should I use?',
+            options: ['main', 'dev'],
+          },
+        }),
+        sessionFixture({ id: 'sess-malformed', attention: { kind: 42, createdAt: 1 } }),
+        sessionFixture({
+          id: 'sess-bad-time',
+          attention: { kind: 'needs_input', createdAt: 'not-a-number', reason: null },
+        }),
+        sessionFixture({ id: 'sess-quiet', attention: null }),
+        sessionFixture({
+          id: 'sess-expired',
+          attention: { kind: 'needs_input', createdAt: 1, expiresAt: 2, reason: 'Too late' },
+        }),
+      ],
+      total: 5,
+    });
+
+    const res = await buildApp().request('/account-map', {}, mockEnv);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    const byId = new Map(body.sessions.map((s: any) => [s.id, s]));
+    expect((byId.get('sess-waiting') as any).attention).toEqual({
+      kind: 'needs_input',
+      reason: 'Which branch should I use?',
+      createdAt: 1_700_000_000_000,
+    });
+    expect((byId.get('sess-malformed') as any).attention).toBeNull();
+    expect((byId.get('sess-bad-time') as any).attention).toBeNull();
+    expect((byId.get('sess-quiet') as any).attention).toBeNull();
+    // Past its expiry, a marker is not waiting on anyone.
+    expect((byId.get('sess-expired') as any).attention).toBeNull();
+    const prById = new Map(body.tasks.map((t: any) => [t.id, t.outputPrUrl]));
+    expect(prById.get('task-pr')).toBe('https://github.com/o/r/pull/7');
+    expect(prById.get('task-js')).toBeNull();
+    expect(prById.get('task-none')).toBeNull();
   });
 });

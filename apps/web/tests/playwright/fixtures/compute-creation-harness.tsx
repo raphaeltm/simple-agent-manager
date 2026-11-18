@@ -13,11 +13,9 @@ import {
   type TaskSubmitOptions,
 } from '../../../src/components/task/TaskSubmitForm';
 import { queryClient } from '../../../src/lib/query-client';
-import { CreateWorkspace } from '../../../src/pages/CreateWorkspace';
 import { Nodes } from '../../../src/pages/Nodes';
 
 const surface = new URLSearchParams(location.search).get('surface');
-const initialPath = surface === 'nodes' ? '/nodes' : '/workspaces/new';
 
 function TaskHarness() {
   const [submitted, setSubmitted] = useState<unknown>(null);
@@ -48,14 +46,13 @@ document.documentElement.dataset.uiTheme = 'sam';
 createRoot(document.getElementById('root')!).render(
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
-      <MemoryRouter initialEntries={[initialPath]}>
+      <MemoryRouter initialEntries={['/nodes']}>
         <main style={{ padding: 12, maxWidth: 1100, margin: 'auto' }}>
           {surface === 'task' ? (
             <TaskHarness />
           ) : (
             <Routes>
               <Route path="/nodes" element={<Nodes />} />
-              <Route path="/workspaces/new" element={<CreateWorkspace />} />
               <Route path="*" element={<Destination />} />
             </Routes>
           )}

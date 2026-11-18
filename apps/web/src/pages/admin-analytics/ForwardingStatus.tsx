@@ -8,14 +8,10 @@ function StatusBadge({ active, label }: { active: boolean; label: string }) {
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${
-        active
-          ? 'bg-success-tint text-success-fg'
-          : 'bg-surface-secondary text-fg-muted'
+        active ? 'bg-success-tint text-success-fg' : 'bg-surface-secondary text-fg-muted'
       }`}
     >
-      <span
-        className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-success-fg' : 'bg-fg-muted'}`}
-      />
+      <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-success-fg' : 'bg-fg-muted'}`} />
       {label}
     </span>
   );
@@ -34,10 +30,7 @@ export function ForwardingStatus({ data }: ForwardingStatusProps) {
     <div className="flex flex-col gap-3">
       {/* Status row */}
       <div className="flex flex-wrap items-center gap-2">
-        <StatusBadge
-          active={data.enabled}
-          label={data.enabled ? 'Enabled' : 'Disabled'}
-        />
+        <StatusBadge active={data.enabled} label={data.enabled ? 'Enabled' : 'Disabled'} />
         <StatusBadge
           active={data.destinations.segment.configured}
           label={`Segment: ${data.destinations.segment.configured ? 'Configured' : 'Not configured'}`}
@@ -56,9 +49,7 @@ export function ForwardingStatus({ data }: ForwardingStatusProps) {
         </div>
         <div>
           <span className="text-fg-muted">Events tracked:</span>{' '}
-          <span className="text-fg-primary font-medium">
-            {data.events.join(', ')}
-          </span>
+          <span className="text-fg-primary font-medium">{data.events.join(', ')}</span>
         </div>
       </div>
     </div>

@@ -1,3 +1,7 @@
+import {
+  parseResolvedResourceReservation,
+  resolveWorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
 import type { CapacityPlacementSnapshot } from '@simple-agent-manager/shared';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -18,13 +22,13 @@ import { writeBootLogs } from '../../services/boot-log';
 import { stopComputeTracking } from '../../services/compute-usage';
 import { rebuildWorkspaceOnNode, restartWorkspaceOnNode } from '../../services/node-agent';
 import * as projectDataService from '../../services/project-data';
-import { sleepWorkspaceSession } from '../../services/session-sleep';
+import { isSafeSleepDeferral, sleepWorkspaceSession } from '../../services/session-sleep';
 import { finalizeWorkspaceEvictionOnNode } from '../../services/workspace-eviction-lifecycle';
-import { reserveEvictedWorkspaceRestart } from '../../services/workspace-placement';
+import { reserveWorkspaceRestart } from '../../services/workspace-placement';
 import {
-  parseResolvedResourceReservation,
-  resolveWorkspaceAdmissionPolicy,
-} from '../../services/workspace-resource-capacity';
+  describeReprovisionDispatchError,
+  signReprovisionCallbackToken,
+} from '../../services/workspace-reprovision-credential';
 import { requireRepositoryOwnerAccess } from '../projects/_helpers';
 import {
   assertNodeOperational,
@@ -42,19 +46,6 @@ import { startComputeTrackingForNode } from './workspace-create-helpers';
 import { workspaceStopRoutes } from './workspace-stop';
 
 const lifecycleRoutes = new Hono<{ Bindings: Env }>();
-const SAFE_SLEEP_DEFERRAL_MESSAGES = new Set([
-  'Harness-owned background work is active',
-  'Workspace idle interval has not elapsed',
-  'Workspace activity changed while the final snapshot was captured',
-  'Workspace activity changed during snapshot artifact verification',
-]);
-
-function isSafeSleepDeferral(error: unknown): error is Error {
-  if (!(error instanceof Error)) return false;
-  if (SAFE_SLEEP_DEFERRAL_MESSAGES.has(error.message)) return true;
-  return error.message.startsWith('Workspace agent is not idle (');
-}
-
 function getTaskRunnerReadyStatus(status: string): 'running' | 'recovery' | 'error' {
   if (status === 'running') return 'running';
   if (status === 'recovery') return 'recovery';
@@ -78,6 +69,39 @@ async function requireWorkspaceRestartGitHubAccess(
     throw errors.notFound('Project');
   }
   await requireRepositoryOwnerAccess(env, db, project, userId, flow);
+}
+
+/** Restarting inactive work is a new admission; an active rebuild retains its reservation. */
+async function reserveWorkspaceRestartAdmission(
+  env: Env,
+  workspace: schema.Workspace,
+  node: schema.Node,
+  userId: string,
+  evictionGeneration: string
+): Promise<boolean> {
+  if (
+    !workspace.projectId ||
+    !workspace.nodeId ||
+    !['stopped', 'error', 'evicted'].includes(workspace.status)
+  )
+    return false;
+  return reserveWorkspaceRestart(
+    env.DATABASE,
+    {
+      id: workspace.id,
+      nodeId: workspace.nodeId,
+      userId,
+      projectId: workspace.projectId,
+      chatSessionId: workspace.chatSessionId,
+      evictionGeneration,
+      expectedEvictionGeneration: workspace.evictionGeneration,
+      expectedStatus: workspace.status as 'stopped' | 'error' | 'evicted',
+      resolvedReservation: parseResolvedResourceReservation(workspace.resolvedReservationJson),
+      capacityPlacementSnapshot: node as unknown as CapacityPlacementSnapshot,
+      authorityNodeClass: node.nodeClass === 'user-owned' ? 'user-owned' : 'managed',
+    },
+    resolveWorkspaceAdmissionPolicy(env)
+  );
 }
 
 type WorkspaceRuntimeRecreationOperation = 'restart' | 'rebuild';
@@ -254,64 +278,16 @@ lifecycleRoutes.post('/:id/restart', requireAuth(), requireApproved(), async (c)
   }
 
   // Clear previous error state and boot logs before starting new provisioning
-  const restartTransition =
-    workspace.status === 'evicted'
-      ? {
-          meta: {
-            changes:
-              workspace.projectId &&
-              (await reserveEvictedWorkspaceRestart(
-                c.env.DATABASE,
-                {
-                  id: workspace.id,
-                  nodeId,
-                  userId,
-                  projectId: workspace.projectId,
-                  chatSessionId: workspace.chatSessionId,
-                  evictionGeneration,
-                  expectedEvictionGeneration: workspace.evictionGeneration,
-                  resolvedReservation: parseResolvedResourceReservation(
-                    workspace.resolvedReservationJson
-                  ),
-                  // The shared admission SQL validates the persisted pool/source/credential
-                  // snapshot against current authority before permitting the same-node restart.
-                  capacityPlacementSnapshot: node as unknown as CapacityPlacementSnapshot,
-                  authorityNodeClass: node.nodeClass === 'user-owned' ? 'user-owned' : 'managed',
-                },
-                resolveWorkspaceAdmissionPolicy(c.env)
-              ))
-                ? 1
-                : 0,
-          },
-        }
-      : await db
-          .update(schema.workspaces)
-          .set({
-            status: 'creating',
-            errorMessage: null,
-            updatedAt: new Date().toISOString(),
-            evictionGeneration,
-            evictionFinalizedAt: null,
-            stopRuntimeConfirmedAt: null,
-          })
-          .where(
-            and(
-              eq(schema.workspaces.id, workspace.id),
-              eq(schema.workspaces.userId, userId),
-              eq(schema.workspaces.nodeId, nodeId),
-              eq(schema.workspaces.status, workspace.status),
-              sql`${schema.workspaces.evictionGeneration} IS ${workspace.evictionGeneration}`,
-              sql`${schema.workspaces.projectId} IS ${workspace.projectId}`,
-              sql`${schema.workspaces.chatSessionId} IS ${workspace.chatSessionId}`,
-              sql`${schema.workspaces.runtimeDeletionConfirmedAt} IS NULL`
-            )
-          )
-          .run();
-  if ((restartTransition.meta.changes ?? 0) !== 1) {
+  const restartAdmitted = await reserveWorkspaceRestartAdmission(
+    c.env,
+    workspace,
+    node,
+    userId,
+    evictionGeneration
+  );
+  if (!restartAdmitted) {
     throw errors.conflict(
-      workspace.status === 'evicted'
-        ? 'Workspace restart requires current compute authority and available node capacity'
-        : 'Workspace changed while restart cancellation was being claimed'
+      'Workspace restart requires current compute authority and available node capacity'
     );
   }
   const computeUsageId = `evicted-restart:${workspace.id}:${evictionGeneration}`;
@@ -334,6 +310,11 @@ lifecycleRoutes.post('/:id/restart', requireAuth(), requireApproved(), async (c)
         await restartWorkspaceOnNode(nodeId, workspace.id, c.env, userId, {
           evictionGeneration,
           expectedEvictionGeneration: workspace.evictionGeneration ?? '',
+          callbackToken: await signReprovisionCallbackToken(
+            c.env,
+            workspace.id,
+            evictionGeneration
+          ),
           beforeExternalMutation: async () => {
             const current = await c.env.DATABASE.prepare(
               `SELECT id
@@ -388,7 +369,7 @@ lifecycleRoutes.post('/:id/restart', requireAuth(), requireApproved(), async (c)
           nodeId,
           'restart',
           evictionGeneration,
-          err,
+          describeReprovisionDispatchError(err, 'restart'),
           runtimeDispatchStarted
         );
       }
@@ -455,31 +436,55 @@ lifecycleRoutes.post('/:id/rebuild', requireAuth(), requireApproved(), async (c)
   }
 
   // Clear previous error state and boot logs before starting new provisioning
-  const rebuildTransition = await db
-    .update(schema.workspaces)
-    .set({
-      status: 'creating',
-      errorMessage: null,
-      updatedAt: new Date().toISOString(),
-      evictionGeneration,
-      evictionFinalizedAt: null,
-      stopRuntimeConfirmedAt: null,
-    })
-    .where(
-      and(
-        eq(schema.workspaces.id, workspace.id),
-        eq(schema.workspaces.userId, userId),
-        eq(schema.workspaces.nodeId, nodeId),
-        eq(schema.workspaces.status, workspace.status),
-        sql`${schema.workspaces.evictionGeneration} IS ${workspace.evictionGeneration}`,
-        sql`${schema.workspaces.projectId} IS ${workspace.projectId}`,
-        sql`${schema.workspaces.chatSessionId} IS ${workspace.chatSessionId}`,
-        sql`${schema.workspaces.runtimeDeletionConfirmedAt} IS NULL`
-      )
-    )
-    .run();
+  const rebuildStartedAt = new Date().toISOString();
+  const rebuildTransition =
+    workspace.status === 'error'
+      ? {
+          meta: {
+            changes: (await reserveWorkspaceRestartAdmission(
+              c.env,
+              workspace,
+              node,
+              userId,
+              evictionGeneration
+            ))
+              ? 1
+              : 0,
+          },
+        }
+      : await db
+          .update(schema.workspaces)
+          .set({
+            status: 'creating',
+            errorMessage: null,
+            updatedAt: rebuildStartedAt,
+            // A rebuild is a new attempt: its clock starts now and its build has not started.
+            creatingStartedAt: rebuildStartedAt,
+            buildStartedAt: null,
+            evictionGeneration,
+            // Same write as the reactivation: the rebuilt runtime's credentials are the only
+            // ones that authenticate from here on (see workspace-reprovision-credential.ts).
+            callbackGeneration: evictionGeneration,
+            evictionFinalizedAt: null,
+            stopRuntimeConfirmedAt: null,
+          })
+          .where(
+            and(
+              eq(schema.workspaces.id, workspace.id),
+              eq(schema.workspaces.userId, userId),
+              eq(schema.workspaces.nodeId, nodeId),
+              eq(schema.workspaces.status, workspace.status),
+              sql`${schema.workspaces.evictionGeneration} IS ${workspace.evictionGeneration}`,
+              sql`${schema.workspaces.projectId} IS ${workspace.projectId}`,
+              sql`${schema.workspaces.chatSessionId} IS ${workspace.chatSessionId}`,
+              sql`${schema.workspaces.runtimeDeletionConfirmedAt} IS NULL`
+            )
+          )
+          .run();
   if ((rebuildTransition.meta.changes ?? 0) !== 1) {
-    throw errors.conflict('Workspace changed while rebuild cancellation was being claimed');
+    throw errors.conflict(
+      'Workspace rebuild requires current compute authority and available node capacity'
+    );
   }
   c.executionCtx.waitUntil(
     (async () => {
@@ -490,6 +495,11 @@ lifecycleRoutes.post('/:id/rebuild', requireAuth(), requireApproved(), async (c)
         await rebuildWorkspaceOnNode(nodeId, workspace.id, c.env, userId, {
           evictionGeneration,
           expectedEvictionGeneration: workspace.evictionGeneration ?? '',
+          callbackToken: await signReprovisionCallbackToken(
+            c.env,
+            workspace.id,
+            evictionGeneration
+          ),
           beforeExternalMutation: async () => {
             const current = await c.env.DATABASE.prepare(
               `SELECT id
@@ -525,7 +535,7 @@ lifecycleRoutes.post('/:id/rebuild', requireAuth(), requireApproved(), async (c)
           nodeId,
           'rebuild',
           evictionGeneration,
-          err
+          describeReprovisionDispatchError(err, 'rebuild')
         );
       }
     })()

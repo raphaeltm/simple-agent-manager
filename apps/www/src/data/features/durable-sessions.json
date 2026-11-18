@@ -5,7 +5,7 @@
   "subtitle": "Sessions you leave idle go to sleep and keep their work for up to seven days.",
   "summary": "Sessions survive runtime teardown, agents coordinate with each other, and Compose releases deploy straight from the project.",
   "highlights": [
-    "Sessions normally restore home and repository state from a 7-day snapshot; VM fallback preserves the transcript and a verified Git recovery point",
+    "Sessions normally restore home and repository state from a 7-day snapshot; fallback keeps the transcript and available backups",
     "Agents dispatch subtasks to peers and send durable messages that can interrupt a busy agent",
     "App deployments run Compose releases with environments, configuration, and logs",
     "Six agent harnesses: Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, Amp"
@@ -19,15 +19,10 @@
       "caption": "Send a message to a sleeping session and SAM restores the workspace, then delivers it"
     }
   ],
-  "homepage": {
-    "headline": "A message wakes it up",
-    "body": "Reply to a sleeping session and SAM restores its saved branch, uncommitted changes, and chat, then delivers your message.",
-    "caption": "SAM recreates the workspace as the session wakes"
-  },
   "details": [
     {
       "headline": "Close the tab. The session waits.",
-      "body": "SAM normally restores the agent’s home directory and repository work from a verified snapshot for up to seven days. After repeated snapshot failures, an idle VM session can sleep with its transcript and a verified Git recovery point instead. SAM shows a notice, and the agent starts fresh on wake. Without a safe recovery point, sleep is blocked.",
+      "body": "SAM normally restores the agent’s home directory and repository work from a verified snapshot for up to seven days. After repeated snapshot failures, SAM releases idle compute and keeps the transcript and available backups. SAM shows a notice that unpublished files and saved agent state may be lost. Continuation uses a verified Git recovery point when one exists, or starts fresh from the transcript.",
       "screenshot": {
         "src": "/images/features/sam-session-sleeping.png",
         "alt": "A finished chat session in the Sleeping state, with the full transcript still visible and a composer that reads Send a message to wake the agent",
@@ -48,8 +43,8 @@
       "body": "App deployments turn a Compose release into a running app. Each environment has its own deployment node, public routes, configuration, logs, and volumes, managed from the same project — and a release can be submitted by an agent task. No separate deployment pipeline to wire up.",
       "screenshot": {
         "src": "/images/features/sam-app-deployment-detail.png",
-        "alt": "Deployment environment detail for staging showing release v14 applied and submitted by an agent task, health checks for app, node, provider, routes, disk, and config, and a public route",
-        "caption": "A release the agent submitted, serving on its own node with health checks and a public route"
+        "alt": "The staging deployment environment page: Live, running version 14 at staging.payments.northwindlabs.dev with Open app and Logs, credited to the Claude Code agent and the chat it came from; recent deploys v14, v13 and v12 with the agent and chat behind each; and who can deploy next to the settings the app reads",
+        "caption": "One page per environment: what's running, which agent shipped it from which chat, and who may deploy next"
       }
     }
   ]

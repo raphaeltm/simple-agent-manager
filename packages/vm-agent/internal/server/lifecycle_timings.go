@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/workspace/vm-agent/internal/eventstore"
 )
@@ -70,6 +71,13 @@ func nextLifecyclePhase(ctx context.Context, phase string) {
 	}
 }
 
+// currentPhase is the phase running right now; at failure time it names the failed step.
+func (t *lifecycleTimings) currentPhase() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.phase
+}
+
 func (t *lifecycleTimings) summary() []lifecycleTiming {
 	t.next("")
 	t.mu.Lock()
@@ -83,18 +91,68 @@ func (t *lifecycleTimings) summary() []lifecycleTiming {
 	return result
 }
 
-// Telemetry must never extend startup or change its outcome. Exactly one bounded
-// best-effort callback per operation; no retries, queue, or per-phase DB writes.
-func (s *Server) finishLifecycleTimings(t *lifecycleTimings, operation, workspaceID, token string, operationErr error) {
-	phases := t.summary()
-	if s.config == nil || s.config.ControlPlaneURL == "" || token == "" {
-		return
+// lifecycleErrorTailBytes bounds the error text sent with a failed sleep/wake trace. The
+// END is kept: command failures wrap stderr, and the reason is on its last lines.
+const lifecycleErrorTailBytes = 2000
+
+// lifecycleErrorTail redacts and bounds an operation error for the step trace, keeping its tail.
+func lifecycleErrorTail(err error) string {
+	if err == nil {
+		return ""
 	}
+	redacted := strings.Map(func(char rune) rune {
+		if (char < 0x20 && char != '\n') || char == 0x7f {
+			return ' '
+		}
+		return char
+	}, redactTaskCallbackDiagnosticText(err.Error()))
+	if len(redacted) <= lifecycleErrorTailBytes {
+		return redacted
+	}
+	start := len(redacted) - lifecycleErrorTailBytes
+	for start < len(redacted) && !utf8.RuneStart(redacted[start]) {
+		start++
+	}
+	return redacted[start:]
+}
+
+// lifecycleTimingPayload is the one callback body. Older control planes ignore the trace
+// fields; newer ones persist sleep/wake traces (session_snapshot_traces) and accept bodies
+// without them from older agents (rule 54).
+func lifecycleTimingPayload(t *lifecycleTimings, operation, chatSessionID string, operationErr error) map[string]interface{} {
+	failedPhase := ""
+	if operationErr != nil {
+		failedPhase = t.currentPhase()
+	}
+	phases := t.summary()
 	outcome := "success"
 	if operationErr != nil {
 		outcome = "error"
 	}
 	payload := map[string]interface{}{"operation": operation, "outcome": outcome, "phases": phases}
+	// Only sleep/wake carry a step trace; provisioning summaries stay error-free telemetry.
+	if operation != "sleep" && operation != "wake" {
+		return payload
+	}
+	if chatSessionID != "" {
+		payload["chatSessionId"] = chatSessionID
+	}
+	if operationErr != nil {
+		if knownLifecyclePhase(failedPhase) {
+			payload["failedPhase"] = failedPhase
+		}
+		payload["errorTail"] = lifecycleErrorTail(operationErr)
+	}
+	return payload
+}
+
+// Telemetry must never extend startup or change its outcome. Exactly one bounded
+// best-effort callback per operation; no retries, queue, or per-phase DB writes.
+func (s *Server) finishLifecycleTimings(t *lifecycleTimings, operation, workspaceID, chatSessionID, token string, operationErr error) {
+	payload := lifecycleTimingPayload(t, operation, chatSessionID, operationErr)
+	if s.config == nil || s.config.ControlPlaneURL == "" || token == "" {
+		return
+	}
 	timeout := s.sessionSnapshotProgressReportTimeout()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)

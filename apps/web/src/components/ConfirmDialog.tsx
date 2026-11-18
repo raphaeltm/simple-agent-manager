@@ -1,4 +1,4 @@
-import { Button } from '@simple-agent-manager/ui';
+import { Button, paneClassName } from '@simple-agent-manager/ui';
 import { type ReactNode, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -155,7 +155,7 @@ export function ConfirmDialog({
     >
       {/* Backdrop */}
       <div
-        className="fixed inset-0 glass-backdrop-dim transition-opacity duration-150"
+        className="fixed inset-0 sam-scrim transition-opacity duration-150"
         aria-hidden="true"
         onClick={loading ? undefined : onClose}
       />
@@ -164,7 +164,7 @@ export function ConfirmDialog({
         <div
           ref={dialogRef}
           tabIndex={-1}
-          className="relative glass-modal glass-panel-container glass-composited rounded-lg shadow-overlay max-h-[calc(100dvh-1.5rem)] w-full max-w-md overflow-hidden outline-none flex flex-col"
+          className={`${paneClassName('overlay')} relative max-h-[calc(100dvh-1.5rem)] w-full max-w-md overflow-hidden outline-none flex flex-col`}
         >
           <div className="flex items-start overflow-y-auto p-5 sm:p-6">
             <div

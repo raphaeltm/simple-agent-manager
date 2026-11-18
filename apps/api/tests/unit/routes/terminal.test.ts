@@ -45,6 +45,8 @@ vi.mock('../../../src/middleware/auth', () => ({
       return next();
     }),
   requireApproved: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
+  // An ordinary session: tokens keep their own lifetime.
+  credentialNotAfter: () => undefined,
 }));
 vi.mock('../../../src/services/jwt', () => ({
   signTerminalToken: vi.fn(),

@@ -1,5 +1,12 @@
 # Distinguish an auto-paused trigger from one the user paused
 
+> **Reconciliation 2026-10-26:** Still open; auto-pause still writes the same `status = 'paused'`
+> (`apps/api/src/services/trigger-admission.ts:266`). #2389 (`0a0276390`) deleted
+> `TriggerCardActions.test.tsx` with the trigger card (the Automation page's run-history line is
+> `triggerAttention`, `apps/web/src/pages/automation/model.ts:141`), and #2443 (`a3a802caa`) moved
+> manual pause/resume into `apps/api/src/services/trigger-status.ts`, where a `manual` reason would
+> be written.
+
 ## Problem
 
 The backend auto-pauses a trigger after N consecutive failures
@@ -57,3 +64,9 @@ COLUMN`, never a table recreation — `triggers` is a CASCADE child of
 - `apps/api/src/services/trigger-admission.ts` — the auto-pause write
 - `.claude/rules/42-no-untracked-degrading-placeholders.md` — this task is the
   tracking record for the removed signal
+
+## Note (2026-10-20)
+
+The Automation page (branch `sam/automation-page`) reads recent runs for paused triggers and shows
+only what they prove: "Paused · its last N runs failed". It still cannot say whether SAM or a person
+paused the trigger, so the backend signal proposed above is still needed.

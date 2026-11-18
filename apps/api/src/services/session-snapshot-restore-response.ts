@@ -20,6 +20,14 @@ import { getSessionSnapshotConfig } from './session-snapshot-artifacts';
 
 type RestoreArtifact = 'home' | 'wip' | 'manifest';
 
+/**
+ * Why a restore is unavailable when a bounded sleep fallback recorded no recovery point. The
+ * vm-agent echoes it back with `status: 'transcript-replay'`, and the VM wake bootstrap
+ * (`snapshotRestoreOutcome` in `agent-session-bootstrap.ts`) starts the agent fresh from the
+ * transcript only for this reason. Shared contract: `tests/fixtures/session-snapshot-restore-transcript-only-v1.json`.
+ */
+export const TRANSCRIPT_ONLY_SLEEP_FALLBACK_REASON = 'transcript_only_sleep_fallback';
+
 function restoreManifest(snapshot: schema.SessionSnapshot): unknown {
   if (!snapshot.manifestJson) return null;
   const manifest: unknown = JSON.parse(snapshot.manifestJson);
@@ -42,6 +50,10 @@ export function sessionSnapshotRestoreResponse(
   chatSessionId: string,
   snapshot: schema.SessionSnapshot
 ) {
+  const fallback = sleptFallbackRecord(snapshot);
+  if (fallback && !fallback.recoveryPoint) {
+    return { available: false, reason: TRANSCRIPT_ONLY_SLEEP_FALLBACK_REASON };
+  }
   const artifactPath = (artifact: RestoreArtifact) =>
     `/api/workspaces/${workspaceId}/session-snapshot/artifacts/${artifact}?chatSessionId=${encodeURIComponent(chatSessionId)}`;
   return {

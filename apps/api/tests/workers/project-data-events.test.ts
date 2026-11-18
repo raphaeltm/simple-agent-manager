@@ -1,31 +1,32 @@
-import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
-
-import type { AdmitProjectEventInput } from '../../src/durable-objects/project-data/project-events';
+import type { AdmitProjectEventInput } from '@simple-agent-manager/project-data/internal/do/project-events';
 import {
   runProjectEventWakeMaterializationBatch,
   terminalizeProjectEventWakeMatches,
-} from '../../src/durable-objects/project-data/project-events-materialization';
+} from '@simple-agent-manager/project-data/internal/do/project-events-materialization';
 import {
   computeProjectEventMaterializationAlarmTime,
   computeProjectEventRetentionAlarmTime,
-} from '../../src/durable-objects/project-data/project-events-scheduler';
+} from '@simple-agent-manager/project-data/internal/do/project-events-scheduler';
 import {
   readEventsForMatches,
   readMatchesByIds,
   updateMatchesForBatch,
-} from '../../src/durable-objects/project-data/project-events-storage-helpers';
-import { WAKE_TARGET_HAS_UNDELIVERED_WAKE_SQL } from '../../src/durable-objects/project-data/project-events-wake-config';
+} from '@simple-agent-manager/project-data/internal/do/project-events-storage-helpers';
+import { WAKE_TARGET_HAS_UNDELIVERED_WAKE_SQL } from '@simple-agent-manager/project-data/internal/do/project-events-wake-config';
 import {
   advanceProjectEventPromptAttemptCheckpoint,
   hasProjectEventWakeLease,
   invalidProjectEventWakeDeliveryTargetResult,
   readProjectEventWakeLeaseUntil,
-} from '../../src/durable-objects/project-data/project-events-wake-delivery';
-import type { PromptDeliveryResult } from '../../src/durable-objects/project-data/prompt-delivery';
-import { parseMailboxMessageRow } from '../../src/durable-objects/project-data/row-schemas';
+} from '@simple-agent-manager/project-data/internal/do/project-events-wake-delivery';
+import type { PromptDeliveryResult } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import { parseMailboxMessageRow } from '@simple-agent-manager/project-data/internal/do/row-schemas';
+import { env, runInDurableObject } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
+
 import type { Env } from '../../src/env';
 import * as svc from '../../src/services/project-data';
+import { useFullProjectEventHistory } from './helpers/full-project-event-history';
 import { seedMaterializationFairnessPrefix } from './helpers/project-event-fairness-fixture';
 import { seedInstallation, seedProject, seedTask, seedUser } from './helpers/seed-d1';
 import {
@@ -137,8 +138,7 @@ async function sessionInboxCount(projectId: string): Promise<number> {
   await stub.ensureProjectId(projectId);
   return runInDurableObject(stub, async (_instance, state) => {
     const row = state.storage.sql.exec('SELECT COUNT(*) AS cnt FROM session_inbox').toArray()[0] as
-      | { cnt?: unknown }
-      | undefined;
+      { cnt?: unknown } | undefined;
     return typeof row?.cnt === 'number' ? row.cnt : 0;
   });
 }
@@ -172,6 +172,8 @@ async function disableProjectEventWakeOnStub(projectId: string): Promise<void> {
     ).env.DURABLE_PROMPT_DELIVERY_ENABLED = 'false';
   });
 }
+
+useFullProjectEventHistory();
 
 describe('ProjectData event subscription core', () => {
   it('admits normalized events idempotently and exposes same-key fingerprint conflicts', async () => {
@@ -522,18 +524,14 @@ describe('ProjectData event subscription core', () => {
     try {
       let admitted!: Awaited<ReturnType<typeof svc.admitProjectEvent>>;
       await withEventEnv({ PROJECT_EVENT_WAKE_ENABLED: 'false' }, async () => {
-        await svc.createProjectEventSubscription(
-          testEnv,
-          projectId,
-          {
-            ...subscriptionInput('sub-wake-runtime-interrupt'),
-            deliveryPreference: {
-              requested: 'runtime_interrupt' as const,
-              resolved: 'queued_for_prompt_delivery' as const,
-              target: { sessionId, taskId: 'task-1', agentId: 'agent-1' },
-            },
-          }
-        );
+        await svc.createProjectEventSubscription(testEnv, projectId, {
+          ...subscriptionInput('sub-wake-runtime-interrupt'),
+          deliveryPreference: {
+            requested: 'runtime_interrupt' as const,
+            resolved: 'queued_for_prompt_delivery' as const,
+            target: { sessionId, taskId: 'task-1', agentId: 'agent-1' },
+          },
+        });
         admitted = await svc.admitProjectEvent(testEnv, projectId, eventInput({}));
       });
 

@@ -1,5 +1,7 @@
 import type { Task, TaskExecutionStep, TaskMode, TaskStatus } from '@simple-agent-manager/shared';
 
+import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
+
 /**
  * Per-task metadata needed for rendering the session tree.
  *
@@ -48,4 +50,30 @@ export function buildTaskInfoMap(tasks: Task[]): Map<string, TaskInfo> {
     });
   }
   return map;
+}
+
+/**
+ * Merge a session's task metadata from the task list into the session, so state helpers
+ * such as `getAttentionState()` can tell completed, failed and cancelled tasks apart. A
+ * task outcome the list API already embedded wins over the separately fetched task page.
+ */
+export function enrichSessionWithTaskInfo(
+  session: ChatSessionListItem,
+  taskInfo: TaskInfo | undefined
+): ChatSessionResponse {
+  if (!taskInfo) return session;
+  return {
+    ...session,
+    task: {
+      id: taskInfo.id,
+      triggeredBy: taskInfo.triggeredBy,
+      connectorClientName: taskInfo.connectorClientName,
+      status: taskInfo.status,
+      terminalReason: taskInfo.terminalReason,
+      errorMessage: taskInfo.errorMessage,
+      executionStep: taskInfo.executionStep,
+      taskMode: taskInfo.taskMode,
+      ...(session as ChatSessionResponse).task,
+    },
+  };
 }

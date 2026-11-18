@@ -1,8 +1,9 @@
+import * as archiveSharding from '@simple-agent-manager/project-data/internal/do/archive-sharding';
+import { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
+import * as mailbox from '@simple-agent-manager/project-data/internal/do/mailbox';
+import * as messages from '@simple-agent-manager/project-data/internal/do/messages';
+
 import { NodeLifecycle } from '../../../src/durable-objects/node-lifecycle';
-import { ProjectData } from '../../../src/durable-objects/project-data';
-import * as archiveSharding from '../../../src/durable-objects/project-data/archive-sharding';
-import * as mailbox from '../../../src/durable-objects/project-data/mailbox';
-import * as messages from '../../../src/durable-objects/project-data/messages';
 
 export interface CapturedExpectedError {
   threw: boolean;
@@ -76,6 +77,201 @@ type ProjectDataExpectedErrorOperation =
  * behavior while returning a serializable assertion value to Vitest.
  */
 export class ProjectDataTestDouble extends ProjectData {
+  private summarySyncDisabledForTest = false;
+
+  /** Retire a finished fixture and drain any summary write-back already in flight. */
+  async disableSummarySyncForTest(): Promise<void> {
+    this.summarySyncDisabledForTest = true;
+    await this.runSummarySyncLocked();
+  }
+
+  protected override async syncSummaryToD1(): Promise<void> {
+    if (!this.summarySyncDisabledForTest) await super.syncSummaryToD1();
+  }
+
+  /**
+   * Remaining injected failures for `archiveSourceReclaimPage` and
+   * `archiveSourceMarkCopyBackRestored`. They stand in for a reset or a lost RPC after the
+   * archive flip committed, which is the state paged reclaim must recover from.
+   */
+  private reclaimFailuresForTest = 0;
+  private copyBackMarkFailuresForTest = 0;
+  /** Remaining injected `archiveSourceFlip` failures: a non-unwindable fault at the flip. */
+  private flipFailuresForTest = 0;
+  /** Remaining injected `archiveTargetAbandonPage` failures: a reset mid-unwind. */
+  private targetAbandonPageFailuresForTest = 0;
+
+  /** How many times the coordinator asked this object for a write estimate. */
+  private estimateCallsForTest = 0;
+  /** How many times the coordinator listed this object's pending reclaims. */
+  private reclaimListingsForTest = 0;
+  /** Added latency per listing: stands in for a cold root object in another region. */
+  private reclaimListingDelayMsForTest = 0;
+
+  reclaimListingCountForTest(): number {
+    return this.reclaimListingsForTest;
+  }
+
+  setReclaimListingDelayForTest(ms: number): void {
+    this.reclaimListingDelayMsForTest = ms;
+  }
+
+  override async archiveSourceListReclaimPending(
+    input: Parameters<ProjectData['archiveSourceListReclaimPending']>[0]
+  ): Promise<ReturnType<ProjectData['archiveSourceListReclaimPending']>> {
+    this.reclaimListingsForTest++;
+    if (this.reclaimListingDelayMsForTest > 0) {
+      await new Promise((resolve) => setTimeout(resolve, this.reclaimListingDelayMsForTest));
+    }
+    return super.archiveSourceListReclaimPending(input);
+  }
+
+  estimateCallCountForTest(): number {
+    return this.estimateCallsForTest;
+  }
+
+  override archiveSourceEstimateWrites(
+    sessionId: string,
+    factor: number,
+    maxMessages: number
+  ): number {
+    this.estimateCallsForTest++;
+    return super.archiveSourceEstimateWrites(sessionId, factor, maxMessages);
+  }
+
+  /** Remaining R2 reads that fail (a transient 5xx) inside `archiveTargetVerifyPage`. */
+  private verifyReadFailuresForTest = 0;
+
+  failNextArchiveVerifyReadsForTest(count: number): void {
+    this.verifyReadFailuresForTest = count;
+  }
+
+  /** Real verifier results, scoped by session so global sweep work cannot pollute assertions. */
+  private archiveVerificationsForTest = new Map<string, { calls: number; chunks: number }>();
+
+  archiveVerificationCountsForTest(sessionId: string): { calls: number; chunks: number } {
+    return this.archiveVerificationsForTest.get(sessionId) ?? { calls: 0, chunks: 0 };
+  }
+
+  override async archiveTargetVerifyPage(
+    input: archiveSharding.ArchiveTargetVerifyPageInput
+  ): Promise<archiveSharding.ArchiveTargetVerifyPageResult> {
+    const result = await this.verifyArchivePageForTest(input);
+    const previous = this.archiveVerificationCountsForTest(input.sessionId);
+    this.archiveVerificationsForTest.set(input.sessionId, {
+      calls: previous.calls + 1,
+      chunks: previous.chunks + result.chunksVerified,
+    });
+    return result;
+  }
+
+  private async verifyArchivePageForTest(
+    input: archiveSharding.ArchiveTargetVerifyPageInput
+  ): Promise<archiveSharding.ArchiveTargetVerifyPageResult> {
+    if (this.verifyReadFailuresForTest <= 0) return super.archiveTargetVerifyPage(input);
+    const env = this.env as { PROJECT_DATA_ARCHIVE_R2?: R2Bucket };
+    const bucket = env.PROJECT_DATA_ARCHIVE_R2;
+    if (!bucket) return super.archiveTargetVerifyPage(input);
+    const flaky = new Proxy(bucket, {
+      get: (target, property, receiver) => {
+        if (property === 'get' && this.verifyReadFailuresForTest > 0) {
+          return async () => {
+            this.verifyReadFailuresForTest--;
+            throw new Error('injected R2 get failure (503)');
+          };
+        }
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    env.PROJECT_DATA_ARCHIVE_R2 = flaky;
+    try {
+      return await super.archiveTargetVerifyPage(input);
+    } finally {
+      env.PROJECT_DATA_ARCHIVE_R2 = bucket;
+    }
+  }
+
+  failNextArchiveFlipsForTest(count: number): void {
+    this.flipFailuresForTest = count;
+  }
+
+  failNextArchiveTargetAbandonPagesForTest(count: number): void {
+    this.targetAbandonPageFailuresForTest = count;
+  }
+
+  override async archiveSourceFlip(
+    input: archiveSharding.ArchiveSourceFinalizeDeleteInput
+  ): Promise<
+    archiveSharding.ArchiveSourceFinalizeDeleteResult | archiveSharding.ArchiveSourceFlipRefusal
+  > {
+    if (this.flipFailuresForTest > 0) {
+      this.flipFailuresForTest--;
+      throw new Error('injected archive flip failure');
+    }
+    return super.archiveSourceFlip(input);
+  }
+
+  override async archiveTargetAbandonPage(
+    input: archiveSharding.ArchiveTargetAbandonInput & { maxRows: number }
+  ): Promise<archiveSharding.ArchiveTargetAbandonPageResult> {
+    if (this.targetAbandonPageFailuresForTest > 0) {
+      this.targetAbandonPageFailuresForTest--;
+      throw new Error('injected archive target abandon failure');
+    }
+    return super.archiveTargetAbandonPage(input);
+  }
+
+  failNextArchiveReclaimPagesForTest(count: number): void {
+    this.reclaimFailuresForTest = count;
+  }
+
+  failNextCopyBackMarkForTest(): void {
+    this.copyBackMarkFailuresForTest = 1;
+  }
+
+  async archiveSourceReclaimPageCapturedForTest(
+    input: archiveSharding.ArchiveSourceReclaimPageInput
+  ): Promise<CapturedExpectedError> {
+    try {
+      await super.archiveSourceReclaimPage(input);
+      return { threw: false };
+    } catch (error) {
+      return capture(error);
+    }
+  }
+
+  async createCommentThreadCapturedForTest(
+    input: Parameters<ProjectData['createCommentThread']>[0]
+  ): Promise<CapturedExpectedError> {
+    try {
+      await this.createCommentThread(input);
+      return { threw: false };
+    } catch (error) {
+      return capture(error);
+    }
+  }
+
+  override async archiveSourceReclaimPage(
+    input: archiveSharding.ArchiveSourceReclaimPageInput
+  ): Promise<archiveSharding.ArchiveSourceReclaimPageResult> {
+    if (this.reclaimFailuresForTest > 0) {
+      this.reclaimFailuresForTest--;
+      throw new Error('injected archive reclaim failure');
+    }
+    return super.archiveSourceReclaimPage(input);
+  }
+
+  override async archiveSourceMarkCopyBackRestored(
+    input: Parameters<ProjectData['archiveSourceMarkCopyBackRestored']>[0]
+  ): Promise<boolean> {
+    if (this.copyBackMarkFailuresForTest > 0) {
+      this.copyBackMarkFailuresForTest--;
+      throw new Error('injected copy-back mark failure');
+    }
+    return super.archiveSourceMarkCopyBackRestored(input);
+  }
+
   /**
    * Test convenience over the production `searchMessagesWithCoverage` RPC: the same bounded
    * search, results only. Production callers must use the coverage variant and disclose it.
@@ -149,8 +345,14 @@ export class ProjectDataTestDouble extends ProjectData {
 
   /** Inject a rollback inside the DO realm so the workers pool does not report
    * a test-realm thrown exception as an unhandled RPC rejection. */
-  async runAlarmWithGroupedCleanupFailureForTest(failurePoint: 'candidate' | 'second_delete' = 'candidate', failRecording = false): Promise<{
-    injected: boolean; laterCleanup: boolean; markerCommitted: boolean; rolledBack: boolean;
+  async runAlarmWithGroupedCleanupFailureForTest(
+    failurePoint: 'candidate' | 'second_delete' = 'candidate',
+    failRecording = false
+  ): Promise<{
+    injected: boolean;
+    laterCleanup: boolean;
+    markerCommitted: boolean;
+    rolledBack: boolean;
   }> {
     const storage = this.ctx.storage;
     const sql = storage.sql;
@@ -167,9 +369,10 @@ export class ProjectDataTestDouble extends ProjectData {
       if (markerWritten) markerCommitted = true;
     };
     sql.exec = ((query: string, ...bindings: SqlStorageValue[]) => {
-      if (/INSERT INTO chat_messages_grouped_fts/.test(query) && /VALUES\('delete'/.test(query)) deletes++;
-      const shouldFail = failurePoint === 'candidate'
-        ? /SELECT id FROM chat_sessions/.test(query) : deletes === 2;
+      if (/INSERT INTO chat_messages_grouped_fts/.test(query) && /VALUES\('delete'/.test(query))
+        deletes++;
+      const shouldFail =
+        failurePoint === 'candidate' ? /SELECT id FROM chat_sessions/.test(query) : deletes === 2;
       if (!injected && shouldFail) {
         injected = true;
         markerCommittedBeforeFailure = markerCommitted;
@@ -178,7 +381,12 @@ export class ProjectDataTestDouble extends ProjectData {
           throw new Error('out of memory: SQLITE_NOMEM');
         });
       }
-      if (injected && failRecording && bindings[0] === 'storageSafetyLastError' && /INSERT/.test(query)) {
+      if (
+        injected &&
+        failRecording &&
+        bindings[0] === 'storageSafetyLastError' &&
+        /INSERT/.test(query)
+      ) {
         throw new Error('injected diagnostic write failure');
       }
       if (bindings[0] === 'storageSafetyLastAlertAt' && /INSERT/.test(query)) markerWritten = true;
@@ -187,8 +395,12 @@ export class ProjectDataTestDouble extends ProjectData {
     }) as typeof sql.exec;
     try {
       await this.alarm();
-      return { injected, laterCleanup, markerCommitted: markerCommittedBeforeFailure,
-        rolledBack: exec('SELECT count(*) n FROM nomem_rollback_probe WHERE id = 2').one().n === 0 };
+      return {
+        injected,
+        laterCleanup,
+        markerCommitted: markerCommittedBeforeFailure,
+        rolledBack: exec('SELECT count(*) n FROM nomem_rollback_probe WHERE id = 2').one().n === 0,
+      };
     } finally {
       sql.exec = exec;
       storage.sync = sync;
@@ -248,11 +460,11 @@ export class ProjectDataTestDouble extends ProjectData {
       } else if (input.operation === 'createSession') {
         await this.createSession(...input.args);
       } else if (input.operation === 'persistMessageBatch') {
-        messages.persistMessageBatch(this.ctx.storage.sql, this.env, ...input.args);
+        await this.persistMessageBatch(...input.args);
       } else if (input.operation === 'persistMessage') {
         messages.persistMessage(this.ctx.storage.sql, this.env, ...input.args);
       } else if (input.operation === 'admitProjectEvent') {
-        this.admitProjectEvent(...input.args);
+        await this.admitProjectEvent(...input.args);
       } else if (input.operation === 'createProjectEventSubscription') {
         this.createProjectEventSubscription(...input.args);
       } else if (input.operation === 'createProjectEventDeliveryBatch') {

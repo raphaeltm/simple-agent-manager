@@ -10,7 +10,7 @@ import {
 vi.mock('cloudflare:workers', () => ({ DurableObject: class {} }));
 
 import * as schema from '../../../src/db/schema';
-import { NodeLifecycle } from '../../../src/durable-objects/node-lifecycle';
+import { persistWarmNodeClaim } from '../../../src/durable-objects/node-lifecycle-warm-claims';
 import { findRecoveryAuthorityFailure } from '../../../src/durable-objects/task-runner/recovery-authority';
 import type { StartTaskInput } from '../../../src/durable-objects/task-runner/types';
 import { VmAgentContainer } from '../../../src/durable-objects/vm-agent-container';
@@ -385,12 +385,9 @@ describe('atomic warm-node claim for the current recovery generation', () => {
     f.sqlite.exec(`INSERT INTO users (id, status) VALUES ('creator', 'active');
       INSERT INTO project_members (project_id, user_id, role, status)
       VALUES ('project', 'creator', 'maintainer', 'active');`);
-    const lifecycle = Object.assign(Object.create(NodeLifecycle.prototype), { env: f.env }) as {
-      persistWarmClaim(
-        nodeId: string,
-        taskId: string,
-        source: SessionRecoverySourceTaskGuard
-      ): Promise<string>;
+    const lifecycle = {
+      persistWarmClaim: (nodeId: string, taskId: string, source: SessionRecoverySourceTaskGuard) =>
+        persistWarmNodeClaim(f.env, nodeId, taskId, source),
     };
     const scheduledGuard = { ...guard, projectEventWake: null, requiredProjectMemberId: 'creator' };
     f.sqlite.exec("UPDATE project_members SET status = 'removed' WHERE user_id = 'creator'");
@@ -448,12 +445,9 @@ describe('atomic warm-node claim for the current recovery generation', () => {
   ])('%s', async (_label, mutation, expected) => {
     const f = fixture();
     if (mutation) f.sqlite.exec(mutation);
-    const lifecycle = Object.assign(Object.create(NodeLifecycle.prototype), { env: f.env }) as {
-      persistWarmClaim(
-        nodeId: string,
-        taskId: string,
-        source: SessionRecoverySourceTaskGuard
-      ): Promise<string>;
+    const lifecycle = {
+      persistWarmClaim: (nodeId: string, taskId: string, source: SessionRecoverySourceTaskGuard) =>
+        persistWarmNodeClaim(f.env, nodeId, taskId, source),
     };
     await expect(lifecycle.persistWarmClaim('warm-node', 'T2', guard)).resolves.toBe(expected);
     expect(

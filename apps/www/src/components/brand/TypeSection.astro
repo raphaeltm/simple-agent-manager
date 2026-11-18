@@ -1,0 +1,234 @@
+---
+/**
+ * 04 Typography: a Chillax specimen whose weight follows the scroll until the visitor takes
+ * the slider, the three families, the scale rendered at real size, and the rules.
+ */
+import { TYPE_SCALE } from '../../data/brand';
+import SectionHead from './SectionHead.astro';
+
+const families = [
+  {
+    name: 'Chillax',
+    role: 'Display',
+    family: 'var(--font-display)',
+    sample: 'Aa',
+    body: 'Headlines, the wordmark and big numbers. Weights 500 to 700, mostly 600. By Indian Type Foundry, free from Fontshare.',
+  },
+  {
+    name: 'System UI',
+    role: 'Body',
+    family: 'var(--font-body)',
+    sample: 'Aa',
+    body: "Everything people read. It is the reader's own system font, so it is fast and familiar on every device.",
+  },
+  {
+    name: 'Mono',
+    role: 'Code and labels',
+    family: 'var(--font-mono)',
+    sample: 'Aa',
+    body: 'Commands, IDs, hex values and small uppercase labels. SF Mono, Fira Code or Cascadia Code, whichever is installed.',
+  },
+];
+
+const familyVar = { display: 'var(--font-display)', body: 'var(--font-body)', mono: 'var(--font-mono)' } as const;
+---
+
+<section id="type" class="bg-section" aria-labelledby="type-title">
+  <div class="container">
+    <SectionHead id="type" title="Chillax up top, the system font for reading">
+      Chillax is round and friendly without being cute, which is the voice we want for headlines.
+      Long text is set in the reader's system font, because reading should never be a style choice.
+    </SectionHead>
+
+    <div class="bg-specimen sam-glass sam-glass-rim" data-progress data-reveal="scale">
+      <p class="bg-specimen-word" id="specimen-word" aria-hidden="true">Simple</p>
+      <div class="bg-specimen-meta">
+        <p class="bg-specimen-glyphs" aria-hidden="true">ABCDEFGHIJKLM<wbr />NOPQRSTUVWXYZ<br />abcdefghijklm<wbr />nopqrstuvwxyz<br />0123456789 &amp; ? ! @ # %</p>
+        <label class="bg-weight" for="weight-input">
+          <span>Weight</span>
+          <input id="weight-input" type="range" min="200" max="700" step="10" value="600" data-weight-input="specimen-word" />
+          <output for="weight-input">600</output>
+        </label>
+      </div>
+    </div>
+
+    <div class="bg-families">
+      {families.map((family, index) => (
+        <article class="bg-card sam-glass sam-glass-rim" data-reveal style={`--i:${index}`}>
+          <p class="bg-family-sample" style={`font-family:${family.family}`} aria-hidden="true">{family.sample}</p>
+          <p class="bg-family-role">{family.role}</p>
+          <h3 style={`font-family:${family.family}`}>{family.name}</h3>
+          <p>{family.body}</p>
+        </article>
+      ))}
+    </div>
+
+    <h3 class="bg-sub">Scale</h3>
+    <ol class="bg-scale">
+      {TYPE_SCALE.map((step, index) => (
+        <li data-reveal="left" style={`--i:${index % 4}`}>
+          <p
+            class="bg-scale-sample"
+            style={`font-family:${familyVar[step.family]};font-size:${step.size};font-weight:${step.weight};line-height:${step.lineHeight};letter-spacing:${step.tracking};${step.uppercase ? 'text-transform:uppercase;' : ''}`}
+          >{step.sample}</p>
+          <dl class="bg-scale-spec">
+            <div><dt>Style</dt><dd>{step.name}</dd></div>
+            <div><dt>Size</dt><dd>{step.size}</dd></div>
+            <div><dt>Weight / line</dt><dd>{step.weight} / {step.lineHeight}</dd></div>
+            <div><dt>Use</dt><dd>{step.use}</dd></div>
+          </dl>
+        </li>
+      ))}
+    </ol>
+
+    <ul class="bg-rules">
+      <li class="sam-glass sam-glass-rim"><strong>Sentence case.</strong> Headings, buttons and menus capitalise only the first word and names: "Create a workspace", not "Create A Workspace".</li>
+      <li class="sam-glass sam-glass-rim"><strong>Chillax never sets paragraphs.</strong> It is for short lines at large sizes. Body text, tables and forms use the system font.</li>
+      <li class="sam-glass sam-glass-rim"><strong>Tighten big type.</strong> Display sizes tighten to about -0.035em, and up to -0.045em at the very largest, with a line height near 1. Small type keeps the default spacing.</li>
+      <li class="sam-glass sam-glass-rim"><strong>Embed the font in images.</strong> When rendering a social card or slide, load the Chillax file itself, then look at the result. A missing font falls back silently.</li>
+    </ul>
+  </div>
+</section>
+
+<style>
+  /* --- Specimen --- */
+  .bg-specimen {
+    display: grid;
+    gap: 24px;
+    padding: clamp(24px, 5vw, 56px);
+    border-radius: 28px;
+    overflow: hidden;
+  }
+
+  .bg-specimen-word {
+    --wght: 600;
+    font-family: var(--font-display);
+    font-size: clamp(4.5rem, 19vw, 15rem);
+    font-weight: var(--wght);
+    line-height: 0.9;
+    letter-spacing: -0.05em;
+    background: linear-gradient(100deg, #bcfc54 0%, #22c55e 45%, #16a34a 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  html[data-theme='light'] .bg-specimen-word {
+    background-image: linear-gradient(100deg, #3f5c00 0%, #15803d 50%, #166534 100%);
+  }
+
+  /* Weight follows the scroll from 200 up to the slider's 600, until the slider is used. */
+  :global(html.bg-motion) .bg-specimen-word:not([data-manual]) {
+    font-weight: calc(200 + 400 * min(1, var(--p, 1) * 2));
+  }
+
+  .bg-specimen-meta {
+    display: grid;
+    gap: 24px;
+    align-items: end;
+  }
+
+  @media (min-width: 900px) {
+    .bg-specimen-meta {
+      grid-template-columns: minmax(0, 1fr) 280px;
+    }
+  }
+
+  .bg-specimen-glyphs {
+    font-family: var(--font-display);
+    font-size: clamp(1rem, 2.2vw, 1.5rem);
+    font-weight: 500;
+    line-height: 1.5;
+    letter-spacing: 0.02em;
+    color: var(--color-fg-muted);
+  }
+
+  .bg-weight {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 12px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-fg-muted);
+  }
+
+  .bg-weight input {
+    accent-color: var(--color-accent-strong);
+  }
+
+  /* --- Families --- */
+  .bg-families {
+    display: grid;
+    gap: 16px;
+    margin-top: 16px;
+  }
+
+  @media (min-width: 900px) {
+    .bg-families {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  .bg-family-sample {
+    font-size: 4.5rem;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--color-fg-primary);
+  }
+
+  .bg-family-role {
+    margin-top: 20px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  /* --- Scale --- */
+  .bg-scale {
+    display: grid;
+    margin-bottom: 40px;
+    list-style: none;
+    border-top: 1px solid var(--color-border-subtle);
+  }
+
+  .bg-scale li {
+    display: grid;
+    gap: 16px;
+    padding: 28px 0;
+    border-bottom: 1px solid var(--color-border-subtle);
+  }
+
+  @media (min-width: 900px) {
+    .bg-scale li {
+      grid-template-columns: minmax(0, 1fr) 360px;
+      align-items: center;
+      gap: 40px;
+    }
+  }
+
+  .bg-scale-sample {
+    overflow-wrap: anywhere;
+  }
+
+  .bg-scale-spec {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 16px;
+    font-size: 0.8125rem;
+  }
+
+  .bg-scale-spec dt {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-fg-dim);
+  }
+
+  .bg-scale-spec dd {
+    color: var(--color-fg-muted);
+    overflow-wrap: anywhere;
+  }
+</style>

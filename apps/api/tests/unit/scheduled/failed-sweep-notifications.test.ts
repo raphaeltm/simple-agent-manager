@@ -1,3 +1,4 @@
+import { SYSTEM_USER_ID } from '@simple-agent-manager/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { sendNotificationOnceMock } = vi.hoisted(() => ({
@@ -23,7 +24,6 @@ function makeEnv() {
       put: vi.fn(async (key: string, value: string) => { values.set(key, value); }),
     },
     NOTIFICATION: {},
-    TRIAL_ANONYMOUS_USER_ID: 'system-sentinel',
   } as unknown as Env;
   return { env, bind, prepare };
 }
@@ -54,7 +54,7 @@ describe('failed sweep notifications', () => {
       expect.objectContaining({ actionUrl: '/admin/logs', type: 'cron_failure' }),
       expect.any(Number)
     );
-    expect(bind).toHaveBeenCalledWith('system-sentinel');
+    expect(bind).toHaveBeenCalledWith(SYSTEM_USER_ID);
     expect(prepare.mock.calls[0]![0]).toContain("status != 'system'");
   });
 

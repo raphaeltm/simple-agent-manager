@@ -21,6 +21,7 @@ import {
   getNodeBackendBaseUrl,
   waitForNodeAgentReadyWith,
 } from './node-agent-readiness';
+import { resolveNodeAgentRoute, retargetNodeAgentUrl } from './node-agent-route';
 import { recordNodeRoutingMetric } from './telemetry';
 import {
   fetchVmAgentContainer,
@@ -55,6 +56,8 @@ interface NodeAgentRequestOptions extends RequestInit {
 }
 
 interface FetchNodeAgentControls {
+  /** Only the authenticated local port-forward adapter may return app redirects. */
+  allowApplicationRedirects?: boolean;
   sourceTaskGuard?: VmAgentContainerRequestGuard;
   beforeExternalMutation?: () => Promise<void>;
   recoverContainerOnTimeout?: boolean;
@@ -267,6 +270,22 @@ export async function nodeAgentRequest(
   }
 }
 
+/** A node redirect is a failed control response. Discard its Location and body:
+ * Go's mux can echo a query JWT into both before the route consumes it.
+ */
+function nodeResponse(response: Response, allowApplicationRedirects = false): Response {
+  // 304 is cache revalidation, not a followable hop; retain confinement/ETag headers.
+  if (
+    allowApplicationRedirects ||
+    response.status === 304 ||
+    response.status < 300 ||
+    response.status >= 400
+  )
+    return response;
+  void response.body?.cancel().catch(() => undefined);
+  return new Response('Node redirect refused', { status: response.status });
+}
+
 export async function fetchNodeAgent(
   nodeId: string,
   env: Env,
@@ -275,27 +294,38 @@ export async function fetchNodeAgent(
   requestTimeoutMs: number,
   controls: FetchNodeAgentControls = {}
 ): Promise<Response> {
+  // Node URLs come from SAM routing, never a redirect chosen by the node.
+  options = { ...options, redirect: 'manual' };
   const {
     sourceTaskGuard,
     beforeExternalMutation,
     recoverContainerOnTimeout = true,
     noWakeContainer = false,
+    allowApplicationRedirects = false,
   } = controls;
   if (!env.DATABASE || typeof env.DATABASE.prepare !== 'function') {
     await beforeExternalMutation?.();
-    return fetchWithTimeout(url, options, requestTimeoutMs);
+    return nodeResponse(
+      await fetchWithTimeout(url, options, requestTimeoutMs),
+      allowApplicationRedirects
+    );
   }
 
   const db = drizzle(env.DATABASE, { schema });
   const node = await db
-    .select({ runtime: schema.nodes.runtime })
+    .select({ runtime: schema.nodes.runtime, transport: schema.nodes.transport })
     .from(schema.nodes)
     .where(eq(schema.nodes.id, nodeId))
     .get();
 
-  if (node?.runtime !== 'cf-container') {
+  // Same single node read as before; only an installed build transport adds its own lookup.
+  const route = await resolveNodeAgentRoute(env, nodeId, node);
+  if (route.kind !== 'container') {
     await beforeExternalMutation?.();
-    return fetchWithTimeout(url, options, requestTimeoutMs);
+    return nodeResponse(
+      await fetchWithTimeout(retargetNodeAgentUrl(url, route), options, requestTimeoutMs),
+      allowApplicationRedirects
+    );
   }
 
   const config = getVmAgentContainerConfig(env);
@@ -349,7 +379,7 @@ export async function fetchNodeAgent(
         );
       }),
     ]);
-    return response;
+    return nodeResponse(response, allowApplicationRedirects);
   } catch (error) {
     const timedOut = error instanceof Error && error.message.startsWith('Request timed out after ');
     if (!timedOut) throw error;
@@ -470,48 +500,48 @@ export async function stopWorkspaceOnNode(
   });
 }
 
+export interface WorkspaceReprovisionOptions extends GuardedNodeAgentMutationOptions {
+  evictionGeneration?: string;
+  expectedEvictionGeneration?: string;
+  /**
+   * The new runtime's workspace callback token. Restart and rebuild rotate the workspace's
+   * credential generation, so the agent must replace the token it holds. A VM agent that
+   * predates this field rejects the request with 400 (its decoder disallows unknown fields).
+   */
+  callbackToken?: string;
+}
+
+function workspaceReprovisionBody(options?: WorkspaceReprovisionOptions): { body?: string } {
+  if (!options?.evictionGeneration) return {};
+  return {
+    body: JSON.stringify({
+      evictionGeneration: options.evictionGeneration,
+      expectedEvictionGeneration: options.expectedEvictionGeneration ?? '',
+      ...(options.callbackToken ? { callbackToken: options.callbackToken } : {}),
+    }),
+  };
+}
+
 export async function restartWorkspaceOnNode(
   nodeId: string,
   workspaceId: string,
   env: Env,
   userId: string,
-  options?: GuardedNodeAgentMutationOptions & {
-    evictionGeneration?: string;
-    expectedEvictionGeneration?: string;
-  }
+  options?: WorkspaceReprovisionOptions
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/restart`, {
     method: 'POST',
-    ...(options?.evictionGeneration
-      ? {
-          body: JSON.stringify({
-            evictionGeneration: options.evictionGeneration,
-            expectedEvictionGeneration: options.expectedEvictionGeneration ?? '',
-          }),
-        }
-      : {}),
+    ...workspaceReprovisionBody(options),
     userId,
     workspaceId,
     beforeExternalMutation: options?.beforeExternalMutation,
   });
 }
 
-export async function deleteWorkspaceOnNode(
-  nodeId: string,
-  workspaceId: string,
-  env: Env,
-  userId: string,
-  options?: { requestTimeoutMs?: number } & GuardedNodeAgentMutationOptions
-): Promise<unknown> {
-  return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}`, {
-    method: 'DELETE',
-    userId,
-    workspaceId,
-    requestTimeoutMs: options?.requestTimeoutMs,
-    beforeExternalMutation: options?.beforeExternalMutation,
-    recoverContainerOnTimeout: false,
-  });
-}
+export {
+  deleteWorkspaceOnNode,
+  type WorkspacePhysicalDeletionIdentity,
+} from './node-agent-workspace-deletion';
 
 export async function teardownDeploymentEnvironmentOnNode(
   nodeId: string,
@@ -997,21 +1027,11 @@ export async function rebuildWorkspaceOnNode(
   workspaceId: string,
   env: Env,
   userId: string,
-  options?: GuardedNodeAgentMutationOptions & {
-    evictionGeneration?: string;
-    expectedEvictionGeneration?: string;
-  }
+  options?: WorkspaceReprovisionOptions
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/rebuild`, {
     method: 'POST',
-    ...(options?.evictionGeneration
-      ? {
-          body: JSON.stringify({
-            evictionGeneration: options.evictionGeneration,
-            expectedEvictionGeneration: options.expectedEvictionGeneration ?? '',
-          }),
-        }
-      : {}),
+    ...workspaceReprovisionBody(options),
     userId,
     workspaceId,
     beforeExternalMutation: options?.beforeExternalMutation,

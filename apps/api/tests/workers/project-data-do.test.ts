@@ -7,7 +7,13 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 
-import { seedInstallation, seedProject, seedTask, seedUser, seedWorkspace } from './helpers/seed-d1';
+import {
+  seedInstallation,
+  seedProject,
+  seedTask,
+  seedUser,
+  seedWorkspace,
+} from './helpers/seed-d1';
 import {
   captureProjectDataExpectedError,
   type ProjectDataTestDouble,
@@ -103,7 +109,7 @@ describe('ProjectData Durable Object', () => {
           runtimeWorkSource: 'claude_sdk',
           runtimeWorkProgressAt: 1_000,
         })
-      ).resolves.toBe(true);
+      ).resolves.toBe('work_edge');
       await expect(
         stub.reportActivity('acp-cas', 'idle', {
           observedAt: 2_000,
@@ -112,7 +118,7 @@ describe('ProjectData Durable Object', () => {
           runtimeWorkSource: 'claude_sdk',
           runtimeWorkProgressAt: 2_000,
         })
-      ).resolves.toBe(true);
+      ).resolves.toBe('work_edge');
 
       // Simulates a delayed coalesced intermediate from another Worker isolate.
       // The stale write must not resurrect a working state or active harness work.
@@ -150,7 +156,7 @@ describe('ProjectData Durable Object', () => {
           observedAt: 2_000,
           statusError: 'terminal error wins same millisecond',
         })
-      ).resolves.toBe(true);
+      ).resolves.toBe('work_edge');
       expect(await stub.getSessionState('acp-cas')).toMatchObject({
         activity: 'error',
         activityAt: 2_000,
@@ -205,7 +211,8 @@ describe('ProjectData Durable Object', () => {
 
       const stub = getStub(projectId);
       await stub.ensureProjectId(projectId);
-      const sessionId = await stub.createSession(workspaceId, 'Deleted Instant wake');
+      // Created by the person who then sends the prompt, as every session-creating route does.
+      const sessionId = await stub.createSession(workspaceId, 'Deleted Instant wake', null, userId);
       expect(await stub.sleepSession(sessionId)).toBe(true);
       await env.DATABASE.prepare(
         `INSERT INTO session_snapshots
@@ -1000,17 +1007,33 @@ describe('ProjectData Durable Object', () => {
       const retryId = crypto.randomUUID();
       const diagnosticId = crypto.randomUUID();
       await stub.persistMessageBatch(sessionId, [
-        { messageId: promptId, role: 'user', content: 'start sign-in', toolMetadata: null, timestamp },
-        { messageId: retryId, role: 'user', content: 'try another method', toolMetadata: null, timestamp },
+        {
+          messageId: promptId,
+          role: 'user',
+          content: 'start sign-in',
+          toolMetadata: null,
+          timestamp,
+        },
+        {
+          messageId: retryId,
+          role: 'user',
+          content: 'try another method',
+          toolMetadata: null,
+          timestamp,
+        },
       ]);
       await stub.persistMessageBatch(sessionId, [
-        { messageId: diagnosticId, role: 'system',
+        {
+          messageId: diagnosticId,
+          role: 'system',
           content: 'This sign-in flow requires a local callback that this session cannot complete.',
-          toolMetadata: JSON.stringify({ promptMessageId: promptId }), timestamp },
+          toolMetadata: JSON.stringify({ promptMessageId: promptId }),
+          timestamp,
+        },
       ]);
       const { messages } = await stub.getMessages(sessionId);
       expect(messages.map((message) => message.id)).toEqual([promptId, retryId, diagnosticId]);
-      expect(messages[2]?.toolMetadata).toEqual({ promptMessageId: promptId });
+      expect(messages[2]?.toolMetadata).toEqual({ promptMessageId: promptId, runtimeReported: true });
       expect(messages[2]?.sequence).toBeGreaterThan(messages[1]!.sequence);
     });
 
@@ -1510,7 +1533,7 @@ describe('ProjectData Durable Object', () => {
       const stub = getStub('project-batch-content-dedup');
       const sessionId = await stub.createSession(null, null);
 
-      // Simulate: user message persisted via DO WebSocket (message.send)
+      // Simulate: user message persisted by durable prompt delivery (REST send)
       await stub.persistMessage(sessionId, 'user', 'Fix the login bug', null);
 
       // Simulate: VM agent batch includes same user message with a different ID
@@ -2523,160 +2546,6 @@ describe('ProjectData Durable Object', () => {
       const results = await stub.searchMessages('analyze the');
       expect(results.length).toBe(1);
       expect(results[0]!.snippet).toContain('analyze');
-    });
-  });
-
-  // =========================================================================
-  // Session–Idea Linking (many-to-many)
-  // =========================================================================
-
-  describe('session-idea linking', () => {
-    it('links a session to an idea', async () => {
-      const stub = getStub('project-idea-link');
-      const sessionId = await stub.createSession(null, 'Idea discussion');
-
-      await stub.linkSessionIdea(sessionId, 'task-001', 'discussing auth flow');
-
-      const ideas = await stub.getIdeasForSession(sessionId);
-      expect(ideas).toHaveLength(1);
-      expect(ideas[0]!.taskId).toBe('task-001');
-      expect(ideas[0]!.context).toBe('discussing auth flow');
-      expect(ideas[0]!.createdAt).toBeGreaterThan(0);
-    });
-
-    it('links multiple ideas to a single session', async () => {
-      const stub = getStub('project-idea-multi-link');
-      const sessionId = await stub.createSession(null, 'Multi-idea session');
-
-      await stub.linkSessionIdea(sessionId, 'task-a', 'first idea');
-      await stub.linkSessionIdea(sessionId, 'task-b', 'second idea');
-      await stub.linkSessionIdea(sessionId, 'task-c', null);
-
-      const ideas = await stub.getIdeasForSession(sessionId);
-      expect(ideas).toHaveLength(3);
-      expect(ideas.map((i: { taskId: string }) => i.taskId)).toEqual([
-        'task-a',
-        'task-b',
-        'task-c',
-      ]);
-    });
-
-    it('is idempotent — duplicate links are silently ignored', async () => {
-      const stub = getStub('project-idea-idempotent');
-      const sessionId = await stub.createSession(null, 'Idempotent test');
-
-      await stub.linkSessionIdea(sessionId, 'task-dup', 'first link');
-      await stub.linkSessionIdea(sessionId, 'task-dup', 'second link attempt');
-
-      const ideas = await stub.getIdeasForSession(sessionId);
-      expect(ideas).toHaveLength(1);
-      // First context wins (INSERT OR IGNORE)
-      expect(ideas[0]!.context).toBe('first link');
-    });
-
-    it('unlinks a session from an idea', async () => {
-      const stub = getStub('project-idea-unlink');
-      const sessionId = await stub.createSession(null, 'Unlink test');
-
-      await stub.linkSessionIdea(sessionId, 'task-rm', 'to be removed');
-      await stub.unlinkSessionIdea(sessionId, 'task-rm');
-
-      const ideas = await stub.getIdeasForSession(sessionId);
-      expect(ideas).toHaveLength(0);
-    });
-
-    it('unlinking non-existent link is a no-op', async () => {
-      const stub = getStub('project-idea-unlink-noop');
-      const sessionId = await stub.createSession(null, 'No-op test');
-
-      // Should not throw
-      await stub.unlinkSessionIdea(sessionId, 'nonexistent-task');
-
-      const ideas = await stub.getIdeasForSession(sessionId);
-      expect(ideas).toHaveLength(0);
-    });
-
-    it('returns sessions linked to an idea (reverse lookup)', async () => {
-      const stub = getStub('project-idea-reverse');
-      const s1 = await stub.createSession(null, 'Session one');
-      const s2 = await stub.createSession(null, 'Session two');
-
-      await stub.linkSessionIdea(s1, 'shared-task', 'context 1');
-      await stub.linkSessionIdea(s2, 'shared-task', 'context 2');
-
-      const sessions = await stub.getSessionsForIdea('shared-task');
-      expect(sessions).toHaveLength(2);
-      expect(sessions[0]!.sessionId).toBe(s1);
-      expect(sessions[0]!.topic).toBe('Session one');
-      expect(sessions[0]!.status).toBe('active');
-      expect(sessions[0]!.context).toBe('context 1');
-      expect(sessions[1]!.sessionId).toBe(s2);
-    });
-
-    it('returns empty array for idea with no linked sessions', async () => {
-      const stub = getStub('project-idea-no-sessions');
-
-      const sessions = await stub.getSessionsForIdea('orphan-task');
-      expect(sessions).toHaveLength(0);
-    });
-
-    it('throws when linking to a non-existent session', async () => {
-      const stub = getStub('project-idea-bad-session');
-      await stub.ensureProjectId('project-idea-bad-session');
-
-      await runInDurableObject(stub, async (instance) => {
-        await expect(
-          instance.linkSessionIdea('nonexistent-session', 'task-x', null)
-        ).rejects.toThrow('Session not found: nonexistent-session');
-      });
-    });
-
-    it('cascade deletes links when session is deleted', async () => {
-      const stub = getStub('project-idea-cascade');
-      const sessionId = await stub.createSession(null, 'Cascade test');
-
-      await stub.linkSessionIdea(sessionId, 'task-cascade', 'will be deleted');
-
-      // Verify link exists
-      expect(await stub.getIdeasForSession(sessionId)).toHaveLength(1);
-
-      // Stop session (does not delete in current schema, just changes status)
-      await stub.stopSession(sessionId);
-
-      // Links should still exist since session is stopped, not deleted
-      expect(await stub.getIdeasForSession(sessionId)).toHaveLength(1);
-    });
-
-    it('returns empty ideas for a session with no links', async () => {
-      const stub = getStub('project-idea-empty-session');
-      const sessionId = await stub.createSession(null, 'No links');
-
-      const ideas = await stub.getIdeasForSession(sessionId);
-      expect(ideas).toHaveLength(0);
-      expect(ideas).toEqual([]);
-    });
-
-    it('round-trips null context correctly', async () => {
-      const stub = getStub('project-idea-null-ctx');
-      const sessionId = await stub.createSession(null, 'Null context');
-
-      await stub.linkSessionIdea(sessionId, 'task-null', null);
-
-      const ideas = await stub.getIdeasForSession(sessionId);
-      expect(ideas).toHaveLength(1);
-      expect(ideas[0]!.context).toBeNull();
-    });
-
-    it('getSessionsForIdea returns linkedAt as a positive number', async () => {
-      const stub = getStub('project-idea-linked-at');
-      const sessionId = await stub.createSession(null, 'LinkedAt test');
-
-      await stub.linkSessionIdea(sessionId, 'task-la', 'test');
-
-      const sessions = await stub.getSessionsForIdea('task-la');
-      expect(sessions).toHaveLength(1);
-      expect(sessions[0]!.linkedAt).toBeGreaterThan(0);
-      expect(typeof sessions[0]!.linkedAt).toBe('number');
     });
   });
 

@@ -2,12 +2,13 @@
  * Candidate selection for the session-sleep sweep (`runSessionSleepSweep`). Split out
  * of `session-sleep.ts` (`.claude/rules/18-file-size-limits.md`).
  */
-import { and, eq, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
+import { rearmableSessionSleepBlockSql } from '../services/session-sleep-fallback-record';
 import { DEFAULT_SESSION_SLEEP_CLAIM_LEASE_MS } from '../services/session-snapshots';
 
 function claimLeaseCutoff(env: Env, now: Date): string {
@@ -21,16 +22,15 @@ function claimLeaseCutoff(env: Env, now: Date): string {
 }
 
 /**
- * Due sleep intents. A failed attempt always carries a retry deadline inside a bounded
- * episode, so no clause selects a failure regardless of attempts any more: the former
- * "repairable capture" clause is what let a permanently degraded session retry forever.
+ * Due sleep intents, including legacy failures and preservation blocks now owned
+ * by the guarded bounded fallback. Claims and identity checks fence each action.
  */
 export function selectSweepCandidates(
   env: Env,
   db: ReturnType<typeof drizzle<typeof schema>>,
   now: Date,
   batchSize: number,
-  maxAttempts: number
+  _maxAttempts: number
 ) {
   const nowIso = now.toISOString();
   const staleClaim = claimLeaseCutoff(env, now);
@@ -47,7 +47,9 @@ export function selectSweepCandidates(
       sleepClaimId: snapshots.sleepClaimId,
       sleepClaimedAt: snapshots.sleepClaimedAt,
       sleepError: snapshots.sleepError,
+      sleepFallbackJson: snapshots.sleepFallbackJson,
       sleepEpisodeStartedAt: snapshots.sleepEpisodeStartedAt,
+      sleepRequiredEpisodeStartedAt: snapshots.sleepRequiredEpisodeStartedAt,
       sleepEpisodeFailures: snapshots.sleepEpisodeFailures,
       updatedAt: snapshots.updatedAt,
       status: snapshots.status,
@@ -58,24 +60,35 @@ export function selectSweepCandidates(
     .leftJoin(schema.workspaces, eq(schema.workspaces.id, snapshots.workspaceId))
     .where(
       and(
-        inArray(snapshots.status, ['pending', 'available', 'degraded', 'failed']),
+        inArray(snapshots.status, ['pending', 'available', 'degraded', 'failed', 'expired']),
         isNull(snapshots.sleepingAt),
         or(
           and(
             eq(snapshots.sleepStatus, 'terminal_failed'),
+            // Historical snapshots outlive removed/replaced workspaces. They must
+            // not consume the bounded live-cleanup page forever.
+            inArray(schema.workspaces.status, ['running', 'recovery', 'sleeping', 'stopped']),
+            eq(schema.workspaces.nodeId, snapshots.nodeId),
+            eq(schema.workspaces.userId, snapshots.userId),
+            eq(schema.workspaces.projectId, snapshots.projectId),
+            eq(schema.workspaces.chatSessionId, snapshots.chatSessionId),
+            or(isNull(snapshots.sleepAfter), lte(snapshots.sleepAfter, nowIso)),
+            sql.raw(rearmableSessionSleepBlockSql('session_snapshots'))
+          ),
+          and(
+            eq(snapshots.sleepStatus, 'terminal_failed'),
             lte(snapshots.sleepAfter, nowIso),
-            sql`CASE WHEN json_valid(${snapshots.sleepFallbackJson}) THEN json_extract(${snapshots.sleepFallbackJson}, '$.blockedReason') END IN ('teardown_unconfirmed', 'runtime_changed')`
+            sql`CASE WHEN json_valid(${snapshots.sleepFallbackJson}) THEN json_extract(${snapshots.sleepFallbackJson}, '$.blockedReason') END = 'runtime_changed'`
           ),
           and(
             inArray(snapshots.sleepStatus, ['scheduled', 'failed']),
             lte(snapshots.sleepAfter, nowIso)
           ),
-          // Legacy rows exhausted before bounded episodes existed: re-armed only by
-          // raising `SESSION_SLEEP_MAX_ATTEMPTS`.
+          // Legacy exhausted failures must converge through the same guarded fallback.
           and(
             eq(snapshots.sleepStatus, 'failed'),
             isNull(snapshots.sleepAfter),
-            lt(snapshots.sleepAttempts, maxAttempts)
+            sql`${snapshots.sleepAttempts} >= 0`
           ),
           and(
             eq(snapshots.sleepStatus, 'preparing'),

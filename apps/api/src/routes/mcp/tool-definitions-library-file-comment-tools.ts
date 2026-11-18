@@ -9,7 +9,7 @@ export const LIBRARY_FILE_COMMENT_TOOLS = [
   {
     name: 'list_library_file_comment_threads',
     description:
-      'List comment threads on a project library file. Unlike message comments, these are project-scoped and do not require a chat session. Returns thread summaries; use get_message_comment_thread for full replies on message threads.',
+      'List comment threads on a project library file. Unlike message comments, these are project-scoped and do not require a chat session. Returns thread summaries; use comments_read method get for full replies on message threads.',
     inputSchema: {
       type: 'object' as const,
       properties: {

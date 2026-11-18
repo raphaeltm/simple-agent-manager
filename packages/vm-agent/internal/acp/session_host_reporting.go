@@ -36,6 +36,15 @@ func (h *SessionHost) reportAgentError(agentType, step, message, detail string) 
 	}
 }
 
+// diagnosticErrorMaxBytes bounds agent error text sent to the control plane.
+const diagnosticErrorMaxBytes = 2048
+
+// promptFailureDetail redacts before truncating, so a cut can never leave a
+// token too short for the redaction patterns to recognise.
+func promptFailureDetail(err error) string {
+	return truncateToByteBudget(redactAgentDiagnosticText(err.Error()), diagnosticErrorMaxBytes)
+}
+
 func (h *SessionHost) reportLifecycle(level, message string, ctx map[string]interface{}) {
 	if h.config.ErrorReporter == nil {
 		return
@@ -200,6 +209,9 @@ type activityPayload struct {
 	RuntimeWorkCount      *int    `json:"runtimeWorkCount,omitempty"`
 	RuntimeWorkSource     string  `json:"runtimeWorkSource,omitempty"`
 	RuntimeWorkProgressAt *int64  `json:"runtimeWorkProgressAt,omitempty"`
+	// SteeringSupported is whether the loaded adapter can take input mid-turn.
+	// Omitted until the adapter's ACP initialize has run.
+	SteeringSupported *bool `json:"steeringSupported,omitempty"`
 }
 
 type activityReportRequest struct {
@@ -224,6 +236,8 @@ type activityReportSnapshot struct {
 	RuntimeWorkSource        string
 	RuntimeWorkProgressAt    int64
 	HasRuntimeWorkProgressAt bool
+	SteeringSupported        bool
+	HasSteeringSupported     bool
 }
 
 func activityReportSnapshotFromPayload(payload activityPayload) activityReportSnapshot {
@@ -250,6 +264,10 @@ func activityReportSnapshotFromPayload(payload activityPayload) activityReportSn
 	if payload.RuntimeWorkProgressAt != nil {
 		snapshot.RuntimeWorkProgressAt = *payload.RuntimeWorkProgressAt
 		snapshot.HasRuntimeWorkProgressAt = true
+	}
+	if payload.SteeringSupported != nil {
+		snapshot.SteeringSupported = *payload.SteeringSupported
+		snapshot.HasSteeringSupported = true
 	}
 	return snapshot
 }
@@ -299,6 +317,7 @@ func (h *SessionHost) prepareActivityReport(activity string) (activityReportRequ
 	agentType := h.agentType
 	restartCount := h.restartCount
 	statusErr := h.statusErr
+	steering := h.steering
 	h.mu.RUnlock()
 
 	payload := activityPayload{
@@ -306,6 +325,10 @@ func (h *SessionHost) prepareActivityReport(activity string) (activityReportRequ
 		NodeID:       nodeID,
 		AgentType:    agentType,
 		RestartCount: restartCount,
+	}
+	if steering.Known {
+		supported := steering.Supported()
+		payload.SteeringSupported = &supported
 	}
 	runtimeWork := h.harnessWorkSnapshot()
 	if runtimeWork.Source != "" {
@@ -327,7 +350,7 @@ func (h *SessionHost) prepareActivityReport(activity string) (activityReportRequ
 	// Attach a redacted status error for prompting/error states so the control
 	// plane can persist a useful failure reason without leaking credentials.
 	if statusErr != "" && (activity == "prompting" || activity == "error") {
-		redactedStatusErr := truncateString(redactAgentDiagnosticText(statusErr), 2048)
+		redactedStatusErr := truncateString(redactAgentDiagnosticText(statusErr), diagnosticErrorMaxBytes)
 		payload.StatusError = &redactedStatusErr
 	}
 

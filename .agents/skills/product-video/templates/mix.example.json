@@ -1,0 +1,115 @@
+{
+  "vo": "takes/roger_v4_tags.mp3",
+  "vo_delay": 0.5,
+  "duration": 90,
+  "music": "audio/music_a.mp3",
+  "music_gain_db": -7,
+  "events": [
+    {
+      "file": "audio/riser.mp3",
+      "at": 0,
+      "gain_db": -16
+    },
+    {
+      "file": "audio/swoosh_a.mp3",
+      "cue": "s1",
+      "offset": -0.55,
+      "gain_db": -15
+    },
+    {
+      "file": "audio/swoosh_b.mp3",
+      "cue": "now1",
+      "offset": -0.55,
+      "gain_db": -15
+    },
+    {
+      "file": "audio/swoosh_a.mp3",
+      "cue": "s2",
+      "offset": -0.55,
+      "gain_db": -15
+    },
+    {
+      "file": "audio/swoosh_b.mp3",
+      "cue": "now2",
+      "offset": -0.55,
+      "gain_db": -15
+    },
+    {
+      "file": "audio/swoosh_a.mp3",
+      "cue": "s3",
+      "offset": -0.55,
+      "gain_db": -15
+    },
+    {
+      "file": "audio/swoosh_b.mp3",
+      "cue": "now3",
+      "offset": -0.55,
+      "gain_db": -15
+    },
+    {
+      "file": "audio/swoosh_a.mp3",
+      "cue": "s4",
+      "offset": -0.55,
+      "gain_db": -15
+    },
+    {
+      "file": "audio/swoosh_b.mp3",
+      "cue": "s5",
+      "offset": -0.55,
+      "gain_db": -15
+    },
+    {
+      "file": "audio/riser.mp3",
+      "cue": "less",
+      "offset": -1.2,
+      "gain_db": -18
+    },
+    {
+      "file": "audio/tick.mp3",
+      "cue": "every",
+      "gain_db": -24
+    },
+    {
+      "file": "audio/tick.mp3",
+      "cue": "inreview",
+      "gain_db": -24
+    },
+    {
+      "file": "audio/tick.mp3",
+      "cue": "start",
+      "gain_db": -24
+    },
+    {
+      "file": "audio/tick.mp3",
+      "cue": "side",
+      "gain_db": -24
+    },
+    {
+      "file": "audio/tick.mp3",
+      "cue": "wait",
+      "gain_db": -24
+    },
+    {
+      "file": "audio/tick.mp3",
+      "cue": "even",
+      "gain_db": -24
+    },
+    {
+      "file": "audio/tick.mp3",
+      "cue": "waits",
+      "gain_db": -24
+    },
+    {
+      "file": "audio/tick.mp3",
+      "cue": "followups",
+      "gain_db": -24
+    },
+    {
+      "file": "audio/tick.mp3",
+      "cue": "straight",
+      "gain_db": -24
+    }
+  ],
+  "music_fade_out": 0.9,
+  "music_delay": 1.2
+}

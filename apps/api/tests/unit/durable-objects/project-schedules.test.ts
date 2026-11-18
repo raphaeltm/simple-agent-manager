@@ -7,26 +7,25 @@ vi.mock('../../../src/services/reserved-task-submission', () => ({
   submitReservedTask: submitReservedTaskMock,
 }));
 
-import * as schema from '../../../src/db/schema';
-import { runMigrations } from '../../../src/durable-objects/migrations';
-import type { DurabilityFoundationHooks } from '../../../src/durable-objects/project-data/durability-foundation';
-import type { ProjectEventScheduleEnv } from '../../../src/durable-objects/project-data/project-event-schedules-config';
+import type { DurabilityFoundationHooks } from '@simple-agent-manager/project-data/internal/do/durability-foundation';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import type { ProjectEventScheduleEnv } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-config';
 import {
   computeScheduleAlarmTime,
   runScheduleAlarm,
-} from '../../../src/durable-objects/project-data/project-event-schedules-runner';
+} from '@simple-agent-manager/project-data/internal/do/project-event-schedules-runner';
 import {
   cancelSchedule,
   createSchedule,
   getSchedule,
   listSchedules,
   rescheduleSchedule,
-} from '../../../src/durable-objects/project-data/project-event-schedules-storage';
-import { admitProjectEvent } from '../../../src/durable-objects/project-data/project-events';
+} from '@simple-agent-manager/project-data/internal/do/project-event-schedules-storage';
+import { admitProjectEvent } from '@simple-agent-manager/project-data/internal/do/project-events';
 import {
   computeStandingWatchAlarmTime,
   runStandingWatchAlarm,
-} from '../../../src/durable-objects/project-data/project-standing-watches-runner';
+} from '@simple-agent-manager/project-data/internal/do/project-standing-watches-runner';
 import {
   createWatch,
   getWatch,
@@ -34,9 +33,11 @@ import {
   pauseWatch,
   revokeWatch,
   updateWatch,
-} from '../../../src/durable-objects/project-data/project-standing-watches-storage';
-import { acceptPromptDeliveryInTransaction } from '../../../src/durable-objects/project-data/prompt-delivery';
-import type { Env } from '../../../src/durable-objects/project-data/types';
+} from '@simple-agent-manager/project-data/internal/do/project-standing-watches-storage';
+import { acceptPromptDeliveryInTransaction } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+
+import * as schema from '../../../src/db/schema';
 import type { ReservedTaskSubmissionInput } from '../../../src/services/reserved-task-submission';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -664,6 +665,29 @@ describe('project schedules — real migrations, CRUD and canonical admission', 
     expect(listSchedules(f.sql, f.env, 'other-project').schedules).toEqual([]);
   });
 
+  it('leaves a malformed schedule row out of the list without hiding the others or the next page', () => {
+    const f = fixture();
+    const [newest, broken, older, oldest] = ['a', 'b', 'c', 'd'].map(
+      (key) => f.create(key).schedule.id
+    );
+    f.sql.exec(
+      `UPDATE project_schedules SET action_json = '{"kind":"unknown"}' WHERE id = ?`,
+      broken
+    );
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const first = listSchedules(f.sql, f.env, PROJECT, { limit: 2 });
+    const second = listSchedules(f.sql, f.env, PROJECT, { limit: 2, cursor: first.nextCursor });
+    const listed = [...first.schedules, ...second.schedules].map((row) => row.id);
+
+    expect(new Set(listed)).toEqual(new Set([newest, older, oldest]));
+    expect(listed).not.toContain(broken);
+    expect(first.nextCursor).not.toBeNull();
+    // The skip is diagnosable: the log names the row it left out (rule 50).
+    expect(warn.mock.calls.map(([line]) => String(line)).join('\n')).toContain(broken);
+    warn.mockRestore();
+  });
+
   it('enforces caps, UTF-8 prompt size, finite TTL/horizon and excludes saved bearer tokens', () => {
     const f = fixture({
       PROJECT_EVENT_SCHEDULE_MAX_SCHEDULES: '1',
@@ -694,6 +718,74 @@ describe('project schedules — real migrations, CRUD and canonical admission', 
       )
     ).not.toContain('bearer_token');
     expect(kept.schedule.creatorUserId).toBe(USER);
+  });
+});
+
+// Constitution XV: who wrote a schedule's prompt decides what the chat or new task receives.
+describe('project schedules — prompt author', () => {
+  const createBy = (
+    f: ReturnType<typeof fixture>,
+    key: string,
+    action: ProjectScheduledAction,
+    promptAuthor: 'human' | 'agent' | 'sam' | null
+  ) =>
+    f.hooks.transactionSync(() =>
+      createSchedule(
+        f.sql,
+        f.env,
+        PROJECT,
+        // `null` reproduces a row written before migration 075 recorded the author.
+        { ...creator, promptAuthor: promptAuthor as 'human' },
+        { action, dueAt: Date.now(), displayTimezone: 'UTC', idempotencyKey: key },
+        Date.now()
+      )
+    );
+
+  it('starts an agent-scheduled task with a first message that names the agent', async () => {
+    const f = fixture();
+    submitReservedTaskMock.mockResolvedValue({ outcome: 'admitted' });
+    const { schedule } = createBy(f, 'agent-start', startAction, 'agent');
+    expect(schedule.promptAuthor).toBe('agent');
+    await runScheduleAlarm(f.sql, f.env, f.hooks);
+    vi.setSystemTime(NOW + 1);
+    await runScheduleAlarm(f.sql, f.env, f.hooks);
+    expect(submitReservedTaskMock).toHaveBeenCalledOnce();
+    const input = submitReservedTaskMock.mock.calls[0]![1] as ReservedTaskSubmissionInput;
+    expect(input.prompt.startsWith('Run the scheduled check\n\n---\nScheduled by an agent')).toBe(
+      true
+    );
+    expect(input.prompt).toContain(`chat session ${CHAT} (schedule ${schedule.id})`);
+  });
+
+  it.each(['human', 'sam', null] as const)(
+    'starts a %s-authored task with the prompt as written',
+    async (promptAuthor) => {
+      const f = fixture();
+      submitReservedTaskMock.mockResolvedValue({ outcome: 'admitted' });
+      createBy(f, `start-${promptAuthor}`, startAction, promptAuthor);
+      await runScheduleAlarm(f.sql, f.env, f.hooks);
+      vi.setSystemTime(NOW + 1);
+      await runScheduleAlarm(f.sql, f.env, f.hooks);
+      const input = submitReservedTaskMock.mock.calls[0]![1] as ReservedTaskSubmissionInput;
+      expect(input.prompt).toBe('Run the scheduled check');
+    }
+  );
+
+  it('delivers a legacy (NULL author) message as written, and an agent one as a notice', async () => {
+    const f = fixture();
+    const legacy = createBy(f, 'legacy-message', messageAction, null).schedule;
+    const agent = createBy(f, 'agent-message', messageAction, 'agent').schedule;
+    expect(legacy.promptAuthor).toBeNull();
+    await runScheduleAlarm(f.sql, f.env, f.hooks);
+    const content = (id: string) =>
+      (
+        f.db
+          .prepare('SELECT content FROM session_inbox WHERE id = ?')
+          .get(getSchedule(f.sql, PROJECT, id)!.deliveryId) as { content: string }
+      ).content;
+    expect(content(legacy.id)).toBe('Continue the scheduled check');
+    expect(content(agent.id)).toMatch(/^SAM notice \(system-generated, not a human message\)/);
+    expect(content(agent.id)).not.toContain('Continue the scheduled check');
   });
 });
 
@@ -844,5 +936,127 @@ describe('standing watches — canonical matches, execution limits and revocatio
     expect(getWatch(f.sql, 'other-project', first.id)).toBeNull();
     expect(() => f.watch('too-many', { maxExecutions: 4 })).toThrow(/controls/i);
     expect(() => f.watch('too-fast', { cooldownMs: 19 })).toThrow(/controls/i);
+  });
+});
+
+describe('shared chats — who may schedule into them (idea 01M59MYE4GY91BWTE8TZF1ZB5D)', () => {
+  const OWNER = 'chat-owner';
+  const GRANT = 'grant-1';
+
+  /** Make CHAT someone else's, shared with USER, as a share leaves it. */
+  function shareWithUser(f: ReturnType<typeof fixture>) {
+    f.db.prepare('UPDATE chat_sessions SET created_by_user_id = ? WHERE id = ?').run(OWNER, CHAT);
+    f.d1.prepare('UPDATE tasks SET user_id = ? WHERE id = ?').run(OWNER, TASK);
+    f.d1.prepare('INSERT INTO users (id,status,name) VALUES (?,?,?)').run(OWNER, 'active', 'Rae');
+    f.d1.prepare('UPDATE users SET name = ? WHERE id = ?').run('Ana', USER);
+    f.db
+      .prepare(
+        `INSERT INTO chat_session_access_grants
+          (id, session_id, grantee_user_id, granted_by_user_id, created_at, expires_at, duration_minutes)
+         VALUES (?, ?, ?, ?, ?, ?, 30)`
+      )
+      .run(GRANT, CHAT, USER, OWNER, NOW, NOW + 30 * 60_000);
+    return f.hooks.transactionSync(() =>
+      createSchedule(
+        f.sql,
+        f.env,
+        PROJECT,
+        { ...creator, sharedAccessGrantId: GRANT },
+        { action: messageAction, dueAt: NOW, displayTimezone: 'UTC', idempotencyKey: 'shared' },
+        NOW
+      )
+    ).schedule;
+  }
+
+  /** Run `during` while the runner reads the sender's name: its last await before admitting. */
+  function duringNameRead(f: ReturnType<typeof fixture>, during: () => void) {
+    const base = f.env.DATABASE;
+    f.env.DATABASE = {
+      ...base,
+      prepare(query: string) {
+        const statement = base.prepare(query);
+        if (!query.includes('FROM users WHERE id IN')) return statement;
+        return {
+          ...statement,
+          bind(...bindings: unknown[]) {
+            const bound = statement.bind(...bindings);
+            return {
+              ...bound,
+              async all() {
+                during();
+                return bound.all();
+              },
+            };
+          },
+        };
+      },
+    } as D1Database;
+  }
+
+  it('admits a teammate’s schedule while their grant is active, attributed to them', async () => {
+    const f = fixture();
+    const schedule = shareWithUser(f);
+    await runScheduleAlarm(f.sql, f.env, f.hooks);
+    expect(getSchedule(f.sql, PROJECT, schedule.id)?.state).toBe('admitted');
+    const row = f.db
+      .prepare("SELECT metadata FROM session_inbox WHERE source_kind = 'scheduled_action'")
+      .get() as { metadata: string };
+    expect(JSON.parse(row.metadata)).toMatchObject({
+      senderName: 'Ana',
+      onBehalfOfUserId: OWNER,
+      grantId: GRANT,
+    });
+  });
+
+  it('stops the admission when the grant ends during the last read before it', async () => {
+    const f = fixture();
+    const schedule = shareWithUser(f);
+    duringNameRead(f, () => {
+      f.db
+        .prepare('UPDATE chat_session_access_grants SET expires_at = ? WHERE id = ?')
+        .run(NOW - 1, GRANT);
+    });
+    await runScheduleAlarm(f.sql, f.env, f.hooks);
+    expect(getSchedule(f.sql, PROJECT, schedule.id)).toMatchObject({
+      state: 'failed',
+      lastError: "The sender's access to this session expired",
+    });
+    expect(f.effects().mailbox).toEqual([]);
+  });
+
+  it('keeps a chat without a recorded owner schedulable by its task’s owner', async () => {
+    // The fixture's chat has no `created_by_user_id`, like chats from before owners were
+    // recorded; its task belongs to USER.
+    const f = fixture();
+    const schedule = f.create('legacy').schedule;
+    await runScheduleAlarm(f.sql, f.env, f.hooks);
+    expect(getSchedule(f.sql, PROJECT, schedule.id)?.state).toBe('admitted');
+  });
+
+  it('pauses a standing watch made before only owners could point one at a chat', async () => {
+    const f = fixture();
+    f.db.prepare('UPDATE chat_sessions SET created_by_user_id = ? WHERE id = ?').run(OWNER, CHAT);
+    const watch = f.watch('cross-member').watch;
+    f.emit('one');
+    await runStandingWatchAlarm(f.sql, f.env, f.hooks);
+    expect(getWatch(f.sql, PROJECT, watch.id)).toMatchObject({
+      state: 'paused',
+      lastError: 'Standing watch creator does not own the target chat',
+      executionCount: 0,
+    });
+    expect(listSchedules(f.sql, f.env, PROJECT).schedules).toEqual([]);
+  });
+
+  it('runs the same watch when its creator owns the chat', async () => {
+    const f = fixture();
+    f.db.prepare('UPDATE chat_sessions SET created_by_user_id = ? WHERE id = ?').run(USER, CHAT);
+    const watch = f.watch('own-chat').watch;
+    f.emit('one');
+    await runStandingWatchAlarm(f.sql, f.env, f.hooks);
+    expect(getWatch(f.sql, PROJECT, watch.id)).toMatchObject({
+      state: 'active',
+      executionCount: 1,
+    });
+    expect(listSchedules(f.sql, f.env, PROJECT).schedules).toHaveLength(1);
   });
 });

@@ -206,6 +206,42 @@ describe('MCP instruction context handlers', () => {
     expect(instructions).toMatch(/expiresAt/);
   });
 
+  it('a taskless conversation keeps answering in the chat: it has no inbox tools', async () => {
+    // inbox_write needs a task-backed token (`resolveSource`), so sending this agent to the inbox
+    // would leave it no way to reach the person.
+    mocks.selectRows = [[project]];
+    mocks.projectData.getSession.mockResolvedValue({ id: 'chat-1', topic: 'Instant topic' });
+    const response = await handleGetInstructions(
+      'request-1',
+      {
+        ...baseToken,
+        taskId: '',
+        contextType: 'conversation',
+        taskMode: 'conversation',
+        chatSessionId: 'chat-1',
+        agentSessionId: 'agent-1',
+      },
+      makeEnv()
+    );
+    const instructions = (parseInstructionPayload(response).instructions as string[]).join('\n');
+    expect(instructions).toContain('Respond to their messages directly.');
+    expect(instructions).not.toContain('Nobody reads this chat.');
+    expect(instructions).not.toContain('they do not watch it');
+  });
+
+  it('a task-backed conversation is sent to the inbox (control)', async () => {
+    mocks.selectRows = [[{ ...task, taskMode: 'conversation' }], [project]];
+    const response = await handleGetInstructions(
+      'request-1',
+      { ...baseToken, taskMode: 'conversation' },
+      makeEnv()
+    );
+    const instructions = (parseInstructionPayload(response).instructions as string[]).join('\n');
+    expect(instructions).toContain('they do not watch it');
+    expect(instructions).toContain('Nobody reads this chat.');
+    expect(instructions).not.toContain('Respond to their messages directly.');
+  });
+
   it('appends a complete entity index naming entities that were not injected', async () => {
     mocks.selectRows = [[task], [project]];
 
@@ -219,8 +255,8 @@ describe('MCP instruction context handlers', () => {
     expect(directives).toContain('BusinessStrategy (context, 2)');
     expect(directives).toContain('Architecture (context, 4)');
     // The agent must be told the block is partial and how to reach the rest.
-    expect(directives).toContain('search_knowledge');
-    expect(directives).toContain('get_relevant_knowledge');
+    expect(directives).toContain('`knowledge_read` method `search`');
+    expect(directives).toContain('`knowledge_read` method `relevant`');
     expect(directives).toContain('2 of the entities listed here have no observations shown above');
   });
 
@@ -412,16 +448,7 @@ describe('MCP instruction context handlers', () => {
     expect(String(payload.policyDirectives)).toContain('Call get_instructions');
   });
 
-  it('resolves trial and direct-workspace contexts without a task row', async () => {
-    const trial = await resolveInstructionContext(
-      {
-        ...baseToken,
-        taskId: '',
-        contextType: 'trial',
-        agentSessionId: 'trial-agent',
-      },
-      makeEnv()
-    );
+  it('resolves direct-workspace contexts without a task row', async () => {
     const direct = await resolveInstructionContext(
       {
         ...baseToken,
@@ -432,10 +459,6 @@ describe('MCP instruction context handlers', () => {
       makeEnv()
     );
 
-    expect(trial).toMatchObject({
-      ok: true,
-      context: { type: 'trial', workspaceId: 'workspace-1', agentSessionId: 'trial-agent' },
-    });
     expect(direct).toMatchObject({
       ok: true,
       context: {

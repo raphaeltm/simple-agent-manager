@@ -136,14 +136,16 @@ describe('task-runner node-steps — node_role filtering', () => {
 
   it('warm node query excludes deployment nodes', async () => {
     const fs = await import('fs');
+    // The warm-pool claim moved out of node-selection.ts for rule 18.
     const source = fs.readFileSync(
-      path.join(SRC_DIR, 'durable-objects/task-runner/node-selection.ts'),
+      path.join(SRC_DIR, 'durable-objects/task-runner/warm-node-claim.ts'),
       'utf-8'
     );
 
     // The warm node search query must include node_role filter
     const warmQueryStart = source.indexOf('const warmNodes = await rc.env.DATABASE.prepare(');
-    const warmQueryEnd = source.indexOf('.bind(state.userId)', warmQueryStart);
+    expect(warmQueryStart).toBeGreaterThan(-1);
+    const warmQueryEnd = source.indexOf('.bind(state.userId', warmQueryStart);
     const warmSection = source.slice(warmQueryStart, warmQueryEnd);
     expect(warmSection).toContain("node_role = 'workspace'");
   });
@@ -161,7 +163,8 @@ describe('task-runner node-steps — node_role filtering', () => {
       'const nodes = await rc.env.DATABASE.prepare(',
       fallbackFunctionStart
     );
-    const fallbackQueryEnd = source.indexOf('.bind(state.userId)', fallbackQueryStart);
+    expect(fallbackQueryStart).toBeGreaterThan(-1);
+    const fallbackQueryEnd = source.indexOf('.bind(', fallbackQueryStart);
     const fallbackSection = source.slice(fallbackQueryStart, fallbackQueryEnd);
     expect(fallbackSection).toContain("node_role = 'workspace'");
   });

@@ -27,7 +27,7 @@ export interface McpTokenEnv {
   MCP_TOKEN_MAX_LIFETIME_SECONDS?: string;
 }
 
-export type McpInstructionContextType = 'task' | 'conversation' | 'trial' | 'direct-workspace';
+export type McpInstructionContextType = 'task' | 'conversation' | 'direct-workspace';
 
 export type McpTaskMode = 'task' | 'conversation';
 
@@ -46,6 +46,13 @@ export interface McpTokenData {
   workspaceId: string;
   chatSessionId?: string;
   agentSessionId?: string;
+  /**
+   * Credential generation of the workspace runtime the token was issued to
+   * (`workspaces.callback_generation`). Absent on tokens issued before generations
+   * existed, which then match only a workspace that has never been rotated
+   * (`mcp-token-lifecycle.ts`).
+   */
+  callbackGeneration?: string | null;
   createdAt: string;
   /** ISO timestamp of last sliding window refresh (set on first refresh) */
   lastRefreshedAt?: string;
@@ -120,6 +127,31 @@ export async function validateMcpToken(
   token: string,
   env?: McpTokenEnv
 ): Promise<McpTokenData | null> {
+  const read = await readMcpToken(kv, token, env);
+  if (!read) return null;
+  return read.refreshIfDue();
+}
+
+/** A stored MCP token that passed its own expiry checks, with its sliding refresh deferred. */
+export interface McpTokenRead {
+  data: McpTokenData;
+  /**
+   * Applies the sliding-window refresh when it is due and returns the token data to use.
+   * Callers that make a further authorization decision must call this only after that
+   * decision accepts the token, so a rejected token does not keep extending its idle TTL.
+   */
+  refreshIfDue: () => Promise<McpTokenData>;
+}
+
+/**
+ * Reads an MCP token and applies the expiry checks of {@link validateMcpToken}, but leaves
+ * the sliding-window refresh to the caller.
+ */
+export async function readMcpToken(
+  kv: KVNamespace,
+  token: string,
+  env?: McpTokenEnv
+): Promise<McpTokenRead | null> {
   const key = `${MCP_TOKEN_PREFIX}${token}`;
   const data = await kv.get<McpTokenData>(key, { type: 'json' });
   if (!data) return null;
@@ -153,16 +185,17 @@ export async function validateMcpToken(
   const elapsedSinceRefresh = (now - lastRefreshMs) / 1000;
   const refreshThreshold = ttl * 0.5;
 
-  if (elapsedSinceRefresh > refreshThreshold) {
+  const refreshIfDue = async (): Promise<McpTokenData> => {
+    if (elapsedSinceRefresh <= refreshThreshold) return data;
     const updatedData: McpTokenData = { ...data, lastRefreshedAt: new Date(now).toISOString() };
     // Cap the remaining TTL so it doesn't extend past max lifetime
     const remainingMaxLifetime = maxLifetime - ageSeconds;
     const effectiveTtl = Math.min(ttl, Math.max(1, Math.floor(remainingMaxLifetime)));
     await kv.put(key, JSON.stringify(updatedData), { expirationTtl: effectiveTtl });
     return updatedData;
-  }
+  };
 
-  return data;
+  return { data, refreshIfDue };
 }
 
 /**

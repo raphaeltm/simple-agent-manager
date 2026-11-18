@@ -1,5 +1,9 @@
 # Extract API Composition Root Modules
 
+> **Reconciliation 2026-10-26:** still open. `apps/api/src/index.ts` is now 986 lines (942 on
+> 10-12): nine merges added routes, handlers or exports, most from #2413 (+15) and #2417 (+14). It
+> passes the size check only through `EXEMPT_FILES` (`scripts/quality/check-file-sizes.ts:43`).
+
 > **Reconciliation 2026-09-30:** still open. PR #1355 was closed unmerged on 2026-07-20, and
 > `apps/api/src/index.ts` is now 939 lines.
 
@@ -43,3 +47,7 @@
 - Tests cover fragile route-order/auth/CORS/proxy/scheduled behavior.
 - No staging deployment is performed.
 - PR is clearly marked do-not-merge and do-not-deploy.
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. The ws-* proxy and port access are extracted. Still open: the app-creation module, named route-registration groups, and moving `onError` (`index.ts:188`), well-known routes (`:319-343`), `notFound` (`:521`) and the scheduled export (`:177,531`). Evidence: #2714 (`routes/workspace-subdomain-proxy.ts`, `workspace-port-access.ts`); #2681; `apps/api/src/index.ts` 1,003→548 lines.

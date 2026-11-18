@@ -1,0 +1,346 @@
+/**
+ * Deployments pages audit: the list and one environment, at 375 px and 1280 px, with every
+ * environment state, long names, empty and failed loads, and the dialogs. Each state asserts
+ * the sentence it must say, so a page that renders the wrong words fails, not just one that
+ * overflows. The API mock lives in `deployments-ui-mocks.ts`.
+ */
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+import { expect, type Page, test } from '@playwright/test';
+
+import { assertNoClippedOverflow, assertNoOverflow } from './audit-helpers';
+import { PROJECT_ID } from './deployments-ui-fixtures';
+import { mockApi } from './deployments-ui-mocks';
+
+const OUT = resolve(process.cwd(), '../../.codex/tmp/playwright-screenshots/deployments');
+
+/**
+ * The app scrolls inside its own containers, so a document "full page" capture stops at
+ * the fold. Grow the viewport by the largest hidden scroll height instead.
+ */
+async function grow(page: Page) {
+  const original = page.viewportSize();
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const extra = await page.evaluate(() => {
+      let most = 0;
+      for (const element of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
+        const style = getComputedStyle(element);
+        if (!['auto', 'scroll'].includes(style.overflowY)) continue;
+        most = Math.max(most, element.scrollHeight - element.clientHeight);
+      }
+      return most;
+    });
+    const size = page.viewportSize();
+    if (!size || extra <= 1) break;
+    await page.setViewportSize({ width: size.width, height: size.height + extra });
+    await page.waitForTimeout(250);
+  }
+  return original;
+}
+
+async function capture(page: Page, name: string, opts: { full?: boolean } = {}) {
+  mkdirSync(OUT, { recursive: true });
+  await page.waitForTimeout(300);
+  const size = opts.full ? await grow(page) : page.viewportSize();
+  const width = size?.width ?? 0;
+  await page.screenshot({ path: `${OUT}/${name}-${width}${opts.full ? '-full' : ''}.png` });
+  if (opts.full && size) await page.setViewportSize(size);
+}
+
+/**
+ * Nothing overflows the page, and nothing is clipped inside a container either: the app
+ * shell hides horizontal overflow, so the document check alone cannot see a clipped row.
+ */
+async function assertLayout(page: Page) {
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+}
+
+const envUrl = (envId: string) => `/projects/${PROJECT_ID}/deployments/${envId}`;
+const listUrl = `/projects/${PROJECT_ID}/deployments`;
+
+const VIEWPORTS = [
+  { label: 'desktop', viewport: { width: 1280, height: 800 }, isMobile: false },
+  { label: 'mobile', viewport: { width: 375, height: 667 }, isMobile: true },
+] as const;
+
+for (const vp of VIEWPORTS) {
+  test.describe(`Deployments — ${vp.label}`, () => {
+    test.use({ viewport: vp.viewport, isMobile: vp.isMobile, hasTouch: vp.isMobile });
+
+    test('list groups environments by what they need', async ({ page }) => {
+      await mockApi(page);
+      await page.goto(listUrl);
+      await expect(page.getByRole('heading', { name: 'Deployments', level: 1 })).toBeVisible();
+      const attention = page.getByRole('region', { name: 'Needs your attention' });
+      await expect(attention.getByText("Version 43 didn't start")).toBeVisible();
+      await expect(attention.getByText("SAM couldn't get a server for version 1")).toBeVisible();
+      // The address people visit: the custom domain, not the generated hostname.
+      await expect(page.getByText('shop.northwind.dev').first()).toBeVisible();
+      await assertLayout(page);
+      await capture(page, 'list');
+      await capture(page, 'list', { full: true });
+    });
+
+    test('list — empty', async ({ page }) => {
+      await mockApi(page, { environments: [] });
+      await page.goto(listUrl);
+      await expect(page.getByRole('heading', { name: 'Nothing deployed yet' })).toBeVisible();
+      await expect(page.getByRole('link', { name: 'How deployments work' })).toHaveAttribute(
+        'href',
+        /\/docs\/guides\/app-deployments\/$/
+      );
+      await assertLayout(page);
+      await capture(page, 'list-empty');
+    });
+
+    test('list — failed load offers a retry', async ({ page }) => {
+      await mockApi(page, { failing: ['list'] });
+      await page.goto(listUrl);
+      await expect(page.getByText(/Could not load/)).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+      await assertLayout(page);
+    });
+
+    // Each state names the sentence it must say.
+    for (const [envId, label, says] of [
+      ['env-prod', 'live', 'Running version 42.'],
+      ['env-staging', 'failed-deploy', "Version 43 didn't start"],
+      ['env-preview', 'deploying', 'Version 3 is starting'],
+      ['env-eu', 'server-silent', "The server hasn't checked in for 3 hours"],
+      ['env-qa', 'down', "SAM couldn't get a server for version 1"],
+      ['env-demo', 'paused', 'Starting brings version 12 back'],
+      ['env-sandbox', 'never-deployed', 'Nothing runs here until an agent deploys to it.'],
+      ['env-docs', 'starting', 'Getting a server ready for version 7.'],
+      ['env-load', 'pause-failed', 'SAM stopped partway, so the app may still be running.'],
+    ] as const) {
+      test(`environment — ${label}`, async ({ page }) => {
+        await mockApi(page);
+        await page.goto(envUrl(envId));
+        await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+        await expect(page.getByText(says).filter({ visible: true }).first()).toBeVisible();
+        if (label === 'failed-deploy') {
+          // The failed version shows its steps: what broke, and that the old version came back.
+          const steps = page.getByRole('list', { name: 'Steps for version 43' });
+          await expect(steps.getByText("The app didn't start")).toBeVisible();
+          await expect(steps.getByText('Put the previous version back')).toBeVisible();
+          // The status names v42, and so does the credit beside it.
+          await expect(page.getByText(/v42 by Opus 5\.5 Chat/)).toBeVisible();
+        }
+        if (label === 'deploying') {
+          await expect(
+            page.getByRole('list', { name: 'Steps for version 3' }).getByText('Starting the app…')
+          ).toBeVisible();
+        }
+        if (label === 'live') {
+          await expect(
+            page.getByText('A newer version arrived before a server picked this one up.')
+          ).toHaveCount(0);
+          await page.getByRole('button', { name: 'Show all 6' }).click();
+          await expect(
+            page.getByText('A newer version arrived before a server picked this one up.')
+          ).toBeVisible();
+        }
+        if (label === 'starting') {
+          // Start resets the newest release to `created`: it is on its way, not skipped.
+          await expect(page.getByText('Skipped', { exact: true })).toHaveCount(0);
+        }
+        if (label === 'down') {
+          // No server ever ran: no logs to offer.
+          await expect(page.getByRole('button', { name: 'Logs' })).toHaveCount(0);
+        }
+        await assertLayout(page);
+        await capture(page, `environment-${label}`);
+        await capture(page, `environment-${label}`, { full: true });
+      });
+    }
+
+    test('environment — a failed section load says so and the rest renders', async ({ page }) => {
+      await mockApi(page, { failing: ['/releases', '/runtime-config'] });
+      await page.goto(envUrl('env-prod'));
+      await expect(page.getByText(/Could not load recent deploys/)).toBeVisible();
+      await expect(page.getByText(/Could not load the settings/)).toBeVisible();
+      await expect(page.getByRole('region', { name: 'Who can deploy' })).toBeVisible();
+      await assertLayout(page);
+    });
+
+    test('sections say they are loading, not empty, until their data arrives', async ({ page }) => {
+      let release = () => {};
+      const until = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await mockApi(page, {
+        hold: {
+          paths: ['/custom-domains', '/public-routes', '/volumes', '/runtime-config'],
+          until,
+        },
+      });
+      await page.goto(envUrl('env-prod'));
+      await expect(page.getByRole('heading', { name: 'production', level: 1 })).toBeVisible();
+      const addresses = page.getByRole('region', { name: 'Addresses' });
+      const data = page.getByRole('region', { name: 'Saved data' });
+      const settings = page.getByRole('region', { name: 'Settings your app reads' });
+      for (const section of [addresses, data, settings]) {
+        await expect(section.getByRole('status')).toHaveText('Loading…');
+      }
+      // Nothing claims the lists are empty while they are still on their way.
+      await expect(page.getByText(/No addresses yet|No settings yet|Disks keep data/)).toHaveCount(
+        0
+      );
+      if (!vp.isMobile) {
+        const index = page.getByRole('navigation', { name: 'On this page' });
+        await expect(index.getByRole('link', { name: 'Saved data' })).toHaveText('Saved data');
+        await expect(index.getByRole('link', { name: 'Addresses' })).toHaveText('Addresses');
+      }
+      await assertLayout(page);
+      await capture(page, 'environment-loading');
+      release();
+      await expect(addresses.getByText('shop.northwind.dev')).toBeVisible();
+      await expect(data.getByText('postgres-data')).toBeVisible();
+      await expect(settings.getByText('PUBLIC_URL')).toBeVisible();
+      await expect(page.getByRole('status').filter({ hasText: 'Loading…' })).toHaveCount(0);
+      if (!vp.isMobile) {
+        await expect(
+          page
+            .getByRole('navigation', { name: 'On this page' })
+            .getByRole('link', { name: /Saved data/ })
+        ).toContainText('70 GB');
+      }
+    });
+
+    test('new environment needs an access choice before it can be created', async ({ page }) => {
+      await mockApi(page);
+      await page.goto(listUrl);
+      await page.getByRole('button', { name: 'New', exact: true }).click();
+      const dialog = page.getByRole('dialog');
+      await dialog.getByPlaceholder('staging').fill('staging-eu');
+      const create = dialog.getByRole('button', { name: 'Create environment' });
+      await expect(create).toBeDisabled();
+      await dialog.getByText('Only some agent profiles').click();
+      await expect(create).toBeDisabled();
+      // On a phone the profile chips open below the fold: the sheet scrolls them into view,
+      // clear of the sticky footer that holds Create.
+      const captain = dialog.getByRole('button', { name: 'Release Captain' });
+      const footer = create.locator('xpath=..');
+      await expect(async () => {
+        const chip = await captain.boundingBox();
+        const bar = await footer.boundingBox();
+        expect(chip && bar ? chip.y + chip.height <= bar.y : false).toBe(true);
+      }).toPass({ timeout: 3000 });
+      await capture(page, 'create-environment-profiles');
+      await captain.click();
+      await expect(create).toBeEnabled();
+      await dialog.getByRole('heading', { name: 'New environment' }).scrollIntoViewIfNeeded();
+      await assertLayout(page);
+      await capture(page, 'create-environment');
+    });
+
+    test('turning agent deploys on never grants access until a choice is made', async ({
+      page,
+    }) => {
+      const writes = await mockApi(page);
+      await page.goto(envUrl('env-sandbox'));
+      const section = page.getByRole('region', { name: 'Who can deploy' });
+      await section.getByRole('switch', { name: 'Agents can deploy here' }).click();
+      await expect(
+        section.getByText('Choose who first. Nothing changes until you do.')
+      ).toBeVisible();
+      expect(writes).toEqual([]);
+      await section.getByRole('radio', { name: 'Any agent in this project' }).click();
+      await expect.poll(() => writes.length).toBe(1);
+      expect(writes[0]).toEqual({
+        envId: 'env-sandbox',
+        body: { agentDeployEnabled: true, allowedDeployProfileIds: [] },
+      });
+    });
+
+    test('"Only these" with nobody picked warns that any agent can still deploy', async ({
+      page,
+    }) => {
+      const writes = await mockApi(page);
+      await page.goto(envUrl('env-staging'));
+      const section = page.getByRole('region', { name: 'Who can deploy' });
+      await section.getByRole('radio', { name: 'Only these' }).click();
+      await expect(section.getByText(/Pick at least one profile/)).toBeVisible();
+      expect(writes).toEqual([]);
+      await section.scrollIntoViewIfNeeded();
+      await assertLayout(page);
+      await capture(page, 'who-can-deploy');
+    });
+
+    test('your own domain ends in the exact DNS record', async ({ page }) => {
+      await mockApi(page);
+      await page.goto(envUrl('env-prod'));
+      await page.getByRole('button', { name: 'Your domain' }).click();
+      const dialog = page.getByRole('dialog');
+      await dialog.getByPlaceholder('shop.example.com').fill('eu.northwind.dev');
+      await expect(dialog.getByText('eu.northwind.dev')).toBeVisible();
+      await dialog
+        .getByText('Points to')
+        .evaluate((element) => element.closest('div')?.scrollIntoView({ block: 'center' }));
+      await expect(dialog.getByText('r1-web-3000-env-01m5prod.apps.example.com')).toBeInViewport();
+      await assertLayout(page);
+      await capture(page, 'add-domain');
+    });
+
+    test('delete needs the environment name typed', async ({ page }) => {
+      await mockApi(page);
+      await page.goto(envUrl('env-prod'));
+      await page.getByRole('button', { name: 'Delete…' }).click();
+      const dialog = page.getByRole('dialog');
+      const confirm = dialog.getByRole('button', { name: 'Delete forever' });
+      await dialog.getByRole('textbox').fill('produc');
+      await expect(confirm).toBeDisabled();
+      await assertLayout(page);
+      await capture(page, 'delete');
+      await dialog.getByRole('textbox').fill('production');
+      await expect(confirm).toBeEnabled();
+    });
+
+    test('logs open from a problem, filtered to errors', async ({ page }) => {
+      await mockApi(page);
+      await page.goto(envUrl('env-staging'));
+      await page.getByRole('button', { name: 'See logs' }).first().click();
+      await expect(page.getByRole('dialog').getByText(/ECONNREFUSED/)).toBeVisible();
+      await assertLayout(page);
+      await capture(page, 'logs');
+      await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+    });
+
+    test('behind the scenes shows the server and its hardware', async ({ page }) => {
+      await mockApi(page);
+      await page.goto(envUrl('env-prod'));
+      const summary = page.locator('summary', { hasText: 'Behind the scenes' });
+      await summary.click();
+      await expect(page.getByText('deploy-prod-01')).toBeVisible();
+      await expect(page.getByLabel('Hardware details')).toBeVisible();
+      await summary.scrollIntoViewIfNeeded();
+      await assertLayout(page);
+      await capture(page, 'behind-the-scenes');
+    });
+
+    test('"Ask an agent" opens a new chat about this environment', async ({ page }) => {
+      await mockApi(page);
+      // The chat page consumes and strips `deployHelp` on arrival, so record every URL.
+      const visited: string[] = [];
+      page.on('framenavigated', (frame) => {
+        if (frame === page.mainFrame()) visited.push(frame.url());
+      });
+      await page.goto(listUrl);
+      await page
+        .getByRole('region', { name: 'Needs your attention' })
+        .getByRole('button', { name: 'Ask an agent' })
+        .last()
+        .click();
+      await expect
+        .poll(() =>
+          visited.some((url) =>
+            /\/projects\/[^/]+\/chat\?deployHelp=staging&deployIntent=fix$/.test(url)
+          )
+        )
+        .toBe(true);
+    });
+  });
+}

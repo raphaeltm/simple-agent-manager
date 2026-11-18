@@ -427,6 +427,29 @@ async function setupMocks(page: Page) {
       await route.fulfill({ json: PROJECT_COMMENTS_RESPONSE });
       return;
     }
+    // The comment reader: the thread and the conversation around its message.
+    if (
+      pathname.startsWith(`${base}/sessions/${SESSION_ID}/comments/`) &&
+      pathname.endsWith('/context')
+    ) {
+      const thread = THREADS.find((candidate) => candidate.id === pathname.split('/').at(-2));
+      await route.fulfill(
+        thread
+          ? {
+              json: {
+                thread: { ...thread, projectId: PROJECT_ID },
+                session: { id: SESSION_ID, topic: SESSIONS[0].topic },
+                viewerAccess: 'owner',
+                anchor: { messageId: thread.anchor.messageId, found: true },
+                messages: MESSAGES,
+                hasMoreBefore: false,
+                hasMoreAfter: false,
+              },
+            }
+          : { status: 404, json: { error: 'NOT_FOUND', message: 'Comment not found' } }
+      );
+      return;
+    }
     if (pathname === `${base}/sessions/${SESSION_ID}/comments`) {
       await route.fulfill({ json: { comments: THREADS } });
       return;
@@ -582,17 +605,14 @@ async function expandHeader(page: Page) {
 }
 
 async function openCommentsDrawer(page: Page) {
-  // The always-visible chip is the intended entry point; fall back to the
-  // action-row button so the test still passes if the chip is suppressed.
+  // A phone's one-row header keeps its comment chip; elsewhere the tool rail's Comments
+  // action is the entry point.
   const chip = page.getByRole('button', { name: /unresolved comment/i }).first();
   if (await chip.isVisible().catch(() => false)) {
     await chip.click();
   } else {
     await expandHeader(page);
-    await page
-      .getByRole('button', { name: /^Comments/ })
-      .first()
-      .click();
+    await page.getByTestId('session-tool-comments').first().click();
   }
   const drawer = page.getByRole('dialog', { name: 'Session comments' });
   await drawer.waitFor({ timeout: 10_000 });
@@ -652,11 +672,17 @@ for (const [label, viewport] of [
   test.describe(`Comment navigation — ${label}`, () => {
     test.use({ viewport, isMobile: label === 'mobile', hasTouch: label === 'mobile' });
 
-    test('header surfaces the unresolved comment count', async ({ page }) => {
+    test('the session surfaces the unresolved comment count', async ({ page }) => {
       await setupMocks(page);
       await openChat(page);
-      await screenshot(page, `comments-01-header-chip-${label}`);
-      await expect(page.getByRole('button', { name: /unresolved comment/i }).first()).toBeVisible();
+      await screenshot(page, `comments-01-count-${label}`);
+      // Phones keep a comment chip in the one-row header; desktop shows the count on the
+      // tool rail's Comments action (the header chip row no longer carries comments).
+      const count =
+        label === 'mobile'
+          ? page.getByRole('button', { name: /unresolved comment|needing your attention/i })
+          : page.getByRole('button', { name: /comment threads — \d+ (unresolved|needs you)/i });
+      await expect(count.first()).toBeVisible();
       await assertNoOverflow(page);
     });
 
@@ -787,7 +813,9 @@ for (const [label, viewport] of [
       await assertNoOverflow(page);
     });
 
-    test('project comments opens and reveals a chat message comment', async ({ page }) => {
+    test('project comments opens a chat message comment in the comment reader', async ({
+      page,
+    }) => {
       await setupMocks(page);
       await page.goto(`/projects/${PROJECT_ID}/comments`);
       await page.getByRole('heading', { name: 'Comments', level: 1 }).waitFor({ timeout: 15_000 });
@@ -798,15 +826,18 @@ for (const [label, viewport] of [
         })
         .click();
 
-      await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`));
-      await expect(page).not.toHaveURL(/commentMessage=/);
-      const highlighted = page.locator('.sam-message-highlight');
-      await expect(highlighted).toContainText(
+      // ct-2 is anchored to msg-5, a later chunk of the reply that msg-4 starts, so the
+      // reader must land on the merged message that shows it.
+      await expect(page).toHaveURL(
+        new RegExp(`/projects/${PROJECT_ID}/comments/${SESSION_ID}/ct-2$`)
+      );
+      const anchored = page.locator('[data-reader-anchor="true"]');
+      await expect(anchored).toContainText(
         'The project-level page now reads the project-wide comments endpoint once'
       );
-      await expect(highlighted).toBeInViewport();
+      await expect(anchored).toBeInViewport();
       await waitForUiSettled(page);
-      await screenshot(page, `comments-14-project-to-chat-message-${label}`);
+      await screenshot(page, `comments-14-project-to-reader-${label}`);
       await assertNoOverflow(page);
     });
 

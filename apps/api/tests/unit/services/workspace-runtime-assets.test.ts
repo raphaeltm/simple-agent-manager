@@ -21,8 +21,11 @@ function makeDbWithLimitAwareness(rowsBySelect: unknown[][]) {
       selectCall += 1;
       const whereResult = Promise.resolve(rows) as Promise<unknown[]> & {
         limit: ReturnType<typeof vi.fn>;
+        orderBy: ReturnType<typeof vi.fn>;
       };
       whereResult.limit = vi.fn().mockResolvedValue(rows);
+      // The task lookup orders newest-first before its limit.
+      whereResult.orderBy = vi.fn().mockReturnValue({ limit: whereResult.limit });
       return {
         from: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnValue(whereResult),

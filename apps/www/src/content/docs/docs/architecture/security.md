@@ -5,11 +5,29 @@ description: How SAM handles authentication, encryption, and credential manageme
 
 SAM's security model separates **platform secrets** (managed by operators) from **user credentials** (encrypted per-user in the database).
 
+## Client address trust
+
+The API reads client addresses only from `CF-Connecting-IP` (`clientIpFromHeaders`, `apps/api/src/lib/client-ip.ts`). Cloudflare overwrites this header at the edge. `X-Forwarded-For` and `X-Real-IP` are never fallback sources, because a caller can supply them. Another trusted ingress must overwrite `CF-Connecting-IP` from its TCP peer and prevent direct access to the origin; merely forwarding a caller's copy does not establish trust. There is no switch to trust arbitrary forwarding headers.
+
+Missing or malformed addresses return no IP. API rate limiters then use one shared `unknown` bucket rather than allowing callers to rotate spoofed keys (`apps/api/src/middleware/rate-limit.ts`). BetterAuth uses the same trusted header for session addresses and its rate limiting, retaining the library's address normalization (`createAuth`, `apps/api/src/auth.ts`). Token, device, and workload sign-ins create sessions outside BetterAuth’s request context, so their routes pass inbound headers to `createSessionCookieForUser`, which stores only the shared helper’s validated address (`apps/api/src/services/session-factory.ts`). Setup-token verification uses the shared UTF-8 comparison helper, which folds length differences into the result and visits every byte without an early mismatch return (`constantTimeEqual`, `apps/api/src/lib/constant-time.ts`).
+
+## Installer preview trust boundaries
+
+The isolated installer has its own origin, Worker, and session storage; it does not share marketing analytics, SAM login sessions, or SAM data bindings. The hosted operator can still replace its code. Source visibility and separation do not make a hosted bootstrap trustless.
+
+Default mode creates a user-owned maintenance service. This preview branch adds a one-use bootstrap claim, browser-generated recovery saved before submission, and independent maintenance sessions (24 hours by default). For maintenance authentication, the user-owned coordinator stores recovery and session hashes rather than credential values. Recovery replacement is prepared, saved, then confirmed, preserving access if a response is lost. The hosted deployment may still run an earlier prototype; check its source revision.
+
+Handoff removes hosted OAuth and deployment-credential copies while retaining the bounded claim record until its original expiry for retry. Access expiry is enforced separately from cleanup; failed provider operations can delay deletion or revocation. No central refresh token is retained. Disconnect does not delete resources already transferred to the user.
+
+Experimental full installation is disabled by default and has not completed authenticated end-to-end validation. Its design separates temporary bootstrap OAuth, user-owned maintenance deployment authority, storage access, and narrower normal SAM runtime authority. Credential values pass through hosted bootstrap before transfer. Continued operation after OAuth revocation must be verified before claiming independence. Updates select an explicit immutable source version; they are not a promise of automatic conflict merging, transactional deployment, or database rollback.
+
+For installer-bound instances, `BOOTSTRAP_OWNER_EMAIL` restricts initial administration to the matching verified email (verified by an OAuth provider or by an emailed sign-in code). Other initial identities are denied; an atomic election handles concurrent callbacks and durably records completion. Later changes to the elected owner's email, role or status do not reopen that election or lock out other authorized users; normal suspension checks still apply. The separate `SETUP_TOKEN` authorizes first-run setup, not user login. Setup closes once it completes or once the instance has an active superadmin (`isSetupCompleted`, `apps/api/src/services/platform-config-core.ts`), and the deploy job masks the token in its log (`scripts/deploy/setup-token.ts`), because the log of a public repository is public. A GitLab login provider can refresh a linked account's profile only when its host is `https://gitlab.com` or comes from the `GITLAB_HOST` Worker variable (`selectGitLabOAuthConfig`, `apps/api/src/services/platform-config-oauth.ts`): a self-managed host saved at runtime reports whatever its operator wants, so its email claims are treated as unverified and its accounts are stored under host-scoped ids (`gitLabLoginProvider`, `apps/api/src/services/gitlab-login-provider.ts`), because GitLab user ids are public and an account is otherwise matched on provider and id alone. Repository access then uses only a GitLab login the configured host issued (`gitlabAccountScope`, `getBetterAuthAccessTokenForProvider`), so one host's token is never refreshed against or sent to another; better-auth's HTTP token endpoints (`/api/auth/get-access-token`, `/refresh-token`, `/account-info`) are closed for the same reason (`routes/auth.ts`). A host saved at runtime that equals the `GITLAB_HOST` pin is trusted like the pin. GitHub and Google have fixed identity hosts for sign-in. Existing accounts can explicitly connect GitHub/GitLab only after a one-time mailbox sign-in check bound to the live session and provider, rechecked at callback; implicit linking and Google linking are refused. The installer's setup link carries it in the URL fragment, which browsers never send to a server; the setup page removes it from the address bar on load. Ordinary installations without this optional binding elect their first superadmin once, with one atomic update that promotes the signing-in user only while they are the only real account, and record it durably so the election never reopens (`establishFirstSuperadmin`, `apps/api/src/services/first-superadmin.ts`).
+
 ## Cloud Credential Model (BYOC + Platform Fallback)
 
 SAM supports **Bring-Your-Own-Cloud (BYOC)**: users and self-hosters may store their own Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, or GCP credentials, encrypted per-user in D1. This is the model for self-hosted deployments and BYO-key users.
 
-However, SAM's own hosted deployment also has an **enabled platform-level cloud credential** (`platform_credentials`, `provider=hetzner`, `credential_type=cloud-provider`). VM provider resolution uses **project credential → user credential → platform credential**, so on the hosted (zero-config) platform a user does **not** need their own cloud credential for SAM to provision workspaces or deployment nodes when the project or platform can supply one. Self-hosted deployments without a project or platform credential rely on user-supplied BYOC tokens.
+An installation administrator can also enable a **platform-level cloud credential** (`platform_credentials`, `credential_type=cloud-provider`). VM provider resolution uses **project credential → user credential → platform credential** (`resolveCredentialSource()` in `apps/api/src/services/provider-credentials.ts`), so where the project or platform can supply one, a user does **not** need their own cloud credential for SAM to provision workspaces or deployment nodes. Installations without a project or platform credential rely on user-supplied BYOC tokens.
 
 ## Credential Types
 
@@ -26,14 +44,13 @@ These Cloudflare Worker secrets are generated or copied during deployment and ar
 | `JWT_PUBLIC_KEY`             | RSA-2048 key for token verification (exposed via JWKS)                                                                                            |
 | `DEPLOY_SIGNING_PRIVATE_KEY` | Ed25519 key for signing deployment apply payloads (auto-generated)                                                                                |
 | `DEPLOY_SIGNING_PUBLIC_KEY`  | Ed25519 key for deployment-node payload verification (auto-generated)                                                                             |
-| `TRIAL_CLAIM_TOKEN_SECRET`   | HMAC secret for trial onboarding claim tokens (auto-generated)                                                                                    |
 | `CF_API_TOKEN`               | Cloudflare deploy, DNS, Origin CA certificate issuance, observability, and AI Gateway operations (requires Account → SSL and Certificates → Edit) |
 | `CF_ACCOUNT_ID`              | Cloudflare account identifier used by account-scoped Cloudflare APIs                                                                              |
 | `CF_ZONE_ID`                 | Cloudflare zone identifier used for DNS and Origin CA operations                                                                                  |
 
-Security keys are automatically generated and persisted by Pulumi on first deployment. Cloudflare secrets remain Worker secrets because they are deployment trust roots. GitHub App/OAuth, GitHub webhook, Google OAuth, GitLab OAuth, analytics forwarding, R2 attachment-upload credentials, devcontainer cache credentials, trial provider keys, and smoke-test auth flags can be supplied as optional Worker secret fallbacks when an installation needs them. Runtime platform values saved through first-run setup or the superadmin platform config UI are stored encrypted in D1 and override environment fallbacks. They never appear in source control. Neither the first-run setup endpoints (`/api/setup/*`) nor the superadmin platform config endpoint (`/api/admin/platform-config`) ever return a secret value: their responses carry only per-field configured/source status, projected by `getPlatformConfigStatus` (`apps/api/src/services/platform-config-status.ts`).
+Security keys are automatically generated and persisted by Pulumi on first deployment. Cloudflare secrets remain Worker secrets because they are deployment trust roots. GitHub App/OAuth, GitHub webhook, Google OAuth, GitLab OAuth, analytics forwarding, R2 attachment-upload credentials, devcontainer cache credentials, and smoke-test auth flags can be supplied as optional Worker secret fallbacks when an installation needs them. Runtime platform values saved through first-run setup or the superadmin platform config UI are stored encrypted in D1 and override environment fallbacks. They never appear in source control. Neither the first-run setup endpoints (`/api/setup/*`) nor the superadmin platform config endpoint (`/api/admin/platform-config`) ever return a secret value: their responses carry only per-field configured/source status, projected by `getPlatformConfigStatus` (`apps/api/src/services/platform-config-status.ts`).
 
-Production deployment secrets are additionally bounded by a GitHub Environment policy that permits deployments from the selected `main` branch only. This external policy is required because a workflow file on another branch cannot be trusted to enforce its own branch check. Automatic deployments also re-resolve the current `main` tip after entering the serialized production deployment queue, so a slower CI run for an older commit cannot roll back a newer deployment.
+Production deployment secrets are additionally bounded by a GitHub Environment policy that permits deployments from the selected `main` branch only. This external policy is required because a workflow file on another branch cannot be trusted to enforce its own branch check. Automatic deployments also re-resolve the current `main` tip after entering the serialized production deployment queue and deploy only that tip, and only when it has its own successful `main` push CI run, so a slower CI run for an older commit cannot roll back a newer deployment.
 
 New VM nodes do not require static `ORIGIN_CA_CERT` or `ORIGIN_CA_KEY` Worker secrets. If those legacy secrets exist from an older deployment, remove them after draining old nodes and confirming the per-node CSR model is deployed.
 
@@ -79,7 +96,7 @@ Cloud provider credentials are stored with a `credentialType` of `cloud-provider
 
 ## Authentication Flow
 
-SAM uses **BetterAuth** with configured OAuth login providers for user authentication:
+SAM uses **BetterAuth** with configured OAuth login providers, and email codes where email is available, for user authentication:
 
 1. User clicks a configured sign-in provider such as GitHub, Google, or GitLab
 2. API redirects to that provider's OAuth flow
@@ -89,13 +106,21 @@ SAM uses **BetterAuth** with configured OAuth login providers for user authentic
 6. BetterAuth creates/updates user record and session
 7. Session cookie set in browser
 
+Where the deploy prepared Email Sending, BetterAuth's email OTP plugin also signs people in with a six-digit code (`services/email-sign-in.ts`):
+
+1. User enters an email address; the API emails a code from `sign-in@agents.<BASE_DOMAIN>` only if the address belongs to an account, or it is the installer owner email before that owner exists. The response is identical either way, and the code is sent after the response (`waitUntil`), so timing reveals nothing. Deployments without an owner email never create accounts by email.
+2. User enters the code. It is stored hashed, expires after 5 minutes and allows 3 attempts.
+3. BetterAuth marks the email verified and creates the session, running the same user and session hooks as OAuth sign-in.
+
+Code requests and code redemptions are limited per IP address. Requests and redemption guesses are also limited per recipient, across all IP addresses (`agentEmail.signInCodesPerIpPerHour`, `agentEmail.signInCodesPerEmailPerHour`, `agentEmail.signInCodeAttemptsPerEmailPerHour`). Each code also allows only 3 guesses. The plugin's password-reset, verification and email-change routes return 404.
+
 ### Token Types
 
 | Token           | Lifetime             | Purpose                          | Validated By            |
 | --------------- | -------------------- | -------------------------------- | ----------------------- |
-| Session cookie  | Hours                | Browser authentication           | API Worker (BetterAuth) |
-| Workspace JWT   | Minutes              | Terminal WebSocket auth          | VM Agent (via JWKS)     |
-| Bootstrap token | 5 minutes            | One-time VM credential injection | API Worker              |
+| Session cookie  | 7 days               | Browser authentication           | API Worker (BetterAuth) |
+| Workspace JWT   | 1 hour               | Terminal WebSocket auth          | VM Agent (via JWKS)     |
+| Bootstrap token | 15 minutes (default) | One-time VM credential injection | API Worker              |
 | Callback token  | 24 hours (renewable) | VM Agent → API callbacks         | API Worker              |
 
 ### SAM Connector tokens
@@ -116,7 +141,7 @@ returns to and warns when that host is a local program.
 
 ### Callback Tokens
 
-VM agents call the API Worker with RS256 callback tokens signed by the Worker (`apps/api/src/services/jwt.ts`). There are two scopes, and neither can stand in for the other:
+VM agents call the API Worker with RS256 callback tokens signed by the Worker (`apps/api/src/services/jwt.ts`). There are two scopes, and neither can stand in for the other. `verifyCallbackToken` rejects a token with no `scope` claim or no `iat` claim. SAM has not minted unscoped tokens since March 2026, and every signer sets `iat`. Only a self-hosted installation that raised `CALLBACK_TOKEN_EXPIRY_MS` to many months could still hold an unscoped token, on a node running since before then. Such a node must be recreated:
 
 - **Node tokens** (`scope: node`) authenticate node-level callbacks such as heartbeats and error reports. They are renewed in the heartbeat response while the node is not terminal (`apps/api/src/routes/node-lifecycle.ts`).
 - **Workspace tokens** (`scope: workspace`) authenticate everything about one workspace: chat messages, session snapshots, git credentials, runtime assets, task status and ACP activity. The Worker hands one to the node when it creates or restores the workspace.
@@ -126,11 +151,45 @@ Both last `CALLBACK_TOKEN_EXPIRY_MS` (24 hours by default). A workspace token is
 1. **Renewal.** After each successful heartbeat, the VM agent renews workspace tokens that are past `CALLBACK_TOKEN_REFRESH_THRESHOLD_RATIO` of their lifetime by calling `POST /api/workspaces/:id/callback-token/renew` with two proofs: the workspace's current, unexpired token and the node's own token. The Worker renews only when D1 binds the workspace to that VM node, the node belongs to the workspace's owner, and both are still active (`apps/api/src/services/workspace-callback-token-renewal.ts`). A node token alone cannot obtain a workspace token, a workspace token copied out of a devcontainer cannot renew itself, and an expired token is never renewed. Authenticated renewal attempts are limited per workspace (`RATE_LIMIT_CALLBACK_TOKEN_RENEWAL`, counted atomically in D1), so a holder of both proofs cannot mint tokens in a loop.
 2. **Delivery.** When the Worker asks a VM node to snapshot a session for sleep, the request carries a fresh workspace token over the authenticated node-management channel, the same way workspace creation does. It is minted only if the workspace is still active on that node.
 
-Neither path serves Instant (cf-container) workspaces. Their container receives a fresh token on every cold wake, one per container generation, so a superseded generation cannot extend its authority past the token it started with.
+Neither path serves Instant (cf-container) workspaces. Their container receives a fresh token on every cold wake, one per container generation, and the previous generation's tokens are retired (see Credential generations below).
 
-Deleting or stopping a workspace ends its callback authority at once: every workspace callback checks the workspace status. Moving a workspace to another node ends renewal for the old node, whose existing token then lapses within one token lifetime. A renewed token keeps its first issue time in a `gen_iat` claim, so the Instant stale-callback guard compares generations correctly (`apps/api/src/routes/_stale-callback-guard.ts`).
+Deleting, stopping or sleeping a workspace ends its callback authority at once. SAM has no per-token revocation list. Instead, each use re-reads the workspace and its node in D1, and only an active workspace (`creating`, `running` or `recovery`) on a node that is not ending (`stopping`, `stopped`, `destroying`, `deleting`, `destroyed` or `deleted`; `nodeStatusTerminatesCallbacks`) is accepted (`assertWorkspaceAcceptsCallback` in `apps/api/src/routes/workspaces/_helpers.ts`). Endpoints that return secrets or rotate credentials re-read the full workspace incarnation again just before they respond (`assertWorkspaceCallbackIdentityCurrent`). The same check gates the SAM AI proxy (`verifyAIProxyAuth` in `apps/api/src/services/ai-proxy-auth.ts`), so a stopped workspace's token cannot keep spending model credentials. A workspace never moves to another node: placement only sets `node_id` while it is empty, and deleting the node clears it. A renewed token keeps its first issue time in a `gen_iat` claim, so the Instant stale-callback guard compares generations correctly (`apps/api/src/routes/_stale-callback-guard.ts`).
 
-Credentials that an agent process received when it started, such as the SAM AI proxy key, are not rotated inside the running process; the process picks up the current token the next time it starts.
+The workspace's SAM MCP token follows the same rule, and also follows the authority of the user it acts for (`validateActiveWorkspaceMcpToken` in `apps/api/src/services/mcp-token-lifecycle.ts`). MCP tool calls, webhook-claim redemption and the GCP deployment identity endpoint accept it only while, in a single D1 read:
+
+- its workspace is active on a live node, runs the token's credential generation, and still belongs to the token's user and project;
+- that user's account still exists and is not suspended;
+- that user has an `active` membership in the project, the same condition the REST API checks (`requireActiveProjectMembership` in `apps/api/src/middleware/project-auth.ts`). Project owners hold an active `owner` membership.
+
+Some failures delete the token, because no later state can make it valid again: a deleted, missing or reassigned workspace, a retired generation, a deleted user account, a membership marked `removed` (offboarding), or no membership row at all. Other failures only refuse the call and keep the token, because the state can be reversed: a suspended account, a `pending` account while signup approval is required, a membership that is `invited` or `suspended`, or a workspace that is stopped, sleeping or on an ending node. Every deleting check runs before every refusing one, so a reversible state cannot hide a permanent one. If a suspended member is also removed, the token is deleted, and reinstating them later does not revive it. An agent whose user is unsuspended or approved can use its token again straight away, with no restart. A `pending` account is gated the same way REST gates it (`isBlockedBySignupApproval` in `apps/api/src/services/signup-approval.ts`). It is refused while signup approval is required, unless its platform role is admin or superadmin, and accepted otherwise. The current `signup.requireApproval` setting is read in the same D1 query and never cached, so turning approval on stops a pending owner's already-running agent on its next call.
+
+The token check does not look at the member's role. Tools that need a particular capability check the current role themselves. Destructive orchestration tools require `task:write` (`apps/api/src/routes/mcp/orchestration-authority.ts`). The GCP deployment identity endpoint requires `deployment:deploy` before it reads its cached identity token or signs a new one (`apps/api/src/routes/project-deployment.ts`).
+
+Removing a member does not stop the workspaces they started. Those workspaces lose MCP access as described above, but they keep running until they are stopped. Their callback tokens are checked against the workspace, not the member.
+
+While a workspace is ending, a few cleanup calls are still accepted:
+
+- node heartbeats and error reports, while the node itself is not ending (`nodeStatusTerminatesCallbacks` in `apps/api/src/services/node-callback-auth.ts`)
+- a provisioning-failure report for a workspace already in `error`
+- idempotent replays of an eviction report
+- resource-telemetry flushes, bound to the workspace's project and node (`apps/api/src/routes/projects/workspace-resource-history-callback.ts`)
+
+A rejected call against a workspace that is being deleted is recorded as evidence that its runtime is still alive. An ending workspace cannot fetch credentials, use the AI proxy or MCP, renew its token, upload session snapshots, or change task or chat state.
+
+#### Credential generations
+
+The same workspace ID can run again under a new runtime: a VM workspace is restarted or rebuilt, or an Instant container wakes from sleep or recovers from a crash. The previous runtime's credentials stop working at that moment, even though they are unexpired and the workspace is active again. Each workspace and each node row has a credential generation (`callback_generation`), and every credential minted for a runtime carries it: callback JWTs as the `cgen` claim, SAM MCP tokens in their stored data.
+
+- **Rotation.** The write that reactivates the runtime also rotates the generation: `reserveWorkspaceRestart` and the rebuild update for VM workspaces (`apps/api/src/services/workspace-placement.ts`, `apps/api/src/routes/workspaces/lifecycle.ts`), and `persistRuntimeRecovering` for Instant containers, which rotates the workspace and its node together (`apps/api/src/durable-objects/vm-agent-container-recovery.ts`).
+- **Checking.** `verifyCallbackToken` compares the token's `cgen` with the row it names, so every callback sink, the AI proxy and token renewal inherit the check (`apps/api/src/services/callback-token-generation.ts`). A retired generation gets `401`. `validateActiveWorkspaceMcpToken` compares the MCP token's generation in the same row read and deletes a retired token. The rule-49 identity fences include the generation, so a request authenticated just before a replacement cannot act on the new runtime.
+- **Delivery.** The new runtime receives its credentials from the same flow that starts it. An Instant wake mints the node token, workspace token and MCP token for the new generation. A VM restart or rebuild sends the new workspace token in the restart request over the node-management channel. The VM agent installs it, exchanges each agent session's SAM MCP token through `POST /api/workspaces/:id/mcp-token/rotate`, which needs both the new workspace token and the old MCP token (`apps/api/src/services/mcp-token-rotation.ts`), and then restarts each agent process that started with the old credentials, keeping its session so the conversation resumes. Renewal and heartbeat refresh keep the generation the presented token proved, never a newer one.
+- **Upgrades.** Credentials minted before generations existed carry none. They keep working until the row's first rotation and are refused after it. A VM agent too old to accept the delivered token rejects the restart request before changing anything, and the restart fails with an explanation instead of reviving the previous runtime's credentials; such a workspace needs a new workspace or chat.
+
+VM node rows are not rotated. A VM node's token is held only by the VM agent on the host, outside every devcontainer, and its generation stays empty; Instant nodes, whose token lives in the same container as the agent, rotate with their workspace.
+
+A VM sleep and wake does not reuse the workspace ID: the wake creates a new workspace, and the sleeping one's credentials stay refused by the lifecycle check above. A copy taken from a running workspace still works while that same runtime runs, until it expires (`CALLBACK_TOKEN_EXPIRY_MS`, 24 hours by default); it cannot renew itself without the node's token.
+
+Credentials that an agent process received when it started, such as the SAM AI proxy key, are not rotated inside the running process; the process picks up the current token the next time it starts. A runtime replacement always starts new processes.
 
 Deletion-in-progress callbacks fail closed. A VM delete timeout is treated as
 uncertainty, so the workspace remains `stopping` and callback routes reject its
@@ -140,13 +199,73 @@ tool output, repository data, and credentials are never copied into this signal.
 
 Destructive runtime requests are bound to a server-written node incarnation, the
 exact provider credential reference used for provisioning, and a SHA-256
-fingerprint of that encrypted credential generation. The fingerprint prevents a
-later in-place credential rotation from redirecting teardown to a different
-provider account whose VM identifier happens to collide. SAM rechecks the
+fingerprint of that encrypted credential generation. SAM rechecks the
 workspace, node owner, project/session ownership, provider instance, and runtime
-incarnation immediately before a VM-agent deletion request. Managed provider
-teardown fails closed when a legacy node has no exact provider-account binding;
-it never substitutes whichever credential happens to be active later.
+incarnation immediately before a VM-agent deletion request.
+
+Deleting a managed VM does not depend on the credential that created it, so
+rotating, re-saving or reconnecting a cloud credential never strands running
+VMs (`resolveStrictNodeTeardownAuthority()` in
+`apps/api/src/services/node-teardown-authority.ts`):
+
+- While the provisioning credential still resolves to its exact generation, SAM
+  deletes through it.
+- Otherwise SAM uses the node owner's current credentials for that provider: the
+  provisioning order for the node's own user and project (project, then user,
+  then platform), the owner's user credential on its own for a project node,
+  then every enabled platform credential for that provider. It never uses
+  another user's or another project's credential.
+- With a current credential, ownership is proven from the VM itself
+  (`proveNodeInstanceOwnership()`). Immediately before the provider delete, SAM
+  re-reads the instance and requires the recorded provider instance ID plus the
+  exact SAM labels: managed, node, role, environment, installation and runtime
+  incarnation. A missing, duplicated or different label preserves the VM, so a
+  VM created before SAM stamped these labels is never deleted this way. This
+  also covers a credential rotated to a different account whose VM identifier
+  happens to collide: that VM is skipped and the next credential is tried.
+- A credential that cannot see the instance is not proof the VM is gone. The
+  node stays `destroying` with a named `cleanup_blocked_reason`
+  (`teardown_credential_unavailable`, `teardown_instance_not_visible`,
+  `teardown_instance_ownership_mismatch`,
+  `teardown_ownership_scope_unavailable`, `teardown_delete_refused` or
+  `teardown_deletion_unconfirmed`) and SAM raises its operator alert
+  (`recordNodeTeardownBlocked()` in `node-teardown-blocked.ts`), instead of
+  retrying silently. A credential that could not be read at all (a transient
+  storage or decryption failure) is an ordinary failure and is retried on the
+  normal backoff, not reported as missing. A credential that can read the VM but
+  is refused permission to delete it is skipped, and the next credential has to
+  prove ownership again before its own delete
+  (`deleteWithCurrentOwnerCredential()`).
+
+The cleanup cron does not wait for a provider's long-running delete. GCP deletes
+an instance through an operation that runs from about 20 seconds to a few
+minutes, longer than one cron attempt may take. For a provider that supports it
+(GCP today), the cron starts the deletion and returns
+(`sendProviderDeletion()` in `apps/api/src/services/node-provider-deletion.ts`):
+
+- The ownership proof and incarnation fence above run first, unchanged.
+- Before the DELETE is sent, SAM writes a record of it on the node row
+  (`nodes.provider_deletion_requested_at`, `nodes.provider_deletion_json`),
+  bound to the node's provider instance ID and runtime incarnation. A delete cut
+  off mid-flight can still be confirmed, or shown never to have arrived.
+- Sending the DELETE is not proof. On a later tick the
+  `provider_deletion_confirm` phase reads the provider's own record of that
+  deletion (`confirmPendingProviderDeletion()`): for GCP, the zone's delete
+  operations whose `targetId` is the instance's numeric ID
+  (`getGcpInstanceDeletionStatus()` in `packages/providers/src/gcp-deletion.ts`).
+  Termination proof is written only when that record shows a completed,
+  error-free deletion of that exact instance. "Not found" through a current
+  credential is still never proof.
+- If the provider has no record of the delete, or the delete failed, the record
+  is cleared and the next attempt runs the guarded teardown again. A deletion
+  still unconfirmed after `operations.nodeProviderDeletionConfirmMaxMs` (30
+  minutes by default) is reported as `teardown_deletion_unconfirmed` with the
+  operator alert, and is checked again only after the one-hour failure backoff.
+
+Providers whose delete call already returns once the provider accepts it
+(Hetzner, DigitalOcean, Vultr, Infomaniak, Scaleway) keep the single-step path.
+Interactive deletes (owner **Delete Node**, NodeLifecycle stop) still wait for
+the provider.
 
 ## Credential Encryption
 
@@ -165,7 +284,7 @@ GCP WIF configuration and uploaded service-account JSON use the same versioned c
 
 The complete source credential is encrypted at rest with AES-256-GCM. SAM signs short-lived RS256 assertions and exchanges them only at the fixed Google OAuth token endpoint. Derived Google access tokens are cached in KV only until their returned expiry minus a safety buffer; they are never persisted as primary credentials. Cache identity includes the authentication mode and WIF or private-key identity, so switching modes or rotating a key cannot reuse a prior token.
 
-Save and rotation verify the selected Compute zone before a D1 transaction replaces both legacy and composable credential copies. A failed verification or transaction leaves the previous credential intact. Disconnect removes SAM's encrypted copies and cached derivatives but does not revoke a Google-managed service-account key.
+Save and rotation verify the selected Compute zone before one D1 transaction updates the user's stored credential in place and replaces its composable copy. The stored credential keeps its id, which the compute pool's account and every node placed from it are keyed on, so a re-save does not reset pool choices or orphan running machines (`replaceUserGcpCredential()`). A failed verification or transaction leaves the previous credential intact. Disconnect removes SAM's encrypted copies and cached derivatives but does not revoke a Google-managed service-account key.
 
 ## Terminal Authentication
 
@@ -192,11 +311,34 @@ When a new VM starts, cloud-init receives only the short-lived bootstrap/callbac
 New nodes use per-node Origin CA key material rather than a platform-shared private key:
 
 1. The API Worker passes a node-scoped certificate endpoint into cloud-init (`apps/api/src/services/nodes.ts`).
-2. Cloud-init generates `/etc/sam/tls/origin-ca-key.pem` locally on the VM, creates a CSR, and posts only that CSR to `POST /api/nodes/:id/origin-ca-certificate` with the node callback JWT (`packages/cloud-init/src/template.ts`).
+2. Cloud-init generates `/etc/sam/tls/origin-ca-key.pem` locally on the VM, creates a CSR, and posts only that CSR to `POST /api/nodes/:id/origin-ca-certificate` with the node callback JWT (`ORIGIN_CA_BOOTSTRAP_RUNCMD` in `packages/cloud-init/src/template-ingress.ts`).
 3. The API Worker verifies the callback token is node-scoped and matches `:id`, then signs the CSR through Cloudflare Origin CA using `CF_API_TOKEN` (`apps/api/src/routes/node-lifecycle.ts`, `apps/api/src/services/origin-ca-certificates.ts`).
 4. The VM stores the returned certificate at `/etc/sam/tls/origin-ca.pem` and starts the VM agent with `TLS_CERT_PATH` and `TLS_KEY_PATH`.
 
 The certificate hostnames remain wildcard-scoped (`*.BASE_DOMAIN`, `*.vm.BASE_DOMAIN`, and `BASE_DOMAIN`) so existing `ws-*` and `{node}.vm` routing continues to work. The private key is no longer shared across nodes or embedded in static cloud-init user-data. Each node receives a distinct private key and short-lived certificate, with `ORIGIN_CA_CERT_VALIDITY_DAYS` defaulting to 7 days.
+
+### Preview credential isolation
+
+Forwarded HTTP and WebSocket applications never receive SAM preview cookies, VM session cookies or valid SAM Bearer credentials. Application cookies and application Authorization headers remain available, except for reserved SAM cookie names. The Worker authenticates preview access and injects a workspace-scoped token; the VM agent consumes that token before forwarding. Redirects return to the browser without the Worker following them against the agent hostname.
+
+### Tunnel Ingress Nodes
+
+Cloud-init and the VM agent also support a node that is reachable only through an outbound Cloudflare Tunnel connector. A node is in this mode when cloud-init receives `cloudflareTunnelToken` (`isTunnelMode` in `packages/cloud-init/src/tunnel.ts`). With `VM_AGENT_TRANSPORT=cloudflare-tunnel`, the control plane creates one tunnel per managed VM incarnation, workspace and deployment nodes alike, and journals its ownership before provisioning (`resolveManagedNodeTransport` in `apps/api/src/services/node-tunnel-config.ts`). Direct-ingress nodes and instant-container routing retain their existing transports. On a deployment node the tunnel carries only the VM agent connection: its app routes still reach Caddy on ports 80 and 443 over the public IP, so the firewall leaves those ports open while dropping the agent port, the tunnel listener and SSH.
+
+- The node receives only its own connector run token, never an account API token. Cloud-init writes it to `/etc/sam/cloudflared/tunnel-token` (mode `0400`, owned by the connector's system user) and skips Origin CA bootstrap entirely (`TUNNEL_BOOTSTRAP_RUNCMD` in `packages/cloud-init/src/template-ingress.ts`).
+- Cloud-init installs a pinned `cloudflared` release only after its SHA-256 matches the value recorded for that architecture (`CLOUDFLARED_RELEASES` in `packages/cloud-init/src/tunnel.ts`), then applies the firewall before the VM agent starts. In tunnel mode the firewall drops inbound IPv4 and IPv6 traffic to the agent port, the tunnel listener port and SSH, allows Docker bridges to reach the agent port, and does not allowlist Cloudflare IPs. The rules live in a dedicated `SAM-TUNNEL-INGRESS` chain replaced by one `iptables-restore --noflush` transaction per address family (the existing INPUT jump is checked before the restore starts, because the restore holds the xtables lock), so re-applying (daily cron, provisioning, every VM agent start via `ExecStartPre`) never leaves a window without them, and the VM agent does not start if the firewall fails. It fails closed when the host has a global IPv6 address but `ip6tables` is unusable (`TUNNEL_FIREWALL_WRITE_FILE` in `packages/cloud-init/src/template-ingress.ts`).
+- The VM agent serves the connector on a separate listener bound to `127.0.0.1` (`VM_AGENT_TUNNEL_ENABLED`, `VM_AGENT_TUNNEL_PORT`, default `8444`). Every request on it is classified as relayed before routing (`classifyTunnelIngress` in `packages/vm-agent/internal/server/tunnel_ingress.go`). The connector reaches the agent from loopback, so this classification is what refuses the node-local Git credential helper bearer (see Workspace Git credential exchange below) on the tunnel listener. Tunnel requests use the same JWT, session and callback-token checks as before.
+- `sam-cloudflared.service` runs as an unprivileged system user and starts only after the tunnel listener answers `/health` (`TUNNEL_WRITE_FILES` in `packages/cloud-init/src/template-ingress.ts`). The tunnel's ingress service must be `http://127.0.0.1:<VM_AGENT_TUNNEL_PORT>`. The main agent port is never a valid tunnel target.
+
+### Workspace Git credential exchange
+
+Git inside a workspace authenticates through a credential helper that asks the VM agent's local `/git-credential` route for a short-lived repository token; the agent exchanges it with the control plane using the workspace's callback token, which the helper does not carry. A node runs one user's workspaces, which can belong to different projects, so the route must not let one workspace obtain another's token.
+
+- Each workspace's helper embeds its own random exchange bearer. The agent keeps only its SHA-256 digest in an owner-only file and compares in constant time (`ValidateGitCredentialExchange` in `packages/vm-agent/internal/bootstrap/git_credential_exchange.go`). A request is accepted only with the bearer of the workspace it names, or with that workspace's callback token (`gitCredentialCallbackToken` in `packages/vm-agent/internal/server/git_credential.go`). A bearerless request is refused, whatever its peer address.
+- The helper bearer is node-local: it is accepted only from a loopback or private peer on a request no proxy or tunnel relayed (`isDirectLocalGitCredentialExchange`). It is never forwarded to the control plane.
+- The bearer lives as long as the workspace. A rebuild, restart, recovery or snapshot restore reuses it, because a running devcontainer keeps the bind-mounted helper it started with (`ResolveGitCredentialExchangeToken`). A helper whose bearer the digest does not accept is reinstalled (`ensureGitCredentialHelper` in `packages/vm-agent/internal/bootstrap/bootstrap.go`). Deleting the workspace removes the helper and digest.
+- Instant workspaces run the same check inside their container, keyed to the container's single workspace (`ConfigureStandaloneGitCredentialHelper` in `packages/vm-agent/internal/server/standalone_git.go`).
+- The bearer protects against code that stays inside its devcontainer. Code that reaches the VM host (a privileged container, which nested Docker requires, or a repository `mounts` entry) can read other workspaces' helpers there. That is consistent with the node VM, not the devcontainer, being the isolation boundary; a node runs only one user's workspaces.
 
 ### Legacy Origin CA Rotation
 
@@ -239,9 +381,93 @@ Library files, repository files, workspace files, and chat messages can all be w
 
 Mermaid lays a diagram out in the live page before it is sanitized, so a remote image named in diagram syntax can still be fetched once while the diagram renders. Markdown images (`![](…)`) are also shown as written. A platform-wide policy for remote resources in agent content, including scripts inside previewed PDFs, is tracked separately.
 
+## Signed Webhook Triggers
+
+A signed webhook trigger (Slack, or a service that sends an HMAC-SHA256 of its body) is reached at
+a public address that names the trigger, `POST /api/webhooks/in/:triggerId`
+(`handleSignedWebhook` in `apps/api/src/routes/trigger-webhooks-signed.ts`). The address is not a
+credential. Trust comes from the signature:
+
+- **The check is code, over raw bytes.** `verifyWebhookSignature` in
+  `apps/api/src/services/webhook-signature.ts` holds one function per scheme and compares with
+  `crypto.subtle.verify`, which is constant-time. It runs on the request body exactly as received,
+  before the body is decoded or parsed. Nothing in the body is read, and nothing counts against the
+  trigger's rate limit, until it passes. Slack's timestamp must be within
+  `operations.webhookSignatureToleranceSeconds` (300 by default); the age is checked only after the
+  MAC matches, so only a holder of the secret can learn that a request was stale.
+- **The signing secret is write-only.** A project member with write access saves it through
+  `PUT /api/projects/:projectId/triggers/:triggerId/webhook/signing-secret`
+  (`setWebhookSigningSecret` in `apps/api/src/services/webhook-signed-store.ts`), which checks the
+  project and the scheme inside the write. It is stored with AES-GCM under the credential
+  encryption key. No API or MCP tool returns it, error messages for a refused value are fixed
+  strings, and MCP `create_trigger` refuses a secret passed to it
+  (`apps/api/src/routes/mcp/trigger-create-tool.ts`).
+- **The provider's event ID is the duplicate key.** `readWebhookEventId` in
+  `apps/api/src/services/webhook-trigger-payload.ts` accepts only a bounded string or number. An
+  event without one starts nothing; SAM does not fall back to skipping the duplicate check.
+- **A verified sender is still untrusted.** A valid signature proves which provider sent the event,
+  not that its author may act for the project. The run uses the trigger's stored agent profile,
+  instructions and execution user; the event content reaches the agent only as text in those
+  instructions.
+- **What is kept.** The call log holds an outcome, a reason code, sizes and times, never a body, a
+  signature or an event ID (the ID is stored as a keyed hash). While a verified event waits for a
+  free run, its rendered instructions are held on the waiting execution
+  (`acceptWebhookTriggerExecution` in `apps/api/src/services/webhook-trigger-queue.ts`), and
+  removed once the run's start is recorded (`settleWebhookQueueRecord`, with
+  `repairWebhookQueueRecords` finishing it from the cron if that write failed, both in
+  `apps/api/src/services/webhook-signed-store.ts`) or the event is dropped (`drainTriggerQueue`
+  in `apps/api/src/services/trigger-queue-drain.ts`). The run's task and chat
+  keep whatever the instructions copied from the event.
+- **Refusals cannot flood the log.** `recordWebhookSignedNotice` keeps one row per trigger, reason
+  and rate-limit window, and at most one project event for it.
+
+The token address `POST /api/webhooks/ingest` does not serve signed triggers
+(`findWebhookTriggerByToken` filters on the scheme), and the signed address does not serve token
+triggers (`findSignedWebhookTrigger`).
+
 ## Secret Redaction in Logs and Diagnostics
 
-Credential tokens are stripped before text reaches a log line or a stored diagnostic: OpenAI and Anthropic `sk-...` keys (including `sk-proj-...` and `sk-ant-...`), GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), and SAM personal access and webhook tokens. Every API redactor takes these token shapes from one definition, `redactCredentialTokens` in `apps/api/src/lib/credential-token-redaction.ts`: structured Worker logs (`apps/api/src/lib/logger.ts`), stored VM agent error reports and debug-agent evidence (`redactSensitiveData`), comment directives delivered to agents, deployment publish and apply events, Report Issue text, and agent sign-in helper diagnostics. `Bearer ...` and `Basic ...` values are matched by each redactor's own rule, because those are also ordinary words and a log line can afford to over-redact where text shown to a user cannot. Redaction is pattern-based and best-effort - a safety net, not a reason to paste secrets anywhere.
+Credential tokens are stripped before text reaches a log line or a stored diagnostic: OpenAI and Anthropic `sk-...` keys (including `sk-proj-...` and `sk-ant-...`), OpenCode `oc_sk_...` keys, GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), and SAM personal access and webhook tokens. Every API redactor takes these token shapes from one definition, `redactCredentialTokens` in `packages/worker-core/src/credential-token-redaction.ts`: structured Worker logs (`packages/worker-core/src/logger.ts`), stored VM agent error reports and debug-agent evidence (`redactSensitiveData`), comment directives delivered to agents, deployment publish and apply events, Report Issue text, and agent sign-in helper diagnostics. `Bearer ...` and `Basic ...` values are matched by each redactor's own rule, because those are also ordinary words and a log line can afford to over-redact where text shown to a user cannot. Redaction is pattern-based and best-effort - a safety net, not a reason to paste secrets anywhere.
+
+## Shared Chat Sessions
+
+A chat's creator can give another project member the same controls in that one chat (see [Share a chat](/docs/guides/collaboration/#share-a-chat)). Every request that drives a chat resolves two identities (`requireSessionWriter` in `apps/api/src/services/session-access.ts`):
+
+- The **actor** is the person acting. It is used only for attribution: the transcript sender, a comment's `sentBy`, activity events and notifications.
+- The **owner** (`chat_sessions.created_by_user_id`) is used for every resource and credential lookup: workspace, node, task, agent session, agent credential and billing. A grantee's identity never selects a resource.
+
+Enforcement points:
+
+- Grants live in the project's ProjectData Durable Object (`chat_session_access_grants`, migrations `064-session-access-grants-and-comment-mentions` and `065-session-access-grant-expiry`). `resolveSessionAccess` in `packages/project-data/src/do/session-access-store.ts` reads them on every check; no decision is cached. A chat without a recorded owner can never be shared.
+- A grant lasts the 5, 10, 30 or 60 minutes chosen when it was made (`durationMinutes`, required by the route in `apps/api/src/routes/chat-session-access.ts` and again by `createSessionAccessGrant`). Expiry is computed, never written: every check reads `revoked_at IS NULL AND expires_at > now` against the server's clock (`readActiveGrant`), so access ends at `expires_at` on every route and at prompt delivery whether or not any cleanup has run. A grant without an end time counts as expired.
+- Only the owner renews an active grant, and a renewal starts a new period from now. A grant passed on ends no later than the issuer's own (`createSessionAccessGrant`), so no chain outlasts the owner's last renewal, and nobody can extend their own access.
+- A ProjectData alarm section, `session_access_expiry` (`processExpiredSessionAccessGrants` in `packages/project-data/src/do/session-access-expiry.ts`), cleans up after a grant expires: it cancels the grantee's undelivered prompts (`sender_access_expired`), records `session.access_expired`, and sends `session.access.changed` to open clients. It is cleanup, not authorization; if it runs late, nothing is allowed that the check above refuses. Clients also refetch access when the soonest grant ends, which only updates what they show. An open project chat hears `session.access.changed` on its chat socket, or on the project-wide socket while the chat sleeps (`publishSessionAccessChanged` in `apps/web/src/lib/session-access-events.ts`), and a teammate's page re-reads its access each time its chat socket opens, so a change made while the page was loading is not missed (`useSessionAccessSync`). Every access read also lists the messages cancelled because their sender's access ended (`listUndeliveredSenderPrompts`), so a page that cached a message before it was cancelled still marks it **Not delivered**.
+- `requireSessionWriter` also requires the grantee and the owner to both be active members with `task:write`. Nothing else is checked: the owner's share is the consent for the grantee to act through the owner's session, so the grantee needs no repository access of their own.
+- The browser's chat WebSocket is read-only. It used to store a `message.send` user message for any connected member; `webSocketMessage` in `packages/project-data/src/do/index.ts` now rejects it, so every prompt passes the REST checks.
+- **Who may wake an agent.** One function decides whether a person may cause a chat's agent to be prompted: `decideAgentWake` in `packages/project-data/src/do/agent-wake-policy.ts`. Send to agent (`authorizeAgentWake`, called from `apps/api/src/routes/chat-comments.ts`), typed and connector messages (`authorizeSendChat` in `apps/api/src/services/send-chat.ts`), answers to the agent's attention requests (`answerAttention` in `apps/api/src/routes/chat-attention.ts`) and the delivery fence below all ask it. Answering an ACP permission or question request is not a wake (it replies inside a turn the agent is blocked on) and checks session control only. The only mode, `trusted_project`, allows the chat's owner and anyone it is shared with. Every queued delivery records `metadata.wake` (who triggered it, the owner it runs for, their role, the mode). An attention answer goes straight to the live agent rather than through the delivery queue, so a teammate's answer records the same wake record on its `session.shared_answer` activity event instead. A comment that someone other than the owner sent or wrote reaches the agent labelled as a teammate's input, not the owner's instruction. Its quoted context is trimmed to fit the directive length limit, while its feedback is never cut: a comment whose feedback alone exceeds the limit is refused before it is sent (`apps/api/src/services/message-comment-directive.ts`).
+- Durable prompt delivery checks the sender again just before it sends (`invalidSessionWriterSenderResult` in `packages/project-data/src/do/prompt-delivery-source-guards.ts`, using `senderLacksSessionAccess`), so a prompt queued before an expiry is refused even if the alarm has not run yet. Revoking a grant fails that person's undelivered prompts in the same transaction (`revokeSessionAccessGrant`).
+- Forking or retrying a teammate's task bills the person who starts it, not the teammate (`inheritedCredentialAttributionForCaller` in `packages/scheduler-core/src/placement-field-resolution.ts`).
+- **Files and Git panels.** The session file routes (`apps/api/src/routes/projects/files.ts`) serve a grantee the owner's workspace through `resolveSessionWorkspace` in `session-workspace-proxy.ts`, which runs `requireSessionWriter` on every request and requires the chat's owner to own the workspace linked to the chat. Each grantee request carries `confine=workdir`; the VM agent (`packages/vm-agent/internal/server/file_confinement.go`) then accepts only relative paths, resolves every symlink inside the workspace with `realpath`, and refuses anything outside the repository working tree or inside any `.git` directory, including a nested repository's, on both runtimes. The agent answers every refused path, `..` included, with `404`; the API already refuses `.` and `..` segments with `400` before the agent sees them. It answers `X-SAM-Path-Confinement: workdir`, and `requireConfinedResponse` returns nothing to a grantee without it, so an older agent fails closed. Upload stays owner-only. Every grantee read is logged (`file_proxy.shared_read`). The limit applies to the panels only: the agent itself can still read anything in the workspace (see Remaining risk). The path check and the read are separate commands, so a process inside the workspace could swap a path for a link between them; only code running in the workspace can do that, and such code can already read every file there.
+- **Attachments.** A grantee's prompt can carry their own uploads, which `transferPromptAttachments` (`apps/api/src/services/prompt-attachments.ts`) reads from the grantee's R2 prefix and copies only into the shared chat's workspace. The delivery fence re-checks the sender before every file and before the send.
+- **Schedules.** A `message_session` schedule needs its creator to own the target chat or hold an active grant (`requireScheduleAction` in `packages/project-data/src/do/project-event-schedules-authority.ts`), checked at creation, at fire time, at recovery and before every delivery side effect (`invalidScheduledDeliveryTarget`). Only a person creating through the API may use a grant; an agent (MCP) or SAM itself may schedule only into its user's own chats. A grantee's schedule records its grant (DO migration `066-schedule-shared-access-grant`) and fires only under that grant; revoke and expiry cancel it with the grantee's other queued prompts (`cancelUndeliveredSenderPrompts`). Standing watches outlive any grant, so they may message only a chat their creator owns, and only the creator may change a watch's action.
+- Terminal, port preview, workspace page and archived-chat fork routes keep their workspace-owner checks. A terminal or port connection reaches the whole workspace container, and an open one cannot be cut off when a grant ends.
+
+**Remaining risk.** A grantee who can prompt the agent can ask it to print anything in its environment and keep using it after their access expires or is revoked. SAM cannot prevent this while the grantee controls the agent. Expiry and revocation stop further control; they do not undo what was done, and a turn the agent already started finishes. What the agent holds:
+
+- The owner's agent credential: an API key or Claude/Codex OAuth token (`packages/vm-agent/internal/acp/process.go`). A chat on a project credential holds the project's key instead; a chat on the SAM AI proxy holds only a placeholder.
+- Git access from the workspace credential helper (`POST /api/workspaces/:id/git-token` in `apps/api/src/routes/workspaces/runtime.ts`). For GitHub it is an installation token scoped to the project repository that expires within an hour. For GitLab it is the owner's personal GitLab OAuth access token. It carries GitLab's `api` scope (requested in `apps/api/src/auth.ts`), so it reaches every GitLab project the owner can, not only this one.
+- The workspace's SAM MCP token, which acts as the owner in this project's MCP tools (8-hour sliding window, 24-hour maximum; `apps/api/src/services/mcp-token.ts`).
+
+The share dialog says so, and the server requires the owner to acknowledge it (`acknowledgeSharedCredentials` on `POST /api/projects/:id/sessions/:sessionId/access/grants`).
+
+## Messages Between Agents
+
+Task agents in one project can message each other (`send_durable_message`, `send_message_to_subtask`) and, with live steering, add a message to another agent's running turn. Agents in a project therefore trust each other: a compromised task can try to steer a sibling. SAM limits what that can do rather than preventing it:
+
+- A peer's text never enters the recipient's chat or prompt. Every message, whatever its class or delivery intent, is published on the pair's `agent-dm.*` channel (`sendOverAgentMessageChannel` in `apps/api/src/routes/mcp/agent-message-channel-send.ts`). The recipient gets a SAM-authored notice naming event IDs (`agentMessageWakeContent`) and reads the text with `get_event`, which marks it untrusted and names the verified sender. When the channel transport is unavailable the send is refused; there is no fallback that posts the text. This is constitution principle XV, Human Voice Is Reserved.
+- Only an urgent class (`interrupt` and above) can stop the recipient's turn, and it still delivers only the notice (`urgentAgentMessageClass`). A steer can only use the `notify` and `deliver` classes (`canSteerMessageClass`).
+- Other agent-written text that becomes a chat message names its author: a task description from `dispatch_task` or `retry_subtask` ends with the parent's task and chat session, or names the SAM assistant when it dispatched the task (`parentAgentAttribution`, `samAssistantAttribution` in `apps/api/src/services/agent-authorship.ts`), an agent-created scheduled message arrives as a notice naming the schedule (`agentScheduleNotice`), and `stop_subtask` sends a fixed notice without quoting the parent's reason (`stopRequestedNotice`).
+- The recipient must be a task in the caller's own project, resolved from the caller's verified MCP token.
 
 ## Workspace Isolation Model
 
@@ -262,27 +488,45 @@ Instant workspaces run in Cloudflare Containers and do not use repository devcon
 
 ### One node belongs to one user
 
-- Every node has a required owner (`nodes.user_id` in `apps/api/src/db/schema.ts`).
+- Every node has a required owner (`nodes.user_id` in `packages/worker-core/src/schema.ts`).
 - The task runner reuses only the requesting user's own running or warm nodes (`apps/api/src/durable-objects/task-runner/node-selection.ts`). Creating a workspace on a specific node requires owning that node (`getOwnedNode` in `apps/api/src/routes/workspaces/_helpers.ts`).
 - SAM is self-hosted. A person or an organization runs each installation, and nodes live in a cloud account that belongs to the user, the project or the installation operator (see the Cloud Credential Model above). SAM does not mix unrelated customers on shared hosts.
 - Nodes hold no cloud-account credentials. The provider API token stays in the control plane, GCP VMs are created without a service account (`packages/providers/src/gcp.ts`), and cloud-init blocks containers from reaching the cloud metadata endpoint (`packages/cloud-init/src/template.ts`).
-- **Exception: anonymous trials.** Every trial runs under one shared system account (`TRIAL_ANONYMOUS_USER_ID`), and the trial orchestrator can reuse a running trial node for a later trial (`apps/api/src/durable-objects/trial-orchestrator/steps.ts`). The per-user boundary therefore does not separate one trial visitor from another: with trials enabled, a visitor who escapes their container can reach other visitors' workspaces on the same node. Trials stay off unless an operator turns on the `trials:enabled` kill switch (`apps/api/src/services/trial/kill-switch.ts`), and they should stay off until each trial gets its own node.
+- SAM no longer has anonymous trials. The former hosted-trial product ran every visitor under one shared system account and could reuse a node across visitors; it was removed in November 2026. Its public `/api/trial/*` endpoints answer `410 Gone` without touching any data (`apps/api/src/routes/trial.ts`), and nothing creates or reuses nodes for the system account any more.
+- **Exception: Operations debugger tools.** When a superadmin turns them on (**Admin → Settings**, `operations.debuggerTools`), agents in the designated Operations project can read every user's nodes, workspaces, sessions and errors, read raw node logs, and capture raw, unredacted node debug packages. Every debugger tool that returns installation data passes `requireOperationsAccess` (`apps/api/src/services/operations-access.ts`), which checks four things each time: the switch is not `off`, the token belongs to the Operations project, the token is task-scoped, and that task's owner is a current superadmin, and every such call is recorded in `operations_audit_log`. The exception is `ops_get_access_status`, which returns only the caller's own mode, capability flags and denial reasons, uses the non-throwing status check, and records only task-scoped calls made inside the Operations project. Debug packages stay in the Operations project library, where only superadmins (in the app) and tokens passing the same check (over MCP) can list or download them, and the daily purge deletes them after `operations.debugPackageRetentionDays` (default 7), in deadline-bounded batches. The VM agent authorizes these reads by the node in the signed management token, not by the user it was signed for, so this control-plane check is the whole boundary: node-management tokens for non-destructive node routes are authorized by the control plane alone. See [Operations debugger tools](/docs/guides/admin-settings/#operations-debugger-tools).
 
-Outside anonymous trials, escaping a devcontainer reaches only the user's own VM, whether the escape comes from repository configuration, user code or an agent. On that VM it can reach the user's other workspaces on the node and the credentials the node holds for them. Opening a repository in SAM trusts its devcontainer the same way opening it in VS Code Dev Containers or GitHub Codespaces does. That repository's code already runs with the user's credentials inside the workspace.
+Codex sessions trust the repository's `.codex/` folder the same way: the Codex adapter marks the session's working directory as a trusted project, and SAM skips Codex's per-hook review (`bypass_hook_trust` in `buildCodexACPManagedConfigEnv`, `packages/vm-agent/internal/acp/session_host_agent_config.go`). The repository's hooks run at session start and around tool calls, with the credentials of the person running the session, even when another project member or repository contributor wrote them. SAM's sandbox, approval and model settings outrank the repository's Codex settings, and Codex drops provider and base-URL keys from project config.
+
+Escaping a devcontainer reaches only the user's own VM, whether the escape comes from repository configuration, user code or an agent. On that VM it can reach the user's other workspaces on the node and the credentials the node holds for them. Opening a repository in SAM trusts its devcontainer the same way opening it in VS Code Dev Containers or GitHub Codespaces does. That repository's code already runs with the user's credentials inside the workspace.
 
 ### Where security review should focus
 
 - **Control-plane authorization.** Node and workspace callback tokens are each scoped to one node or one workspace, and the Worker checks them (see Callback Tokens above).
-- **Placement.** Nothing may place one user's workspace on another user's node. Anonymous trials share one system account, so trials must not share nodes with each other either.
+- **Placement.** Nothing may place one user's workspace on another user's node.
 - **Credential scoping.** A node must never receive another user's credentials or installation-wide secrets.
 - **App deployments.** Deployment nodes run internet-facing apps unattended and can host several environments belonging to the same user. Their Compose subset denies host-authority fields such as `privileged`, `network_mode` and `use_api_socket` (`DENIED_SERVICE_FIELDS` in `packages/shared/src/compose-parser/constants.ts`).
 
 Ways to run nested containers without `privileged`, such as a user-namespaced container runtime, are welcome improvements, provided Docker, Compose and Testcontainers keep working inside workspaces.
 
+## Application Build Executor
+
+Cloudflare application builds run arbitrary Dockerfile `RUN` code as root inside Docker-in-Docker with host build networking. Builds have unrestricted internet access, like VM workspaces; package repositories and presigned R2 transfers are reached directly without an outbound proxy, host allowlist or HTTPS interception CA. This is the deployment-build egress decision approved on November 15, 2026. Network access is not a security boundary for build code.
+
+Each publish job gets its own microVM, identified by `publishJobId`, with no reuse across jobs or projects. SAM delivers no platform cloud credentials, signing keys, workspace callback token, or runtime deployment secret values to that guest. The Go supervisor holds the job callback token in memory; it is not placed in process arguments, environment variables or files. Arbitrary root code shares the guest with that supervisor, so assume it can obtain and use the authority of that one job. It can also use the job's short-lived presigned object URLs. It has no authority over other jobs, projects, credential endpoints or Worker bindings.
+
+The enforcing paths are:
+
+- `apps/api/src/durable-objects/compose-builder-container.ts` enables direct internet access, passes only nonsecret timing budgets through the environment, checks the builder version, and sends a single launch payload through the SDK's private container transport. It never calls the guest control port after launch acceptance, because root build code could bind that port later. Its persisted deadline alarm destroys the microVM before recording the timeout in D1 and retries failed destruction.
+- `packages/vm-agent/cmd/sam-builder/main.go` closes the bootstrap HTTP listener before starting the build. `packages/vm-agent/internal/builder/` keeps the callback token in supervisor memory, verifies context size and SHA-256 before extraction, and rejects HTTP redirects for authenticated control-plane and presigned transfers.
+- `apps/api/src/services/jwt.ts` verifies the publish-job token's signature, issuer, audience, expiration and claims. `apps/api/src/services/publish-job-token.ts` binds it to the current nonterminal job row, project, environment, profile, executor and attempt on every authorized callback. Completion, cancellation or an attempt change revokes callback authority immediately. Generic workspace/node callback sinks reject this scope.
+- The existing publish callback routes fence artifact keys, event updates and release submission to that job and attempt. Presigned URLs carry only the specific context download or image upload authority until their expiry; a terminal job cannot obtain new URLs, but an already-issued URL remains usable until it expires.
+
+The build microVM is the isolation boundary. Root execution and open egress are intentional capabilities; the restrictions protect control-plane and cross-project authority while allowing ordinary Docker builds. Deployment target nodes retain their separate restricted Compose policy described above.
+
 ## Security Best Practices
 
 - **Rotate keys quarterly** — regenerate JWT and encryption keys
-- **Minimal GitHub App permissions** — only Contents (read/write), Metadata (read-only), and Email addresses (read-only)
+- **Minimal GitHub App permissions** — Contents (read/write), plus read-only Metadata, Email addresses, Pull requests, Checks, Actions, and Issues, which is what the self-hosting setup wizard requests. Grant Pull requests (read/write) only if agents should open pull requests (see [Let agents open pull requests](/docs/guides/self-hosting/#let-agents-open-pull-requests))
 - **HTTPS everywhere** — all traffic encrypted via Cloudflare
 - **Session isolation** — each workspace JWT is scoped to a specific workspace ID
 - **Per-user credential isolation** — each user's cloud/agent secrets are encrypted with a per-credential IV and are never shared between users

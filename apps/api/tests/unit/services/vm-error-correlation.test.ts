@@ -15,7 +15,7 @@ describe('VM error task correlation', () => {
         id TEXT PRIMARY KEY,
         node_id TEXT,
         project_id TEXT,
-        chat_session_id TEXT
+        chat_session_id TEXT, callback_generation TEXT
       );
       CREATE TABLE tasks (
         id TEXT PRIMARY KEY,

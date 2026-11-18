@@ -1,15 +1,15 @@
-import {
-  Activity,
-  Brain,
-  ChevronRight,
-  FileText,
-  Info,
-  ShieldCheck,
-} from 'lucide-react';
+import { Activity, Brain, ChevronRight, FileText, Info, ShieldCheck } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import type { ActivityEventResponse } from '../../lib/api';
-import { FOCUS_RING, GLASS_CARD, GLASS_CARD_HOVER, GLASS_CARD_MUTED, Panel, SectionHeader } from './index';
+import {
+  FOCUS_RING,
+  GLASS_CARD,
+  GLASS_CARD_HOVER,
+  GLASS_CARD_MUTED,
+  Panel,
+  SectionHeader,
+} from './index';
 
 function Metric({ label, value, icon }: { label: string; value: string; icon: ReactNode }) {
   return (
@@ -32,27 +32,54 @@ interface OverviewTabProps {
   setActiveTab: (tab: 'overview' | 'memory' | 'policies' | 'actions') => void;
 }
 
-export function OverviewTab({ entityCount, activePolicyCount, actionCount, actions, loading, setActiveTab }: OverviewTabProps) {
+export function OverviewTab({
+  entityCount,
+  activePolicyCount,
+  actionCount,
+  actions,
+  loading,
+  setActiveTab,
+}: OverviewTabProps) {
   // Show actions that might need attention (errors or noteworthy events)
-  const attentionActions = actions.filter((a) =>
-    a.eventType.includes('error') || a.eventType.includes('fail') || a.eventType.includes('block'),
-  ).slice(0, 5);
+  const attentionActions = actions
+    .filter(
+      (a) =>
+        a.eventType.includes('error') ||
+        a.eventType.includes('fail') ||
+        a.eventType.includes('block')
+    )
+    .slice(0, 5);
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
-        <Metric label="Memory entities" value={loading ? '—' : String(entityCount)} icon={<Brain size={14} />} />
-        <Metric label="Active policies" value={loading ? '—' : String(activePolicyCount)} icon={<ShieldCheck size={14} />} />
-        <Metric label="Recent actions" value={loading ? '—' : String(actionCount)} icon={<Activity size={14} />} />
+        <Metric
+          label="Memory entities"
+          value={loading ? '—' : String(entityCount)}
+          icon={<Brain size={14} />}
+        />
+        <Metric
+          label="Active policies"
+          value={loading ? '—' : String(activePolicyCount)}
+          icon={<ShieldCheck size={14} />}
+        />
+        <Metric
+          label="Recent actions"
+          value={loading ? '—' : String(actionCount)}
+          icon={<Activity size={14} />}
+        />
       </div>
 
       <Panel>
         <div className="flex items-start gap-3">
           <Info className="mt-0.5 shrink-0 text-accent" size={16} />
           <div className="min-w-0">
-            <h2 className="m-0 text-sm font-semibold text-fg-primary">Project-scoped agent context</h2>
+            <h2 className="m-0 text-sm font-semibold text-fg-primary">
+              Project-scoped agent context
+            </h2>
             <p className="m-0 mt-1 text-[13px] leading-relaxed text-fg-muted">
-              Inspect what agents remember, which policies apply, and what actions happened recently in this project.
+              Inspect what agents remember, which policies apply, and what actions happened recently
+              in this project.
             </p>
           </div>
         </div>
@@ -72,7 +99,10 @@ export function OverviewTab({ entityCount, activePolicyCount, actionCount, actio
                 >
                   <span className="min-w-0 break-words">
                     <span className="font-medium">{action.eventType}:</span>{' '}
-                    <span className="text-fg-muted">{(action.payload as Record<string, unknown>)?.summary as string ?? action.actorType}</span>
+                    <span className="text-fg-muted">
+                      {((action.payload as Record<string, unknown>)?.summary as string) ??
+                        action.actorType}
+                    </span>
                   </span>
                   <ChevronRight className="shrink-0 text-fg-muted" size={14} />
                 </button>

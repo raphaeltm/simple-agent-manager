@@ -11,7 +11,7 @@ import * as v from 'valibot';
 import * as schema from '../db/schema';
 import { interactionDecisionHash } from '../durable-objects/interaction-store-model';
 import type { Env } from '../env';
-import { getTrustedApiOrigin } from '../lib/trusted-origins';
+import { requireExactBrowserOrigin } from '../lib/browser-write-origin';
 import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
@@ -25,7 +25,7 @@ import {
   recordInteractionDelivery,
   snapshotInteractions,
 } from '../services/acp-interaction-store';
-import { requireSessionCreator } from './chat-session-ownership';
+import { recordSharedSessionAnswer, requireSessionWriter } from '../services/session-access';
 
 type AnswerInteractionResult = Awaited<ReturnType<typeof answerInteraction>>;
 type AcceptedAnswerResult = Extract<
@@ -35,30 +35,9 @@ type AcceptedAnswerResult = Extract<
 type ChatAcpContext = Context<{ Bindings: Env }>;
 type BrowserAnswerBody = InferOutput<typeof AcpInteractionBrowserAnswerSchema>;
 
-function exactAppOrigin(env: Pick<Env, 'BASE_DOMAIN'>): string {
-  const apiOrigin = getTrustedApiOrigin(env);
-  const url = new URL(apiOrigin);
-  if (url.hostname.startsWith('api.')) url.hostname = `app.${url.hostname.slice(4)}`;
-  return url.toString().replace(/\/$/u, '');
-}
-
 function requiredParam(value: string | undefined, name: string): string {
   if (!value) throw errors.badRequest(`${name} is required`);
   return value;
-}
-
-function requireExactBrowserOrigin(c: {
-  req: { header: (name: string) => string | undefined };
-  env: Env;
-}): void {
-  const origin = c.req.header('Origin');
-  const fetchSite = c.req.header('Sec-Fetch-Site');
-  if (fetchSite === 'cross-site') {
-    throw errors.forbidden('Cross-site interaction writes are not allowed');
-  }
-  if (!origin || origin !== exactAppOrigin(c.env)) {
-    throw errors.forbidden('Untrusted interaction write origin');
-  }
 }
 
 function requireAcceptedAnswer(answer: AnswerInteractionResult): AcceptedAnswerResult {
@@ -142,9 +121,12 @@ async function listInteractionSnapshots(c: ChatAcpContext): Promise<Response> {
   const db = drizzle(c.env.DATABASE, { schema });
 
   await requireProjectCapability(db, projectId, userId, 'task:read');
-  const session = await requireSessionCreator(c.env, projectId, sessionId, userId).catch(
-    () => null
-  );
+  // Session writers (the owner and active grantees) see full requests; everyone else sees
+  // only that the agent is waiting.
+  const session = await requireSessionWriter(c.env, projectId, sessionId, userId, {
+    db,
+    action: 'view the agent requests in this session',
+  }).catch(() => null);
   const snapshot = await snapshotInteractions(
     c.env,
     projectId,
@@ -173,7 +155,10 @@ async function readInteractionDetail(c: ChatAcpContext): Promise<Response> {
   const db = drizzle(c.env.DATABASE, { schema });
 
   await requireProjectCapability(db, projectId, userId, 'task:read');
-  await requireSessionCreator(c.env, projectId, sessionId, userId);
+  await requireSessionWriter(c.env, projectId, sessionId, userId, {
+    db,
+    action: 'view the agent requests in this session',
+  });
   const detail = await getInteractionDetail(c.env, projectId, sessionId, interactionId);
   if (!detail) throw errors.notFound('ACP interaction');
   c.header('Cache-Control', 'private, no-store');
@@ -209,7 +194,12 @@ export async function answerAgentInteraction(
   const db = drizzle(env.DATABASE, { schema });
 
   await requireProjectCapability(db, projectId, userId, 'task:write');
-  await requireSessionCreator(env, projectId, sessionId, userId);
+  // Not an agent wake (lib/agent-wake-policy.ts): this answers a request inside a turn the
+  // agent already started and is blocked on, so only session control is checked.
+  const writer = await requireSessionWriter(env, projectId, sessionId, userId, {
+    db,
+    action: 'answer the agent in this session',
+  });
   const answerBodyHash = await interactionDecisionHash(body.decision);
   const answer = await answerInteraction(env, {
     projectId,
@@ -228,6 +218,12 @@ export async function answerAgentInteraction(
     acceptedAnswer,
     body.decision
   );
+  if (acceptedAnswer.status === 'answered') {
+    await recordSharedSessionAnswer(env, writer, {
+      interactionId,
+      kind: acceptedAnswer.summary.kind,
+    });
+  }
 
   return { accepted: true, state: acceptedAnswer.summary.state };
 }

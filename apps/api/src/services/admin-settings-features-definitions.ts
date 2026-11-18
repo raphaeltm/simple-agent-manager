@@ -1,0 +1,389 @@
+import {
+  INSIGHTS_AGENT_SETTINGS,
+  INSIGHTS_CLOUDFLARE_COST_SETTINGS,
+  INSIGHTS_INSTALLATION_SETTINGS,
+  INSIGHTS_PAGE_SETTINGS,
+  INSIGHTS_RECEIPT_SETTINGS,
+} from '@simple-agent-manager/operations';
+import { DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS } from '@simple-agent-manager/shared';
+
+import { DEFAULT_USER_ACCESS_TOKEN_LOCK_TIMEOUT_MS } from '../durable-objects/user-access-token-lock-config';
+import {
+  type AdminSettingDefinition,
+  DEFAULT_COMMENT_CONTEXT_MAX_ROWS,
+  DEFAULT_COMMENT_CONTEXT_MESSAGES,
+  DEFAULT_COMMENT_MENTIONS_MAX,
+  DEFAULT_NODE_USAGE_CHUNK_LOOKBACK_MINUTES,
+  DEFAULT_NODE_USAGE_MAX_CHUNKS_PER_WORKSPACE,
+  DEFAULT_NODE_USAGE_MAX_HISTORY_WORKSPACES,
+  DEFAULT_NODE_USAGE_MAX_WORKSPACES,
+  DEFAULT_NODE_USAGE_WINDOW_MINUTES,
+  DEFAULT_PROFILE_PIN_CANDIDATE_LIMIT,
+  DEFAULT_PROFILE_USAGE_WINDOW_DAYS,
+  DEFAULT_SESSION_ACCESS_MAX_GRANTS,
+  IDEA_UPDATE_DEFAULTS,
+  integerDefinition,
+  oauthDefinition,
+  OPERATOR_DEFAULTS,
+  switchDefinition,
+  validGitLabHost,
+} from './admin-setting-definitions';
+import { AGENT_EMAIL_SETTINGS } from './agent-email/setting-definitions';
+import {
+  DEFAULT_AUTH_READ_ATTEMPTS,
+  DEFAULT_CONFIG_READ_TIMEOUT_MS,
+  MAX_CONFIG_READ_TIMEOUT_MS,
+} from './config-read-deadline';
+import { CONNECTOR_READ_SETTINGS } from './connector-read-settings-definition';
+import { INBOX_SETTINGS } from './inbox-settings-definition';
+import { ENV_KEYS, SETTING_KEYS } from './platform-config-store';
+import { RUNTIME_SECRET_REQUEST_SETTINGS } from './runtime-secret-request-settings-definition';
+import { WORKFLOW_DEFAULTS, WORKFLOW_SETTING_DETAILS } from './workflow-defaults';
+export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
+  {
+    ...oauthDefinition(
+      SETTING_KEYS.gitlabHost,
+      ENV_KEYS.gitlabHost,
+      'GitLab OAuth host, without paths or credentials.'
+    ),
+    validate: validGitLabHost,
+  },
+  switchDefinition(
+    'operations.cronSweepsEnabled',
+    true,
+    'Operations',
+    'Allow recurring cron recovery and cleanup sweeps.',
+    { legacyKv: 'cron' }
+  ),
+  switchDefinition(
+    'operations.doAlarmsEnabled',
+    true,
+    'Operations',
+    'Allow Durable Object alarm work; disabled alarms re-arm for later.',
+    { legacyKv: 'alarms' }
+  ),
+  ...(Object.keys(WORKFLOW_DEFAULTS) as Array<keyof typeof WORKFLOW_DEFAULTS>).map((key) =>
+    integerDefinition(
+      `workflow.${key}`,
+      WORKFLOW_DEFAULTS[key],
+      'Operations',
+      WORKFLOW_SETTING_DETAILS[key].description,
+      { min: 1, max: WORKFLOW_SETTING_DETAILS[key].max }
+    )
+  ),
+  integerDefinition(
+    'collaboration.sessionAccessMaxGrants',
+    DEFAULT_SESSION_ACCESS_MAX_GRANTS,
+    'Collaboration',
+    'Maximum people one chat session can be shared with at a time.',
+    { min: 1, max: 100 }
+  ),
+  integerDefinition(
+    'collaboration.commentMentionsMax',
+    DEFAULT_COMMENT_MENTIONS_MAX,
+    'Collaboration',
+    'Maximum people one comment can @mention.',
+    { min: 1, max: 50 }
+  ),
+  integerDefinition(
+    'collaboration.ideaUpdateBodyMaxLength',
+    IDEA_UPDATE_DEFAULTS.bodyMaxLength,
+    'Collaboration',
+    'Maximum characters in an idea update.',
+    { min: 100, max: 16_000 }
+  ),
+  integerDefinition(
+    'collaboration.ideaUpdateQuoteMaxLength',
+    IDEA_UPDATE_DEFAULTS.quoteMaxLength,
+    'Collaboration',
+    'Maximum characters in a quoted excerpt on an idea update.',
+    { min: 0, max: 4_000 }
+  ),
+  integerDefinition(
+    'collaboration.ideaUpdatePageSize',
+    IDEA_UPDATE_DEFAULTS.pageSize,
+    'Collaboration',
+    'Number of idea updates returned per page.',
+    { min: 1, max: 100 }
+  ),
+  integerDefinition(
+    'collaboration.ideaAgentNoteMinIntervalSeconds',
+    IDEA_UPDATE_DEFAULTS.agentMinIntervalSeconds,
+    'Collaboration',
+    'Minimum seconds between notes from one agent session on one idea.',
+    { min: 1, max: 86_400 }
+  ),
+  integerDefinition(
+    'collaboration.commentContextMessages',
+    DEFAULT_COMMENT_CONTEXT_MESSAGES,
+    'Collaboration',
+    'Messages of context shown when reading a comment or an agent question from notifications.',
+    { min: 1, max: 50 }
+  ),
+  integerDefinition(
+    'collaboration.commentContextMaxRows',
+    DEFAULT_COMMENT_CONTEXT_MAX_ROWS,
+    'Collaboration',
+    'Most stored rows read before and after a commented message for that view. Agent replies are stored as many streamed rows.',
+    { min: 50, max: 5_000 }
+  ),
+  ...RUNTIME_SECRET_REQUEST_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Chat',
+      setting.description,
+      setting.range
+    )
+  ),
+  ...CONNECTOR_READ_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Connector',
+      setting.description,
+      setting.range
+    )
+  ),
+  ...INBOX_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Chat',
+      setting.description,
+      setting.range
+    )
+  ),
+  ...INSIGHTS_RECEIPT_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Chat',
+      setting.description,
+      setting.range
+    )
+  ),
+  ...INSIGHTS_PAGE_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Operations',
+      setting.description,
+      setting.range
+    )
+  ),
+  ...INSIGHTS_INSTALLATION_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Operations',
+      setting.description,
+      setting.range
+    )
+  ),
+  ...INSIGHTS_AGENT_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Operations',
+      setting.description,
+      setting.range
+    )
+  ),
+  ...INSIGHTS_CLOUDFLARE_COST_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Operations',
+      setting.description,
+      setting.range
+    )
+  ),
+  integerDefinition(
+    'performance.providerCatalogTimeoutMs',
+    10_000,
+    'Operations',
+    'Maximum milliseconds for a provider machine catalog read.',
+    { min: 100, max: 120_000 }
+  ),
+  integerDefinition(
+    'performance.githubRequestTimeoutMs',
+    5_000,
+    'Operations',
+    'Maximum milliseconds per GitHub discovery request.',
+    { min: 100, max: 120_000 }
+  ),
+  integerDefinition(
+    'performance.githubInstallationsDeadlineMs',
+    15_000,
+    'Operations',
+    'Maximum milliseconds for GitHub installation discovery.',
+    { min: 100, max: 120_000 }
+  ),
+  integerDefinition(
+    'performance.userAccessTokenLockTimeoutMs',
+    DEFAULT_USER_ACCESS_TOKEN_LOCK_TIMEOUT_MS,
+    'Operations',
+    'Milliseconds a GitHub or GitLab user-token lookup may hold its per-user lock before a waiting lookup takes it over. Lower values risk two refreshes overlapping.',
+    { min: 10_000, max: 120_000 }
+  ),
+  integerDefinition(
+    'performance.projectRecentTimeoutMs',
+    3_000,
+    'Operations',
+    'Maximum milliseconds for optional recent project data.',
+    { min: 100, max: 30_000 }
+  ),
+  integerDefinition(
+    'performance.externalReadTimeoutMs',
+    5_000,
+    'Operations',
+    'Maximum milliseconds for admin external analytics reads.',
+    { min: 100, max: 120_000 }
+  ),
+  {
+    ...integerDefinition(
+      'performance.configReadTimeoutMs',
+      DEFAULT_CONFIG_READ_TIMEOUT_MS,
+      'Operations',
+      'Maximum milliseconds per legacy platform configuration or session read; bootstrap uses the default deadline before D1 settings are available.',
+      { min: 100, max: MAX_CONFIG_READ_TIMEOUT_MS }
+    ),
+  },
+  integerDefinition(
+    'performance.authReadAttempts',
+    DEFAULT_AUTH_READ_ATTEMPTS,
+    'Operations',
+    'Maximum attempts for an idempotent session read after a configuration outage or timeout.',
+    { min: 1, max: 3 }
+  ),
+  ...AGENT_EMAIL_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Email',
+      setting.description,
+      setting.range
+    )
+  ),
+  integerDefinition(
+    'nodes.usageWindowMinutes',
+    DEFAULT_NODE_USAGE_WINDOW_MINUTES,
+    'Operations',
+    'Minutes of CPU and memory history the Nodes page draws for each machine and session. VM agents upload history in 15-minute batches, so a window under 30 minutes is often mostly empty.',
+    { min: 15, max: 360 }
+  ),
+  integerDefinition(
+    'nodes.usageChunkLookbackMinutes',
+    DEFAULT_NODE_USAGE_CHUNK_LOOKBACK_MINUTES,
+    'Operations',
+    'How long before the Nodes page window a CPU and memory history chunk may start and still be drawn. It must cover the longest chunk a VM agent uploads (15 minutes by default); a larger value reads more rows.',
+    { min: 15, max: 1440 }
+  ),
+  integerDefinition(
+    'nodes.usageMaxHistoryWorkspaces',
+    DEFAULT_NODE_USAGE_MAX_HISTORY_WORKSPACES,
+    'Operations',
+    'Most workspaces per person whose CPU and memory history the Nodes page reads in one request. Running and most recently changed workspaces come first; the page says how many it left out.',
+    { min: 1, max: 500 }
+  ),
+  integerDefinition(
+    'nodes.usageMaxWorkspaces',
+    DEFAULT_NODE_USAGE_MAX_WORKSPACES,
+    'Operations',
+    'Most workspaces per person the Nodes page lists in one request. Running workspaces come first, then the most recently changed; the page says how many it left out.',
+    { min: 50, max: 2000 }
+  ),
+  integerDefinition(
+    'nodes.usageMaxChunksPerWorkspace',
+    DEFAULT_NODE_USAGE_MAX_CHUNKS_PER_WORKSPACE,
+    'Operations',
+    'Most CPU and memory history chunks the Nodes page reads per workspace in one request, newest first. At 15-minute chunks a workspace has about 8 in the default window; the page says when a workspace had more.',
+    { min: 4, max: 500 }
+  ),
+  integerDefinition(
+    'chat.profileUsageWindowDays',
+    DEFAULT_PROFILE_USAGE_WINDOW_DAYS,
+    'Chat',
+    'Days of each person’s own new chats used to put their recent profiles first and to suggest hiding ones they no longer use.',
+    { min: 1, max: 365 }
+  ),
+  integerDefinition(
+    'chat.profilePinCandidateLimit',
+    DEFAULT_PROFILE_PIN_CANDIDATE_LIMIT,
+    'Chat',
+    'Most agent profiles listed when someone chooses which profiles use one of their accounts.',
+    { min: 50, max: 5000 }
+  ),
+  integerDefinition(
+    'collaboration.commentNotificationWindowSeconds',
+    DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS / 1000,
+    'Collaboration',
+    'Seconds in which repeated comments on one session send one notification per person. Mentions always notify.',
+    { min: 60, max: 86_400 }
+  ),
+  integerDefinition(
+    'operations.pullRequestRefreshCap',
+    3,
+    'Operations',
+    'Maximum pull requests scheduled for GitHub refresh on one detail read.',
+    { min: 1, max: 20 }
+  ),
+  integerDefinition(
+    'operations.pullRequestRefreshTtlSeconds',
+    300,
+    'Operations',
+    'Age after which a pull request detail is refreshed from GitHub.',
+    { min: 30, max: 86400 }
+  ),
+  integerDefinition(
+    'operations.pullRequestRefreshBudgetPerHour',
+    120,
+    'Operations',
+    'Shared GitHub pull request refresh limit per installation each hour.',
+    { min: 1, max: 5000 }
+  ),
+  integerDefinition(
+    'operations.pullRequestRefreshBackoffSeconds',
+    3600,
+    'Operations',
+    'Default pause after a GitHub pull request rate limit response.',
+    { min: 60, max: 86400 }
+  ),
+  integerDefinition(
+    'operations.pullRequestRefreshTimeoutMs',
+    10000,
+    'Operations',
+    'Timeout for one GitHub pull request refresh request.',
+    { min: 1000, max: 30000 }
+  ),
+  integerDefinition(
+    'operations.pullRequestCheckUpdateCap',
+    100,
+    'Operations',
+    'Maximum pull request rows updated by one GitHub check event per project.',
+    { min: 1, max: 500 }
+  ),
+  integerDefinition(
+    'operations.pullRequestPendingCheckCap',
+    1000,
+    'Operations',
+    'Maximum unmatched GitHub check observations retained per project repository.',
+    { min: 1, max: 10000 }
+  ),
+  switchDefinition(
+    'operations.stalledTaskClassifierEnabled',
+    true,
+    'Operations',
+    'Allow stalled-task classification; existing liveness checks remain active.',
+    { legacyEnvironment: 'STALLED_TASK_CLASSIFIER_ENABLED' }
+  ),
+  switchDefinition(
+    'operations.samOperatorDisabled',
+    OPERATOR_DEFAULTS.disabled,
+    'Operations',
+    'Disable the private SAM assistant for every account. Does not opt users in.',
+    // Inverse polarity: containment requires the disabled switch to be true.
+    { unavailableValue: true }
+  ),
+];

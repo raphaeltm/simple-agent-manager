@@ -3,6 +3,12 @@ import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
+import { log } from '../../../src/lib/logger';
+import { ADMIN_SETTINGS_REGISTRY } from '../../../src/services/admin-settings-registry';
+import {
+  invalidateAdminSettings,
+  resolveAdminSetting,
+} from '../../../src/services/admin-settings-resolution';
 import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
 vi.mock('../../../src/middleware/auth', () => ({
   getAuth: (c: any) => c.get('auth'),
@@ -58,7 +64,10 @@ describe('admin settings authorization and API', () => {
     ]) {
       for (const body of [
         undefined,
-        { expectedRevision: 0, changes: [{ name: 'trials.enabled', value: true }] },
+        {
+          expectedRevision: 0,
+          changes: [{ name: 'operations.stalledTaskClassifierEnabled', value: false }],
+        },
       ])
         expect((await request(headers, body)).status).toBe(
           headers['x-user'] === 'none' ? 401 : 403
@@ -70,14 +79,11 @@ describe('admin settings authorization and API', () => {
   });
   it('requires revision, rejects unknown fields and reports stale revisions', async () => {
     expect((await request()).status).toBe(200);
-    expect((await request({}, { changes: [{ name: 'trials.enabled', value: true }] })).status).toBe(
-      400
-    );
     expect(
       (
         await request(
           {},
-          { expectedRevision: 0, changes: [{ name: 'trials.enabled', value: true }], extra: 1 }
+          { changes: [{ name: 'operations.stalledTaskClassifierEnabled', value: false }] }
         )
       ).status
     ).toBe(400);
@@ -85,7 +91,22 @@ describe('admin settings authorization and API', () => {
       (
         await request(
           {},
-          { expectedRevision: 0, changes: [{ name: 'trials.enabled', value: true }] }
+          {
+            expectedRevision: 0,
+            changes: [{ name: 'operations.stalledTaskClassifierEnabled', value: false }],
+            extra: 1,
+          }
+        )
+      ).status
+    ).toBe(400);
+    expect(
+      (
+        await request(
+          {},
+          {
+            expectedRevision: 0,
+            changes: [{ name: 'operations.stalledTaskClassifierEnabled', value: false }],
+          }
         )
       ).status
     ).toBe(200);
@@ -93,18 +114,42 @@ describe('admin settings authorization and API', () => {
       (
         await request(
           {},
-          { expectedRevision: 0, changes: [{ name: 'trials.enabled', value: false }] }
+          {
+            expectedRevision: 0,
+            changes: [{ name: 'operations.stalledTaskClassifierEnabled', value: true }],
+          }
         )
       ).status
     ).toBe(409);
   });
+  it('edits, validates and resets the run-usage ceiling while invalidating its cached value', async () => {
+    const name = 'insights.runUsageMaxRowsPerSession';
+    expect(await resolveAdminSetting(bindings, name)).toBe(256);
+    for (const value of [0, 10001, 1.5, '2']) {
+      expect((await request({}, { expectedRevision: 0, changes: [{ name, value }] })).status).toBe(
+        400
+      );
+    }
+    expect((await request({}, { expectedRevision: 0, changes: [{ name, value: 2 }] })).status).toBe(
+      200
+    );
+    expect(await resolveAdminSetting(bindings, name)).toBe(2);
+    expect(
+      (await request({}, { expectedRevision: 1, changes: [{ name, value: null }] })).status
+    ).toBe(200);
+    expect(await resolveAdminSetting(bindings, name)).toBe(256);
+  });
+
   it('sanitizes SQL errors and never exposes value-derived diagnostics', async () => {
     sqlite.exec(
       "CREATE TRIGGER fail_write BEFORE INSERT ON platform_settings BEGIN SELECT RAISE(ABORT,'private-plaintext'); END;"
     );
     const response = await request(
       {},
-      { expectedRevision: 0, changes: [{ name: 'trials.enabled', value: true }] }
+      {
+        expectedRevision: 0,
+        changes: [{ name: 'operations.stalledTaskClassifierEnabled', value: false }],
+      }
     );
     expect(response.status).toBe(503);
     expect(await response.text()).not.toContain('private-plaintext');
@@ -218,4 +263,286 @@ describe('integration mutation guardrails', () => {
       count: 0,
     });
   });
+});
+
+describe('integration owner alerts', () => {
+  const sent: Array<{ to: string; subject: string; text: string }> = [];
+  beforeEach(() => {
+    sent.length = 0;
+    sqlite.exec(`
+      CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT, name TEXT, role TEXT, status TEXT);
+      INSERT INTO users VALUES ('admin', 'owner@example.com', 'Owner', 'superadmin', 'active');
+    `);
+    Object.assign(bindings, {
+      BASE_DOMAIN: 'example.com',
+      AGENT_EMAIL: {
+        send: async (message: { to: string; subject: string; text: string }) => {
+          sent.push(message);
+          return { messageId: 'm' };
+        },
+      },
+    });
+  });
+
+  it('emails the owners when an integration setting is set or reset from the settings page', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ error: 'invalid_grant' })));
+    const response = await request(
+      {},
+      {
+        expectedRevision: 0,
+        changes: [
+          { name: 'integration.google.clientId', value: 'stored-client-id' },
+          { name: 'integration.google.clientSecret', value: 'stored-client-secret' },
+        ],
+      }
+    );
+    expect(response.status).toBe(200);
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]!.subject).toBe('SAM security alert: Google sign-in (OAuth) settings changed');
+    expect(sent[0]!.text).toContain('By: Owner <owner@example.com>');
+    expect(sent[0]!.text).not.toContain('stored-client-secret');
+  });
+
+  it('sends nothing for non-integration settings', async () => {
+    const response = await request(
+      {},
+      {
+        expectedRevision: 0,
+        changes: [{ name: 'operations.stalledTaskClassifierEnabled', value: false }],
+      }
+    );
+    expect(response.status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(sent).toEqual([]);
+  });
+});
+
+describe('stored setting validation fault isolation on SQLite D1', () => {
+  const insert = (name: string, value: string) =>
+    sqlite
+      .prepare('INSERT INTO platform_settings(key,value,updated_at,updated_by) VALUES(?,?,?,?)')
+      .run(name, value, '2026-11-16T12:00:00Z', 'admin');
+
+  it('keeps good/bad/good overrides, flags the bad row, warns once without values, and resets it', async () => {
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    try {
+      insert('chat.messageMergingEnabled', 'false');
+      insert('chat.profileUsageWindowDays', '-987654321');
+      insert('operations.stalledTaskClassifierEnabled', 'false');
+      const response = await request();
+      expect(response.status).toBe(200);
+      const view = await response.json();
+      expect(view.settings).toHaveLength(ADMIN_SETTINGS_REGISTRY.length);
+      const bad = view.settings.find((s: any) => s.name === 'chat.profileUsageWindowDays');
+      expect(bad).toMatchObject({
+        source: 'default',
+        configured: false,
+        storedValueInvalid: true,
+        storedValue: '-987654321',
+        value: bad.defaultValue,
+        updatedAt: '2026-11-16T12:00:00Z',
+        updatedBy: 'admin',
+      });
+      for (const name of [
+        'chat.messageMergingEnabled',
+        'operations.stalledTaskClassifierEnabled',
+      ]) {
+        expect(view.settings.find((s: any) => s.name === name)).toMatchObject({
+          value: false,
+          source: 'database',
+          configured: true,
+        });
+        expect(view.settings.find((s: any) => s.name === name)).not.toHaveProperty(
+          'storedValueInvalid'
+        );
+      }
+      expect(await resolveAdminSetting(bindings, 'chat.profileUsageWindowDays')).toBe(
+        bad.defaultValue
+      );
+      expect((await request()).status).toBe(200);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        'admin_settings.invalid_stored_value',
+        expect.objectContaining({
+          key: 'chat.profileUsageWindowDays',
+          context: 'platform_settings',
+          action: 'show_fallback',
+        })
+      );
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('-987654321');
+      const reset = await request(
+        {},
+        {
+          expectedRevision: view.revision,
+          changes: [{ name: bad.name, value: null }],
+        }
+      );
+      expect(reset.status).toBe(200);
+      const after = await reset.json();
+      expect(after.settings.find((s: any) => s.name === bad.name)).not.toHaveProperty(
+        'storedValueInvalid'
+      );
+      expect(
+        sqlite.prepare('SELECT key FROM platform_settings WHERE key=?').get(bad.name)
+      ).toBeUndefined();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('returns defaults even when every stored override is invalid', async () => {
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    try {
+      insert('chat.profileUsageWindowDays', 'invalid-private-text');
+      insert('chat.profilePinCandidateLimit', '-1');
+      const response = await request();
+      expect(response.status).toBe(200);
+      const view = await response.json();
+      expect(view.settings.filter((s: any) => s.storedValueInvalid)).toHaveLength(2);
+      for (const item of view.settings.filter((s: any) => s.storedValueInvalid))
+        expect(item).toMatchObject({ value: item.defaultValue, source: 'default' });
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('invalid-private-text');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('leaves a valid stored row identical to its preexisting contract', async () => {
+    insert('chat.profileUsageWindowDays', '7');
+    const response = await request();
+    expect(response.status).toBe(200);
+    const view = await response.json();
+    const definition = ADMIN_SETTINGS_REGISTRY.find(
+      (s) => s.name === 'chat.profileUsageWindowDays'
+    )!;
+    expect(view.settings.find((s: any) => s.name === definition.name)).toMatchObject({
+      value: 7,
+      source: 'database',
+      configured: true,
+      updatedAt: '2026-11-16T12:00:00Z',
+      updatedBy: 'admin',
+    });
+    expect(view.settings.find((s: any) => s.name === definition.name)).not.toHaveProperty(
+      'storedValueInvalid'
+    );
+  });
+});
+
+it.each([
+  ['connector.enabled', false],
+  ['connector.writeEnabled', false],
+  ['connector.clientRegistration', 'allowlist'],
+  ['connector.allowedRedirectHosts', []],
+  ['operations.samOperatorDisabled', true],
+] as const)('reports the actual fail-closed fallback for invalid %s', async (name, expected) => {
+  const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+  try {
+    sqlite
+      .prepare('INSERT INTO platform_settings(key,value,updated_at) VALUES(?,?,?)')
+      .run(name, '[1]', '2026-11-16');
+    const response = await request();
+    expect(response.status).toBe(200);
+    const view = await response.json();
+    expect(view.settings.find((item: any) => item.name === name)).toMatchObject({
+      value: expected,
+      storedValueInvalid: true,
+      source: 'default',
+    });
+    expect(await resolveAdminSetting(bindings, name)).toEqual(expected);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+it('keeps emergency KV vetoes for invalid overrides', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    sqlite
+      .prepare('INSERT INTO platform_settings(key,value,updated_at) VALUES(?,?,?)')
+      .run('operations.cronSweepsEnabled', 'invalid', '2026-11-16');
+    await bindings.KV.put('control-loops:cron-enabled', 'false');
+    const response = await request();
+    expect(response.status).toBe(200);
+    const view = await response.json();
+    expect(
+      view.settings.find((item: any) => item.name === 'operations.cronSweepsEnabled')
+    ).toMatchObject({ value: false, storedValueInvalid: true, storedValueFallback: 'safe' });
+    expect(await resolveAdminSetting(bindings, 'operations.cronSweepsEnabled')).toBe(false);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+it('keeps a previously observed false brake for an invalid boolean row', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    const name = 'operations.stalledTaskClassifierEnabled';
+    sqlite
+      .prepare('INSERT INTO platform_settings(key,value,updated_at) VALUES(?,?,?)')
+      .run(name, 'false', '2026-11-16');
+    expect(await resolveAdminSetting(bindings, name)).toBe(false);
+    sqlite.prepare('UPDATE platform_settings SET value=? WHERE key=?').run('invalid', name);
+    invalidateAdminSettings(bindings);
+    const response = await request();
+    const view = await response.json();
+    expect(response.status).toBe(200);
+    expect(view.settings.find((item: any) => item.name === name)).toMatchObject({
+      value: false,
+      storedValueInvalid: true,
+      storedValueFallback: 'safe',
+    });
+    expect(await resolveAdminSetting(bindings, name)).toBe(false);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+it('never exposes stale secret override text in the list or its diagnostics', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    sqlite
+      .prepare('INSERT INTO platform_settings(key,value,updated_at) VALUES(?,?,?)')
+      .run('integration.github.clientSecret', 'private-stale-secret', '2026-11-16');
+    sqlite
+      .prepare('INSERT INTO platform_settings(key,value,updated_at) VALUES(?,?,?)')
+      .run('chat.profileUsageWindowDays', '-1', '2026-11-16');
+    const response = await request();
+    expect(response.status).toBe(200);
+    expect(await response.text()).not.toContain('private-stale-secret');
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('private-stale-secret');
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+it('keeps canonical tool merging OFF by default and accepts only a typed boolean kill switch', async () => {
+  expect(await resolveAdminSetting(bindings, 'chat.toolCallMergingEnabled')).toBe(false);
+  expect(
+    (
+      await request(
+        {},
+        { expectedRevision: 0, changes: [{ name: 'chat.toolCallMergingEnabled', value: 'true' }] }
+      )
+    ).status
+  ).toBe(400);
+  expect(
+    (
+      await request(
+        {},
+        { expectedRevision: 0, changes: [{ name: 'chat.toolCallMergingEnabled', value: true }] }
+      )
+    ).status
+  ).toBe(200);
+  await invalidateAdminSettings(bindings);
+  expect(await resolveAdminSetting(bindings, 'chat.toolCallMergingEnabled')).toBe(true);
+  expect(
+    (
+      await request(
+        {},
+        { expectedRevision: 1, changes: [{ name: 'chat.toolCallMergingEnabled', value: false }] }
+      )
+    ).status
+  ).toBe(200);
+  await invalidateAdminSettings(bindings);
+  expect(await resolveAdminSetting(bindings, 'chat.toolCallMergingEnabled')).toBe(false);
 });

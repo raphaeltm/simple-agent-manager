@@ -1,0 +1,71 @@
+// Fixed adapter: only the trusted source checkout chooses executable hooks.
+import { writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+export function builderEngineConfig(supplied, approvedCommit) {
+  const {
+    sourceCommit,
+    accountId,
+    zoneId,
+    zoneName,
+    baseDomain,
+    environment,
+    prefix,
+    ownerEmail,
+    workersDev,
+  } = supplied;
+  if (sourceCommit !== approvedCommit) throw new Error('Source approval mismatch');
+  return {
+    schemaVersion: 1,
+    ownerEmail,
+    workersDev,
+    sourceCommit,
+    accountId,
+    zoneId,
+    zoneName,
+    baseDomain,
+    environment,
+    prefix,
+    // Same checksum- and size-pinned publisher archive as SAM's own CI deploys.
+    codexBuild: {
+      executable: 'bash',
+      args: ['scripts/deploy/prepare-codex-runtime-artifact.sh', 'apps/api/container-artifacts'],
+    },
+    codexPublish: {
+      executable: 'bash',
+      args: [
+        'scripts/deploy/publish-codex-runtime-artifact.sh',
+        'apps/api/container-artifacts/codex-runtime-linux-amd64.tar.gz',
+      ],
+    },
+  };
+}
+
+if (process.argv[1] === new URL(import.meta.url).pathname) {
+  const config = builderEngineConfig(
+    JSON.parse(process.env.SAM_ENGINE_CONFIG ?? '{}'),
+    process.env.SAM_SOURCE_COMMIT
+  );
+  const configPath = '/sam/job/engine-config.json';
+  writeFileSync(configPath, JSON.stringify(config), { mode: 0o600 });
+  const child = spawn(
+    process.execPath,
+    [
+      fileURLToPath(new URL('../../node_modules/tsx/dist/cli.mjs', import.meta.url)),
+      'scripts/deploy/installer-engine-cli.ts',
+      '--config',
+      configPath,
+      '--state',
+      '/sam/job/checkpoint.json',
+    ],
+    // Pass the engine's phase events (and, on failure, its scrubbed tail) through
+    // to the builder supervisor, which keeps the last lines for the owner.
+    { stdio: ['ignore', 'inherit', 'inherit'], env: process.env }
+  );
+  child.once('error', () => {
+    process.exitCode = 1;
+  });
+  child.once('close', (code) => {
+    process.exitCode = code === 0 ? 0 : 1;
+  });
+}

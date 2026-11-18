@@ -1,18 +1,27 @@
+import { SYSTEM_USER_ID } from '@simple-agent-manager/shared';
+
 import type { Env } from '../env';
 import { resolveD1BindingIdentity } from '../lib/d1-session';
-import { getCredentialEncryptionKey } from '../lib/secrets';
-import { ulid } from '../lib/ulid';
+import { log } from '../lib/logger';
 import {
   commitAdminSettingsStatements,
   resolveAdminSettingDetailsMany,
   validateAdminSettingsChanges,
 } from './admin-settings';
 import type { AdminSettingName } from './admin-settings-registry';
-import { encrypt } from './encryption';
+import { DEFAULT_CONFIG_READ_TIMEOUT_MS } from './config-read-deadline';
+import { IoTimeoutError, withDeadline } from './fetch-timeout';
+import {
+  integrationAuditChanges,
+  integrationChanges,
+  type PlatformIntegrationChange,
+  platformSourceFromSetting,
+  withStoredClearsOnly,
+} from './platform-config-changes';
+import { buildPlatformIntegrationStatements, settingStatement } from './platform-config-statements';
 import {
   creatorId,
   ENV_KEYS,
-  INTEGRATION_CREDENTIAL_TYPE,
   readSetting,
   resolveSecret,
   resolveSetting,
@@ -34,325 +43,54 @@ import type {
  *
  * The writers live here ON PURPOSE. `invalidatePlatformConfigCache` is module-private so that
  * every mutation of the data behind `ResolvedPlatformConfig` provably drops the cache in the same
- * file that owns it (see `.claude/rules/44-dual-write-migration-enumerate-writers.md`). Splitting
- * the write path into its own module would require exporting the invalidator and would lose that
- * guarantee, so this file sits above the 500-line advisory threshold by design.
+ * file that owns it (see `.claude/rules/44-dual-write-migration-enumerate-writers.md`). Statement construction is split out, but every public writer and invalidation remain together
+ * so no writer can forget the cache-generation fence.
  */
 
 /**
  * Per-isolate cache TTL for the resolved platform config, in milliseconds.
  *
- * `resolvePlatformConfig` costs five D1 round-trips for the fields outside Phase 1 and sits on the auth preamble of every
- * authenticated request (`createAuth`), so it is exactly the "stable config" case the
+ * `resolvePlatformConfig` reads five fields outside Phase 1 for App/webhook/feedback callers.
+ * Login bootstrap uses the focused OAuth resolver. This is the stable config case the
  * per-isolate cache in `.claude/rules/60-request-io-and-bundle-budgets.md` exists for.
  * Platform OAuth config changes at most a handful of times in a deployment's lifetime.
  */
 const DEFAULT_PLATFORM_CONFIG_CACHE_MS = 60_000;
 
 /*
- * The writers below return nothing ON PURPOSE. A `ResolvedPlatformConfig` carries every platform
- * secret as plaintext `.value`, and `PUT /api/setup/config` once echoed a writer's result straight
- * into its response body. Callers that need to report state use `getPlatformConfigStatus`, which
- * projects to booleans and source labels.
+ * The writers below never return resolved values ON PURPOSE. A `ResolvedPlatformConfig` carries
+ * every platform secret as plaintext `.value`, and a since-removed `PUT /api/setup/config` once
+ * echoed a writer's result straight into its response body. They return only the audit record of
+ * what changed (setting names and set/reset), which the owner security alerts describe. Callers
+ * that need to report state use `getPlatformConfigStatus`, which projects to booleans and labels.
  */
 
 export async function savePlatformIntegrationConfig(
   env: Env,
   input: PlatformIntegrationInput,
   updatedBy?: string
-): Promise<void> {
-  const by = creatorId(env, updatedBy);
+): Promise<PlatformIntegrationChange[]> {
+  const by = creatorId(updatedBy);
   const expectedRevision = await validateAdminSettingsChanges(env, integrationChanges(input));
+  const changes = await integrationAuditChanges(env, input);
   const statements = await buildPlatformIntegrationStatements(
     env,
-    input,
+    withStoredClearsOnly(input, changes),
     by,
     new Date().toISOString()
   );
-  if (statements.length === 0) return;
+  if (statements.length === 0) return [];
   try {
     await commitAdminSettingsStatements(env, {
       statements,
-      changes: integrationAuditChanges(input),
+      changes,
       actorUserId: by,
       expectedRevision,
     });
   } finally {
     invalidatePlatformConfigCache();
   }
-}
-
-function integrationAuditChanges(
-  input: PlatformIntegrationInput
-): Array<{ name: AdminSettingName; action: 'set' | 'reset' }> {
-  const changes: Array<{ name: AdminSettingName; action: 'set' | 'reset' }> = [];
-  for (const provider of ['github', 'google', 'googleInfrastructure', 'gitlab'] as const) {
-    const config = input[provider];
-    if (!config) continue;
-    for (const field of provider === 'gitlab'
-      ? ['host', 'clientId', 'clientSecret']
-      : ['clientId', 'clientSecret']) {
-      const removed = provider === 'googleInfrastructure' && input.googleInfrastructure?.remove;
-      if (removed || trimOptional((config as Record<string, string | undefined>)[field])) {
-        changes.push({
-          name: `integration.${provider}.${field}` as AdminSettingName,
-          action: removed ? 'reset' : 'set',
-        });
-      }
-    }
-  }
   return changes;
-}
-
-function integrationChanges(input: PlatformIntegrationInput) {
-  return integrationAuditChanges(input).map((change) => {
-    const [, provider, field = ''] = change.name.split('.');
-    const config = input[provider as 'github' | 'google' | 'googleInfrastructure' | 'gitlab'];
-    return {
-      name: change.name,
-      value:
-        change.action === 'reset'
-          ? null
-          : trimOptional((config as Record<string, string | undefined>)[field]),
-    };
-  });
-}
-
-function settingStatement(
-  env: Env,
-  key: string,
-  value: string,
-  updatedBy: string,
-  now: string
-): D1PreparedStatement {
-  return env.DATABASE.prepare(
-    `INSERT INTO platform_settings (key, value, updated_at, updated_by)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by`
-  ).bind(key, value, now, updatedBy);
-}
-
-function deleteSettingStatement(env: Env, key: string): D1PreparedStatement {
-  return env.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?').bind(key);
-}
-
-async function secretUpsertStatement(
-  env: Env,
-  provider: string,
-  kind: string,
-  label: string,
-  value: string,
-  updatedBy: string,
-  now: string
-): Promise<D1PreparedStatement> {
-  const encrypted = await encrypt(value, getCredentialEncryptionKey(env));
-  const existing = await env.DATABASE.prepare(
-    `SELECT id FROM platform_credentials
-     WHERE credential_type = ? AND provider = ? AND credential_kind = ?
-     ORDER BY updated_at DESC, created_at DESC
-     LIMIT 1`
-  )
-    .bind(INTEGRATION_CREDENTIAL_TYPE, provider, kind)
-    .first<{ id: string }>();
-
-  if (existing) {
-    return env.DATABASE.prepare(
-      `UPDATE platform_credentials
-       SET label = ?, encrypted_token = ?, iv = ?, is_enabled = 1, updated_by = ?, updated_at = ?
-       WHERE id = ?`
-    ).bind(label, encrypted.ciphertext, encrypted.iv, updatedBy, now, existing.id);
-  }
-
-  return env.DATABASE.prepare(
-    `INSERT INTO platform_credentials
-       (id, credential_type, provider, agent_type, credential_kind, label, encrypted_token, iv, is_enabled, created_by, created_at, updated_by, updated_at)
-     VALUES (?, ?, ?, NULL, ?, ?, ?, ?, 1, ?, ?, ?, ?)`
-  ).bind(
-    ulid(),
-    INTEGRATION_CREDENTIAL_TYPE,
-    provider,
-    kind,
-    label,
-    encrypted.ciphertext,
-    encrypted.iv,
-    updatedBy,
-    now,
-    updatedBy,
-    now
-  );
-}
-
-async function buildPlatformIntegrationStatements(
-  env: Env,
-  input: PlatformIntegrationInput,
-  updatedBy: string,
-  now: string
-): Promise<D1PreparedStatement[]> {
-  const statements: D1PreparedStatement[] = [];
-  const github = input.github ?? {};
-  const google = input.google ?? {};
-  const googleInfrastructure = input.googleInfrastructure ?? {};
-  const gitlab = input.gitlab ?? {};
-  const feedback = input.feedback ?? {};
-
-  const githubClientId = trimOptional(github.clientId);
-  if (githubClientId)
-    statements.push(
-      settingStatement(env, SETTING_KEYS.githubClientId, githubClientId, updatedBy, now)
-    );
-
-  const githubAppId = trimOptional(github.appId);
-  if (githubAppId)
-    statements.push(settingStatement(env, SETTING_KEYS.githubAppId, githubAppId, updatedBy, now));
-
-  const githubAppSlug = trimOptional(github.appSlug);
-  if (githubAppSlug)
-    statements.push(
-      settingStatement(env, SETTING_KEYS.githubAppSlug, githubAppSlug, updatedBy, now)
-    );
-
-  const googleClientId = trimOptional(google.clientId);
-  if (googleClientId)
-    statements.push(
-      settingStatement(env, SETTING_KEYS.googleClientId, googleClientId, updatedBy, now)
-    );
-
-  if (googleInfrastructure.remove) {
-    statements.push(
-      env.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?').bind(
-        SETTING_KEYS.googleInfrastructureClientId
-      ),
-      env.DATABASE.prepare(
-        'DELETE FROM platform_credentials WHERE credential_type = ? AND provider = ? AND credential_kind = ?'
-      ).bind(
-        INTEGRATION_CREDENTIAL_TYPE,
-        'google-infrastructure',
-        SECRET_KINDS.googleInfrastructureClientSecret
-      )
-    );
-  } else {
-    const clientId = trimOptional(googleInfrastructure.clientId);
-    if (clientId) {
-      statements.push(
-        settingStatement(env, SETTING_KEYS.googleInfrastructureClientId, clientId, updatedBy, now)
-      );
-    }
-  }
-
-  const gitlabHost = trimOptional(gitlab.host);
-  if (gitlabHost)
-    statements.push(settingStatement(env, SETTING_KEYS.gitlabHost, gitlabHost, updatedBy, now));
-
-  const gitlabClientId = trimOptional(gitlab.clientId);
-  if (gitlabClientId)
-    statements.push(
-      settingStatement(env, SETTING_KEYS.gitlabClientId, gitlabClientId, updatedBy, now)
-    );
-
-  if (feedback.remove) {
-    statements.push(deleteSettingStatement(env, SETTING_KEYS.feedbackProjectId));
-  } else {
-    const feedbackProjectId = trimOptional(feedback.projectId);
-    if (feedbackProjectId) {
-      statements.push(
-        settingStatement(env, SETTING_KEYS.feedbackProjectId, feedbackProjectId, updatedBy, now)
-      );
-    }
-  }
-
-  const githubClientSecret = trimOptional(github.clientSecret);
-  if (githubClientSecret) {
-    statements.push(
-      await secretUpsertStatement(
-        env,
-        'github',
-        SECRET_KINDS.githubClientSecret,
-        'GitHub OAuth client secret',
-        githubClientSecret,
-        updatedBy,
-        now
-      )
-    );
-  }
-
-  const githubAppPrivateKey = trimOptional(github.appPrivateKey);
-  if (githubAppPrivateKey) {
-    statements.push(
-      await secretUpsertStatement(
-        env,
-        'github',
-        SECRET_KINDS.githubAppPrivateKey,
-        'GitHub App private key',
-        githubAppPrivateKey,
-        updatedBy,
-        now
-      )
-    );
-  }
-
-  const githubWebhookSecret = trimOptional(github.webhookSecret);
-  if (githubWebhookSecret) {
-    statements.push(
-      await secretUpsertStatement(
-        env,
-        'github',
-        SECRET_KINDS.githubWebhookSecret,
-        'GitHub webhook secret',
-        githubWebhookSecret,
-        updatedBy,
-        now
-      )
-    );
-  }
-
-  const googleClientSecret = trimOptional(google.clientSecret);
-  if (googleClientSecret) {
-    statements.push(
-      await secretUpsertStatement(
-        env,
-        'google',
-        SECRET_KINDS.googleClientSecret,
-        'Google OAuth client secret',
-        googleClientSecret,
-        updatedBy,
-        now
-      )
-    );
-  }
-
-  if (!googleInfrastructure.remove) {
-    const clientSecret = trimOptional(googleInfrastructure.clientSecret);
-    if (clientSecret) {
-      statements.push(
-        await secretUpsertStatement(
-          env,
-          'google-infrastructure',
-          SECRET_KINDS.googleInfrastructureClientSecret,
-          'Google infrastructure OAuth client secret',
-          clientSecret,
-          updatedBy,
-          now
-        )
-      );
-    }
-  }
-
-  const gitlabClientSecret = trimOptional(gitlab.clientSecret);
-  if (gitlabClientSecret) {
-    statements.push(
-      await secretUpsertStatement(
-        env,
-        'gitlab',
-        SECRET_KINDS.gitlabClientSecret,
-        'GitLab client secret',
-        gitlabClientSecret,
-        updatedBy,
-        now
-      )
-    );
-  }
-
-  return statements;
 }
 
 function runtimePreview(value: string): ResolvedPlatformValue {
@@ -418,23 +156,30 @@ export async function completeSetupWithConfig(
   env: Env,
   input: PlatformIntegrationInput,
   updatedBy?: string
-): Promise<void> {
-  const by = creatorId(env, updatedBy);
+): Promise<PlatformIntegrationChange[]> {
+  const by = creatorId(updatedBy);
   const expectedRevision = await validateAdminSettingsChanges(env, integrationChanges(input));
   const now = new Date().toISOString();
-  const statements = await buildPlatformIntegrationStatements(env, input, by, now);
+  const changes = await integrationAuditChanges(env, input);
+  const statements = await buildPlatformIntegrationStatements(
+    env,
+    withStoredClearsOnly(input, changes),
+    by,
+    now
+  );
   statements.push(settingStatement(env, SETUP_COMPLETED_SETTING_KEY, 'true', by, now));
 
   try {
     await commitAdminSettingsStatements(env, {
       statements,
-      changes: integrationAuditChanges(input),
+      changes,
       actorUserId: by,
       expectedRevision,
     });
   } finally {
     invalidatePlatformConfigCache();
   }
+  return changes;
 }
 
 interface PlatformConfigCacheEntry {
@@ -456,9 +201,8 @@ interface PlatformConfigCacheEntry {
 
 /**
  * Module-scoped cache — Workers re-use the isolate across requests within an instance, so this
- * gives the intended "last value for up to TTL" behaviour. `services/trial/kill-switch.ts` uses
- * the same module-scope shape but does NOT key on its binding; do not copy that half of it when
- * adding a cache over a binding whose identity can vary per request (see `database` below).
+ * gives the intended "last value for up to TTL" behaviour. The cache keys on its D1 binding,
+ * because a binding's identity can vary per request (see `database` below).
  */
 let platformConfigCache: PlatformConfigCacheEntry | null = null;
 
@@ -480,6 +224,7 @@ let platformConfigCacheGeneration = 0;
 let platformConfigInFlight: {
   database: D1Database;
   generation: number;
+  deadlineAt: number;
   promise: Promise<ResolvedPlatformConfig>;
 } | null = null;
 
@@ -521,18 +266,14 @@ export function resolvePlatformConfigCacheMs(env: Env): number {
  * config (`createAuth` needs three) should resolve once and use the `select*` helpers below
  * rather than calling the `get*` wrappers repeatedly.
  *
- * Unlike `services/trial/kill-switch.ts`, a failed read is deliberately NOT cached. That cache
- * stores its fail-closed default on error to throttle retries, which is safe because "trials
- * disabled" is a valid conservative answer. Here the equivalent would be caching "no OAuth
- * configured", which would disable every social login for a full TTL — strictly worse than
- * re-reading. A rejected read therefore propagates and populates nothing.
+ * A failed read is deliberately NOT cached: caching a fail-closed default would mean caching
+ * "no OAuth configured", which would disable every social login for a full TTL — strictly
+ * worse than re-reading. A rejected read therefore propagates and populates nothing.
  */
 export async function resolvePlatformConfig(
   env: Env,
   now: number = Date.now()
 ): Promise<ResolvedPlatformConfig> {
-  const legacy = await resolveLegacyPlatformConfig(env, now);
-  const config = structuredClone(legacy);
   const fields = (['github', 'google', 'googleInfrastructure', 'gitlab'] as const).flatMap(
     (provider) =>
       (provider === 'gitlab'
@@ -544,16 +285,17 @@ export async function resolvePlatformConfig(
         name: `integration.${provider}.${field}` as AdminSettingName,
       }))
   );
-  const settings = await resolveAdminSettingDetailsMany(
-    env,
-    fields.map((item) => item.name)
-  );
+  const settings = await resolveAdminSettingDetailsMany(env, [
+    ...fields.map((item) => item.name),
+    'performance.configReadTimeoutMs',
+  ]);
+  const timeoutMs = Number(settings.at(-1)?.value ?? DEFAULT_CONFIG_READ_TIMEOUT_MS);
+  const legacy = await resolveLegacyPlatformConfig(env, now, timeoutMs);
+  const config = structuredClone(legacy);
   fields.forEach(({ provider, field }, index) => {
     const setting = settings[index];
     if (!setting) throw new Error('Platform settings are unavailable.');
-    let source: ResolvedPlatformValue['source'] = 'environment';
-    if (setting.source === 'database') source = 'runtime';
-    else if (setting.source === 'default') source = 'unset';
+    const source = platformSourceFromSetting(setting.source);
     (config[provider] as unknown as Record<string, ResolvedPlatformValue>)[field] = {
       value: typeof setting.value === 'string' ? setting.value : null,
       source,
@@ -566,7 +308,8 @@ export async function resolvePlatformConfig(
 
 async function resolveLegacyPlatformConfig(
   env: Env,
-  now: number = Date.now()
+  now: number = Date.now(),
+  timeoutMs = DEFAULT_CONFIG_READ_TIMEOUT_MS
 ): Promise<ResolvedPlatformConfig> {
   // A missing binding is NOT a usable cache key: `undefined === undefined` would make every
   // database-less env share one entry. Such an env also resolves purely from `env` values
@@ -588,7 +331,7 @@ async function resolveLegacyPlatformConfig(
 
   const ttl = resolvePlatformConfigCacheMs(env);
   if (!database || ttl <= 0) {
-    const config = await readPlatformConfigFromStore(env);
+    const config = await withDeadline(() => readPlatformConfigFromStore(env), timeoutMs);
     if (cached && cached.database === database) {
       // Caching is off for this binding — do not let a previous entry linger.
       platformConfigCache = null;
@@ -602,17 +345,28 @@ async function resolveLegacyPlatformConfig(
   if (
     joinable &&
     joinable.database === database &&
-    joinable.generation === platformConfigCacheGeneration
+    joinable.generation === platformConfigCacheGeneration &&
+    Date.now() < joinable.deadlineAt
   ) {
-    return joinable.promise;
+    const config = await joinable.promise;
+    if (
+      platformConfigCacheGeneration !== joinable.generation ||
+      platformConfigInFlight !== joinable
+    )
+      return resolveLegacyPlatformConfig(env);
+    return config;
   }
 
   const generation = platformConfigCacheGeneration;
-  const promise = readPlatformConfigFromStore(env);
-  platformConfigInFlight = { database, generation, promise };
+  const promise = withDeadline(() => readPlatformConfigFromStore(env), timeoutMs);
+  const deadlineAt = Date.now() + timeoutMs;
+  platformConfigInFlight = { database, generation, deadlineAt, promise };
 
   try {
     const config = await promise;
+    if (platformConfigInFlight?.promise !== promise) return resolveLegacyPlatformConfig(env);
+    if (Date.now() >= deadlineAt)
+      throw new IoTimeoutError('Platform configuration read exceeded its deadline');
     if (platformConfigCacheGeneration === generation) {
       // No write landed while we were reading, so this result is still current: publish it.
       platformConfigCache = { database, config, expiresAt: now + ttl };
@@ -676,13 +430,39 @@ async function readPlatformConfigFromStore(env: Env): Promise<ResolvedPlatformCo
   };
 }
 
+/**
+ * First-run setup is over once it was completed, or once the install has an owner.
+ *
+ * Installs that predate the setup wizard (#1528) already had a superadmin but never wrote
+ * `setup.completed`, so `/setup` stayed open behind `SETUP_TOKEN` and was used on 2026-11-12 to
+ * take over production. An active superadmin can change every integration in Admin, so setup has
+ * nothing left to do; the row is written then, so a later role change cannot reopen it.
+ * `SETUP_FORCE` stays the explicit lockout-recovery override.
+ */
 export async function isSetupCompleted(env: Env): Promise<boolean> {
   const forced = env.SETUP_FORCE === 'true';
   if (forced) return false;
   const row = await readSetting(env, SETUP_COMPLETED_SETTING_KEY);
-  return row.value === 'true';
+  if (row.value === 'true') return true;
+  const owner = await env.DATABASE.prepare(
+    `SELECT id FROM users WHERE role = 'superadmin' AND status = 'active' AND id != ?
+     ORDER BY created_at, id LIMIT 1`
+  )
+    .bind(SYSTEM_USER_ID)
+    .first<{ id: string }>();
+  if (!owner) return false;
+  try {
+    await setSetupCompleted(env, owner.id);
+  } catch (err) {
+    // Setup is closed either way; a failed write only means the next check writes again.
+    log.error('platform-config.setup_completed_write_failed', {
+      ownerId: owner.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  return true;
 }
 
 export async function setSetupCompleted(env: Env, updatedBy?: string): Promise<void> {
-  await writeSetting(env, SETUP_COMPLETED_SETTING_KEY, 'true', creatorId(env, updatedBy));
+  await writeSetting(env, SETUP_COMPLETED_SETTING_KEY, 'true', creatorId(updatedBy));
 }

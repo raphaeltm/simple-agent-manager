@@ -1,10 +1,15 @@
+import type { OperationContext } from '@simple-agent-manager/operations';
+import { OperationError } from '@simple-agent-manager/operations';
+import { scheduleCreateStartsWork } from '@simple-agent-manager/operations';
+
 import { protectedFormReceiptHash } from '../durable-objects/interaction-store-form';
 import type { Env } from '../env';
 import { takeRejectedBeforeEffects } from '../lib/operation-effect-boundary';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { AppError } from '../middleware/error';
-import { OperationError } from '../operations/errors';
-import type { OperationContext } from '../operations/types';
+
+/** The parts of an operation context a connector write reads, with the full worker env. */
+export type ConnectorWriteContext = Omit<OperationContext, 'env' | 'ports'> & { env: Env };
 import { operationReceiptId } from './cli-operation-receipts';
 import { getConnectorSettings } from './connector-settings';
 import { recordActivityEvent } from './project-data';
@@ -62,7 +67,7 @@ function safeId(value: unknown): string | null {
 /** Called inside an operation, after its current resource/capability checks.
  * An uncertain write stays reserved forever rather than provisioning twice. */
 export async function executeConnectorWrite<T>(
-  ctx: OperationContext,
+  ctx: ConnectorWriteContext,
   operation: string,
   input: Record<string, unknown>,
   run: () => Promise<T>,
@@ -70,6 +75,7 @@ export async function executeConnectorWrite<T>(
 ): Promise<T> {
   if (ctx.actor.via !== 'connector' && ctx.actor.via !== 'pat') {
     await preflight?.();
+    await ctx.assertEffectAllowed?.();
     return run();
   }
   const settings = ctx.connectorSettings ?? (await getConnectorSettings(ctx.env));
@@ -113,11 +119,12 @@ export async function executeConnectorWrite<T>(
       );
     receiptId = await operationReceiptId(projectId, ctx.actor.userId, 'CONNECTOR', operation, key);
     intentHash = await hashIntent(input);
-    // Forms may contain low-entropy secrets; retain only a keyed intent fingerprint.
-    if (operation === 'sam_agent_answer' && input.formContent !== undefined)
+    // Forms may contain low-entropy secrets; retain only a keyed intent fingerprint. Any write
+    // that carries form content (sam_agent_answer, sam_inbox_answer) is covered.
+    if (input.formContent !== undefined)
       intentHash = await protectedFormReceiptHash(
         getCredentialEncryptionKey(ctx.env),
-        String(input.interactionId),
+        String(input.interactionId ?? input.ref ?? operation),
         intentHash
       );
     const previous = await readReceipt();
@@ -133,7 +140,12 @@ export async function executeConnectorWrite<T>(
     settings.writeRateLimitPerMinute,
     60_000
   );
-  if (operation === 'sam_chat_start') {
+  // A schedule that will start work later spends the same start budget now, so scheduling is
+  // not a way around the per-person start limits. A recurring schedule is charged once here.
+  if (
+    operation === 'sam_chat_start' ||
+    (operation === 'sam_schedule_create' && scheduleCreateStartsWork(input))
+  ) {
     await consumeConnectorBudget(
       ctx.env,
       ctx.actor.userId,
@@ -235,6 +247,22 @@ const AUDIT_INPUT_FIELDS = new Set([
   'formContent',
   'markerId',
   'answer',
+  // Inbox writes (sam_inbox_answer, sam_inbox_archive).
+  'ref',
+  'decision',
+  'note',
+  'scheduleId',
+  'runAt',
+  'cron',
+  'timezone',
+  'disambiguation',
+  'expiresAt',
+  'name',
+  'reason',
+  'action',
+  'paused',
+  'expectedVersion',
+  'subscriptionId',
 ]);
 function auditResourceId(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -248,7 +276,7 @@ function auditResourceId(value: unknown): string | null {
 /** Every write invocation, including denied requests and receipt replays, is audited.
  * Called by defineOperation before authority checks; no input values are retained. */
 export async function auditConnectorWrite<T>(
-  ctx: OperationContext,
+  ctx: ConnectorWriteContext,
   operation: string,
   rawInput: unknown,
   run: () => Promise<T>
@@ -274,7 +302,9 @@ export async function auditConnectorWrite<T>(
       projectId,
       auditResourceId(input.taskId) ??
         auditResourceId(input.sessionId) ??
-        auditResourceId(input.ideaId),
+        auditResourceId(input.ideaId) ??
+        auditResourceId(input.scheduleId) ??
+        auditResourceId(input.subscriptionId),
       JSON.stringify(
         Object.keys(input)
           .filter((name) => AUDIT_INPUT_FIELDS.has(name))

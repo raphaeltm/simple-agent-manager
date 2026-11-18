@@ -1,7 +1,12 @@
+import {
+  CLOUDFLARE_BUILD_DELETION_CONFLICT,
+  isCloudflareBuildDeletionConflict,
+} from '@simple-agent-manager/app-deployment';
 import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 import type { Env } from '../env';
+import { clientIpFromHeaders } from '../lib/client-ip';
 import { d1CauseCode, d1ErrorCategory, isFailedQueryError } from '../lib/d1-error-code';
 import { log, serializeError } from '../lib/logger';
 import { getTaskSubmitOperation } from '../lib/task-submit-diagnostics';
@@ -91,7 +96,7 @@ function scheduleErrorPersistence(
         workspaceId: identifiers.workspaceId ?? null,
         taskId: identifiers.taskId ?? null,
         sessionId: identifiers.sessionId ?? null,
-        ipAddress: c.req.header('CF-Connecting-IP') ?? null,
+        ipAddress: clientIpFromHeaders((name) => c.req.header(name)) ?? null,
         userAgent: c.req.header('User-Agent') ?? null,
       },
       c.env
@@ -121,7 +126,10 @@ export function handleAppError(err: Error, c: AppContext): Response {
   let status: number;
   let body: Record<string, unknown>;
 
-  if (err instanceof AppError) {
+  if (isCloudflareBuildDeletionConflict(err)) {
+    status = 409;
+    body = { error: 'CONFLICT', message: CLOUDFLARE_BUILD_DELETION_CONFLICT };
+  } else if (err instanceof AppError) {
     status = err.statusCode;
     body = { ...err.toJSON() };
   } else if (err instanceof GcpApiError) {

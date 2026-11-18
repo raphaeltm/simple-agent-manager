@@ -53,7 +53,11 @@ export function normalizeResourceRequirements(
       }
       continue;
     }
-    setResourceRequirementField(normalized, field, normalizeResourceRequirementField(field, fieldValue));
+    setResourceRequirementField(
+      normalized,
+      field,
+      normalizeResourceRequirementField(field, fieldValue)
+    );
   }
 
   return normalized;

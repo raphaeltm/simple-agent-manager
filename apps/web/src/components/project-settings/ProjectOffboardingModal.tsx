@@ -43,7 +43,7 @@ export function defaultOffboardingAction(
 function resourceKindLabel(kind: ProjectMemberOffboardingResourceKind): string {
   switch (kind) {
     case 'trigger':
-      return 'Triggers';
+      return 'Automation';
     case 'task_tree':
       return 'Running tasks';
     case 'node':
@@ -272,6 +272,18 @@ export function ProjectOffboardingModal({
                         <div className="text-fg-muted">need stop or replacement</div>
                       </div>
                     </div>
+
+                    {preview.personalProfilePinCount > 0 && (
+                      <p
+                        className="m-0 rounded-md border border-border-default bg-inset p-3 text-xs text-fg-muted"
+                        data-testid="offboarding-profile-pins"
+                      >
+                        {preview.personalProfilePinCount === 1
+                          ? 'Their own account choice on 1 of this project’s profiles will be removed.'
+                          : `Their own account choices on ${preview.personalProfilePinCount} of this project’s profiles will be removed.`}{' '}
+                        These only ever applied to their own runs.
+                      </p>
+                    )}
 
                     {resourceCount === 0 ? (
                       <div className="rounded-md border border-border-default bg-inset p-3 text-sm text-fg-muted">

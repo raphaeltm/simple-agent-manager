@@ -38,9 +38,9 @@ export const PROVIDER_CATALOG_STALE_TIME_MS = resolveDurationMs(
 );
 
 /**
- * Trial status (`GET /api/trial-status`) — whether a platform-funded trial is still
- * available to this user. Moves only when a trial is claimed or expires, both of
- * which invalidate the query explicitly.
+ * Platform compute availability (`GET /api/trial-status`) — whether installation
+ * platform compute is available to this user. Moves only when an admin changes the
+ * platform cloud credential or AI proxy configuration.
  */
 const DEFAULT_TRIAL_STATUS_STALE_TIME_MS = 60_000;
 export const TRIAL_STATUS_STALE_TIME_MS = resolveDurationMs(
@@ -78,4 +78,24 @@ const DEFAULT_PROJECT_CREATE_CONFIG_STALE_TIME_MS = 300_000;
 export const PROJECT_CREATE_CONFIG_STALE_TIME_MS = resolveDurationMs(
   import.meta.env.VITE_PROJECT_CREATE_CONFIG_STALE_TIME_MS,
   DEFAULT_PROJECT_CREATE_CONFIG_STALE_TIME_MS
+);
+
+/**
+ * Insights · Flow (`GET /api/projects/:projectId/insights/flow`): counts over 7 to 90 days,
+ * which move slowly. Past this the page refetches in the background without hiding the numbers.
+ */
+const DEFAULT_INSIGHTS_STALE_TIME_MS = 300_000;
+export const INSIGHTS_STALE_TIME_MS = resolveDurationMs(
+  import.meta.env.VITE_INSIGHTS_STALE_TIME_MS,
+  DEFAULT_INSIGHTS_STALE_TIME_MS
+);
+
+/**
+ * Platform capabilities (`GET /api/config/platform-capabilities`): which platform services the
+ * installation has. They change only when the installation is reconfigured.
+ */
+const DEFAULT_PLATFORM_CAPABILITIES_STALE_TIME_MS = 300_000;
+export const PLATFORM_CAPABILITIES_STALE_TIME_MS = resolveDurationMs(
+  import.meta.env.VITE_PLATFORM_CAPABILITIES_STALE_TIME_MS,
+  DEFAULT_PLATFORM_CAPABILITIES_STALE_TIME_MS
 );

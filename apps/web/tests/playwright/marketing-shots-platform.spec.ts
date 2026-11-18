@@ -17,7 +17,7 @@
  *      sam-session-waking         — same session mid-wake, phase progress banner
  *   C. sam-agents-orchestration   — task hierarchy modal (parent + dispatched subtasks)
  *   D. sam-app-deployments        — deployment environments list
- *      sam-app-deployment-detail  — staging environment overview
+ *      sam-app-deployment-detail  — the staging environment page
  */
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -83,7 +83,6 @@ const MOCK_PROJECT = {
   githubInstallationId: 'inst-northwind',
   defaultVmSize: 'medium',
   defaultAgentType: 'claude-code',
-  defaultProvider: 'hetzner',
   workspaceIdleTimeoutMs: null,
   nodeIdleTimeoutMs: null,
   createdAt: '2026-06-01T00:00:00.000Z',
@@ -108,15 +107,9 @@ const CHILD_TESTS_SESSION_ID = 'sess-refund-tests';
 const CHILD_SIGNOFF_TASK_ID = 'task-refund-signoff';
 
 /**
- * Session recency drives real UI behavior: `isStaleSession()`
- * (`lib/chat-session-utils.ts`) compares `lastMessageAt` against `Date.now()`
- * with a 3-hour window (`STALE_SESSION_THRESHOLD_MS`) and collapses anything
- * older into a click-to-expand "Older" bucket in the sidebar. Fixed
- * `2026-09-14T09:40` timestamps looked deterministic but silently fell
- * outside that window whenever the suite ran later in the day (the sandbox
- * clock is real — `date -u` returns the actual current time) — every
- * requested sidebar session collapsed into "Older (8)" and only the exempt
- * sleeping session stayed visible. Anchor everything to the real run time.
+ * Anchor every timestamp to the real run time. Relative times in the sidebar
+ * ("1m ago") are computed against `Date.now()`, so fixed timestamps drift into
+ * implausible ages whenever the suite runs later than they were written.
  */
 const NOW = Date.now();
 function agoMs(minutes: number): number {
@@ -172,9 +165,8 @@ const SESSION_LIST = [
     topic: 'Stripe webhook signature rotation',
     status: 'sleeping',
     messageCount: 14,
-    // Sleeping sessions are exempt from the staleness cutoff (they stay
-    // discoverable so the same-chat wake gesture keeps working), so this can
-    // stay narratively "older" without falling into the sidebar's Older bucket.
+    // Sleeping sessions sit in their own open section, so this can stay
+    // narratively "older" and still show in the sidebar.
     startedAt: agoMs(170),
     endedAt: null,
     createdAt: agoMs(170),
@@ -1043,10 +1035,11 @@ test('sam-hero-live-session', async ({ page }) => {
   ).toBeVisible();
   await expect(page.getByText("I'll add idempotency protection in four steps", { exact: false })).toBeVisible();
   await expect(page.getByText('Bash: pytest tests/webhooks/test_refund_idempotency.py -q')).toBeVisible();
-  await expect(page.getByText('Read payments/webhooks/refund_handler.py')).toBeVisible();
+  // Finished and running tool calls collapse into one group row.
+  await expect(page.getByRole('button', { name: /^3 tool calls · running Bash/ })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Plan' })).toBeVisible();
-  // Two open review comments drive the header's "2" discovery chip.
-  await expect(page.getByRole('button', { name: /2 unresolved comments?/ })).toBeVisible();
+  // The open review comment shows as a count on the agent's message.
+  await expect(page.getByRole('button', { name: /1 comment on this message, 1 unresolved/ })).toBeVisible();
 
   // Verify the session header's expandable infra/task-status panel renders
   // correctly, then collapse it again. Left open, its absolutely-positioned
@@ -1063,8 +1056,8 @@ test('sam-hero-live-session', async ({ page }) => {
   // The composer stays empty with its normal placeholder — the conversation
   // itself (plan + tool cards) is the subject of this shot, not the mention
   // palette, which would hide the bottom third of the chat.
-  await expect(page.getByPlaceholder(/Agent is working|Send a message/)).toBeVisible();
-  await expect(page.getByPlaceholder(/Agent is working|Send a message/)).toHaveValue('');
+  await expect(page.getByPlaceholder(/Steer the agent|Agent is working|Send a message/)).toBeVisible();
+  await expect(page.getByPlaceholder(/Steer the agent|Agent is working|Send a message/)).toHaveValue('');
 
   // The CompletionDock's floating "bump" (the red Interrupt button) is
   // deliberately positioned to poke up over the bottom of the scrollable
@@ -1106,8 +1099,8 @@ test('sam-hero-live-session', async ({ page }) => {
   await marketingShot(page, 'sam-hero-live-session');
 });
 
-// The same session on a phone: the source for the marketing homepage's mobile
-// hero (apps/www/scripts/build-hero-layers.ts crops its layers from it).
+// The same session on a phone (the brand guide's imagery uses a crop of it:
+// apps/www/public/images/hero/phone.webp).
 test.describe('hero on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
@@ -1308,6 +1301,20 @@ const DEPLOY_NODE_PROD = {
   deploymentEnvironments: [{ id: 'env-production', projectId: PROJECT_ID, name: 'production' }],
 };
 
+const DEPLOY_TASK_ID = 'task-ship-refund-idempotency';
+const DEPLOY_SUBMITTED_BY = {
+  userId: NORTHWIND.owner.id,
+  workspaceId: 'ws-ship-refund-idempotency',
+  taskId: DEPLOY_TASK_ID,
+  agentProfileId: 'profile-opus',
+};
+
+const STAGING_RELEASES = [
+  { id: 'release-14', environmentId: 'env-staging', version: 14, status: 'applied', createdBy: NORTHWIND.owner.id, createdAt: agoIso(42), submittedBy: DEPLOY_SUBMITTED_BY },
+  { id: 'release-13', environmentId: 'env-staging', version: 13, status: 'applied', createdBy: NORTHWIND.owner.id, createdAt: agoIso(5 * 60), submittedBy: { ...DEPLOY_SUBMITTED_BY, agentProfileId: 'profile-codex' } },
+  { id: 'release-12', environmentId: 'env-staging', version: 12, status: 'applied', createdBy: NORTHWIND.owner.id, createdAt: agoIso(26 * 60), submittedBy: DEPLOY_SUBMITTED_BY },
+];
+
 const STAGING_ENV = {
   id: 'env-staging',
   projectId: PROJECT_ID,
@@ -1348,7 +1355,8 @@ const STAGING_ENV = {
     version: 14,
     status: 'applied',
     createdBy: 'Claude Code — Opus 5 / task-ship-refund-idempotency',
-    createdAt: '2026-09-14T09:58:00.000Z',
+    createdAt: agoIso(42),
+    submittedBy: DEPLOY_SUBMITTED_BY,
   },
   routeHostnames: ['staging.payments.northwindlabs.dev'],
   node: DEPLOY_NODE,
@@ -1483,6 +1491,16 @@ async function setupDeploymentMocks(page: Page) {
     if (path === `/api/projects/${PROJECT_ID}/environments/env-staging/custom-domains`) {
       return respond(route, 200, { customDomains: [] });
     }
+    if (path === `/api/projects/${PROJECT_ID}/environments/env-staging/releases`) {
+      return respond(route, 200, { releases: STAGING_RELEASES });
+    }
+    if (path.match(/\/environments\/[^/]+\/(releases|custom-domains|public-routes)$/)) {
+      return respond(route, 200, { releases: [], customDomains: [], publicRoutes: [] });
+    }
+    if (path.match(/\/environments\/[^/]+\/volumes$/)) return respond(route, 200, { volumes: [] });
+    if (path === `/api/projects/${PROJECT_ID}/tasks/${DEPLOY_TASK_ID}`) {
+      return respond(route, 200, { id: DEPLOY_TASK_ID, projectId: PROJECT_ID, title: 'Retry failed webhook deliveries', status: 'completed' });
+    }
     if (path.match(/\/environments\/[^/]+\/(logs|containers|metrics)$/)) {
       return respond(route, 200, { entries: [], containers: [], systemInfo: null, fallbackMetrics: null });
     }
@@ -1500,17 +1518,13 @@ test('deployments list renders the environment lifecycle', async ({ page }) => {
   await setupDeploymentMocks(page);
   await page.goto(`/projects/${PROJECT_ID}/deployments`);
 
-  await expect(page.getByRole('heading', { name: 'staging', exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'production', exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'preview-pr-482', exact: true })).toBeVisible();
-  await expect(page.getByText('v14 · applied')).toBeVisible();
-  await expect(page.getByText('v13 · applied')).toBeVisible();
-  // The preview card reads as still coming up, not a third "done" clone —
-  // pending release, "starting" env status, and an Unknown service state
-  // (deriveServiceState() returns 'unknown' for a starting environment).
-  await expect(page.getByText('v1 · created')).toBeVisible();
-  await expect(page.getByText('starting', { exact: true })).toBeVisible();
-  await expect(page.getByText('Unknown', { exact: true })).toBeVisible();
+  const running = page.getByRole('region', { name: 'Running' });
+  await expect(running.getByText('staging', { exact: true })).toBeVisible();
+  await expect(running.getByText('production', { exact: true })).toBeVisible();
+  // The preview reads as still coming up, not a third "done" clone.
+  await expect(running.getByText('preview-pr-482', { exact: true })).toBeVisible();
+  await expect(running.getByText('Starting', { exact: true })).toBeVisible();
+  await expect(page.getByText('staging.payments.northwindlabs.dev')).toBeVisible();
   await expect(page.locator('body')).not.toContainText('Something went wrong');
 
   await assertNoOverflow(page);
@@ -1521,11 +1535,24 @@ test('sam-app-deployment-detail', async ({ page }) => {
   await page.goto(`/projects/${PROJECT_ID}/deployments/env-staging`);
 
   await expect(page.getByRole('heading', { name: 'staging', exact: true })).toBeVisible();
-  await expect(page.getByText('Release v14').first()).toBeVisible();
-  await expect(page.getByText('staging.payments.northwindlabs.dev')).toBeVisible();
-  await expect(page.getByText('Serving', { exact: true })).toBeVisible();
+  await expect(page.getByText('Running version 14.').first()).toBeVisible();
+  await expect(page.getByText('staging.payments.northwindlabs.dev').first()).toBeVisible();
+  // Who shipped it, from which chat: the release the agent submitted.
+  await expect(page.getByRole('region', { name: 'Recent deploys' }).getByText('“Retry failed webhook deliveries”').first()).toBeVisible();
   await expect(page.locator('body')).not.toContainText('Something went wrong');
 
   await assertNoOverflow(page);
   await marketingShot(page, 'sam-app-deployment-detail');
+});
+
+test('sam-app-deployment-policy', async ({ page }) => {
+  await setupDeploymentMocks(page);
+  await page.goto(`/projects/${PROJECT_ID}/deployments/env-staging`);
+
+  const access = page.getByRole('region', { name: 'Who can deploy' });
+  await expect(access.getByText('Agents can deploy here')).toBeVisible();
+  await expect(access.getByText('2 profiles can deploy here.')).toBeVisible();
+  await expect(page.locator('body')).not.toContainText('Something went wrong');
+
+  await marketingShot(page, 'sam-app-deployment-policy', access);
 });

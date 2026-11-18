@@ -71,6 +71,7 @@ export async function followChannelForCaller(
     requestedDelivery?: ProjectEventRequestedDeliveryMode;
     reason?: string;
     expiresAt?: number;
+    minWakeIntervalMs?: number;
   }
 ) {
   const context = await channelCallerContext(env, caller, 'task:write');
@@ -94,6 +95,7 @@ export async function followChannelForCaller(
     expiresAt: request.expiresAt,
     defaultExpiresAt: resolveAgentExpiresAt(env, caller, request.expiresAt),
     reason: request.reason,
+    minWakeIntervalMs: request.minWakeIntervalMs,
   });
   return {
     ...result,

@@ -5,21 +5,21 @@
  * The defect this guards: on the SAM root object a project-wide search full-scanned
  * `chat_messages` (7.4 M rows) in the keyword fallback and scored every FTS match, burning the
  * 30 s CPU allowance and queuing every other request behind it (2026-09-18..24). No harness here
- * enforces the CPU limit (`apps/api/.claude/rules/69`), so the discriminating assertions measure
+ * enforces the CPU limit (`.claude/rules/69`), so the discriminating assertions measure
  * the SHAPE that prevents it — SQLite rows read by one search — and the coverage disclosure a
  * consumer relies on to know the result is partial.
  */
-import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
-
-import { createRowMeteredSqlStorage } from '../../src/durable-objects/project-data/alarm-sections';
-import { materializeSession } from '../../src/durable-objects/project-data/materialization';
+import { createRowMeteredSqlStorage } from '@simple-agent-manager/project-data/internal/do/alarm-sections';
+import { materializeSession } from '@simple-agent-manager/project-data/internal/do/materialization';
 import {
   DEFAULT_PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT,
   DEFAULT_PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT,
   type MessageSearchBounds,
   searchMessagesWithCoverage,
-} from '../../src/durable-objects/project-data/message-search';
+} from '@simple-agent-manager/project-data/internal/do/message-search';
+import { env, runInDurableObject } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
+
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 
 const WIDE: MessageSearchBounds = {

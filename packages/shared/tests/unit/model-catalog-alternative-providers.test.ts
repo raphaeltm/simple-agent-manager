@@ -5,6 +5,17 @@ import { getModelGroupsForAgent, getModelsForAgent, isKnownModel } from '../../s
 const OPENCODE_CONSUMERS = ['opencode'] as const;
 
 const EXPECTED_OPENCODE_MODELS = [
+  'opencode/hy4-flash-free',
+  'opencode/gemini-4-hydrogen',
+  'opencode/longcat-2.5-free',
+  'opencode/gemini-4-carbon',
+  'opencode/minimax-m3.1-flash-free',
+  'opencode/claude-fable-5-2',
+  'opencode/muse-ember-1.0',
+  'opencode-go/hy4-flash-free',
+  'opencode-go/qwen4-max',
+  'opencode-go/longcat-2.5-free',
+
   'opencode/claude-fable-5-1',
   'opencode/claude-fable-5',
   'opencode/claude-opus-5-5',
@@ -12,8 +23,15 @@ const EXPECTED_OPENCODE_MODELS = [
   'opencode/claude-sonnet-5',
   'opencode/claude-sonnet-5-5',
   'opencode/claude-haiku-5-5',
-  'opencode/exo-free',
-  'opencode/step-5-preview-free',
+  'opencode/beam-free',
+  'opencode/iceman-free',
+  'opencode/inkling-2-small-free',
+  'opencode-go/hy4',
+  'opencode/muse-wonder-1.0',
+  'opencode/flint-40b-free',
+  'opencode-go/iceman-contributor-free',
+  'opencode-go/minimax-m3.1-flash',
+  'opencode/deepseek-v4.1-flash-free',
   'opencode/mistral-large-4',
   'opencode/gemini-3.8-flash',
   'opencode/gemini-3.7-flash',
@@ -27,9 +45,9 @@ const EXPECTED_OPENCODE_MODELS = [
   'opencode/kimi-k3',
   'opencode/minimax-m3',
   'opencode/muse-spark-1.3',
-  'opencode/muse-spark-1.3-contributor-free',
-  'opencode/ling-3.0-flash-fin-free',
-  'opencode-go/deepseek-v4-flash-vision-exp',
+  'opencode/gemini-4-argon',
+  'opencode/glm-5.3-flash-free',
+  'opencode-go/gemini-4-argon',
   'opencode-go/glm-5.2',
   'opencode-go/glm-5.3',
   'opencode-go/gpt-6-luna',
@@ -40,11 +58,11 @@ const EXPECTED_OPENCODE_MODELS = [
   'opencode-go/muse-spark-1.3-contributor',
   'opencode-go/qwen3.8-max',
   'opencode-go/claude-haiku-5-5',
-  'opencode-go/space-bunny',
-  'opencode-go/step-5-preview-free',
+  'opencode-go/kimi-k3.1-pro',
+  'opencode-go/step-5-preview',
 ] as const;
 
-const EXPECTED_GROUP_LABELS = ['OpenCode Zen', 'OpenCode Go'] as const;
+const EXPECTED_GROUP_LABELS = ['OpenCode', 'OpenCode Go'] as const;
 
 describe('OpenCode model catalog entries', () => {
   it('keys suggested OpenCode models as provider-qualified IDs', () => {
@@ -62,26 +80,46 @@ describe('OpenCode model catalog entries', () => {
   });
 
   it('keeps changed Models.dev display names in sync', () => {
-    const namesById = new Map(
-      getModelsForAgent('opencode').map((model) => [model.id, model.name])
-    );
+    const namesById = new Map(getModelsForAgent('opencode').map((model) => [model.id, model.name]));
 
-    expect(namesById.get('opencode/deepseek-v4-flash')).toBe('DeepSeek V4 Flash');
+    expect(namesById.get('opencode/hy4-flash-free')).toBe('Hy4 flash Free');
+    expect(namesById.get('opencode/gemini-4-hydrogen')).toBe('Gemini 4 Hydrogen');
+    expect(namesById.get('opencode/longcat-2.5-free')).toBe('LongCat 2.5 Free');
+    expect(namesById.get('opencode/gemini-4-carbon')).toBe('Gemini 4 Carbon');
+    expect(namesById.get('opencode/minimax-m3.1-flash-free')).toBe('MiniMax M3.1 Flash Free');
+    expect(namesById.get('opencode/claude-fable-5-2')).toBe('Claude Fable 5.2');
+    expect(namesById.get('opencode/muse-ember-1.0')).toBe('Muse Ember 1.0');
+    expect(namesById.get('opencode-go/hy4-flash-free')).toBe('Hy4 flash Free');
+    expect(namesById.get('opencode-go/qwen4-max')).toBe('Qwen4 Max');
+    expect(namesById.get('opencode-go/longcat-2.5-free')).toBe('LongCat 2.5 Free');
+    expect(namesById.get('opencode/deepseek-v4.1-flash')).toBe('DeepSeek V4.1 Flash 1017');
+    expect(namesById.get('opencode-go/deepseek-v4.1-flash')).toBe('DeepSeek V4.1 Flash 1017');
+    expect(namesById.get('opencode/muse-wonder-1.0')).toBe('Muse Wonder');
+    expect(namesById.get('opencode/flint-40b-free')).toBe('Flint 40B Free');
+    expect(namesById.get('opencode-go/iceman-contributor-free')).toBe('Iceman Contributor Free');
+    expect(namesById.get('opencode-go/minimax-m3.1-flash')).toBe('MiniMax M3.1 Flash');
+    expect(namesById.get('opencode-go/gemini-4-argon')).toBe('Gemini 4 Argon');
+    expect(namesById.has('opencode/deepseek-v4-flash')).toBe(false);
+    expect(namesById.get('opencode/iceman-free')).toBe('Iceman Free');
+    expect(namesById.has('opencode/crouton-alpha-free')).toBe(false);
+    expect(namesById.get('opencode/inkling-2-small-free')).toBe('Inkling 2 Small Free');
+    expect(namesById.get('opencode-go/hy4')).toBe('Hy4');
+    expect(namesById.has('opencode-go/crouton-alpha-free')).toBe(false);
     expect(namesById.get('opencode/claude-sonnet-5-5')).toBe('Claude Sonnet 5.5');
     expect(namesById.get('opencode/claude-haiku-5-5')).toBe('Claude Haiku 5.5');
     expect(namesById.get('opencode/gpt-6-astra')).toBe('GPT-6 Astra');
     expect(namesById.get('opencode/gpt-6.1-sol')).toBe('GPT-6.1 Sol');
     expect(namesById.get('opencode/gpt-5.6-sol')).toBe('GPT-5.6 Sol');
     expect(namesById.get('opencode/grok-4.7')).toBe('Grok 4.7');
-    expect(namesById.get('opencode/muse-spark-1.3-contributor-free')).toBe('Muse Spark 1.3 Free');
-    expect(namesById.get('opencode-go/deepseek-v4-flash')).toBe('DeepSeek V4 Flash');
-    expect(namesById.get('opencode-go/deepseek-v4-pro')).toBe('DeepSeek V4 Pro (New)');
+    expect(namesById.get('opencode/gemini-4-argon')).toBe('Gemini 4 Argon');
+    expect(namesById.get('opencode-go/step-5-preview')).toBe('Step 5 Preview');
+    expect(namesById.get('opencode-go/deepseek-v4-pro')).toBe('DeepSeek V4 Pro');
     expect(namesById.get('opencode-go/gpt-6-luna')).toBe('GPT-6 Luna');
     expect(namesById.has('opencode-go/gpt-6.1-sol')).toBe(false);
     expect(namesById.get('opencode-go/gpt-5.6-luna')).toBe('GPT-5.6 Luna');
     expect(namesById.get('opencode-go/hy3')).toBe('Hy3');
     expect(namesById.get('opencode-go/kimi-k3')).toBe('Kimi K3');
-    expect(namesById.get('opencode-go/space-bunny')).toBe('Space Bunny');
+    expect(namesById.get('opencode-go/kimi-k3.1-pro')).toBe('Kimi K3.1 Pro');
   });
 
   it('keeps OpenCode groups discoverable by provider label', () => {
@@ -113,6 +151,15 @@ describe('OpenCode model catalog entries', () => {
 
   it('excludes inactive Models.dev records from the static fallback', () => {
     for (const inactiveModelId of [
+      'opencode/nemotron-3-ultra-free',
+      'opencode/deepseek-v4-flash',
+      'opencode/longcat-2.5-preview-free',
+      'opencode/deepseek-v4-flash-vision-exp',
+      'opencode/space-bunny-free',
+      'opencode/claude-sonnet-4',
+      'opencode-go/longcat-2.5-preview-free',
+      'opencode-go/space-bunny',
+      'opencode-go/gemini-4-argon-contributor',
       'opencode/claude-opus-4-1',
       'opencode/fledge-alpha-free',
       'opencode/deepseek-v4-flash-free',

@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"regexp"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/diagredact"
 )
 
 const crashRecoveredStopReason = "recovered"
@@ -22,15 +23,6 @@ const crashRecoveredStopReason = "recovered"
 const FatalErrorStopReason = "fatal_error"
 
 const fatalErrorStopReason = FatalErrorStopReason
-
-var diagnosticRedactionPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{16,}`),
-	regexp.MustCompile(`(?i)((?:api[_-]?key|token|secret|password|authorization)\s*[:=]\s*)("[^"]+"|'[^']+'|[^\s,;]+)`),
-	regexp.MustCompile(`\b(sk-[A-Za-z0-9_-]{12,})\b`),
-	regexp.MustCompile(`\b(gh[pousr]_[A-Za-z0-9_]{12,})\b`),
-	regexp.MustCompile(`\b(github_pat_[A-Za-z0-9_]{12,})\b`),
-	regexp.MustCompile(`\b(sam_test_[A-Za-z0-9_-]{12,})\b`),
-}
 
 func isCrashPromptError(err error) bool {
 	if err == nil {
@@ -57,20 +49,7 @@ func isCrashPromptError(err error) bool {
 }
 
 func redactAgentDiagnosticText(text string) string {
-	redacted := text
-	for _, pattern := range diagnosticRedactionPatterns {
-		redacted = pattern.ReplaceAllStringFunc(redacted, func(match string) string {
-			submatches := pattern.FindStringSubmatch(match)
-			if len(submatches) >= 3 {
-				return submatches[1] + "[REDACTED]"
-			}
-			if len(submatches) >= 2 && strings.HasSuffix(strings.ToLower(submatches[1]), " ") {
-				return submatches[1] + "[REDACTED]"
-			}
-			return "[REDACTED]"
-		})
-	}
-	return redacted
+	return diagredact.Text(text)
 }
 
 type recoveryNotify func(stopReason string, err error)
@@ -159,6 +138,11 @@ func (h *SessionHost) beginCrashRecoveryWithPrerequisites(reqID json.RawMessage,
 	h.crashSessionID = prerequisites.sessionID
 	h.crashPromptReqID = append(json.RawMessage(nil), reqID...)
 	h.crashPromptViewerID = viewerID
+	// The interrupted turn no longer owns a live peer. Stop its prompting
+	// heartbeat before recovery starts; otherwise it overwrites the recovered
+	// idle report until the stale-turn sleep bound. Admission is still held by
+	// this attempt, so this cannot cancel a replacement turn's reporter.
+	h.stopPromptActivityRereport()
 	h.setStatusLocked(HostStarting)
 	h.statusErr = ""
 	h.armCrashRecoveryWatchdogLocked(notify)
@@ -227,10 +211,14 @@ func (h *SessionHost) armCrashRecoveryWatchdogLocked(notify recoveryNotify) {
 	if timeout <= 0 {
 		return
 	}
-	go h.watchCrashRecovery(timeout, notify)
+	h.crashRecoveryEpoch++
+	h.promptMu.Lock()
+	attempt := h.promptAttempt
+	h.promptMu.Unlock()
+	go h.watchCrashRecovery(timeout, notify, h.crashRecoveryEpoch, attempt)
 }
 
-func (h *SessionHost) watchCrashRecovery(timeout time.Duration, notify recoveryNotify) {
+func (h *SessionHost) watchCrashRecovery(timeout time.Duration, notify recoveryNotify, epoch uint64, attempt *promptAttempt) {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
@@ -240,11 +228,26 @@ func (h *SessionHost) watchCrashRecovery(timeout time.Duration, notify recoveryN
 	case <-timer.C:
 	}
 
+	h.finishCrashRecoveryTimeout(timeout, notify, epoch, attempt)
+}
+
+func (h *SessionHost) finishCrashRecoveryTimeout(timeout time.Duration, notify recoveryNotify, epoch uint64, attempt *promptAttempt) {
+	h.evictionDecisionMu.Lock()
+	defer h.evictionDecisionMu.Unlock()
+	h.mu.RLock()
+	active := h.crashRecoveryInProgress && h.crashRecoveryEpoch == epoch
+	h.mu.RUnlock()
+	if !active {
+		return
+	}
+	if h.parkRecoveryWatchdogForEviction(func() { h.finishCrashRecoveryTimeout(timeout, notify, epoch, attempt) }, attempt) {
+		return
+	}
 	message := fmt.Sprintf("Agent crash recovery timed out after %s", timeout)
 	err := fmt.Errorf("%s", message)
 
 	h.mu.Lock()
-	if !h.crashRecoveryInProgress {
+	if !h.crashRecoveryInProgress || h.crashRecoveryEpoch != epoch {
 		h.mu.Unlock()
 		return
 	}

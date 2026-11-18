@@ -302,7 +302,7 @@ test.describe('Fork/retry new chat screen audit', () => {
     const textarea = page.getByPlaceholder(COMPOSER_PLACEHOLDER);
     await expect(textarea).toHaveValue(/Parent task ID: task-1/);
     const prompt = await textarea.inputValue();
-    expect(prompt).toContain('SAM MCP tools');
+    expect(prompt).toContain('SAM MCP tool sessions_read');
     expect(prompt).toContain('Previous session: "Fix the login bug"');
     expect(prompt).toContain('Parent project ID: proj-test-1');
     expect(prompt).toContain('Parent session ID: session-1');
@@ -510,6 +510,7 @@ test.describe('Archived chat Fork composer audit', () => {
     await expect(page.getByPlaceholder('Write a prompt to fork this archived chat...')).toHaveCount(
       0
     );
-    await expect(page.getByText('Read-only session')).toBeVisible();
+    await expect(page.getByText('This chat has ended')).toBeVisible();
+    await expect(page.getByText('Only Test User can fork it to continue.')).toBeVisible();
   });
 });

@@ -30,6 +30,8 @@ export type CapacityPoolSummaryWorkloadRoles = 'editor-visible' | 'all';
 
 export interface ReadDefaultPoolSummaryOptions {
   workloadRoles?: CapacityPoolSummaryWorkloadRoles;
+  /** Only write-authorized placement may queue interrupted legacy work for this exact pool. */
+  adoptLegacyPublication?: boolean;
   /**
    * Default placement reads must remain active-only. UI/editor reads opt into
    * disabled default pools so users can add back offerings after removing the
@@ -40,7 +42,7 @@ export interface ReadDefaultPoolSummaryOptions {
 
 export interface PoolPublicationGuard {
   /** Source refreshes whose results this pool readiness publication certifies. */
-  sourceGenerations?: Array<{ id: string; generation: number }>;
+  sourceGenerations?: Array<{ id: string; generation: number; status?: 'active' | 'disabled' }>;
   revision: number;
   updatedAt: string;
   status: string;
@@ -75,6 +77,8 @@ export interface DefaultCapacityPoolOfferingResolution {
   offerings: ProviderInstanceOffering[];
   refreshSucceeded: boolean;
   catalogComplete?: boolean;
+  /** Validated publication facts; successful static reference catalogs need not enumerate live inventory. */
+  catalogValidated?: boolean;
 }
 
 export type DefaultCapacityPoolOfferingResolver = (
@@ -109,8 +113,20 @@ export interface DefaultCapacityPoolsBackfillOptions {
   env?: Env;
   offeringResolver?: DefaultCapacityPoolOfferingResolver;
   scopeBatchSize?: number;
-  /** Candidate ROWS published per source per pass before the durable cursor defers the rest. */
+  /** Candidate ROWS written per D1 batch while publishing a source's catalog. */
   candidatePublishBatchSize?: number;
+  /**
+   * Per-source wall-clock budget for publishing an incomplete catalog in one pass. Overrides
+   * `operations.capacityPoolPublishBudgetMs`; 0 writes one batch per pass.
+   */
+  candidatePublishBudgetMs?: number;
+  /** Shared across every source/scope in an invocation; bounds aggregate expensive work. */
+  reconciliationDeadlineAt?: number;
+  refreshSettings?: import('./capacity-pool-refresh-settings').CapacityPoolRefreshSettings;
+  /** Scheduler continuation must not restart an exhausted operation. */
+  refreshContinuation?: boolean;
+  /** Exact durable lease claimed by the cron continuation; stale claimants cannot reacquire. */
+  refreshClaim?: { generation: number; nextAttemptAt: number };
   /** Secret-free credential anchors scrubbed/pruned per backfill pass. */
   credentialAnchorScrubBatchSize?: number;
   beforeSourcePublication?: (input: {

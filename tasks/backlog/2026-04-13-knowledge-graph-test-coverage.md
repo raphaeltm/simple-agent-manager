@@ -1,5 +1,10 @@
 # Knowledge Graph Test Coverage — Post-Merge Gap
 
+> **Reconciliation 2026-10-26:** nothing in scope shipped. The tools-list test is now at
+> `apps/api/tests/unit/routes/mcp.test.ts:739`, not `:639`, and still names none of the 11
+> knowledge tools. The shipped knowledge MCP cases are now at
+> `mcp-knowledge-policy-tools.test.ts:212-454`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

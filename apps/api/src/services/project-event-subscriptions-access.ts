@@ -163,11 +163,15 @@ export function resolveDeliveryPreference(
   // mailbox class, so its wakes stop a busy target turn (stop-and-deliver)
   // instead of being recorded as never-injected. A true in-harness runtime
   // interrupt adapter can later claim the mode through the delivery resolver's
-  // runtime_interrupt capability path.
+  // runtime_interrupt capability path. runtime_steer rides the same queue with the
+  // `steer` delivery intent: a busy target receives the batch inside its running
+  // turn, and an idle or sleeping one gets an ordinary wake prompt.
   const resolved =
     requested === 'record_only'
       ? 'record_only'
-      : requested === 'existing_session_prompt' || requested === 'runtime_interrupt'
+      : requested === 'existing_session_prompt' ||
+          requested === 'runtime_interrupt' ||
+          requested === 'runtime_steer'
         ? 'queued_for_prompt_delivery'
         : 'recorded_not_injected';
   return {

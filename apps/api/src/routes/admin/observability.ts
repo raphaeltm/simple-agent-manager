@@ -13,24 +13,7 @@ import { log } from '../../lib/logger';
 import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { rateLimit } from '../../middleware/rate-limit';
-import {
-  AdminLogQuerySchema,
-  jsonValidator,
-  RunDebugDiagnosisSchema,
-  SaveDebugDiagnosisIdeaSchema,
-} from '../../schemas';
-import {
-  createDebugDiagnosisRun,
-  getDebugDiagnosisRun,
-  listDebugDiagnoses,
-  retryDebugDiagnosisRun,
-  saveDebugDiagnosisAsIdea,
-} from '../../services/debug-agent';
-import {
-  cancelDiagnosisRunner,
-  listDiagnosisEvents,
-  startDiagnosisRunner,
-} from '../../services/diagnosis-runner';
+import { AdminLogQuerySchema, jsonValidator } from '../../schemas';
 import {
   getDiagnosticArtifactForDownload,
   getDiagnosticIncidentByErrorId,
@@ -42,10 +25,15 @@ import {
   getErrorTrends,
   getHealthSummary,
   getLogQueryRateLimit,
-  queryCloudflareLogs,
   queryErrors,
 } from '../../services/observability';
 import { runPlatformFeedbackTriage } from '../../services/platform-feedback-triage';
+import {
+  queryWorkerLogs,
+  WORKER_LOG_RATE_KEY_PREFIX,
+  WORKER_LOG_RATE_WINDOW_SECONDS,
+} from '../../services/worker-log-query';
+import { registerAdminDiagnosisRoutes } from './diagnoses';
 
 /**
  * Admin observability sub-router (spec 023) — mounted by the parent admin
@@ -53,7 +41,6 @@ import { runPlatformFeedbackTriage } from '../../services/platform-feedback-tria
  * requireApproved() + requireSuperadmin() on every request.
  */
 export const adminObservabilityRoutes = new Hono<{ Bindings: Env }>();
-
 
 const VALID_ERROR_SOURCES = new Set<string>(['client', 'vm-agent', 'api']);
 const VALID_ERROR_LEVELS = new Set<string>(['error', 'warn', 'info']);
@@ -304,59 +291,15 @@ adminObservabilityRoutes.post(
   async (c, next) => {
     const limiter = rateLimit({
       limit: getLogQueryRateLimit(c.env),
-      keyPrefix: 'cf-log-query',
-      windowSeconds: 60,
+      keyPrefix: WORKER_LOG_RATE_KEY_PREFIX,
+      windowSeconds: WORKER_LOG_RATE_WINDOW_SECONDS,
     });
     return limiter(c, next);
   },
   jsonValidator(AdminLogQuerySchema),
   async (c) => {
-    if (!c.env.CF_API_TOKEN || !c.env.CF_ACCOUNT_ID) {
-      throw errors.badRequest(
-        'Cloudflare API credentials not configured. Set CF_API_TOKEN and CF_ACCOUNT_ID.'
-      );
-    }
-
-    const body = c.req.valid('json');
-
-    // Validate dates
-    const startDate = new Date(body.timeRange.start);
-    const endDate = new Date(body.timeRange.end);
-    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-      throw errors.badRequest('timeRange start and end must be valid ISO 8601 dates');
-    }
-
-    // Validate levels
-    if (body.levels) {
-      const validLogLevels = new Set(['error', 'warn', 'info', 'debug', 'log']);
-      for (const level of body.levels) {
-        if (!validLogLevels.has(level)) {
-          throw errors.badRequest(
-            `Invalid level: ${level}. Must be one of: error, warn, info, debug, log`
-          );
-        }
-      }
-    }
-
-    // Validate limit
-    if (body.limit !== undefined && (body.limit < 1 || body.limit > 500)) {
-      throw errors.badRequest('limit must be between 1 and 500');
-    }
-
     try {
-      const result = await queryCloudflareLogs({
-        cfApiToken: c.env.CF_API_TOKEN,
-        cfAccountId: c.env.CF_ACCOUNT_ID,
-        timeRange: { start: body.timeRange.start, end: body.timeRange.end },
-        levels: body.levels ?? undefined,
-        search: body.search || undefined,
-        limit: body.limit,
-        cursor: body.cursor || undefined,
-        queryId: body.queryId || undefined,
-        scriptName: body.scriptName || undefined,
-      });
-
-      return c.json(result);
+      return c.json(await queryWorkerLogs(c.env, c.req.valid('json'), c.req.raw.signal));
     } catch (err) {
       if (err instanceof CfApiError) {
         return c.json({ error: 'CF_API_ERROR', message: err.message }, 502);
@@ -366,98 +309,7 @@ adminObservabilityRoutes.post(
   }
 );
 
-adminObservabilityRoutes.get('/debug/projects', async (c) => {
-  const db = drizzle(c.env.DATABASE, { schema });
-  const projects = await db
-    .select({ id: schema.projects.id, name: schema.projects.name })
-    .from(schema.projects)
-    .orderBy(schema.projects.name)
-    .limit(200);
-  return c.json({ projects });
-});
-
-adminObservabilityRoutes.get('/diagnoses', async (c) => {
-  const result = await listDebugDiagnoses(c.env, {
-    errorId: c.req.query('errorId'),
-    startTime: c.req.query('startTime'),
-    endTime: c.req.query('endTime'),
-  });
-  return c.json(result);
-});
-
-adminObservabilityRoutes.post('/diagnoses', jsonValidator(RunDebugDiagnosisSchema), async (c) => {
-  const body = c.req.valid('json');
-  if (
-    (!body.errorId && (!body.startTime || !body.endTime)) ||
-    (body.errorId && (body.startTime || body.endTime))
-  ) {
-    throw errors.badRequest('Provide either errorId or a startTime/endTime window');
-  }
-  try {
-    const run = await createDebugDiagnosisRun(c.env, getUserId(c), body);
-    await startDiagnosisRunner(c.env, run.id);
-    return c.json({ run }, 202);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Diagnosis failed';
-    if (message.includes('budget') || message.includes('token ceiling')) {
-      return c.json({ error: 'DEBUG_BUDGET_EXHAUSTED', message }, 429);
-    }
-    if (message.includes('not found') || message.includes('window'))
-      throw errors.badRequest(message);
-    throw err;
-  }
-});
-
-adminObservabilityRoutes.get('/diagnosis-runs/:runId', async (c) => {
-  const run = await getDebugDiagnosisRun(c.env, c.req.param('runId'));
-  if (!run) throw errors.notFound('Diagnosis run not found');
-  const cursor = Number(c.req.query('cursor') ?? 0);
-  const eventResult = await listDiagnosisEvents(
-    c.env,
-    run.id,
-    Number.isFinite(cursor) && cursor >= 0 ? cursor : 0
-  );
-  return c.json({ run, ...eventResult });
-});
-
-adminObservabilityRoutes.get('/diagnosis-runs/:runId/events', async (c) => {
-  const run = await getDebugDiagnosisRun(c.env, c.req.param('runId'));
-  if (!run) throw errors.notFound('Diagnosis run not found');
-  const cursor = Number(c.req.query('cursor') ?? 0);
-  return c.json(
-    await listDiagnosisEvents(c.env, run.id, Number.isFinite(cursor) && cursor >= 0 ? cursor : 0)
-  );
-});
-
-adminObservabilityRoutes.post('/diagnosis-runs/:runId/cancel', async (c) => {
-  const run = await getDebugDiagnosisRun(c.env, c.req.param('runId'));
-  if (!run) throw errors.notFound('Diagnosis run not found');
-  await cancelDiagnosisRunner(c.env, run.id);
-  return c.json({ accepted: true }, 202);
-});
-
-adminObservabilityRoutes.post('/diagnosis-runs/:runId/retry', async (c) => {
-  const run = await retryDebugDiagnosisRun(c.env, c.req.param('runId'), getUserId(c));
-  await startDiagnosisRunner(c.env, run.id);
-  return c.json({ run }, 202);
-});
-
-adminObservabilityRoutes.post(
-  '/diagnoses/:diagnosisId/idea',
-  jsonValidator(SaveDebugDiagnosisIdeaSchema),
-  async (c) => {
-    const body = c.req.valid('json');
-    if (!body.projectId?.trim()) throw errors.badRequest('projectId is required');
-    const result = await saveDebugDiagnosisAsIdea(
-      c.env,
-      c.req.param('diagnosisId'),
-      body.projectId,
-      getUserId(c),
-      body.title
-    );
-    return c.json(result, 201);
-  }
-);
+registerAdminDiagnosisRoutes(adminObservabilityRoutes);
 
 adminObservabilityRoutes.post('/feedback-triage', async (c) => {
   const result = await runPlatformFeedbackTriage(c.env, 'manual');
@@ -486,4 +338,3 @@ adminObservabilityRoutes.get('/logs/stream', async (c) => {
 
   return doStub.fetch(new Request(doUrl.toString(), c.req.raw));
 });
-

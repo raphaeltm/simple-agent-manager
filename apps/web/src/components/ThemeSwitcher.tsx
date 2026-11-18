@@ -18,8 +18,8 @@ const THEME_OPTIONS: ThemeOption[] = [
 /**
  * Shared three-way theme switcher (Dark | Light | System). Self-contained —
  * reads and writes the preference via {@link useTheme}, so host surfaces need no
- * extra props. Horizontal icon + label layout with `role="group"` +
- * `aria-pressed`, visible focus ring, and theme-aware design tokens only.
+ * extra props. A SAM Glass well: the chosen theme is raised with its label,
+ * the others show their icon. `role="group"` + `aria-pressed`.
  */
 export const ThemeSwitcher: FC<{ className?: string }> = ({ className }) => {
   const { theme, setTheme } = useTheme();
@@ -28,7 +28,7 @@ export const ThemeSwitcher: FC<{ className?: string }> = ({ className }) => {
     <div
       role="group"
       aria-label="Theme"
-      className={`flex gap-1 ${className ?? ''}`.trim()}
+      className={`sam-well flex gap-0.5 rounded-[var(--sam-radius-control)] p-0.5 ${className ?? ''}`.trim()}
     >
       {THEME_OPTIONS.map(({ value, label, icon: Icon }) => {
         const active = theme === value;
@@ -39,13 +39,13 @@ export const ThemeSwitcher: FC<{ className?: string }> = ({ className }) => {
             onClick={() => setTheme(value)}
             aria-pressed={active}
             aria-label={label}
-            className={`flex items-center justify-center gap-1.5 rounded-sm border py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-1 focus-visible:ring-offset-bg-canvas ${
+            className={`flex h-8 items-center justify-center gap-1.5 rounded-[9px] border-0 text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring ${
               active
-                ? 'bg-accent text-fg-on-accent border-accent flex-1 px-2'
-                : 'border-border-default text-fg-muted hover:bg-surface-hover hover:text-fg-primary px-2'
+                ? 'sam-raised flex-1 px-2 font-medium text-fg-primary'
+                : 'bg-transparent px-2.5 text-fg-muted hover:text-fg-primary'
             }`}
           >
-            <Icon size={14} aria-hidden="true" />
+            <Icon size={15} strokeWidth={1.75} aria-hidden="true" className={active ? 'text-[var(--sam-status-success-fg)]' : undefined} />
             {active && <span>{label}</span>}
           </button>
         );

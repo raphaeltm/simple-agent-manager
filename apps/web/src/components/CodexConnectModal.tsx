@@ -15,6 +15,7 @@ import {
 
 interface AgentCredentialConnectModalProps {
   agentType: GuidedSetupAgentType;
+  projectId?: string;
   isOpen: boolean;
   onClose: () => void;
   onConnected?: () => void;
@@ -66,7 +67,8 @@ function getPollIntervalMs(): number {
   return Number(import.meta.env.VITE_CODEX_SETUP_POLL_MS ?? DEFAULT_POLL_INTERVAL_MS);
 }
 
-function getSuccessCloseDelayMs(): number {
+/** How long the success state stays on screen before the modal closes itself. */
+export function getSuccessCloseDelayMs(): number {
   return Number(
     import.meta.env.VITE_CODEX_SETUP_SUCCESS_CLOSE_MS ?? DEFAULT_SUCCESS_CLOSE_DELAY_MS
   );
@@ -102,6 +104,7 @@ function isFailureStatus(status: AgentCredentialSetupStatus): boolean {
 
 export function AgentCredentialConnectModal({
   agentType,
+  projectId,
   isOpen,
   onClose,
   onConnected,
@@ -190,9 +193,9 @@ export function AgentCredentialConnectModal({
 
     void (async () => {
       try {
-        const result = await createAgentCredentialSetupSession(agentType);
-        if (result.kind === 'created') sessionIdRef.current = result.session.id;
+        const result = await createAgentCredentialSetupSession(agentType, projectId);
         if (cancelled) return;
+        if (result.kind === 'created') sessionIdRef.current = result.session.id;
         if (result.kind !== 'created') {
           setPhase('blocked');
           setMessage(result.message);
@@ -220,7 +223,7 @@ export function AgentCredentialConnectModal({
       manualCloseTimerRef.current = null;
       sessionIdRef.current = null;
     };
-  }, [agentType, isOpen, retryNonce]);
+  }, [agentType, projectId, isOpen, retryNonce]);
 
   const handleCopy = async () => {
     if (!session?.userCode) return;
@@ -328,6 +331,11 @@ export function AgentCredentialConnectModal({
       aria-labelledby={titleId}
     >
       <div className="flex flex-col gap-5">
+        <p className="m-0 text-sm text-fg-muted">
+          {projectId
+            ? 'This account will be saved for this project. Your personal default stays unchanged.'
+            : 'This account will be saved as your personal default.'}
+        </p>
         {phase === 'creating' && <p role="status">Starting guided setup…</p>}
 
         {(phase === 'blocked' || phase === 'error') && message && (

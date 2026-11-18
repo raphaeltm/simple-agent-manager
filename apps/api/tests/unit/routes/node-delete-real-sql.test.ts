@@ -5,7 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
-import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import {
+  applySqliteMigration,
+  createAllSchemaTables,
+  createSqliteD1,
+} from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({
   requireNodeOwnership: vi.fn(),
@@ -35,7 +39,10 @@ vi.mock('../../../src/services/node-lifecycle', () => ({
   finalizeDeletion: (...args: unknown[]) => mocks.finalizeDeletion(...args),
 }));
 
+import { drizzle } from 'drizzle-orm/d1';
+
 import { nodesRoutes } from '../../../src/routes/nodes';
+import { deleteOwnedNode } from '../../../src/routes/nodes/delete';
 
 const TERMINATION_PROOF_AT = '2026-09-04T09:00:00.000Z';
 const ORIGINAL_INCARNATION = 'runtime-node-1';
@@ -91,6 +98,12 @@ describe('DELETE /api/nodes/:id managed-node proof predicates — real SQL verti
     vi.clearAllMocks();
     sqlite = new Database(':memory:');
     createAllSchemaTables(sqlite, schema);
+    // This route now relies on the shipped audit uniqueness constraint.
+    sqlite.exec('DROP TABLE node_health_events');
+    applySqliteMigration(
+      sqlite,
+      new URL('../../../src/db/migrations/0172_node_health_events.sql', import.meta.url)
+    );
     env = { DATABASE: createSqliteD1(sqlite) } as Env;
 
     mocks.requireNodeOwnership.mockResolvedValue({
@@ -98,6 +111,8 @@ describe('DELETE /api/nodes/:id managed-node proof predicates — real SQL verti
       userId: 'user-1',
       status: 'deleted',
       healthStatus: 'unhealthy',
+      createdAt: '2026-09-04T08:00:00.000Z',
+      lastHeartbeatAt: null,
       nodeRole: 'workspace',
       nodeClass: 'managed',
       runtimeIncarnationId: ORIGINAL_INCARNATION,
@@ -124,6 +139,53 @@ describe('DELETE /api/nodes/:id managed-node proof predicates — real SQL verti
   });
 
   afterEach(() => sqlite.close());
+
+  it.each(['DELETE', 'POST'])(
+    'rejects owner/manual %s before provider teardown or attestation when a builder is reserved',
+    async (method) => {
+      seedNode();
+      sqlite.exec(`INSERT INTO deployment_publish_jobs
+      (id,node_id,executor,context_shadow,executor_instance_id,status)
+      VALUES ('job','node-1','cloudflare',0,'job','succeeded')`);
+      const response = await app.request(
+        `/api/nodes/node-1${method === 'POST' ? '/manual-deletion' : ''}`,
+        {
+          method,
+          ...(method === 'POST'
+            ? {
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ confirmed: true }),
+              }
+            : {}),
+        },
+        env
+      );
+      expect(response.status).toBe(409);
+      expect(mocks.deleteNodeResources).not.toHaveBeenCalled();
+      expect(mocks.finalizeDeletion).not.toHaveBeenCalled();
+      expect(sqlite.prepare('SELECT runtime_termination_attested_at FROM nodes').get()).toEqual({
+        runtime_termination_attested_at: null,
+      });
+      expect(sqlite.prepare('SELECT id FROM deployment_publish_jobs').get()).toEqual({ id: 'job' });
+    }
+  );
+
+  it('the shared Operations delete_node entry point rejects before provider teardown', async () => {
+    seedNode();
+    sqlite.exec(`INSERT INTO deployment_publish_jobs
+      (id,node_id,executor,context_shadow,executor_instance_id,status)
+      VALUES ('job','node-1','cloudflare',0,'job','building')`);
+    await expect(
+      deleteOwnedNode(
+        env,
+        drizzle(env.DATABASE, { schema }),
+        await mocks.requireNodeOwnership(),
+        'user-1'
+      )
+    ).rejects.toMatchObject({ statusCode: 409 });
+    expect(mocks.deleteNodeResources).not.toHaveBeenCalled();
+    expect(mocks.finalizeDeletion).not.toHaveBeenCalled();
+  });
 
   it('deletes only workspaces carrying the matching proof and the exact node incarnation', async () => {
     seedNode();
@@ -153,7 +215,7 @@ describe('DELETE /api/nodes/:id managed-node proof predicates — real SQL verti
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({
-      message: 'Managed node incarnation changed after deletion proof',
+      message: 'Node incarnation changed before deletion audit',
     });
     expect(
       sqlite.prepare('SELECT runtime_incarnation_id FROM nodes WHERE id = ?').get('node-1')

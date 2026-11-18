@@ -1,9 +1,21 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { QueryClientProvider } from '@tanstack/react-query';
+import {
+  act,
+  fireEvent,
+  render as rawRender,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiClientError } from '../../src/lib/api/client';
+import { createTestQueryClient, renderWithQuery as render } from '../test-utils/query-test-utils';
 const mocks = vi.hoisted(() => ({ fetchAdminSettings: vi.fn(), patchAdminSettings: vi.fn() }));
-vi.mock('../../src/lib/api/admin-settings', () => mocks);
+vi.mock('../../src/lib/api/admin-settings', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/lib/api/admin-settings')>()),
+  ...mocks,
+}));
 import { AdminSettings } from '../../src/pages/AdminSettings';
 const field = (name: string, overrides = {}) => ({
   name,
@@ -97,7 +109,7 @@ describe('AdminSettings', () => {
     const confirm = screen.getByRole('button', { name: 'Apply change' });
     fireEvent.click(confirm);
     fireEvent.click(confirm);
-    expect(mocks.patchAdminSettings).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mocks.patchAdminSettings).toHaveBeenCalledTimes(1));
     expect(mocks.patchAdminSettings).toHaveBeenCalledWith(2, [
       { name: 'operations.doAlarmsEnabled', value: null },
     ]);
@@ -168,6 +180,32 @@ describe('AdminSettings', () => {
     );
     expect(secret).toHaveValue('private-secret');
   });
+  it('groups collaboration tunables and never hides a category this build does not know', async () => {
+    mocks.fetchAdminSettings.mockResolvedValue({
+      ...base,
+      settings: [
+        ...base.settings,
+        field('collaboration.commentMentionsMax', {
+          type: 'integer',
+          defaultValue: 10,
+          value: 10,
+          category: 'Collaboration',
+          range: { min: 1, max: 50 },
+        }),
+        field('future.newThing', { category: 'Future' }),
+      ],
+    });
+    render(<AdminSettings />);
+
+    const collaboration = await screen.findByRole('region', { name: 'Collaboration' });
+    expect(
+      within(collaboration).getByLabelText('collaboration · comment Mentions Max')
+    ).toBeInTheDocument();
+    const other = screen.getByRole('region', { name: 'Other' });
+    expect(within(other).getByLabelText('future · new Thing')).toBeInTheDocument();
+    // Liveness: the known groups still render beside the new ones.
+    expect(screen.getByRole('region', { name: 'Operations' })).toBeInTheDocument();
+  });
   it('resets both database credential overrides atomically', async () => {
     mocks.fetchAdminSettings.mockResolvedValue({
       ...base,
@@ -192,4 +230,129 @@ describe('AdminSettings', () => {
       ])
     );
   });
+});
+
+vi.mock('../../src/hooks/useQueryScope', () => ({ useQueryScope: () => 'admin-1' }));
+
+describe('draft revision anchors', () => {
+  beforeEach(() => vi.clearAllMocks());
+  it('anchors a draft to its cached revision while a mount refresh resolves, then rebases only on explicit reload', async () => {
+    const cached = { ...base, settings: [field('runtime.first', { value: 'old' })] };
+    const newer = { ...cached, revision: 9 };
+    let release!: (value: typeof cached) => void;
+    mocks.fetchAdminSettings.mockReturnValueOnce(
+      new Promise((resolve) => {
+        release = resolve;
+      })
+    );
+    mocks.patchAdminSettings.mockRejectedValueOnce(new ApiClientError('CONFLICT', 'stale', 409));
+    const client = createTestQueryClient();
+    client.setQueryData(['auth', 'admin-1', 'admin', 'settings'], cached);
+    rawRender(
+      <QueryClientProvider client={client}>
+        <AdminSettings />
+      </QueryClientProvider>
+    );
+    const input = await screen.findByLabelText('runtime · first');
+    await waitFor(() => expect(mocks.fetchAdminSettings).toHaveBeenCalledTimes(1));
+    fireEvent.change(input, { target: { value: 'draft' } });
+    await act(async () => release(newer));
+    await screen.findByText('1 settings · Revision 9');
+    fireEvent.click(within(card('runtime · first')).getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(mocks.patchAdminSettings).toHaveBeenCalledWith(2, [
+        { name: 'runtime.first', value: 'draft' },
+      ])
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent('Settings changed');
+    expect(input).toHaveValue('draft');
+    mocks.fetchAdminSettings.mockResolvedValue(newer);
+    mocks.patchAdminSettings.mockResolvedValue({ ...newer, revision: 10 });
+    fireEvent.click(screen.getByRole('button', { name: 'Reload current settings' }));
+    await waitFor(() =>
+      expect(within(card('runtime · first')).getByRole('button', { name: 'Save' })).toBeEnabled()
+    );
+    fireEvent.click(within(card('runtime · first')).getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(mocks.patchAdminSettings).toHaveBeenCalledWith(9, [
+        { name: 'runtime.first', value: 'draft' },
+      ])
+    );
+  });
+
+  it('advances remaining drafts after an acknowledged own write but not a later reconnect refresh', async () => {
+    const original = { ...base, settings: [field('runtime.first'), field('runtime.second')] };
+    mocks.fetchAdminSettings.mockResolvedValue(original);
+    mocks.patchAdminSettings.mockResolvedValue({ ...original, revision: 3 });
+    const { queryClient } = render(<AdminSettings />);
+    fireEvent.change(await screen.findByLabelText('runtime · first'), {
+      target: { value: 'first' },
+    });
+    fireEvent.change(screen.getByLabelText('runtime · second'), { target: { value: 'second' } });
+    fireEvent.click(within(card('runtime · first')).getByRole('button', { name: 'Save' }));
+    await screen.findByText('2 settings · Revision 3');
+    const saveSecond = within(card('runtime · second')).getByRole('button', { name: 'Save' });
+    await waitFor(() => expect(saveSecond).toBeEnabled());
+    mocks.fetchAdminSettings.mockResolvedValue({ ...original, revision: 9 });
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: ['auth', 'admin-1', 'admin', 'settings'] });
+    });
+    await screen.findByText('2 settings · Revision 9');
+    fireEvent.click(saveSecond);
+    await waitFor(() =>
+      expect(mocks.patchAdminSettings).toHaveBeenLastCalledWith(3, [
+        { name: 'runtime.second', value: 'second' },
+      ])
+    );
+  });
+});
+
+it('shows invalid stored text beside the default and permits a confirmed null reset', async () => {
+  mocks.fetchAdminSettings.mockResolvedValue({
+    ...base,
+    settings: [
+      field('chat.profileUsageWindowDays', {
+        type: 'integer',
+        category: 'Chat',
+        value: 14,
+        defaultValue: 14,
+        source: 'default',
+        storedValueInvalid: true,
+        storedValue: '-1',
+      }),
+    ],
+  });
+  render(<AdminSettings />);
+  expect(await screen.findByText('Default in effect, stored value invalid.')).toBeVisible();
+  expect(screen.getByText('Stored value: -1')).toBeVisible();
+  expect(screen.getByLabelText('chat · profile Usage Window Days')).toHaveValue(14);
+  fireEvent.click(screen.getByRole('button', { name: 'Reset override' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Apply change' }));
+  await waitFor(() =>
+    expect(mocks.patchAdminSettings).toHaveBeenCalledWith(2, [
+      { name: 'chat.profileUsageWindowDays', value: null },
+    ])
+  );
+});
+
+it('labels a safety fallback and never displays secret stored text', async () => {
+  mocks.fetchAdminSettings.mockResolvedValue({
+    ...base,
+    settings: [
+      field('integration.github.clientSecret', {
+        secret: true,
+        storedValueInvalid: true,
+        storedValueFallback: 'safe',
+        storedValue: 'private-stored-secret',
+        source: 'default',
+        value: null,
+      }),
+    ],
+  });
+  render(<AdminSettings />);
+  expect(
+    await screen.findByText('Safe fallback in effect, stored value invalid.')
+  ).toBeInTheDocument();
+  expect(screen.queryByText(/private-stored-secret/)).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Reset override' })).toBeEnabled();
 });

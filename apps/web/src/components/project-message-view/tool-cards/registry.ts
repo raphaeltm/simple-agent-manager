@@ -1,17 +1,26 @@
 import type { ToolCallItem } from '@simple-agent-manager/acp-client';
 import type { FC } from 'react';
 
+import { extractApprovalId, isApprovalCardTool } from './approval-card-data';
+import { ApprovalCard } from './ApprovalCard';
 import {
   DOCUMENT_CARD_TOOLS,
   extractDocumentCardData,
   normalizeToolName,
 } from './document-card-data';
 import { DocumentCard } from './DocumentCard';
+import { extractHumanInputRequest, isHumanInputCardTool } from './human-input-card-data';
+import { HumanInputCard } from './HumanInputCard';
+import { extractInboxItemRef, isInboxItemCardTool } from './inbox-item-card-data';
+import { InboxItemCard } from './InboxItemCard';
+import { extractSecretRequestId, isSecretRequestCardTool } from './secret-request-card-data';
+import { SecretRequestCard } from './SecretRequestCard';
+import { isTypedCardToolName } from './typed-card-tools';
 
 /** Props every typed tool-call card receives. */
 export interface ToolCardProps {
   item: ToolCallItem;
-  /** Project the card belongs to — needed for library preview URLs. */
+  /** Project the card belongs to — needed for library preview URLs and approval scoping. */
   projectId?: string;
 }
 
@@ -56,8 +65,35 @@ export function matchToolCard(item: ToolCallItem): FC<ToolCardProps> | null {
 }
 
 function resolveToolCard(item: ToolCallItem): FC<ToolCardProps> | null {
-  const base = normalizeToolName(item.toolName ?? item.title);
-  if (!base || !DOCUMENT_CARD_TOOLS.has(base)) {
+  // One list of card tools for the registry and the message converter (TYPED_CARD_TOOLS): a card
+  // missing from it never renders, rather than rendering only for harnesses that repeat the tool
+  // name on every row.
+  if (!isTypedCardToolName(item.toolName ?? item.title)) {
+    return null;
+  }
+  // Operations approval request: the card needs the approval ID from the result. While the
+  // call runs, or when it failed, the generic card shows it (and any error) instead.
+  if (isApprovalCardTool(item)) {
+    return item.status !== 'failed' && extractApprovalId(item) ? ApprovalCard : null;
+  }
+  // Agent question: the card needs the attention marker reference from the result. While the
+  // call runs, when it failed, or for results recorded before the structured payload, the
+  // generic card shows it instead.
+  if (isHumanInputCardTool(item)) {
+    return item.status !== 'failed' && extractHumanInputRequest(item) ? HumanInputCard : null;
+  }
+  // Agent inbox item (`inbox_write` ask or review): the card needs the item reference from the
+  // result. Update and cancel results have none, so they keep the generic card, as does a call
+  // that is running or failed.
+  if (isInboxItemCardTool(item)) {
+    return item.status !== 'failed' && extractInboxItemRef(item) ? InboxItemCard : null;
+  }
+  // Agent secret request: the card needs the request ID from the result. While the call runs, or
+  // when it failed (bad name, override, cap), the generic card shows it and the error instead.
+  if (isSecretRequestCardTool(item)) {
+    return item.status !== 'failed' && extractSecretRequestId(item) ? SecretRequestCard : null;
+  }
+  if (!DOCUMENT_CARD_TOOLS.has(normalizeToolName(item.toolName ?? item.title) ?? '')) {
     return null;
   }
   // Name says "library tool"; the payload is the authority on whether we can

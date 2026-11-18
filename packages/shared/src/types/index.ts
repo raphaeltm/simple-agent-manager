@@ -1,5 +1,29 @@
 // FILE SIZE EXCEPTION: Shared public type barrel intentionally keeps named re-exports centralized for stable package imports. See .claude/rules/18-file-size-limits.md
 // Types barrel — named re-exports only (no `export *`)
+export type { IdeaUpdateNote, IdeaUpdatesPage } from './idea-updates';
+export type {
+  CappedList,
+  FileContext,
+  IdeaContext,
+  LinkedFile,
+  LinkedIdea,
+  LinkedPullRequest,
+  LinkedSession,
+  LinkKind,
+  LinkOrigin,
+  LinkRelation,
+  PullRequestRef,
+  PullRequestState,
+  SessionContext,
+} from './links';
+export {
+  isLinkRelation,
+  isStrongLinkRelation,
+  isWeakLinkRelation,
+  LINK_RELATIONS,
+  STRONG_LINK_RELATIONS,
+  WEAK_LINK_RELATIONS,
+} from './links';
 
 // User & Credentials
 export type {
@@ -7,6 +31,7 @@ export type {
   AdminUserActionRequest,
   AdminUserRoleRequest,
   AdminUsersResponse,
+  AgentCredentialScope,
   CreateCredentialRequest,
   CreatePlatformCredentialRequest,
   Credential,
@@ -14,6 +39,8 @@ export type {
   CredentialResponse,
   CredentialSource,
   CredentialValidationStatus,
+  GcpApiIssue,
+  GcpApiIssueReason,
   GcpCredential,
   GcpCredentialAuthType,
   GcpCredentialMetadata,
@@ -27,6 +54,9 @@ export type {
   ProjectDeploymentCredential,
   ProjectDeploymentCredentialResponse,
   SaveGcpServiceAccountCredentialRequest,
+  SessionAgentCredential,
+  SessionAgentCredentialResponse,
+  SessionAgentRuntimeConfig,
   SetupProjectDeploymentRequest,
   SignupApprovalConfig,
   SignupApprovalConfigResponse,
@@ -89,8 +119,10 @@ export {
   isCapacityPoolScope,
   isCapacityPoolStatus,
   isCapacityPoolStrategy,
+  isCapacitySourceExcluded,
   isCapacitySourceKind,
   isCapacityWorkloadRole,
+  MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH,
   SAFE_EFFECTIVE_CAPACITY_POOL_REASONS,
 } from './capacity-pool';
 
@@ -168,6 +200,7 @@ export type {
   NodeStatus,
   NodeSystemInfo,
   NodeTransport,
+  NodeWorkspaceMemoryMetric,
   PortsResponse,
   UpdateWorkspaceRequest,
   VMLocation,
@@ -182,7 +215,7 @@ export type {
   WorkspaceStatus,
 } from './workspace';
 // Node class runtime guards (value exports, not types)
-export { isNodeClass, isUserOwnedNodeClass } from './workspace';
+export { isNodeClass, isUserOwnedNodeClass, NODE_BILLING_ENDED_STATUSES } from './workspace';
 // Provider Catalog
 export type {
   LocationInfo,
@@ -324,6 +357,8 @@ export type {
   CommentAnchorKind,
   CommentAuthor,
   CommentAuthorKind,
+  CommentMention,
+  CommentMentionInput,
   CommentReply,
   CommentStatus,
   CreateLibraryFileCommentThreadRequest,
@@ -336,6 +371,7 @@ export type {
   MessageCommentAnchor,
   MessageCommentAuthor,
   MessageCommentAuthorKind,
+  MessageCommentContextResponse,
   MessageCommentDirectiveState,
   MessageCommentListRequest,
   MessageCommentListResponse,
@@ -353,6 +389,7 @@ export type {
   ProjectCommentSessionRef,
   ReplyToLibraryFileCommentThreadRequest,
   ReplyToMessageCommentThreadRequest,
+  StoredCommentAnchorKind,
   UpdateLibraryFileCommentThreadStatusRequest,
   UpdateMessageCommentThreadStatusRequest,
 } from './comments';
@@ -362,6 +399,7 @@ export {
   COMMENT_STATUSES,
   MESSAGE_COMMENT_AUTHOR_KINDS,
   MESSAGE_COMMENT_THREAD_STATUSES,
+  STORED_COMMENT_ANCHOR_KINDS,
 } from './comments';
 
 // ProjectData event subscription core
@@ -372,7 +410,7 @@ export type { ProjectEventSubscriptionAgentCaller, ProjectEventSubscriptionCalle
 // prettier-ignore
 export { PROJECT_EVENT_SUBSCRIPTION_CALLER_KINDS, PROJECT_EVENT_SUBSCRIPTION_OWNER_SCOPES } from './project-event-subscriptions';
 // prettier-ignore
-export { PROJECT_EVENT_AUDIENCE_SCOPES, PROJECT_EVENT_CONTRACT_VERSION, PROJECT_EVENT_DELIVERY_ADAPTER_ACTIONS, PROJECT_EVENT_DELIVERY_ADAPTER_KINDS, PROJECT_EVENT_DELIVERY_ATTEMPT_STATES, PROJECT_EVENT_DELIVERY_BATCH_STATES, PROJECT_EVENT_DELIVERY_CAPABILITY_MODES, PROJECT_EVENT_DELIVERY_RESOLUTION_REASONS, PROJECT_EVENT_DELIVERY_TARGET_STATES, PROJECT_EVENT_FILTER_FIELDS, PROJECT_EVENT_FILTER_VERSION, PROJECT_EVENT_REQUESTED_DELIVERY_MODES, PROJECT_EVENT_RESOLVED_DELIVERY_MODES, PROJECT_EVENT_SEVERITIES, PROJECT_EVENT_SUBSCRIPTION_OWNER_TYPES, PROJECT_EVENT_SUBSCRIPTION_STATES } from './project-events';
+export { DEFAULT_PROJECT_EVENT_REQUESTED_DELIVERY, PROJECT_EVENT_AUDIENCE_SCOPES, PROJECT_EVENT_CONTRACT_VERSION, PROJECT_EVENT_DELIVERY_ADAPTER_ACTIONS, PROJECT_EVENT_DELIVERY_ADAPTER_KINDS, PROJECT_EVENT_DELIVERY_ATTEMPT_STATES, PROJECT_EVENT_DELIVERY_BATCH_STATES, PROJECT_EVENT_DELIVERY_CAPABILITY_MODES, PROJECT_EVENT_DELIVERY_RESOLUTION_REASONS, PROJECT_EVENT_DELIVERY_TARGET_STATES, PROJECT_EVENT_FILTER_FIELDS, PROJECT_EVENT_FILTER_VERSION, PROJECT_EVENT_REQUESTED_DELIVERY_MODES, PROJECT_EVENT_RESOLVED_DELIVERY_MODES, PROJECT_EVENT_SEVERITIES, PROJECT_EVENT_SUBSCRIPTION_OWNER_TYPES, PROJECT_EVENT_SUBSCRIPTION_STATES } from './project-events';
 export {
   AGENT_ACTIVITY_STATES,
   ATTACHMENT_DEFAULTS,
@@ -394,6 +432,8 @@ export {
   WAKE_PHASE_PENDING_LABEL,
   wakePhaseLabel,
 } from './task';
+export type { WakeWaitReason } from './wake-wait';
+export { isWakeWaitReason, WAKE_WAIT_REASON_LABELS, WAKE_WAIT_REASONS } from './wake-wait';
 
 // Session (Chat, Agent, ACP)
 export type {
@@ -423,8 +463,6 @@ export type {
   PersistMessageItem,
   PersistMessageRequest,
   PlanEntry,
-  ProjectWebSocketEvent,
-  ProjectWebSocketEventType,
   RecentChatsResponse,
   RemoveWorktreeResponse,
   SessionActivitySource,
@@ -467,6 +505,50 @@ export type {
   WebPushSubscriptionsResponse,
 } from './notification';
 export { NOTIFICATION_CHANNELS, NOTIFICATION_TYPES, NOTIFICATION_URGENCIES } from './notification';
+export type {
+  DecideOperationsActionApprovalRequest,
+  DecideOperationsActionApprovalResponse,
+  GetOperationsActionApprovalResponse,
+  ListOperationsActionApprovalsResponse,
+  OperationsAction,
+  OperationsActionApproval,
+  OperationsActionTargetType,
+  OperationsApprovalDecision,
+  OperationsApprovalStatus,
+} from './operations-actions';
+export {
+  OPERATIONS_ACTION_LABELS,
+  OPERATIONS_ACTION_TARGET_TYPES,
+  OPERATIONS_ACTIONS,
+  OPERATIONS_APPROVAL_DECISIONS,
+  OPERATIONS_APPROVAL_STATUSES,
+  OPERATIONS_AUTO_SAFE_ACTIONS,
+  OPERATIONS_IRREVERSIBLE_ACTIONS,
+} from './operations-actions';
+
+// Shared session access
+export type {
+  CreateSessionAccessGrantRequest,
+  CreateSessionAccessGrantResponse,
+  RevokeSessionAccessGrantResponse,
+  SessionAccessChangedEvent,
+  SessionAccessDurationMinutes,
+  SessionAccessGrant,
+  SessionAccessPerson,
+  SessionAccessRevokeReason,
+  SessionAccessSummary,
+  SessionUndeliveredPrompt,
+  SessionUndeliveredReason,
+  SessionViewerAccess,
+} from './session-access';
+export {
+  isSessionAccessDurationMinutes,
+  isShareableChatSessionStatus,
+  SESSION_ACCESS_DURATION_MINUTES,
+  SESSION_ACCESS_REVOKE_REASONS,
+  SESSION_VIEWER_ACCESS_LEVELS,
+  SHAREABLE_CHAT_SESSION_STATUSES,
+} from './session-access';
 
 // Admin Observability
 export type {
@@ -527,14 +609,18 @@ export type {
   GitHubCliPolicyPermissions,
   OpenCodeProvider,
   OpenCodeProviderMeta,
+  ProfilePickerState,
+  ProfilePickerUsage,
   ResolvedAgentProfile,
   ResolvedSkillProfile,
   SaveAgentSettingsRequest,
   UpdateAgentProfileRequest,
+  UpdateProfilePickerRequest,
   UpdateSkillRequest,
 } from './agent-settings';
 export {
   AGENT_EFFORT_LEVELS,
+  AGENT_MODEL_MAX_LENGTH,
   AGENT_PROFILE_RUNTIMES,
   DEFAULT_AGENT_EFFORT,
   DEFAULT_GITHUB_CLI_POLICY,
@@ -589,6 +675,19 @@ export {
   validateDirectoryPath,
 } from './library';
 
+// Agent email (prototype)
+export type {
+  AgentEmailConfigResponse,
+  AgentEmailMainDomainRecord,
+  AgentEmailSetupPlan,
+  AgentEmailSetupRequest,
+  AgentEmailSetupState,
+  AgentEmailZoneChange,
+  EmailTemplateContext,
+  EmailTriggerConfig,
+  EmailTriggerConfigInput,
+} from './agent-email';
+
 // Triggers (Event-Driven Agent Triggers)
 export type {
   CreateGitHubTriggerRequest,
@@ -596,13 +695,14 @@ export type {
   CreateTriggerResponse,
   CronTemplateContext,
   CronValidationResult,
+  GitHubFilterPreviewResponse,
   GitHubTemplateContext,
   GitHubTriggerConfig,
   GitHubTriggerEventType,
   GitHubTriggerFilters,
+  GitHubTriggerRoutingConfig,
   ListTriggerExecutionsResponse,
   ListTriggersResponse,
-  ListWebhookDeliveriesResponse,
   RunTriggerRequest,
   Trigger,
   TriggeredBy,
@@ -616,16 +716,6 @@ export type {
   TriggerSourceType,
   TriggerStatus,
   UpdateTriggerRequest,
-  WebhookCredential,
-  WebhookDelivery,
-  WebhookDeliveryOutcome,
-  WebhookFilterMode,
-  WebhookFilterOperator,
-  WebhookFilterResult,
-  WebhookTemplateContext,
-  WebhookTriggerConfig,
-  WebhookTriggerConfigInput,
-  WebhookTriggerFilter,
 } from './trigger';
 export {
   GITHUB_TRIGGER_EVENT_TYPES,
@@ -634,10 +724,44 @@ export {
   TRIGGER_SOURCE_TYPES,
   TRIGGER_STATUSES,
   TRIGGERED_BY_VALUES,
+} from './trigger';
+export type {
+  ListWebhookDeliveriesResponse,
+  SetWebhookSigningSecretRequest,
+  SetWebhookSigningSecretResponse,
+  WebhookCredential,
+  WebhookDelivery,
+  WebhookDeliveryOutcome,
+  WebhookEventIdLocation,
+  WebhookFilterMode,
+  WebhookFilterOperator,
+  WebhookFilterResult,
+  WebhookRejectionReason,
+  WebhookSetupState,
+  WebhookSetupStatus,
+  WebhookSignedVerificationScheme,
+  WebhookSigningSecretStatus,
+  WebhookTemplateContext,
+  WebhookTriggerConfig,
+  WebhookTriggerConfigInput,
+  WebhookTriggerFilter,
+  WebhookVerificationConfig,
+  WebhookVerificationScheme,
+} from './trigger-webhook';
+export {
+  isWebhookFilterPresenceOperator,
+  isWebhookSignedScheme,
+  SLACK_WEBHOOK_DEFAULTS,
   WEBHOOK_DELIVERY_OUTCOMES,
   WEBHOOK_FILTER_MODES,
   WEBHOOK_FILTER_OPERATORS,
-} from './trigger';
+  WEBHOOK_FILTER_PRESENCE_OPERATORS,
+  WEBHOOK_REJECTION_REASONS,
+  WEBHOOK_SETUP_STATES,
+  WEBHOOK_SIGNED_VERIFICATION_SCHEMES,
+  WEBHOOK_SIGNING_SECRET_ANCHOR,
+  WEBHOOK_VERIFICATION_SCHEMES,
+} from './trigger-webhook';
 
 // Compute Usage
 export type {
@@ -664,6 +788,155 @@ export type {
   QuotaSource,
   UserQuotaStatusResponse,
 } from './compute-quotas';
+
+// Ideas (derived status)
+export type {
+  IdeaCountKind,
+  IdeaCounts,
+  IdeaDerivedState,
+  IdeaDerivedStatus,
+  IdeaHumanTransition,
+  IdeaListItem,
+  IdeaListResponse,
+  IdeaNeedsYouState,
+  IdeaPullRequest,
+  IdeaStatusOrigin,
+  IdeaStatusSession,
+  IdeaStatusSource,
+} from './ideas';
+export {
+  DEFAULT_IDEA_TITLE_MAX_LENGTH,
+  IDEA_COUNT_KINDS,
+  IDEA_HUMAN_TRANSITIONS,
+  IDEA_NEEDS_YOU_STATES,
+  ideaNeedsYou,
+  isIdeaHumanTransition,
+} from './ideas';
+
+// Project Overview (Inbox slice F1)
+export type {
+  OverviewBrief,
+  OverviewBriefPart,
+  OverviewBriefRef,
+  OverviewBriefRefKind,
+  OverviewBriefSentence,
+  OverviewMergedPullRequest,
+  OverviewRunningChat,
+  OverviewRunningState,
+  ProjectOverviewResponse,
+  ProjectOverviewSection,
+} from './project-overview';
+export {
+  DEFAULT_PROJECT_OVERVIEW_RECENT_LIMIT,
+  DEFAULT_PROJECT_OVERVIEW_RUNNING_LIMIT,
+  MAX_PROJECT_OVERVIEW_LIMIT,
+  OVERVIEW_BRIEF_REF_KINDS,
+} from './project-overview';
+
+// Run receipt (Insights slice R)
+export type {
+  RunReceipt,
+  RunReceiptAccount,
+  RunReceiptCiFirstTry,
+  RunReceiptFacts,
+  RunReceiptFactsInput,
+  RunReceiptOutcome,
+  RunReceiptPhase,
+  RunReceiptPhaseKey,
+  RunReceiptPullRequest,
+  RunReceiptResources,
+  RunReceiptSection,
+  RunReceiptSlowItem,
+  RunReceiptSlowKind,
+  RunReceiptToolCalls,
+  RunReceiptToolKindCount,
+  RunReceiptWaitingInterval,
+} from './insights-receipt';
+export { RUN_RECEIPT_PHASE_KEYS } from './insights-receipt';
+// Run usage (Insights slice U)
+export type {
+  RunModelUsage,
+  RunReceiptTokens,
+  RunTokenCounts,
+  RunUsageSource,
+  RunUsageSpend,
+} from './insights-run-usage';
+// Insights · Flow (Insights slice F)
+export type {
+  FlowFlakyCheck,
+  FlowMedian,
+  FlowRate,
+  FlowRuns,
+  FlowRunsBucket,
+  FlowSection,
+  FlowStopReason,
+  FlowStopReasonCount,
+  FlowTopBlocker,
+  FlowWaitingIdea,
+  InsightsRange,
+  ProjectFlowResponse,
+} from './insights-flow';
+export {
+  DEFAULT_INSIGHTS_RANGE,
+  FLOW_DELIBERATE_STOP_REASONS,
+  FLOW_STOP_REASON_LABELS,
+  FLOW_STOP_REASONS,
+  INSIGHTS_RANGE_DAYS,
+  INSIGHTS_RANGES,
+  isInsightsRange,
+} from './insights-flow';
+
+// Lifecycle phase timings (Insights slice T): the operations a stored phase can name
+export type { LifecyclePhaseOperation } from './lifecycle-phase-operations';
+export {
+  LIFECYCLE_PHASE_OPERATIONS,
+  PROJECT_LIFECYCLE_PHASE_OPERATIONS,
+} from './lifecycle-phase-operations';
+
+// Insights · Accounts (Insights slice A)
+export type {
+  InsightsAccount,
+  InsightsAccountKind,
+  InsightsAccountOwner,
+  InsightsAccountSpend,
+  InsightsAccountsSection,
+  InsightsAccountStalls,
+  InsightsAccountTokens,
+  InsightsStallEpisode,
+  InsightsStallOutcome,
+  ProjectAccountsResponse,
+} from './insights-accounts';
+export type {
+  InsightsFirstPerson,
+  InsightsPeopleAskKind,
+  InsightsPeopleSection,
+  InsightsReviewPickup,
+  InsightsWaiting,
+  InsightsWaitingGroup,
+  InsightsWaitingItem,
+  ProjectPeopleResponse,
+} from './insights-people';
+export { INSIGHTS_PEOPLE_ASK_KINDS } from './insights-people';
+
+// Insights · Agent setups (Insights slice S)
+export type {
+  InsightsSetupGroup,
+  InsightsSetupGrouping,
+  InsightsSetupMemory,
+  InsightsSetupNudges,
+  InsightsSetupOwner,
+  InsightsSetupsSection,
+  InsightsSetupSuggestion,
+  InsightsSetupTokens,
+  ProjectSetupsResponse,
+  RunNudgeCounts,
+  RunNudgeWindow,
+} from './insights-setups';
+export {
+  DEFAULT_INSIGHTS_SETUP_GROUPING,
+  INSIGHTS_SETUP_GROUPINGS,
+  isInsightsSetupGrouping,
+} from './insights-setups';
 
 // Knowledge Graph
 export type {
@@ -697,16 +970,22 @@ export type {
   GetPendingMessagesResponse,
   ListMailboxResponse,
   MessageClass,
+  PromptDeliveryIntent,
   PromptDeliverySource,
   SendDurableMessageRequest,
   SendDurableMessageResponse,
   SenderType,
+  SteerOutcome,
   VmPromptDeliveryCapabilities,
   VmPromptDeliveryReceipt,
   VmPromptDeliveryResponse,
   VmPromptReceiptState,
+  VmSteerReceipt,
+  VmSteerReceiptState,
+  VmSteerResponse,
 } from './mailbox';
 export {
+  canSteerMessageClass,
   DELIVERY_STATE_TRANSITIONS,
   DELIVERY_STATES,
   DELIVERY_TERMINAL_STATES,
@@ -715,10 +994,13 @@ export {
   MAILBOX_DEFAULTS,
   MESSAGE_CLASS_URGENCY,
   MESSAGE_CLASSES,
+  PROMPT_DELIVERY_INTENTS,
   PROMPT_DELIVERY_SOURCES,
   SENDER_TYPES,
+  STEER_OUTCOMES,
   TURN_STOP_URGENCY_THRESHOLD,
   VM_PROMPT_RECEIPT_STATES,
+  VM_STEER_RECEIPT_STATES,
 } from './mailbox';
 
 // Durable execution checkpoint foundation
@@ -757,6 +1039,33 @@ export {
   SCHEDULER_STATES,
 } from './mission';
 
+// Durable workflow runs (read contract for the Automation → Workflows pages)
+export type {
+  WorkflowActivityEntry,
+  WorkflowArtifactRef,
+  WorkflowRunDetail,
+  WorkflowRunDetailResponse,
+  WorkflowRunListResponse,
+  WorkflowRunStatus,
+  WorkflowRunSummary,
+  WorkflowStepAgent,
+  WorkflowStepDetail,
+  WorkflowStepKind,
+  WorkflowStepOutput,
+  WorkflowStepStatus,
+  WorkflowStepSummary,
+  WorkflowStepWait,
+} from './workflow';
+export {
+  DEFAULT_WORKFLOW_RUN_LIST_LIMIT,
+  isWorkflowRunStatus,
+  isWorkflowStepStatus,
+  MAX_WORKFLOW_RUN_LIST_LIMIT,
+  WORKFLOW_RUN_STATUSES,
+  WORKFLOW_STEP_KINDS,
+  WORKFLOW_STEP_STATUSES,
+} from './workflow';
+
 // Orchestrator (Phase 3: Project Orchestrator)
 export type {
   DecisionAction,
@@ -775,17 +1084,21 @@ export type {
   CreatePolicyRequest,
   ListPoliciesResponse,
   PolicyCategory,
+  PolicyInjectMode,
   PolicyScope,
   PolicySource,
   ProjectPolicy,
   UpdatePolicyRequest,
 } from './policy';
 export {
+  DEFAULT_POLICY_INJECT_MODE,
   isPolicyCategory,
+  isPolicyInjectMode,
   isPolicyScope,
   isPolicySource,
   POLICY_CATEGORIES,
   POLICY_DEFAULTS,
+  POLICY_INJECT_MODES,
   POLICY_SCOPES,
   POLICY_SOURCES,
 } from './policy';
@@ -838,6 +1151,13 @@ export type {
   SandboxFileReadResult,
 } from './sandbox';
 
+// Nodes page resource usage
+export type {
+  NodeResourceReservation,
+  NodeResourceUsageResponse,
+  NodeResourceUsageSeries,
+  NodeWorkspaceResourceUsage,
+} from './node-resource-usage';
 // Resource Requirements & Reservations
 export type {
   LegacyVmSizeResolutionInput,
@@ -886,3 +1206,143 @@ export type {
   ProjectEventDeliveryOutcome,
   ProjectEventDeliveryOutcomeList,
 } from './project-events';
+
+// SAM notices (structured platform messages in chat)
+export type {
+  SamNotice,
+  SamNoticeQuote,
+  SamNoticeRef,
+  SamNoticeRefKind,
+  SamNoticeSeverity,
+} from './sam-notices';
+export {
+  buildSamNotice,
+  CHAT_CONTEXT_SUMMARY_SOURCE,
+  parseSamNotice,
+  SAM_NOTICE_LIMITS,
+  SAM_NOTICE_METADATA_KEY,
+  SAM_NOTICE_REF_KINDS,
+  SAM_NOTICE_SEVERITIES,
+  SAM_NOTICE_VERSION,
+  SAM_RUNTIME_REPORTED_KEY,
+} from './sam-notices';
+
+// Agent-requested runtime secrets
+export type {
+  EffectiveRuntimeEnvEntry,
+  FulfillRuntimeSecretRequestBody,
+  ProjectRuntimeEnvVarProvenance,
+  RuntimeEnvCollectedProvenance,
+  RuntimeEnvScope,
+  RuntimeSecretRequest,
+  RuntimeSecretRequestExistingValue,
+  RuntimeSecretRequestResolution,
+  RuntimeSecretRequestResponse,
+  RuntimeSecretRequestStatus,
+} from './runtime-secret-requests';
+export {
+  REQUEST_SECRET_TOOL,
+  RUNTIME_ENV_SCOPES,
+  RUNTIME_SECRET_REQUEST_REASON_MAX_LENGTH,
+  RUNTIME_SECRET_REQUEST_STATUSES,
+} from './runtime-secret-requests';
+
+// Inbox (idea 01M7G03ZCQ6TM6CMEYDRKQ8ST9)
+export type {
+  AskAssigneeKind,
+  AskKind,
+  AskStatus,
+  InboxActionResponse,
+  InboxAgentItem,
+  InboxAgentLinkKind,
+  InboxAgentState,
+  InboxAnswerRequest,
+  InboxAnswerSpec,
+  InboxAskAnswerShape,
+  InboxContextMessage,
+  InboxCountResponse,
+  InboxErrorAction,
+  InboxErrorActionOption,
+  InboxFilter,
+  InboxItem,
+  InboxItemContext,
+  InboxItemKind,
+  InboxItemResponse,
+  InboxLink,
+  InboxListResponse,
+  InboxSimilarItem,
+  InboxStore,
+  ParsedInboxRef,
+} from './inbox';
+export {
+  ASK_ASSIGNEE_KINDS,
+  ASK_KINDS,
+  ASK_STATUSES,
+  formatInboxRef,
+  INBOX_AGENT_LINK_KINDS,
+  INBOX_AGENT_STATES,
+  INBOX_AGENT_URL_LINK_KINDS,
+  INBOX_ASK_ANSWER_SHAPES,
+  INBOX_CONFIRM_OPTIONS,
+  INBOX_ERROR_ACTIONS,
+  INBOX_FILTERS,
+  INBOX_ITEM_KINDS,
+  INBOX_STORES,
+  INBOX_WRITE_TOOL,
+  parseInboxRef,
+} from './inbox';
+export type {
+  AskActivityKind,
+  AskActorKind,
+  InboxItemCommentThread,
+  InboxTaskActionResponse,
+  InboxTaskActivity,
+  InboxTaskAssignee,
+  InboxTaskCommentRequest,
+  InboxTaskCommentResponse,
+  InboxTaskDetail,
+  InboxTaskDoneRequest,
+  InboxTaskEventType,
+  InboxTaskReassignRequest,
+  InboxTaskStep,
+  InboxTaskStepRequest,
+} from './inbox-tasks';
+export {
+  ASK_ACTIVITY_KINDS,
+  ASK_ACTOR_KINDS,
+  INBOX_EVENT_SOURCE,
+  INBOX_EVENT_SUBJECT_TYPE,
+  INBOX_TASK_DEFAULT_WAKE_EVENT_TYPES,
+  INBOX_TASK_EVENT_TYPES,
+  INBOX_TASK_STEP_EVENT_TYPES,
+} from './inbox-tasks';
+
+// Admin Health & cost (Insights slices H and CF)
+export type {
+  InstallationCloudflareCost,
+  InstallationCloudflareCostStatus,
+  InstallationCloudflareProductLine,
+  InstallationCloudflareRefreshResponse,
+  InstallationComputeCurrencySpend,
+  InstallationComputeProviderSpend,
+  InstallationComputeSpend,
+  InstallationComputeWeek,
+  InstallationHealthRange,
+  InstallationHealthResponse,
+  InstallationHealthSection,
+  InstallationHealthWindow,
+  InstallationLatencyIncident,
+  InstallationLatencyIncidentState,
+  InstallationLatencyState,
+  InstallationLifecycleLatency,
+  InstallationMachineDensity,
+  InstallationMachineReuse,
+  InstallationNewMachineReason,
+  InstallationNewMachineReasonKind,
+  InstallationNewMachineReasons,
+} from './insights-installation';
+export {
+  DEFAULT_INSTALLATION_HEALTH_RANGE,
+  INSTALLATION_HEALTH_RANGES,
+  isInstallationHealthRange,
+} from './insights-installation';

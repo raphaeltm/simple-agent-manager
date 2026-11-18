@@ -29,20 +29,16 @@ export interface AllocationWriterInventoryEntry {
  * routes through shared admission or is deliberately re-classified.
  */
 export type AllocationEntrypointStatus =
-  | 'canonical'
-  | 'role-adapter'
-  | 'runtime-adapter'
-  | 'runtime-dispatch'
-  | 'unreviewed-bypass';
+  'canonical' | 'role-adapter' | 'runtime-adapter' | 'runtime-dispatch' | 'unreviewed-bypass';
 
 export interface AllocationEntrypointInventoryEntry {
   filePath: string;
   owner: string;
   entrypoint: AllocationEntrypointCall;
   /** Which control plane drives this callsite. */
-  scope: 'task-runner' | 'route' | 'service' | 'trial-orchestrator' | 'node-lifecycle';
+  scope: 'task-runner' | 'route' | 'service' | 'node-lifecycle';
   /** What the allocated capacity is for. */
-  role: 'workspace' | 'deployment' | 'trial' | 'recovery-relay' | 'instant' | 'metering';
+  role: 'workspace' | 'deployment' | 'recovery-relay' | 'instant' | 'metering';
   /** The admission/authorization actually observed at this callsite. */
   admission: string;
   status: AllocationEntrypointStatus;

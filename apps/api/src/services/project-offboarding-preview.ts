@@ -12,6 +12,7 @@ import {
   enumerateOffboardingResources,
   summarizeOffboardingResources,
 } from './project-offboarding-preview-resources';
+import { countProjectProfilePins } from './project-offboarding-profile-pins';
 
 const DEFAULT_OFFBOARDING_PLAN_TTL_SECONDS = 15 * 60;
 
@@ -76,6 +77,11 @@ export async function createProjectMemberOffboardingPreview(input: {
     defaultAgentType: input.defaultAgentType,
   });
   const summary = summarizeOffboardingResources(resources);
+  const personalProfilePinCount = await countProjectProfilePins(
+    input.db,
+    input.project.id,
+    input.memberUserId
+  );
   const planId = offboardingPlanId();
 
   await persistPreviewPlan({
@@ -99,6 +105,7 @@ export async function createProjectMemberOffboardingPreview(input: {
     requiresHumanDecision: resources.length > 0,
     summary,
     resources: resources.map((resource): ProjectMemberOffboardingResourcePreview => ({ ...resource })),
+    personalProfilePinCount,
   };
 }
 

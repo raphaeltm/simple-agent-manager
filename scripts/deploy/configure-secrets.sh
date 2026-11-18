@@ -9,17 +9,92 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# Registers a value with GitHub's log masker before anything else can print it (policy
+# 795e72a6, .claude/rules/83-no-secret-readback-in-ci.md). GitHub masks only values it knows,
+# matching line by line: a value read back from Pulumi is unknown to it, and the JSON-escaped
+# form of a multi-line value is one line it would not otherwise match. So every non-blank line
+# and the JSON-escaped form are registered. Outside GitHub Actions nothing is printed, because
+# the command itself carries the value.
+mask_secret_value() {
+  local value="$1"
+  if [[ "${GITHUB_ACTIONS:-}" != "true" || -z "$value" ]]; then
+    return 0
+  fi
+  local line escaped
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    if [[ -n "${line//[[:space:]]/}" ]]; then
+      # The runner decodes %25 in command data, so a literal % must be sent encoded.
+      printf '::add-mask::%s\n' "${line//%/%25}"
+    fi
+  done <<<"$value"
+  escaped="$(printf '%s' "$value" | json_escape_stdin)"
+  escaped="${escaped:1:${#escaped}-2}"
+  if [[ -n "$escaped" && "$escaped" != "$value" ]]; then
+    printf '::add-mask::%s\n' "${escaped//%/%25}"
+  fi
+}
+
+# Prints a Pulumi stack output on stdout, or nothing when it cannot be read, so
+# callers keep their override precedence. A failed read names its cause on
+# stderr. Only Pulumi's stderr is ever shown: its stdout carries the secret.
 read_pulumi_secret() {
   local output_name="$1"
   if [ -z "${PULUMI_STACK:-}" ]; then
     return 0
   fi
 
-  (
-    cd infra
-    pulumi stack select "$PULUMI_STACK" >/dev/null 2>&1
-    pulumi stack output "$output_name" --show-secrets 2>/dev/null
-  ) || true
+  local stderr_file value="" status=0 step="pulumi stack output $output_name"
+  stderr_file="$(mktemp)"
+  chmod 600 "$stderr_file"
+  if ! (cd infra && pulumi stack select "$PULUMI_STACK" >/dev/null 2>"$stderr_file"); then
+    status=1
+    step="pulumi stack select $PULUMI_STACK"
+  else
+    # Legacy readback, masked by load_pulumi_secret before any other use. Removal is tracked in
+    # tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md and idea 01M7M5PJCY4T3CR715AFKRM74R.
+    # sam:secret-readback-allowed tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md
+    value="$(cd infra && pulumi stack output "$output_name" --show-secrets 2>"$stderr_file")" || status=$?
+  fi
+
+  if [ "$status" -ne 0 ]; then
+    if grep -qi 'does not have output property' "$stderr_file"; then
+      echo "WARNING: Pulumi stack $PULUMI_STACK has no output named $output_name" >&2
+    fi
+    echo "WARNING: could not read Pulumi output $output_name: '$step' exited with status $status. Last Pulumi stderr lines:" >&2
+    tail -n 20 "$stderr_file" | sed 's/^/  pulumi: /' >&2
+  elif [ -z "$value" ]; then
+    echo "WARNING: Pulumi output $output_name on stack $PULUMI_STACK is empty" >&2
+  else
+    printf '%s\n' "$value"
+  fi
+  rm -f "$stderr_file"
+}
+
+# Pulumi outputs whose read came back empty, named when a required key is missing.
+PULUMI_EMPTY_OUTPUTS=()
+
+# Reads a Pulumi output into the named variable and records an empty result.
+load_pulumi_secret() {
+  local variable_name="$1"
+  local output_name="$2"
+  local value
+  value="$(read_pulumi_secret "$output_name")"
+  mask_secret_value "$value"
+  if [ -z "$value" ]; then
+    PULUMI_EMPTY_OUTPUTS+=("$output_name")
+  fi
+  printf -v "$variable_name" '%s' "$value"
+}
+
+report_empty_pulumi_outputs() {
+  if [ -z "${PULUMI_STACK:-}" ]; then
+    echo "PULUMI_STACK is not set, so no keys were read from Pulumi state." >&2
+  elif [ "${#PULUMI_EMPTY_OUTPUTS[@]}" -gt 0 ]; then
+    echo "Pulumi output reads that came back empty from stack $PULUMI_STACK: ${PULUMI_EMPTY_OUTPUTS[*]}" >&2
+  else
+    echo "No Pulumi output read from stack $PULUMI_STACK came back empty." >&2
+  fi
 }
 
 derive_deploy_signing_public_key() {
@@ -59,9 +134,14 @@ WORKER_SECRET_BULK_COUNT=0
 WORKER_SECRET_BULK_SET_COUNT=0
 WORKER_SECRET_BULK_DELETE_COUNT=0
 
+WORKER_SECRET_BULK_OUTPUT=""
+
 cleanup_worker_secret_bulk_payload() {
   if [ -n "${WORKER_SECRET_BULK_PAYLOAD:-}" ]; then
     rm -f "$WORKER_SECRET_BULK_PAYLOAD"
+  fi
+  if [ -n "${WORKER_SECRET_BULK_OUTPUT:-}" ]; then
+    rm -f "$WORKER_SECRET_BULK_OUTPUT"
   fi
 }
 trap cleanup_worker_secret_bulk_payload EXIT
@@ -132,6 +212,40 @@ queue_stale_worker_secret_delete() {
   echo -e "${GREEN}✅${NC}"
 }
 
+# Prints the last 30 lines of Wrangler's output, dropping every line that
+# contains any line of any queued secret value, raw or JSON-escaped. Dropping the
+# whole line is safer than substituting "[redacted]" in place: a substitution
+# only matches the full value, so it would print one line of a multi-line
+# secret (a PEM key row) that Wrangler echoed on its own. Short values
+# over-withhold, which costs diagnostic detail rather than a leak. Values are
+# read from the mode-0600 payload, never from arguments or the environment.
+print_redacted_worker_secret_output() {
+  local output_file="$1"
+  node -e '
+const fs = require("fs");
+const [payloadPath, outputPath] = process.argv.slice(1);
+const fragments = new Set();
+for (const value of Object.values(JSON.parse(fs.readFileSync(payloadPath, "utf8")))) {
+  if (typeof value !== "string") continue;
+  for (const form of [value, JSON.stringify(value).slice(1, -1)]) {
+    for (const line of form.split(/\r?\n/)) {
+      if (line.trim()) fragments.add(line.trim());
+    }
+  }
+}
+let withheld = 0;
+const lines = fs.readFileSync(outputPath, "utf8").split(/\r?\n/).filter((line) => {
+  if ([...fragments].some((fragment) => line.includes(fragment))) {
+    withheld += 1;
+    return false;
+  }
+  return line.trim() !== "";
+});
+for (const line of lines.slice(-30)) process.stdout.write(`  wrangler: ${line}\n`);
+if (withheld > 0) process.stdout.write(`  (${withheld} line(s) withheld because they contained a secret value)\n`);
+' "$WORKER_SECRET_BULK_PAYLOAD" "$output_file"
+}
+
 flush_worker_secret_bulk() {
   if [ "$WORKER_SECRET_BULK_HAS_ENTRIES" != "true" ]; then
     echo "No Worker secret changes queued."
@@ -141,13 +255,21 @@ flush_worker_secret_bulk() {
   printf '\n}\n' >>"$WORKER_SECRET_BULK_PAYLOAD"
   echo "Applying $WORKER_SECRET_BULK_COUNT Worker secret operations via wrangler secret bulk ($WORKER_SECRET_BULK_SET_COUNT set/update, $WORKER_SECRET_BULK_DELETE_COUNT delete)..."
 
-  if pnpm --filter @simple-agent-manager/api exec wrangler secret bulk "$WORKER_SECRET_BULK_PAYLOAD" --env "$ENVIRONMENT" >/dev/null 2>&1; then
+  WORKER_SECRET_BULK_OUTPUT="$(mktemp)"
+  chmod 600 "$WORKER_SECRET_BULK_OUTPUT"
+  local status=0
+  pnpm --filter @simple-agent-manager/api exec wrangler secret bulk "$WORKER_SECRET_BULK_PAYLOAD" --env "$ENVIRONMENT" >"$WORKER_SECRET_BULK_OUTPUT" 2>&1 || status=$?
+  if [ "$status" -eq 0 ]; then
+    rm -f "$WORKER_SECRET_BULK_OUTPUT"
     echo -e "${GREEN}✅ Worker secrets configured in bulk${NC}"
     return 0
   fi
 
   echo -e "${RED}❌ Worker secret bulk configuration failed${NC}" >&2
-  echo "Wrangler returned a non-zero status. Secret values were not logged; rerun locally with Wrangler diagnostics if needed." >&2
+  echo "Wrangler exited with status $status. Last Wrangler output lines (lines containing a queued secret value are withheld):" >&2
+  print_redacted_worker_secret_output "$WORKER_SECRET_BULK_OUTPUT" >&2 ||
+    echo "  (Wrangler output withheld: it could not be checked for secret values)" >&2
+  rm -f "$WORKER_SECRET_BULK_OUTPUT"
   return 1
 }
 
@@ -175,22 +297,22 @@ SECRET_JWT_PUBLIC_KEY="${SECRET_JWT_PUBLIC_KEY:-}"
 if [[ -n "${PULUMI_STACK:-}" ]]; then
   echo "Reading Pulumi-managed security keys from stack: $PULUMI_STACK"
   if [[ -z "$PULUMI_ENCRYPTION_KEY" ]]; then
-    PULUMI_ENCRYPTION_KEY="$(read_pulumi_secret encryptionKey)"
+    load_pulumi_secret PULUMI_ENCRYPTION_KEY encryptionKey
   fi
   if [[ -z "$PULUMI_JWT_PRIVATE_KEY" ]]; then
-    PULUMI_JWT_PRIVATE_KEY="$(read_pulumi_secret jwtPrivateKey)"
+    load_pulumi_secret PULUMI_JWT_PRIVATE_KEY jwtPrivateKey
   fi
   if [[ -z "$PULUMI_JWT_PUBLIC_KEY" ]]; then
-    PULUMI_JWT_PUBLIC_KEY="$(read_pulumi_secret jwtPublicKey)"
+    load_pulumi_secret PULUMI_JWT_PUBLIC_KEY jwtPublicKey
   fi
   if [[ -z "$PULUMI_DEPLOY_SIGNING_PRIVATE_KEY" ]]; then
-    PULUMI_DEPLOY_SIGNING_PRIVATE_KEY="$(read_pulumi_secret deploySigningPrivateKey)"
+    load_pulumi_secret PULUMI_DEPLOY_SIGNING_PRIVATE_KEY deploySigningPrivateKey
   fi
   if [[ -z "$PULUMI_PREVIEW_SIGNING_KEY" ]]; then
-    PULUMI_PREVIEW_SIGNING_KEY="$(read_pulumi_secret previewSigningKey)"
+    load_pulumi_secret PULUMI_PREVIEW_SIGNING_KEY previewSigningKey
   fi
   if [[ -z "$PULUMI_VAPID_PRIVATE_KEY_PEM" ]]; then
-    PULUMI_VAPID_PRIVATE_KEY_PEM="$(read_pulumi_secret vapidPrivateKeyPem)"
+    load_pulumi_secret PULUMI_VAPID_PRIVATE_KEY_PEM vapidPrivateKeyPem
   fi
 fi
 
@@ -211,8 +333,9 @@ elif [ -n "$PULUMI_ENCRYPTION_KEY" ]; then
   JWT_PRIVATE_KEY="$PULUMI_JWT_PRIVATE_KEY"
   JWT_PUBLIC_KEY="$PULUMI_JWT_PUBLIC_KEY"
 else
-  echo -e "${RED}ERROR: No security keys available from GitHub Secrets or Pulumi state${NC}"
-  echo "This should not happen - Pulumi should have created the keys."
+  echo -e "${RED}ERROR: No security keys available from GitHub Secrets or Pulumi state${NC}" >&2
+  echo "This should not happen - Pulumi should have created the keys." >&2
+  report_empty_pulumi_outputs
   exit 1
 fi
 
@@ -236,6 +359,7 @@ elif [[ -n "$PULUMI_DEPLOY_SIGNING_PRIVATE_KEY" ]]; then
 else
   echo -e "${RED}ERROR: No deploy signing key available from GitHub Secrets or Pulumi state${NC}" >&2
   echo "This should not happen - Pulumi should have created the key." >&2
+  report_empty_pulumi_outputs
   exit 1
 fi
 echo ""
@@ -254,10 +378,12 @@ if [[ -n "${VAPID_PRIVATE_KEY:-}" ]]; then
 elif [[ -n "$PULUMI_VAPID_PRIVATE_KEY_PEM" ]]; then
   echo "Using Web Push VAPID key from Pulumi state (auto-persisted)"
   VAPID_PRIVATE_KEY="$(derive_vapid_key_from_pem "$PULUMI_VAPID_PRIVATE_KEY_PEM" derive-private-from-pem)"
+  mask_secret_value "$VAPID_PRIVATE_KEY"
   VAPID_PUBLIC_KEY="$(derive_vapid_key_from_pem "$PULUMI_VAPID_PRIVATE_KEY_PEM" derive-public-from-pem)"
 else
   echo -e "${RED}ERROR: No Web Push VAPID key available from an explicit override or Pulumi state${NC}" >&2
   echo "This should not happen - Pulumi should have created the key." >&2
+  report_empty_pulumi_outputs
   exit 1
 fi
 if [[ -z "${VAPID_SUBJECT:-}" ]]; then
@@ -293,6 +419,7 @@ set_worker_secret "GITHUB_WEBHOOK_SECRET" "${GH_WEBHOOK_SECRET:-${GITHUB_WEBHOOK
 set_worker_secret "CF_API_TOKEN" "${CF_API_TOKEN:-}" "$ENVIRONMENT" "true" || FAILED=true
 set_worker_secret "CF_ZONE_ID" "${CF_ZONE_ID:-}" "$ENVIRONMENT" "true" || FAILED=true
 set_worker_secret "CF_ACCOUNT_ID" "${CF_ACCOUNT_ID:-}" "$ENVIRONMENT" "true" || FAILED=true
+set_worker_secret "BOOTSTRAP_OWNER_EMAIL" "${BOOTSTRAP_OWNER_EMAIL:-}" "$ENVIRONMENT" "false"
 set_worker_secret "CF_AIG_TOKEN" "${CF_AIG_TOKEN:-}" "$ENVIRONMENT" "false"
 
 # Configure deployment apply signing keys. Deployment nodes only apply releases
@@ -316,14 +443,6 @@ set_worker_secret "GITHUB_CLIENT_SECRET" "${GH_CLIENT_SECRET:-}" "$ENVIRONMENT" 
 set_worker_secret "GITHUB_APP_ID" "${GH_APP_ID:-}" "$ENVIRONMENT" "false"
 set_worker_secret "GITHUB_APP_PRIVATE_KEY" "${GH_APP_PRIVATE_KEY:-}" "$ENVIRONMENT" "false"
 set_worker_secret "GITHUB_APP_SLUG" "${GH_APP_SLUG:-}" "$ENVIRONMENT" "false"
-
-# Configure trial onboarding claim/fingerprint HMAC secret (Pulumi-managed, persists across deploys).
-# Required when trials are enabled; harmless when trials are disabled (cookies just aren't issued).
-PULUMI_TRIAL_CLAIM_TOKEN_SECRET="${PULUMI_TRIAL_CLAIM_TOKEN_SECRET:-}"
-if [ -z "$PULUMI_TRIAL_CLAIM_TOKEN_SECRET" ] && [ -n "${PULUMI_STACK:-}" ]; then
-  PULUMI_TRIAL_CLAIM_TOKEN_SECRET="$(read_pulumi_secret trialClaimTokenSecret)"
-fi
-set_worker_secret "TRIAL_CLAIM_TOKEN_SECRET" "$PULUMI_TRIAL_CLAIM_TOKEN_SECRET" "$ENVIRONMENT" "true" || FAILED=true
 
 # Configure Google INFRA OAuth secrets (optional — only needed for GCP OIDC integration)
 GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}"
@@ -386,20 +505,34 @@ else
   echo -e "${YELLOW}ℹ  Skipping GA4 secrets (GA4_API_SECRET/GA4_MEASUREMENT_ID not set — GA4 analytics forwarding disabled)${NC}"
 fi
 
-# Configure trial Anthropic API key (optional — only needed when trials use Anthropic provider)
-ANTHROPIC_API_KEY_TRIAL="${ANTHROPIC_API_KEY_TRIAL:-}"
-if [ -n "$ANTHROPIC_API_KEY_TRIAL" ]; then
-  set_worker_secret "ANTHROPIC_API_KEY_TRIAL" "$ANTHROPIC_API_KEY_TRIAL" "$ENVIRONMENT" "false"
-else
-  echo -e "${YELLOW}ℹ  Skipping ANTHROPIC_API_KEY_TRIAL (not set — trials will use Workers AI provider)${NC}"
-fi
-
 # Configure smoke test auth (optional — only needed for staging/test environments)
 SMOKE_TEST_AUTH_ENABLED="${SMOKE_TEST_AUTH_ENABLED:-}"
 if [ -n "$SMOKE_TEST_AUTH_ENABLED" ]; then
   set_worker_secret "SMOKE_TEST_AUTH_ENABLED" "$SMOKE_TEST_AUTH_ENABLED" "$ENVIRONMENT" "false"
 else
   echo -e "${YELLOW}ℹ  Skipping SMOKE_TEST_AUTH_ENABLED (not set — smoke test token auth disabled)${NC}"
+fi
+
+# Agent sign-in through workload identity (optional — test instances only). One JSON secret
+# holds the whole trust configuration (apps/api/src/services/agent-sign-in/config.ts). It is
+# deploy-time only so an admin account cannot turn it on. When the GitHub secret is removed the
+# Worker secret is deleted too, so removing the secret and redeploying switches the feature off.
+AGENT_SIGN_IN_TRUST="${AGENT_SIGN_IN_TRUST:-}"
+# A secondary installation's own trust (its GitHub secret, never the primary's or a derived one).
+if [[ -z "$AGENT_SIGN_IN_TRUST" && "${AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET:-}" == "true" ]]; then
+  AGENT_SIGN_IN_TRUST="${SECONDARY_AGENT_SIGN_IN_TRUST:-}"
+fi
+if [ -n "$AGENT_SIGN_IN_TRUST" ]; then
+  set_worker_secret "AGENT_SIGN_IN_TRUST" "$AGENT_SIGN_IN_TRUST" "$ENVIRONMENT" "false"
+elif [[ "${AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET:-false}" == "true" ]]; then
+  # A secondary installation without its own trust secret (AGENT_SIGN_IN_TRUST_STAGING2 for
+  # staging2) keeps whatever the Worker has, an earlier value or one an admin set by hand; deploys
+  # never derive one, so nothing here deletes it. Revoking it therefore means deleting the Worker
+  # secret by hand, not just the GitHub secret.
+  echo -e "${YELLOW}ℹ  AGENT_SIGN_IN_TRUST not supplied for this installation — leaving the Worker secret unchanged${NC}"
+else
+  echo -e "${YELLOW}ℹ  AGENT_SIGN_IN_TRUST not set — agent sign-in disabled; removing any previous value${NC}"
+  queue_stale_worker_secret_delete "AGENT_SIGN_IN_TRUST"
 fi
 
 # NOTE: Hetzner tokens are NOT platform secrets.
@@ -413,10 +546,12 @@ fi
 STALE_SECRETS=(
   "AI_PROXY_DEFAULT_MODEL"   # Migrated to wrangler.toml [vars] — code defaults in shared/constants/ai-services.ts
   "AI_PROXY_ENABLED"         # Migrated to wrangler.toml [vars]
+  "TRIAL_CLAIM_TOKEN_SECRET" # Retired anonymous-trial product (2026-11-08)
+  "ANTHROPIC_API_KEY_TRIAL"  # Retired anonymous-trial product (2026-11-08)
 )
 
 echo ""
-echo "Cleaning up stale secrets (migrated to wrangler.toml vars)..."
+echo "Cleaning up stale secrets (migrated to wrangler.toml vars or retired)..."
 for secret_name in "${STALE_SECRETS[@]}"; do
   queue_stale_worker_secret_delete "$secret_name"
 done

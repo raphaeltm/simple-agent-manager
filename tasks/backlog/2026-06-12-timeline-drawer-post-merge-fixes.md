@@ -1,5 +1,12 @@
 # Timeline Drawer Post-Merge Fixes
 
+> **Reconciliation 2026-10-26:** still open as listed. #2389 (`0a0276390`) deleted
+> `SessionEventsDrawer.tsx`; the undefined classes remain in `ChatTimelineDrawer.tsx`,
+> `SessionCommentsDrawer.tsx` and `comments/MessageCommentPanels.tsx`. C1 pointer moved: the drawer
+> flags now live in `apps/web/src/components/project-message-view/useSessionOverlays.ts:38-57`
+> (#2431, `35f14a954`), and the file panel renders at `SessionMessageView.tsx:438-446`; there is
+> still no mutual exclusion.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** H1, the focus trap on the timeline drawer (`useDialogFocusTrap` at

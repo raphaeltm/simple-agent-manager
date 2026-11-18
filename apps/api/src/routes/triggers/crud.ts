@@ -1,47 +1,58 @@
 /** Authenticated trigger CRUD. Execution actions live in actions.ts. */
+import { cronToNextFire } from '@simple-agent-manager/cron';
+import {
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CreateTriggerResponse,
   GitHubTriggerEventType,
   ListTriggersResponse,
   TriggerResponse,
 } from '@simple-agent-manager/shared';
+import { DEFAULT_TRIGGER_EXECUTION_LOG_RETENTION_DAYS } from '@simple-agent-manager/shared';
 import {
   DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
   DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
   DEFAULT_TRIGGER_NAME_MAX_LENGTH,
 } from '@simple-agent-manager/shared';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, type sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
+import type * as v from 'valibot';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt, requireRouteParam } from '../../lib/route-helpers';
-import { getAuth } from '../../middleware/auth';
+import { assertNotAgentSignInSession, getAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { CreateTriggerSchema, jsonValidator, UpdateTriggerSchema } from '../../schemas';
+import {
+  loadEmailTriggerConfig,
+  resolveAllowedSenders,
+  toEmailTriggerConfig,
+} from '../../services/agent-email/trigger-config';
 import { buildCredentialAttributionForTriggers } from '../../services/credential-attribution-health';
-import { cronToNextFire } from '../../services/cron-utils';
 import {
   assertGitHubTriggerConfigExists,
   githubTriggerConfigUpdate,
+  validateGitHubTriggerQueueConfig,
 } from '../../services/github-trigger-config';
 import { parseGitHubTriggerFiltersJson } from '../../services/github-trigger-filter';
 import { getProjectMultiplayerState } from '../../services/project-multiplayer';
-import {
-  ResourceRequirementsValidationError,
-  serializeResourceRequirementsInput,
-} from '../../services/resource-requirements-input';
 import { clearTriggerPageCaches } from '../../services/trigger-cache';
 import {
+  assertKeepsAgentProfile,
   createTrigger,
   validateCron,
   validateReferences,
   validateTriggerSourceFields,
 } from '../../services/trigger-create';
 import { listTriggerRows, toTriggerResponse } from '../../services/trigger-read';
+import { triggerStatusUpdates } from '../../services/trigger-status';
 import {
+  assertWebhookSchemeUnchanged,
   getWebhookTriggerLimits,
   validateWebhookTriggerConfig,
 } from '../../services/webhook-trigger-config';
@@ -49,7 +60,8 @@ import {
   mergeWebhookConfig,
   toWebhookTriggerConfig,
   webhookConfigUpdateValues,
-} from '../../services/webhook-trigger-store';
+} from '../../services/webhook-trigger-config-rows';
+import { readWebhookTriggerConfig } from '../../services/webhook-trigger-setup';
 import { requireProjectTaskRead, requireProjectTaskWrite } from '../task-project-auth';
 import { buildWebhookCredential } from './webhooks';
 
@@ -108,11 +120,18 @@ function triggerResourceRequirementsJson(body: {
 
 async function enrichTrigger(
   db: Database,
+  env: Env,
   row: schema.TriggerRow,
   credentialAttribution?: TriggerResponse['credentialAttribution']
 ): Promise<TriggerResponse> {
   const response = toTriggerResponse(row);
   response.credentialAttribution = credentialAttribution;
+  if (row.sourceType === 'github')
+    response.queueStats = (await readQueueStats(env, row.projectId)).get(row.id) ?? {
+      queued: 0,
+      routed: 0,
+      dropped: 0,
+    };
   if (row.sourceType === 'github') {
     const config = await db
       .select()
@@ -127,16 +146,18 @@ async function enrichTrigger(
       response.githubConfig = {
         eventType: config.eventType as GitHubTriggerEventType,
         filters: parsedFilters.filters,
+        subjectAffinity: config.subjectAffinity,
+        queueMaxPending: config.queueMaxPending,
+        queueTtlSeconds: config.queueTtlSeconds,
       };
     }
   }
   if (row.sourceType === 'webhook') {
-    const config = await db
-      .select()
-      .from(schema.webhookTriggerConfigs)
-      .where(eq(schema.webhookTriggerConfigs.triggerId, row.id))
-      .get();
-    if (config) response.webhookConfig = toWebhookTriggerConfig(config);
+    const config = await readWebhookTriggerConfig(env, row);
+    if (config) response.webhookConfig = config;
+  }
+  if (row.sourceType === 'email') {
+    response.emailConfig = await loadEmailTriggerConfig(db, env, row.id);
   }
   return response;
 }
@@ -145,14 +166,18 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
   const userId = getAuth(c).user.id;
-  const project = await requireProjectTaskWrite(db, projectId, userId);
   const body = c.req.valid('json');
+  // Every trigger starts work after the session that created it has ended: on a schedule (cron),
+  // on mail from its allowed senders (email), on repository events (github) or with the
+  // credential it returns (webhook). An agent sign-in session must not leave one behind.
+  assertNotAgentSignInSession(c);
+  const project = await requireProjectTaskWrite(db, projectId, userId);
   const { created, webhookToken } = await createTrigger(db, c.env, project, userId, body);
   const id = created.id;
   clearTriggerPageCaches(projectId);
   const attributionById = await attribution(db, c.env, project, [created]);
   const response: CreateTriggerResponse = {
-    ...(await enrichTrigger(db, created, attributionById.get(id))),
+    ...(await enrichTrigger(db, c.env, created, attributionById.get(id))),
     webhookCredential: webhookToken ? buildWebhookCredential(c.env, webhookToken.token) : undefined,
   };
   log.info('trigger.created', { triggerId: id, projectId, sourceType: body.sourceType });
@@ -166,7 +191,8 @@ crudRoutes.get('/', async (c) => {
   const project = await requireProjectTaskRead(db, projectId, getAuth(c).user.id);
   const rows = await listTriggerRows(db, projectId);
   const ids = rows.map((row) => row.id);
-  const [githubConfigs, webhookConfigs, attributionById] = await Promise.all([
+  const emailIds = rows.filter((row) => row.sourceType === 'email').map((row) => row.id);
+  const [githubConfigs, webhookConfigs, emailConfigs, attributionById] = await Promise.all([
     ids.length
       ? db
           .select()
@@ -179,14 +205,24 @@ crudRoutes.get('/', async (c) => {
           .from(schema.webhookTriggerConfigs)
           .where(inArray(schema.webhookTriggerConfigs.triggerId, ids))
       : [],
+    emailIds.length
+      ? db
+          .select()
+          .from(schema.triggerEmailConfigs)
+          .where(inArray(schema.triggerEmailConfigs.triggerId, emailIds))
+      : [],
     attribution(db, c.env, project, rows),
   ]);
   const githubById = new Map(githubConfigs.map((config) => [config.triggerId, config]));
   const webhookById = new Map(webhookConfigs.map((config) => [config.triggerId, config]));
+  const emailById = new Map(emailConfigs.map((config) => [config.triggerId, config]));
+  const queueStats = githubConfigs.length ? await readQueueStats(c.env, projectId) : new Map();
   const triggers = rows.map((row) => {
     const response = toTriggerResponse(row);
     response.credentialAttribution = attributionById.get(row.id);
     const github = githubById.get(row.id);
+    if (github)
+      response.queueStats = queueStats.get(row.id) ?? { queued: 0, routed: 0, dropped: 0 };
     if (github) {
       const parsedFilters = parseGitHubTriggerFiltersJson(github.filtersJson);
       if (!parsedFilters.valid) {
@@ -195,10 +231,15 @@ crudRoutes.get('/', async (c) => {
       response.githubConfig = {
         eventType: github.eventType as GitHubTriggerEventType,
         filters: parsedFilters.filters,
+        subjectAffinity: github.subjectAffinity,
+        queueMaxPending: github.queueMaxPending,
+        queueTtlSeconds: github.queueTtlSeconds,
       };
     }
     const webhook = webhookById.get(row.id);
-    if (webhook) response.webhookConfig = toWebhookTriggerConfig(webhook);
+    if (webhook) response.webhookConfig = toWebhookTriggerConfig(webhook, c.env);
+    const email = emailById.get(row.id);
+    if (email) response.emailConfig = toEmailTriggerConfig(email, c.env.BASE_DOMAIN);
     return response;
   });
   const response: ListTriggersResponse = { triggers };
@@ -224,14 +265,31 @@ crudRoutes.get('/:triggerId', async (c) => {
     .orderBy(desc(schema.triggerExecutions.createdAt))
     .limit(5);
   return c.json({
-    ...(await enrichTrigger(db, trigger, attributionById.get(triggerId))),
+    ...(await enrichTrigger(db, c.env, trigger, attributionById.get(triggerId))),
     recentExecutions,
   });
 });
 
+/**
+ * Whether an update only stands a trigger down (pause or disable, nothing else). That is the one
+ * change an agent sign-in session may make: any other field (resuming it, its schedule, prompt,
+ * profile, email senders, webhook or GitHub filters) decides what the trigger does after the
+ * session has ended.
+ */
+function onlyStandsDown(body: v.InferOutput<typeof UpdateTriggerSchema>): boolean {
+  const fields = Object.entries(body).filter(([, value]) => value !== undefined);
+  return (
+    fields.length === 1 &&
+    fields[0]?.[0] === 'status' &&
+    body.status !== undefined &&
+    body.status !== 'active'
+  );
+}
+
 crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   const triggerId = requireRouteParam(c, 'triggerId');
+  if (!onlyStandsDown(c.req.valid('json'))) assertNotAgentSignInSession(c);
   const db = drizzle(c.env.DATABASE, { schema });
   const project = await requireProjectTaskWrite(db, projectId, getAuth(c).user.id);
   const trigger = await db
@@ -245,9 +303,10 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
   if (body.webhookConfig && trigger.sourceType !== 'webhook') {
     throw errors.badRequest('webhookConfig is only valid for webhook triggers');
   }
-  if (trigger.sourceType === 'webhook' && body.agentProfileId === null) {
-    throw errors.badRequest('agentProfileId is required for webhook triggers');
-  }
+  assertKeepsAgentProfile(trigger.sourceType, body.agentProfileId);
+  const emailAllowedSenders = body.emailConfig?.allowedSenders
+    ? await resolveAllowedSenders(db, c.env, trigger.userId, body.emailConfig.allowedSenders)
+    : undefined;
   await validateReferences(db, projectId, body.agentProfileId, body.skillId);
   const now = new Date().toISOString();
   const updates: Omit<Partial<schema.NewTriggerRow>, 'autoPauseResetSequence'> & {
@@ -309,14 +368,14 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
     }
   }
   if (body.status !== undefined) {
-    updates.status = body.status;
-    if (body.status === 'active' && trigger.status !== 'active') {
-      updates.autoPauseResetSequence = sql`${schema.triggers.nextExecutionSequence}`;
-    }
-    if (body.status !== 'active') updates.nextFireAt = null;
-    if (body.status === 'active' && trigger.sourceType === 'cron' && trigger.cronExpression) {
-      updates.nextFireAt = cronToNextFire(trigger.cronExpression, trigger.cronTimezone ?? 'UTC');
-    }
+    // The schedule the row will have after this update: a request that changes the cron and
+    // resumes at once must take its next fire from the new cron.
+    const schedule = {
+      ...trigger,
+      cronExpression: updates.cronExpression ?? trigger.cronExpression,
+      cronTimezone: updates.cronTimezone ?? trigger.cronTimezone,
+    };
+    Object.assign(updates, triggerStatusUpdates(schedule, body.status));
   }
   let effectiveWebhookConfig: ReturnType<typeof mergeWebhookConfig> | undefined;
   if (body.webhookConfig) {
@@ -326,10 +385,9 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
       .where(eq(schema.webhookTriggerConfigs.triggerId, triggerId))
       .get();
     if (!current) throw errors.notFound('Webhook trigger');
-    effectiveWebhookConfig = mergeWebhookConfig(
-      toWebhookTriggerConfig(current),
-      body.webhookConfig
-    );
+    const stored = toWebhookTriggerConfig(current, c.env);
+    assertWebhookSchemeUnchanged(stored.verification, body.webhookConfig.verification);
+    effectiveWebhookConfig = mergeWebhookConfig(stored, body.webhookConfig);
     const configError = validateWebhookTriggerConfig(
       effectiveWebhookConfig,
       getWebhookTriggerLimits(c.env)
@@ -342,9 +400,15 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
     .set(updates)
     .where(and(eq(schema.triggers.id, triggerId), eq(schema.triggers.projectId, projectId)));
   if (body.githubConfig) {
+    const config = await validateGitHubTriggerQueueConfig(c.env, body.githubConfig);
+    await db.batch([triggerUpdate, githubTriggerConfigUpdate(db, triggerId, config, now)]);
+  } else if (emailAllowedSenders) {
     await db.batch([
       triggerUpdate,
-      githubTriggerConfigUpdate(db, triggerId, body.githubConfig, now),
+      db
+        .update(schema.triggerEmailConfigs)
+        .set({ allowedSendersJson: JSON.stringify(emailAllowedSenders), updatedAt: now })
+        .where(eq(schema.triggerEmailConfigs.triggerId, triggerId)),
     ]);
   } else if (effectiveWebhookConfig) {
     await db.batch([
@@ -366,7 +430,7 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
   clearTriggerPageCaches(projectId);
   const attributionById = await attribution(db, c.env, project, [updated]);
   log.info('trigger.updated', { triggerId, projectId, fields: Object.keys(body) });
-  return c.json(await enrichTrigger(db, updated, attributionById.get(triggerId)));
+  return c.json(await enrichTrigger(db, c.env, updated, attributionById.get(triggerId)));
 });
 
 crudRoutes.delete('/:triggerId', async (c) => {
@@ -384,3 +448,37 @@ crudRoutes.delete('/:triggerId', async (c) => {
 });
 
 export { crudRoutes };
+
+async function readQueueStats(env: Env, projectId: string) {
+  const result = await env.DATABASE.prepare(
+    `SELECT trigger_id,
+    SUM(CASE WHEN status IN ('waiting','routing') THEN 1 ELSE 0 END) AS queued,
+    SUM(CASE WHEN status='routed' THEN 1 ELSE 0 END) AS routed,
+    SUM(CASE WHEN status='dropped' AND COALESCE(skip_reason,'')!='delivery_uncertain' THEN 1 ELSE 0 END) AS dropped,
+    SUM(CASE WHEN status='dropped' AND skip_reason='delivery_uncertain' THEN 1 ELSE 0 END) AS unconfirmed
+    FROM trigger_executions WHERE project_id=? GROUP BY trigger_id`
+  )
+    .bind(projectId)
+    .all<{
+      trigger_id: string;
+      queued: number;
+      routed: number;
+      dropped: number;
+      unconfirmed: number;
+    }>();
+  return new Map(
+    result.results.map((row) => [
+      row.trigger_id,
+      {
+        queued: row.queued,
+        routed: row.routed,
+        dropped: row.dropped,
+        unconfirmed: row.unconfirmed,
+        retentionDays: parsePositiveInt(
+          env.TRIGGER_EXECUTION_LOG_RETENTION_DAYS,
+          DEFAULT_TRIGGER_EXECUTION_LOG_RETENTION_DAYS
+        ),
+      },
+    ])
+  );
+}

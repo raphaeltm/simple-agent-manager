@@ -1,0 +1,293 @@
+import type { ResolvedResourceReservation } from '@simple-agent-manager/shared';
+import { describe, expect, it } from 'vitest';
+
+import {
+  DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB as HOST_RESERVE_MB,
+} from '../../src';
+import {
+  ACCEPT_STALE_HEARTBEAT_POLICY,
+  AggregateCapacityTimeline,
+  CURRENT_AGGREGATE_CAPACITY_POLICY,
+  NO_FINAL_CAPACITY_CAS_POLICY,
+  OVERLAPPING_PROVISIONING_POLICY,
+} from './aggregate-capacity-timeline-harness';
+
+const HALF_NODE: ResolvedResourceReservation = {
+  cpuMillis: 2_000,
+  // Half of 8192 MiB after the default host reserve.
+  memoryMb: (8_192 - HOST_RESERVE_MB) / 2,
+  diskMb: 40_960,
+  exclusiveNode: false,
+  source: 'platform',
+  sourceId: 'platform',
+  version: 1,
+};
+
+const LARGE_NODE = {
+  nodeClass: 'managed',
+  providerInstanceId: 'server-timeline',
+  observedProviderInstanceVcpuCount: 4,
+  observedProviderInstanceMemoryMb: 8_192,
+  observedProviderInstanceDiskGb: 80,
+  observedHardwareSource: 'observed',
+};
+
+// These fixtures isolate declared-budget boundaries. Live-memory pressure has
+// separate scenarios below; unknown container observations otherwise retain the
+// full outstanding reservation in addition to the simulated host use.
+const IDLE_BUDGET_NODE = {
+  ...LARGE_NODE,
+  lastMetrics: JSON.stringify({ version: 1, cpuLoadAvg1: 0.2, memoryPercent: 0, diskPercent: 10 }),
+};
+
+const FULL_NODE: ResolvedResourceReservation = {
+  ...HALF_NODE,
+  cpuMillis: 4_000,
+  memoryMb: 8_192 - HOST_RESERVE_MB,
+  diskMb: 81_920,
+};
+
+function exactSnapshot(world: AggregateCapacityTimeline, taskId: string): string | null {
+  return world.workspaces.get(`workspace-${taskId}`)?.resolvedReservationJson ?? null;
+}
+
+describe('aggregate capacity deterministic virtual timeline', () => {
+  it('serializes concurrent full-node reservations', () => {
+    const world = new AggregateCapacityTimeline();
+    world.addNode('node-1', IDLE_BUDGET_NODE);
+    world.submit('full-a', FULL_NODE, { preferredNodeId: 'node-1', commitDelayMs: 10 });
+    world.submit('full-b', FULL_NODE, { preferredNodeId: 'node-1', commitDelayMs: 10 });
+    world.runUntilIdle();
+
+    expect(world.tasks.get('full-a')?.status).toBe('running');
+    expect(world.tasks.get('full-b')?.status).toBe('retry-wait');
+    expect(world.activeWorkspaces('node-1')).toHaveLength(1);
+    world.assertSafety();
+  });
+
+  it('serializes contenders that both observe the last remaining capacity', () => {
+    const world = new AggregateCapacityTimeline();
+    world.addNode('node-1', IDLE_BUDGET_NODE);
+    world.submit('existing', HALF_NODE, { preferredNodeId: 'node-1' });
+    world.runUntilIdle();
+
+    world.submit('contender-a', HALF_NODE, { preferredNodeId: 'node-1', commitDelayMs: 10 });
+    world.submit('contender-b', HALF_NODE, { preferredNodeId: 'node-1', commitDelayMs: 10 });
+    world.runUntilIdle();
+
+    expect(world.tasks.get('contender-a')?.status).toBe('running');
+    expect(world.tasks.get('contender-b')?.status).toBe('retry-wait');
+    expect(world.activeWorkspaces('node-1')).toHaveLength(2);
+    world.assertSafety();
+  });
+
+  it('packs many small legacy reservations until explicit memory is exhausted', () => {
+    const world = new AggregateCapacityTimeline();
+    world.addNode('node-large-pack', {
+      ...IDLE_BUDGET_NODE,
+      observedProviderInstanceVcpuCount: 16,
+      observedProviderInstanceMemoryMb: 32_768,
+    });
+    const small = {
+      ...HALF_NODE,
+      cpuMillis: 400,
+      // Exactly 40 fit the 32 GiB node after the host reserve; the 41st overflows memory.
+      memoryMb: Math.floor((32_768 - HOST_RESERVE_MB) / 40),
+      diskMb: 2_048,
+    };
+    for (let index = 0; index < 40; index += 1) {
+      world.submit(`small-${index}`, small, { preferredNodeId: 'node-large-pack' });
+      world.runUntilIdle();
+    }
+    expect(world.activeWorkspaces('node-large-pack')).toHaveLength(40);
+    world.submit('small-overflow', small, { preferredNodeId: 'node-large-pack' });
+    world.runUntilIdle();
+    expect(world.tasks.get('small-overflow')?.status).toBe('retry-wait');
+    world.assertSafety();
+  });
+
+  it('rechecks rising measured memory pressure at commit and retains the exact reservation for retry', () => {
+    const world = new AggregateCapacityTimeline();
+    world.addNode('node-pressure', IDLE_BUDGET_NODE);
+    const exact = { ...HALF_NODE, source: 'task' as const, sourceId: 'task-pressure' };
+    world.submit('pressure', exact, { preferredNodeId: 'node-pressure', commitDelayMs: 10 });
+    expect(world.tasks.get('pressure')?.status).toBe('reserving');
+
+    // The declared reservation still fits, but live usage rises after advisory
+    // selection. The final recheck must defer without creating a workspace.
+    world.nodes.get('node-pressure')!.lastMetrics = JSON.stringify({
+      version: 1,
+      cpuLoadAvg1: 0.2,
+      memoryPercent: 75,
+      diskPercent: 10,
+    });
+    world.runUntilIdle();
+    expect(world.tasks.get('pressure')?.status).toBe('retry-wait');
+    expect(world.activeWorkspaces('node-pressure')).toHaveLength(0);
+    expect(world.tasks.get('pressure')?.reservationJson).toBe(JSON.stringify(exact));
+
+    // Recover naturally once pressure falls, preserving the configured plan.
+    world.nodes.get('node-pressure')!.lastMetrics = IDLE_BUDGET_NODE.lastMetrics;
+    world.heartbeat('node-pressure');
+    world.retry('pressure', { preferredNodeId: 'node-pressure' });
+    world.runUntilIdle();
+    expect(world.tasks.get('pressure')?.status).toBe('running');
+    expect(exactSnapshot(world, 'pressure')).toBe(JSON.stringify(exact));
+    world.assertSafety();
+  });
+
+  it('rejects planned capacity without verified observed hardware, even on an empty node', () => {
+    const world = new AggregateCapacityTimeline();
+    world.addNode('node-unverified', {
+      providerInstanceId: 'server-unverified',
+      providerInstanceVcpuCount: 4,
+      providerInstanceMemoryMb: 8_192,
+      providerInstanceDiskGb: 80,
+    });
+    world.submit('denied', HALF_NODE, { preferredNodeId: 'node-unverified' });
+
+    expect(world.tasks.get('denied')?.status).toBe('retry-wait');
+    expect(world.activeWorkspaces('node-unverified')).toHaveLength(0);
+  });
+
+  it('preserves host memory reserve when physical memory would otherwise fit', () => {
+    const world = new AggregateCapacityTimeline();
+    world.addNode('node-1', LARGE_NODE);
+    world.submit('denied', { ...FULL_NODE, memoryMb: 8_192 }, { preferredNodeId: 'node-1' });
+
+    expect(world.tasks.get('denied')?.status).toBe('retry-wait');
+    expect(world.activeWorkspaces('node-1')).toHaveLength(0);
+  });
+
+  it('rejects an occupied node when resource telemetry disappears', () => {
+    const world = new AggregateCapacityTimeline();
+    world.addNode('node-1', LARGE_NODE);
+    world.submit('existing', HALF_NODE, { preferredNodeId: 'node-1' });
+    world.runUntilIdle();
+    world.nodes.get('node-1')!.lastMetrics = null;
+    world.submit('denied', HALF_NODE, { preferredNodeId: 'node-1' });
+
+    expect(world.tasks.get('denied')?.status).toBe('retry-wait');
+    expect(world.activeWorkspaces('node-1')).toHaveLength(1);
+    world.assertSafety();
+  });
+
+  it('rejects stale nodes until a delayed heartbeat makes them eligible', () => {
+    const world = new AggregateCapacityTimeline();
+    world.addNode('node-stale', LARGE_NODE, { lastHeartbeatAt: world.now - 30_001 });
+
+    world.submit('delayed', HALF_NODE, { preferredNodeId: 'node-stale' });
+    expect(world.tasks.get('delayed')?.status).toBe('retry-wait');
+    world.scheduleHeartbeat('node-stale', 5_000);
+    world.runUntilIdle();
+    world.retry('delayed', { preferredNodeId: 'node-stale' });
+    world.runUntilIdle();
+
+    expect(world.tasks.get('delayed')?.status).toBe('running');
+    world.assertSafety();
+  });
+
+  it('serializes overlapping provisioning and releases capacity on cancellation or failure', () => {
+    const world = new AggregateCapacityTimeline();
+    world.submit('provision-a', HALF_NODE, { provisionIfUnavailable: true });
+    world.submit('provision-b', HALF_NODE, { provisionIfUnavailable: true });
+
+    expect(world.providerRequests).toHaveLength(1);
+    world.cancel('provision-b');
+    world.runUntilIdle();
+    world.retry('provision-a');
+    world.runUntilIdle();
+    expect(world.tasks.get('provision-a')?.status).toBe('running');
+
+    world.fail('provision-a');
+    world.submit('replacement', HALF_NODE, { preferredNodeId: 'node-provisioned-0' });
+    world.runUntilIdle();
+    expect(world.tasks.get('replacement')?.status).toBe('running');
+    world.assertNoProvisioningOverlap();
+    world.assertSafety();
+  });
+
+  it('makes retries idempotent and persists the exact pre-resolved snapshot', () => {
+    const world = new AggregateCapacityTimeline();
+    world.addNode('node-1', LARGE_NODE);
+    const exact = { ...HALF_NODE, source: 'task' as const, sourceId: 'task-exact-snapshot' };
+    world.submit('retry', exact, { preferredNodeId: 'node-1' });
+    world.runUntilIdle();
+    world.submit(
+      'retry',
+      { ...exact, sourceId: 'mutated-after-resolution' },
+      {
+        preferredNodeId: 'node-1',
+      }
+    );
+    world.runUntilIdle();
+
+    expect(world.activeWorkspaces('node-1')).toHaveLength(1);
+    expect(exactSnapshot(world, 'retry')).toBe(JSON.stringify(exact));
+    world.assertSafety();
+  });
+
+  it('fails closed for occupied legacy/malformed data and enforces exclusivity', () => {
+    for (const legacyJson of [null, '{broken']) {
+      const world = new AggregateCapacityTimeline();
+      world.addNode('node-legacy', LARGE_NODE);
+      world.seedWorkspace({
+        id: `legacy-${String(legacyJson)}`,
+        nodeId: 'node-legacy',
+        reservationJson: legacyJson,
+      });
+      world.submit('denied', HALF_NODE, { preferredNodeId: 'node-legacy' });
+      expect(world.tasks.get('denied')?.status).toBe('retry-wait');
+    }
+
+    const world = new AggregateCapacityTimeline();
+    world.addNode('node-exclusive', LARGE_NODE);
+    const exclusive = { ...HALF_NODE, exclusiveNode: true };
+    world.submit('exclusive', exclusive, { preferredNodeId: 'node-exclusive' });
+    world.runUntilIdle();
+    world.submit('co-tenant', HALF_NODE, { preferredNodeId: 'node-exclusive' });
+    expect(world.tasks.get('co-tenant')?.status).toBe('retry-wait');
+    world.assertSafety();
+  });
+});
+
+describe('aggregate capacity simulation calibration', () => {
+  it('detects removal of the final capacity recheck', () => {
+    const world = new AggregateCapacityTimeline(NO_FINAL_CAPACITY_CAS_POLICY);
+    world.addNode('node-1', IDLE_BUDGET_NODE);
+    world.submit('existing', HALF_NODE, { preferredNodeId: 'node-1' });
+    world.runUntilIdle();
+    world.submit('contender-a', HALF_NODE, { preferredNodeId: 'node-1', commitDelayMs: 10 });
+    world.submit('contender-b', HALF_NODE, { preferredNodeId: 'node-1', commitDelayMs: 10 });
+    world.runUntilIdle();
+
+    expect(() => world.assertSafety()).toThrow(/capacity exceeded/);
+  });
+
+  it('detects accepting a stale heartbeat', () => {
+    const world = new AggregateCapacityTimeline(ACCEPT_STALE_HEARTBEAT_POLICY);
+    world.addNode('node-stale', LARGE_NODE, { lastHeartbeatAt: world.now - 30_001 });
+    world.submit('unsafe-stale-placement', HALF_NODE, { preferredNodeId: 'node-stale' });
+    world.runUntilIdle();
+
+    expect(() => world.assertSafety()).toThrow(/stale heartbeat/);
+  });
+
+  it('detects removal of the provisioning lease', () => {
+    const world = new AggregateCapacityTimeline(OVERLAPPING_PROVISIONING_POLICY);
+    world.submit('provision-a', HALF_NODE, { provisionIfUnavailable: true });
+    world.submit('provision-b', HALF_NODE, { provisionIfUnavailable: true });
+
+    expect(() => world.assertNoProvisioningOverlap()).toThrow(/overlapped/);
+  });
+
+  it('keeps the current policy as the calibrated control', () => {
+    const world = new AggregateCapacityTimeline(CURRENT_AGGREGATE_CAPACITY_POLICY);
+    world.addNode('node-1', LARGE_NODE);
+    world.submit('control', HALF_NODE, { preferredNodeId: 'node-1' });
+    world.runUntilIdle();
+
+    expect(() => world.assertSafety()).not.toThrow();
+    expect(() => world.assertNoProvisioningOverlap()).not.toThrow();
+  });
+});

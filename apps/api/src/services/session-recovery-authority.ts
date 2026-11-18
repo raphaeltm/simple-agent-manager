@@ -1,4 +1,13 @@
+import type {
+  ProjectDataSourceTaskGuard,
+  ProjectEventWakeRecoveryGuard,
+} from '@simple-agent-manager/project-data';
+
 import type { Env } from '../env';
+import {
+  type ProviderLimitRecoveryApproval,
+  providerLimitRecoveryApprovalD1Fence,
+} from './provider-limit-recovery-approval';
 import {
   sessionRecoveryAuthorityRevoked,
   type SessionRecoveryAuthorityRevokedError,
@@ -7,19 +16,19 @@ import {
 const TERMINAL_TASK_STATUSES_SQL = "'completed', 'failed', 'cancelled'";
 const LIVE_TASK_STATUSES_SQL = "'queued', 'delegated', 'in_progress', 'awaiting_followup'";
 
-export interface ProjectEventWakeRecoveryGuard {
-  batchId: string;
-  subscriptionId: string;
-}
+/** ProjectData owns the guard a delivery carries; the worker adds its own recovery authorities. */
+export type { ProjectEventWakeRecoveryGuard };
 
-export interface SessionRecoverySourceTaskGuard {
-  taskId: string;
-  projectId: string;
-  chatSessionId: string;
-  projectEventWake?: ProjectEventWakeRecoveryGuard | null;
-  /** Pre-materialization event guard; after admission projectEventWake supplies this requirement. */
-  requireSourceProjectMember?: boolean;
-  requiredProjectMemberId?: string | null;
+export interface SessionRecoverySourceTaskGuard extends ProjectDataSourceTaskGuard {
+  /** Cron retry authority: exact failed eviction attempt, with a non-decaying budget. */
+  evictionRecoveryRetry?: {
+    workspaceId: string;
+    nodeId: string;
+    generation: string | null;
+    recoveryAttemptId: string;
+    maxAttempts: number;
+  };
+  providerLimitApproval?: ProviderLimitRecoveryApproval | null;
 }
 
 /** Event subscriptions retain source task identity, never a caller-supplied user identity. */
@@ -46,6 +55,7 @@ export async function isSessionRecoverySourceTaskGuardValid(
   database: D1Database,
   guard: SessionRecoverySourceTaskGuard
 ): Promise<boolean> {
+  const approvalFence = providerLimitRecoveryApprovalD1Fence('source', guard.providerLimitApproval);
   const row = await database
     .prepare(
       `SELECT source.id
@@ -95,6 +105,7 @@ export async function isSessionRecoverySourceTaskGuardValid(
           )`
               : ''
           }
+          ${approvalFence.sql}
         LIMIT 1`
     )
     .bind(
@@ -103,7 +114,8 @@ export async function isSessionRecoverySourceTaskGuardValid(
       guard.chatSessionId,
       guard.chatSessionId,
       guard.chatSessionId,
-      ...(guard.requiredProjectMemberId ? [guard.requiredProjectMemberId] : [])
+      ...(guard.requiredProjectMemberId ? [guard.requiredProjectMemberId] : []),
+      ...approvalFence.params
     )
     .first<{ id: string }>();
   return Boolean(row);

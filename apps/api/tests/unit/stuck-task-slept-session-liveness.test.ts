@@ -1,11 +1,10 @@
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import { upsertActivityState } from '@simple-agent-manager/project-data/internal/do/session-state';
+import type { Env as ProjectDataEnv } from '@simple-agent-manager/project-data/internal/do/types';
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { runMigrations } from '../../src/durable-objects/migrations';
-import { upsertActivityState } from '../../src/durable-objects/project-data/session-state';
-import { getLocalTaskRuntimeLiveness } from '../../src/durable-objects/project-data/task-runtime-liveness';
-import type { Env as ProjectDataEnv } from '../../src/durable-objects/project-data/types';
 import type { Env } from '../../src/env';
 import { getTaskRuntimeLiveness } from '../../src/scheduled/stuck-tasks';
 import {
@@ -13,6 +12,7 @@ import {
   needsSessionResumabilityProbe,
   needsTaskSupersessionProbe,
 } from '../../src/services/task-runtime-liveness';
+import { getLocalTaskRuntimeLiveness } from '../../src/services/task-runtime-liveness-local';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 import { createSqlStorage } from './durable-objects/sql-storage-test-utils';
 
@@ -624,19 +624,26 @@ describe('ProjectData idle-cleanup liveness for a stale VM node heartbeat', () =
   });
 
   it('uses the successful node health probe, then proves the task live from local ACP state', async () => {
-    const verdict = await getLocalTaskRuntimeLiveness(sqlWithLiveAcpSession(), doEnv(), doTask);
+    // Route resolution consumes the shared probe budget. This case models no elapsed
+    // time, so the exact fetch timeout must not depend on runner scheduling jitter.
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    try {
+      const verdict = await getLocalTaskRuntimeLiveness(sqlWithLiveAcpSession(), doEnv(), doTask);
 
-    expect(fetchWithTimeoutMock).toHaveBeenCalledWith(
-      'https://01m064tg56ecjw1d127h32brvj.vm.example.test:8443/health',
-      { method: 'GET' },
-      5_000
-    );
-    expect(verdict).toMatchObject({
-      live: true,
-      conclusive: true,
-      reason: 'task_agent_host_running',
-      activeAcpSessionId: 'acp-live',
-    });
+      expect(fetchWithTimeoutMock).toHaveBeenCalledWith(
+        'https://01m064tg56ecjw1d127h32brvj.vm.example.test:8443/health',
+        { method: 'GET', redirect: 'manual' },
+        5_000
+      );
+      expect(verdict).toMatchObject({
+        live: true,
+        conclusive: true,
+        reason: 'task_agent_host_running',
+        activeAcpSessionId: 'acp-live',
+      });
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('preserves the task after a failed node health probe response', async () => {

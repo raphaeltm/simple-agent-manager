@@ -9,15 +9,32 @@ import {
   fetchNodeAgent,
   getNodeAgentRequestTimeoutMs,
   listNodeEventsOnNode,
-  nodeAgentRawRequest,
 } from '../../services/node-agent';
 import {
   getNodeLogsFromNode,
   getNodeSystemInfoFromNode,
   listNodeContainersFromNode,
+  openNodeDiagnosticDownload,
 } from '../../services/node-agent-diagnostics';
+import { getNodeBackendBaseUrl } from '../../services/node-agent-readiness';
+import {
+  type NodeAgentRoute,
+  NodeAgentRouteError,
+  resolveNodeAgentRoute,
+} from '../../services/node-agent-route';
+import { ownerNodeAccess, runNodeDiagnostic } from '../../services/node-diagnostics-access';
+import {
+  gatewayDecisionResponse,
+  isGatewayAuthorizationRequest,
+} from '../../services/node-websocket-gateway';
 
 export const nodeDiagnosticsRoutes = new Hono<{ Bindings: Env }>();
+
+async function ownedNode(c: Context<{ Bindings: Env }>, nodeId: string) {
+  const node = await requireNodeOwnership(c, nodeId);
+  if (!node) throw errors.notFound('Node');
+  return node;
+}
 
 /**
  * GET /:id/events — Proxy node events from the VM Agent.
@@ -27,26 +44,13 @@ export const nodeDiagnosticsRoutes = new Hono<{ Bindings: Env }>();
  */
 nodeDiagnosticsRoutes.get('/:id/events', async (c) => {
   const nodeId = c.req.param('id');
-  const userId = getUserId(c);
-  const node = await requireNodeOwnership(c, nodeId);
-
-  if (!node) {
-    throw errors.notFound('Node');
-  }
-
-  if (node.status !== 'running') {
-    return c.json({ events: [], nextCursor: null });
-  }
-
+  const node = await ownedNode(c, nodeId);
   const limit = Math.min(Math.max(Number(c.req.query('limit')) || 100, 1), 500);
-
-  try {
-    const result = await listNodeEventsOnNode(nodeId, c.env, userId, limit);
-    return c.json(result);
-  } catch {
-    // Node agent may be unreachable — return empty rather than 500
-    return c.json({ events: [], nextCursor: null });
-  }
+  const outcome = await runNodeDiagnostic(node, ownerNodeAccess(getUserId(c)), (id, userId) =>
+    listNodeEventsOnNode(id, c.env, userId, limit)
+  );
+  // Not running or unreachable: an empty page rather than an error.
+  return c.json(outcome.status === 'ok' ? outcome.value : { events: [], nextCursor: null });
 });
 
 /**
@@ -55,28 +59,22 @@ nodeDiagnosticsRoutes.get('/:id/events', async (c) => {
  * Only available when the node is running.
  */
 nodeDiagnosticsRoutes.get('/:id/system-info', async (c) => {
+  c.header('Cache-Control', 'no-store');
   const nodeId = c.req.param('id');
-  const userId = getUserId(c);
-  const node = await requireNodeOwnership(c, nodeId);
-
-  if (!node) {
-    throw errors.notFound('Node');
-  }
-
-  if (node.status !== 'running') {
+  const node = await ownedNode(c, nodeId);
+  const outcome = await runNodeDiagnostic(node, ownerNodeAccess(getUserId(c)), (id, userId) =>
+    getNodeSystemInfoFromNode(id, c.env, userId)
+  );
+  if (outcome.status === 'not_running') {
     return c.json(
       { error: 'NODE_NOT_RUNNING', message: 'System info unavailable when node is not running' },
       400
     );
   }
-
-  try {
-    const result = await getNodeSystemInfoFromNode(nodeId, c.env, userId);
-    return c.json(result);
-  } catch {
-    // Node agent may be unreachable — return 503
+  if (outcome.status === 'unreachable') {
     return c.json({ error: 'UNAVAILABLE', message: 'Could not reach node agent' }, 503);
   }
+  return c.json(outcome.value);
 });
 
 /**
@@ -86,27 +84,16 @@ nodeDiagnosticsRoutes.get('/:id/system-info', async (c) => {
  */
 nodeDiagnosticsRoutes.get('/:id/logs', async (c) => {
   const nodeId = c.req.param('id');
-  const userId = getUserId(c);
-  const node = await requireNodeOwnership(c, nodeId);
-
-  if (!node) {
-    throw errors.notFound('Node');
-  }
-
-  if (node.status !== 'running') {
-    return c.json({ entries: [], nextCursor: null, hasMore: false });
-  }
-
+  const node = await ownedNode(c, nodeId);
   // Pass through all query params to the VM Agent
   const queryString = new URL(c.req.url).searchParams.toString();
-
-  try {
-    const result = await getNodeLogsFromNode(nodeId, c.env, userId, queryString);
-    return c.json(result);
-  } catch {
-    // Node agent may be unreachable — return empty rather than 500
-    return c.json({ entries: [], nextCursor: null, hasMore: false });
-  }
+  const outcome = await runNodeDiagnostic(node, ownerNodeAccess(getUserId(c)), (id, userId) =>
+    getNodeLogsFromNode(id, c.env, userId, queryString)
+  );
+  // Not running or unreachable: an empty page rather than an error.
+  return c.json(
+    outcome.status === 'ok' ? outcome.value : { entries: [], nextCursor: null, hasMore: false }
+  );
 });
 
 /**
@@ -115,26 +102,21 @@ nodeDiagnosticsRoutes.get('/:id/logs', async (c) => {
  */
 nodeDiagnosticsRoutes.get('/:id/containers', async (c) => {
   const nodeId = c.req.param('id');
-  const userId = getUserId(c);
-  const node = await requireNodeOwnership(c, nodeId);
-
-  if (!node) {
-    throw errors.notFound('Node');
-  }
-
-  if (node.status !== 'running') {
+  const node = await ownedNode(c, nodeId);
+  const outcome = await runNodeDiagnostic(node, ownerNodeAccess(getUserId(c)), (id, userId) =>
+    listNodeContainersFromNode(id, c.env, userId)
+  );
+  if (outcome.status === 'not_running') {
     return c.json({ containers: [], nodeId, unavailableReason: 'node_not_running' });
   }
-
-  try {
-    const result = await listNodeContainersFromNode(nodeId, c.env, userId);
-    return c.json({
-      ...(typeof result === 'object' && result !== null ? result : { containers: [] }),
-      nodeId,
-    });
-  } catch {
+  if (outcome.status === 'unreachable') {
     return c.json({ containers: [], nodeId, unavailableReason: 'node_agent_unreachable' }, 503);
   }
+  const result = outcome.value;
+  return c.json({
+    ...(typeof result === 'object' && result !== null ? result : { containers: [] }),
+    nodeId,
+  });
 });
 
 /**
@@ -160,11 +142,7 @@ nodeDiagnosticsRoutes.get('/:id/logs/stream', async (c) => {
 
   // Build the VM agent WebSocket URL with all query params
   const clientUrl = new URL(c.req.url);
-  const vmProtocol = c.env.VM_AGENT_PROTOCOL || 'https';
-  const vmPort = c.env.VM_AGENT_PORT || '8443';
-  const vmUrl = new URL(
-    `${vmProtocol}://${nodeId.toLowerCase()}.vm.${c.env.BASE_DOMAIN}:${vmPort}/logs/stream`
-  );
+  const vmUrl = new URL(`${getNodeBackendBaseUrl(nodeId, c.env)}/logs/stream`);
   vmUrl.searchParams.set('token', token);
 
   // Forward filter params from client
@@ -196,6 +174,19 @@ nodeDiagnosticsRoutes.get('/:id/logs/stream', async (c) => {
   headers.set('Authorization', `Bearer ${token}`);
   headers.set('X-SAM-Node-Id', nodeId);
 
+  // Self-hosted WebSocket gateway: same auth and headers; the box's Caddy carries the socket.
+  // The node row is already loaded above, so this adds no read on any transport.
+  if (isGatewayAuthorizationRequest(c.req.raw)) {
+    let route: NodeAgentRoute;
+    try {
+      route = await resolveNodeAgentRoute(c.env, nodeId, node);
+    } catch (err) {
+      if (!(err instanceof NodeAgentRouteError)) throw err;
+      return c.json({ error: 'NODE_UNREACHABLE', message: 'Node is not reachable' }, 503);
+    }
+    return gatewayDecisionResponse(c.req.raw, route, { url: vmUrl, headers });
+  }
+
   return fetchNodeAgent(
     nodeId,
     c.env,
@@ -209,7 +200,7 @@ nodeDiagnosticsRoutes.get('/:id/logs/stream', async (c) => {
 });
 
 interface NodeDownload {
-  path: string;
+  path: '/debug-package' | '/events/export' | '/metrics/export';
   contentType: string;
   filename: string;
   extension: string;
@@ -223,29 +214,22 @@ async function downloadNodeDiagnostics(
 ): Promise<Response> {
   const nodeId = c.req.param('id');
   if (!nodeId) throw errors.notFound('Node');
-  const userId = getUserId(c);
-  const node = await requireNodeOwnership(c, nodeId);
-  if (!node) throw errors.notFound('Node');
-  if (node.status !== 'running') throw errors.badRequest('Node is not running');
-
-  try {
-    const response = await nodeAgentRawRequest(nodeId, c.env, options.path, userId);
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      throw new Error(`VM agent returned ${response.status}: ${body}`);
-    }
-    const headers: Record<string, string> = {
-      'Content-Type': response.headers.get('Content-Type') || options.contentType,
-      'Content-Disposition':
-        response.headers.get('Content-Disposition') ||
-        `attachment; filename="${options.filename}-${nodeId}.${options.extension}"`,
-    };
-    if (options.includeLength)
-      headers['Content-Length'] = response.headers.get('Content-Length') || '';
-    return new Response(response.body, { status: 200, headers });
-  } catch {
-    throw errors.badRequest(options.errorMessage);
-  }
+  const node = await ownedNode(c, nodeId);
+  const outcome = await runNodeDiagnostic(node, ownerNodeAccess(getUserId(c)), (id, userId) =>
+    openNodeDiagnosticDownload(id, c.env, userId, options.path)
+  );
+  if (outcome.status === 'not_running') throw errors.badRequest('Node is not running');
+  if (outcome.status === 'unreachable') throw errors.badRequest(options.errorMessage);
+  const response = outcome.value;
+  const headers: Record<string, string> = {
+    'Content-Type': response.headers.get('Content-Type') || options.contentType,
+    'Content-Disposition':
+      response.headers.get('Content-Disposition') ||
+      `attachment; filename="${options.filename}-${nodeId}.${options.extension}"`,
+  };
+  if (options.includeLength)
+    headers['Content-Length'] = response.headers.get('Content-Length') || '';
+  return new Response(response.body, { status: 200, headers });
 }
 
 /** Download raw VM Agent diagnostic artifacts for an owned, running node. */

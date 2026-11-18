@@ -19,11 +19,11 @@
  * grouped/FTS index — which is what makes these assertions discriminating
  * rather than accidentally satisfied by the raw-message LIKE fallback.
  */
+import { runProjectDataGroupedFtsCleanup } from '@simple-agent-manager/project-data/internal/do/grouped-fts-cleanup';
+import { resolveStorageSafetyConfig } from '@simple-agent-manager/project-data/internal/do/storage-safety';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import { runProjectDataGroupedFtsCleanup } from '../../src/durable-objects/project-data/grouped-fts-cleanup';
-import { resolveStorageSafetyConfig } from '../../src/durable-objects/project-data/storage-safety';
 import type { Env as WorkerEnv } from '../../src/env';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
@@ -234,8 +234,9 @@ describe('incremental materialization on sleep', () => {
     const tail = await stub.searchMessages('zephyrous', sessionId, ['assistant']);
     expect(tail.length).toBeGreaterThanOrEqual(1);
     // Control: the pre-sleep half is still there.
-    expect((await stub.searchMessages('quixotic', sessionId, ['assistant'])).length)
-      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('quixotic', sessionId, ['assistant'])).length
+    ).toBeGreaterThanOrEqual(1);
 
     const state = await readIndexState(stub, sessionId);
     expect(state.status).toBe('stopped');
@@ -301,8 +302,9 @@ describe('incremental materialization on sleep', () => {
     expect(await stub.searchMessages('quarantined injected sentinel', sessionId)).toEqual([]);
     // Liveness control: the surrounding run IS searchable, so the empty result
     // above cannot mean the session was never indexed at all.
-    expect((await stub.searchMessages('system message', sessionId, ['assistant'])).length)
-      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('system message', sessionId, ['assistant'])).length
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it('does not start a new grouped row when the role changes across the boundary', async () => {
@@ -341,10 +343,12 @@ describe('incremental materialization on sleep', () => {
     expect(grouped.map((row) => row.role)).toEqual(['thinking', 'tool']);
     expect(grouped[0]!.content).toBe('Considering the recondite option.');
     expect(grouped[1]!.content).toBe('Read(subterranean.md)');
-    expect((await stub.searchMessages('recondite', sessionId, ['thinking'])).length)
-      .toBeGreaterThanOrEqual(1);
-    expect((await stub.searchMessages('subterranean', sessionId, ['tool'])).length)
-      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('recondite', sessionId, ['thinking'])).length
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('subterranean', sessionId, ['tool'])).length
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it('indexes the tail when a session fails rather than stops', async () => {
@@ -358,10 +362,12 @@ describe('incremental materialization on sleep', () => {
 
     expect(await stub.failSession(sessionId, 'agent crashed')).toBe(true);
 
-    expect((await stub.searchMessages('catastrophe', sessionId, ['assistant'])).length)
-      .toBeGreaterThanOrEqual(1);
-    expect((await stub.searchMessages('debacle', sessionId, ['assistant'])).length)
-      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('catastrophe', sessionId, ['assistant'])).length
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('debacle', sessionId, ['assistant'])).length
+    ).toBeGreaterThanOrEqual(1);
     const state = await readIndexState(stub, sessionId);
     expect(state.status).toBe('failed');
     expect(state.search_index_state).toBe('complete');
@@ -416,8 +422,9 @@ describe('incremental materialization on sleep', () => {
     // lands inside the shared millisecond rather than at the start of it. One new
     // message, so at most a couple of rows.
     expect(secondPass.tokenScanRows).toBeLessThanOrEqual(2);
-    expect((await stub.searchMessages('a later question', sessionId, ['user'])).length)
-      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('a later question', sessionId, ['user'])).length
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it('is a no-op when a sleeping session is re-materialized with nothing new', async () => {
@@ -561,8 +568,9 @@ describe('incremental materialization on sleep', () => {
     expect(grouped[0]!.content).toBe(
       Array.from({ length: TOKEN_COUNT }, (_, i) => `p${i} `).join('')
     );
-    expect((await stub.searchMessages(`p${TOKEN_COUNT - 1}`, sessionId, ['assistant'])).length)
-      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages(`p${TOKEN_COUNT - 1}`, sessionId, ['assistant'])).length
+    ).toBeGreaterThanOrEqual(1);
 
     const state = await readIndexState(stub, sessionId);
     expect(state.search_index_state).toBe('partial');
@@ -590,10 +598,12 @@ describe('incremental materialization on sleep', () => {
     expect(grouped.every((row) => row.role === 'assistant')).toBe(true);
 
     // Both rows are still indexed — capping must not drop content from search.
-    expect((await stub.searchMessages('oversize', sessionId, ['assistant'])).length)
-      .toBeGreaterThanOrEqual(1);
-    expect((await stub.searchMessages('continuation after', sessionId, ['assistant'])).length)
-      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('oversize', sessionId, ['assistant'])).length
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('continuation after', sessionId, ['assistant'])).length
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it('defers the remainder when a pass hits its row budget, and resumes on the next pass', async () => {
@@ -632,8 +642,9 @@ describe('incremental materialization on sleep', () => {
     await stub.materializeSession(sessionId);
     expect(await readGroupedRows(stub, sessionId)).toHaveLength(3);
     expect((await readIndexState(stub, sessionId)).search_index_state).toBe('complete');
-    expect((await stub.searchMessages('third budgeted', sessionId, ['user'])).length)
-      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('third budgeted', sessionId, ['user'])).length
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it('treats a pre-watermark session as indexed through materialized_at', async () => {
@@ -666,8 +677,9 @@ describe('incremental materialization on sleep', () => {
     expect(grouped).toHaveLength(1);
     expect(grouped[0]!.content).toBe('Legacy obligato content. Plus fungible tail.');
     expect(await countFtsHits(stub, sessionId, 'obligato')).toBe(1);
-    expect((await stub.searchMessages('fungible', sessionId, ['assistant'])).length)
-      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('fungible', sessionId, ['assistant'])).length
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it('keeps a batch that landed below the watermark findable through the fallback', async () => {
@@ -802,7 +814,7 @@ describe('incremental materialization and storage relief', () => {
     // Because the pruner cleared it, a re-index rebuilds the whole session.
     await runInDurableObject(stub, async (_instance, state) => {
       state.storage.sql.exec(
-        "UPDATE chat_sessions SET search_index_state = NULL WHERE id = ?",
+        'UPDATE chat_sessions SET search_index_state = NULL WHERE id = ?',
         sessionId
       );
     });
@@ -823,10 +835,7 @@ describe('materializePendingSessions sweep', () => {
     // Put it to sleep WITHOUT indexing, reproducing a session that was already
     // asleep when incremental materialization shipped.
     await runInDurableObject(stub, async (_instance, state) => {
-      state.storage.sql.exec(
-        "UPDATE chat_sessions SET status = 'sleeping' WHERE id = ?",
-        sleeping
-      );
+      state.storage.sql.exec("UPDATE chat_sessions SET status = 'sleeping' WHERE id = ?", sleeping);
     });
 
     expect(await stub.searchMessages('peripatetic', sleeping, ['assistant'])).toEqual([]);
@@ -834,8 +843,9 @@ describe('materializePendingSessions sweep', () => {
     const first = await stub.materializePendingSessions();
     expect(first.errors).toBe(0);
     expect(first.materialized).toBeGreaterThanOrEqual(1);
-    expect((await stub.searchMessages('peripatetic', sleeping, ['assistant'])).length)
-      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('peripatetic', sleeping, ['assistant'])).length
+    ).toBeGreaterThanOrEqual(1);
 
     // Second sweep: nothing is pending any more, so it must not re-select.
     const second = await stub.materializePendingSessions();
@@ -868,8 +878,9 @@ describe('materializePendingSessions sweep', () => {
     expect(swept.errors).toBe(0);
     expect(swept.materialized).toBeGreaterThanOrEqual(1);
 
-    expect((await stub.searchMessages('pusillanimous', sessionId, ['assistant'])).length)
-      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('pusillanimous', sessionId, ['assistant'])).length
+    ).toBeGreaterThanOrEqual(1);
     // Liveness control: the first half is still indexed exactly once.
     expect(await countFtsHits(stub, sessionId, 'antediluvian')).toBe(1);
   });

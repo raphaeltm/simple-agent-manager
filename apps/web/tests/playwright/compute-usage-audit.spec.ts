@@ -97,9 +97,33 @@ function makeNodeUsageRecord(overrides: {
 
 // Normal dataset: a few users, mixed platform/BYOC, one with active nodes
 const USERS_NORMAL = [
-  makeUserNodeSummary({ userId: 'u1', name: 'Alice Johnson', email: 'alice@example.com', totalNodeHours: 24.5, totalVcpuHours: 98.0, platformNodeHours: 20.0, activeNodes: 2 }),
-  makeUserNodeSummary({ userId: 'u2', name: 'Bob Smith', email: 'bob@example.com', totalNodeHours: 8.2, totalVcpuHours: 32.8, platformNodeHours: 8.2, activeNodes: 0 }),
-  makeUserNodeSummary({ userId: 'u3', name: null, email: 'charlie@example.com', totalNodeHours: 1.1, totalVcpuHours: 4.4, platformNodeHours: 0, activeNodes: 0 }),
+  makeUserNodeSummary({
+    userId: 'u1',
+    name: 'Alice Johnson',
+    email: 'alice@example.com',
+    totalNodeHours: 24.5,
+    totalVcpuHours: 98.0,
+    platformNodeHours: 20.0,
+    activeNodes: 2,
+  }),
+  makeUserNodeSummary({
+    userId: 'u2',
+    name: 'Bob Smith',
+    email: 'bob@example.com',
+    totalNodeHours: 8.2,
+    totalVcpuHours: 32.8,
+    platformNodeHours: 8.2,
+    activeNodes: 0,
+  }),
+  makeUserNodeSummary({
+    userId: 'u3',
+    name: null,
+    email: 'charlie@example.com',
+    totalNodeHours: 1.1,
+    totalVcpuHours: 4.4,
+    platformNodeHours: 0,
+    activeNodes: 0,
+  }),
 ];
 
 // Long text dataset: names/emails longer than 60 chars
@@ -139,8 +163,23 @@ const USERS_MANY = Array.from({ length: 32 }, (_, i) =>
 
 // Node records for the detail view
 const NODES_NORMAL = [
-  makeNodeUsageRecord({ nodeId: 'node-abc123def456ghi', name: 'prod-worker-1', vmSize: 'cpx31', vcpuCount: 4, credentialSource: 'platform', status: 'running' }),
-  makeNodeUsageRecord({ nodeId: 'node-xyz789uvw012jkl', name: 'dev-node-1', vmSize: 'ccx13', vcpuCount: 2, credentialSource: 'user', status: 'destroyed', endedAt: '2026-04-15T12:00:00Z' }),
+  makeNodeUsageRecord({
+    nodeId: 'node-abc123def456ghi',
+    name: 'prod-worker-1',
+    vmSize: 'cpx31',
+    vcpuCount: 4,
+    credentialSource: 'platform',
+    status: 'running',
+  }),
+  makeNodeUsageRecord({
+    nodeId: 'node-xyz789uvw012jkl',
+    name: 'dev-node-1',
+    vmSize: 'ccx13',
+    vcpuCount: 2,
+    credentialSource: 'user',
+    status: 'destroyed',
+    endedAt: '2026-04-15T12:00:00Z',
+  }),
 ];
 
 const NODES_LONG_ID = [
@@ -176,19 +215,23 @@ function makeAdminNodeUsageResponse(users: ReturnType<typeof makeUserNodeSummary
 }
 
 // Per-user node detail response (AdminUserNodeDetailedUsage)
-function makeDetailedNodeUsage(options: {
-  totalNodeHours?: number;
-  totalVcpuHours?: number;
-  platformNodeHours?: number;
-  activeNodes?: number;
-  nodes?: ReturnType<typeof makeNodeUsageRecord>[];
-} = {}) {
+function makeDetailedNodeUsage(
+  options: {
+    totalNodeHours?: number;
+    totalVcpuHours?: number;
+    platformNodeHours?: number;
+    activeNodes?: number;
+    nodes?: ReturnType<typeof makeNodeUsageRecord>[];
+  } = {}
+) {
   return {
     period: PERIOD,
     totalNodeHours: options.totalNodeHours ?? 24.5,
     totalVcpuHours: options.totalVcpuHours ?? 98.0,
     platformNodeHours: options.platformNodeHours ?? 20.0,
-    activeNodes: options.activeNodes ?? (options.nodes ?? NODES_NORMAL).filter((n) => n.status === 'running').length,
+    activeNodes:
+      options.activeNodes ??
+      (options.nodes ?? NODES_NORMAL).filter((n) => n.status === 'running').length,
     nodes: options.nodes ?? NODES_NORMAL,
   };
 }
@@ -234,8 +277,21 @@ function makeActiveNode(overrides: {
 }
 
 const ACTIVE_NODES_NORMAL = [
-  makeActiveNode({ nodeId: 'node-abc123def456ghi', name: 'warm-pool-node-1', vmSize: 'cpx31', vcpuCount: 4, credentialSource: 'platform' }),
-  makeActiveNode({ nodeId: 'node-xyz789uvw012jkl', name: 'byoc-node-1', vmSize: 'ccx13', vcpuCount: 2, credentialSource: 'user', createdAt: new Date(Date.now() - 7200000).toISOString() }),
+  makeActiveNode({
+    nodeId: 'node-abc123def456ghi',
+    name: 'warm-pool-node-1',
+    vmSize: 'cpx31',
+    vcpuCount: 4,
+    credentialSource: 'platform',
+  }),
+  makeActiveNode({
+    nodeId: 'node-xyz789uvw012jkl',
+    name: 'byoc-node-1',
+    vmSize: 'ccx13',
+    vcpuCount: 2,
+    credentialSource: 'user',
+    createdAt: new Date(Date.now() - 7200000).toISOString(),
+  }),
 ];
 
 const ACTIVE_NODES_LONG = [
@@ -248,16 +304,18 @@ const ACTIVE_NODES_LONG = [
   }),
 ];
 
-function makeComputeUsageResponse(options: {
-  activeSessions?: ReturnType<typeof makeActiveNode>[];
-  totalNodeHours?: number;
-  totalVcpuHours?: number;
-  platformNodeHours?: number;
-  platformVcpuHours?: number;
-  userNodeHours?: number;
-  userVcpuHours?: number;
-  activeNodes?: number;
-} = {}) {
+function makeComputeUsageResponse(
+  options: {
+    activeSessions?: ReturnType<typeof makeActiveNode>[];
+    totalNodeHours?: number;
+    totalVcpuHours?: number;
+    platformNodeHours?: number;
+    platformVcpuHours?: number;
+    userNodeHours?: number;
+    userVcpuHours?: number;
+    activeNodes?: number;
+  } = {}
+) {
   const sessions = options.activeSessions ?? [];
   return {
     currentPeriod: {
@@ -291,7 +349,8 @@ type MockOptions = {
 async function setupMocks(page: Page, options: MockOptions = {}) {
   const adminUsageData = makeAdminNodeUsageResponse(options.adminUsers ?? USERS_NORMAL);
   const userDetailData = options.userDetailedUsage ?? makeDetailedNodeUsage();
-  const computeUsageData = options.computeUsage ?? makeComputeUsageResponse({ activeSessions: ACTIVE_NODES_NORMAL });
+  const computeUsageData =
+    options.computeUsage ?? makeComputeUsageResponse({ activeSessions: ACTIVE_NODES_NORMAL });
   await page.addInitScript((userId) => {
     window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
   }, MOCK_USER.user.id);
@@ -306,7 +365,8 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
 
     // Notifications
-    if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
+    if (path.startsWith('/api/notifications'))
+      return respond(200, { notifications: [], unreadCount: 0 });
 
     // Dashboard
     if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
@@ -335,9 +395,16 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
     // AI usage — GET /api/usage/ai (empty for compute-focused tests)
     if (path === '/api/usage/ai') {
       return respond(200, {
-        totalCostUsd: 0, totalRequests: 0, totalInputTokens: 0, totalOutputTokens: 0,
-        cachedRequests: 0, errorRequests: 0, byModel: [], byDay: [],
-        period: 'current-month', periodLabel: 'April 2026',
+        totalCostUsd: 0,
+        totalRequests: 0,
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        cachedRequests: 0,
+        errorRequests: 0,
+        byModel: [],
+        byDay: [],
+        period: 'current-month',
+        periodLabel: 'April 2026',
       });
     }
 
@@ -360,6 +427,7 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
           dailyOutputTokenLimit: 200000,
         },
         monthCostUsd: 0,
+        monthlyCostCap: { available: true, ceilingUsd: null, effectiveCapUsd: null },
         utilization: {
           dailyInputPercent: 0,
           dailyOutputPercent: 0,
@@ -375,7 +443,7 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
       return respond(200, computeUsageData);
     }
 
-    // Trial status
+    // Platform compute availability
     if (path === '/api/trial-status') return respond(200, { available: false });
 
     // User quota status (for SettingsComputeUsage — returns "no quota configured" shape)
@@ -554,7 +622,10 @@ test.describe('AdminComputeUsage — Mobile (375x667)', () => {
   });
 
   test('detail view: back button meets 44px minimum touch target', async ({ page }) => {
-    await setupMocks(page, { adminUsers: USERS_NORMAL, userDetailedUsage: makeDetailedNodeUsage() });
+    await setupMocks(page, {
+      adminUsers: USERS_NORMAL,
+      userDetailedUsage: makeDetailedNodeUsage(),
+    });
     await goToAdminUsage(page);
     await page.locator('button:has-text("Alice Johnson")').click();
     await expect(page.locator('text=Back to all users')).toBeVisible();
@@ -628,7 +699,10 @@ test.describe('AdminComputeUsage — Desktop (1280x800)', () => {
   });
 
   test('detail view: stat cards and nodes table visible', async ({ page }) => {
-    await setupMocks(page, { adminUsers: USERS_NORMAL, userDetailedUsage: makeDetailedNodeUsage() });
+    await setupMocks(page, {
+      adminUsers: USERS_NORMAL,
+      userDetailedUsage: makeDetailedNodeUsage(),
+    });
     await goToAdminUsage(page);
     await page.locator('button:has-text("Alice Johnson")').click();
     // Four stat card labels: node-hrs, vCPU-hrs, Platform, Active Nodes
@@ -640,7 +714,10 @@ test.describe('AdminComputeUsage — Desktop (1280x800)', () => {
   });
 
   test('detail view: 4 stat cards all have icons', async ({ page }) => {
-    await setupMocks(page, { adminUsers: USERS_NORMAL, userDetailedUsage: makeDetailedNodeUsage() });
+    await setupMocks(page, {
+      adminUsers: USERS_NORMAL,
+      userDetailedUsage: makeDetailedNodeUsage(),
+    });
     await goToAdminUsage(page);
     await page.locator('button:has-text("Alice Johnson")').click();
     // All four stat card caption labels should be visible
@@ -653,7 +730,10 @@ test.describe('AdminComputeUsage — Desktop (1280x800)', () => {
   });
 
   test('detail view: nodes table has correct column headers', async ({ page }) => {
-    await setupMocks(page, { adminUsers: USERS_NORMAL, userDetailedUsage: makeDetailedNodeUsage() });
+    await setupMocks(page, {
+      adminUsers: USERS_NORMAL,
+      userDetailedUsage: makeDetailedNodeUsage(),
+    });
     await goToAdminUsage(page);
     await page.locator('button:has-text("Alice Johnson")').click();
     // Column headers from the new node-centric table
@@ -678,7 +758,10 @@ test.describe('AdminComputeUsage — Desktop (1280x800)', () => {
   });
 
   test('detail view: node name and truncated ID shown in node column', async ({ page }) => {
-    await setupMocks(page, { adminUsers: USERS_NORMAL, userDetailedUsage: makeDetailedNodeUsage({ nodes: NODES_NORMAL }) });
+    await setupMocks(page, {
+      adminUsers: USERS_NORMAL,
+      userDetailedUsage: makeDetailedNodeUsage({ nodes: NODES_NORMAL }),
+    });
     await goToAdminUsage(page);
     await page.locator('button:has-text("Alice Johnson")').click();
     await expect(page.locator('text=prod-worker-1')).toBeVisible();
@@ -779,9 +862,7 @@ test.describe('SettingsComputeUsage — Mobile (375x667)', () => {
   test('special characters in node ID render safely', async ({ page }) => {
     await setupMocks(page, {
       computeUsage: makeComputeUsageResponse({
-        activeSessions: [
-          makeActiveNode({ nodeId: 'node-<script>alert(1)</script>' }),
-        ],
+        activeSessions: [makeActiveNode({ nodeId: 'node-<script>alert(1)</script>' })],
       }),
     });
     await goToSettingsUsage(page);

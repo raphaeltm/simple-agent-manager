@@ -7,30 +7,33 @@
  * authority the wake carries. `eviction-recovery-prompt.test.ts` runs the real wake from a
  * queued-message delivery down to the TaskRunner start it requests.
  */
+import {
+  type DurabilityFoundationHooks,
+  finalizeAcceptedPromptDelivery,
+  processPromptDeliveryAlarm,
+} from '@simple-agent-manager/project-data/internal/do/durability-foundation';
+import {
+  OWNER_ONLY_SCHEDULE,
+  requireScheduleAction,
+} from '@simple-agent-manager/project-data/internal/do/project-event-schedules-authority';
+import { runScheduleAlarm } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-runner';
+import {
+  createSchedule,
+  getSchedule,
+} from '@simple-agent-manager/project-data/internal/do/project-event-schedules-storage';
+import {
+  admitProjectEvent,
+  createProjectEventSubscription,
+} from '@simple-agent-manager/project-data/internal/do/project-events';
+import {
+  runProjectEventWakeMaterializationBatch,
+  selectProjectEventWakeMaterializationCandidates,
+} from '@simple-agent-manager/project-data/internal/do/project-events-materialization';
 import type { ProjectScheduledAction } from '@simple-agent-manager/shared';
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import {
-  type DurabilityFoundationHooks,
-  finalizeAcceptedPromptDelivery,
-  processPromptDeliveryAlarm,
-} from '../../src/durable-objects/project-data/durability-foundation';
-import { requireScheduleAction } from '../../src/durable-objects/project-data/project-event-schedules-authority';
-import { runScheduleAlarm } from '../../src/durable-objects/project-data/project-event-schedules-runner';
-import {
-  createSchedule,
-  getSchedule,
-} from '../../src/durable-objects/project-data/project-event-schedules-storage';
-import {
-  admitProjectEvent,
-  createProjectEventSubscription,
-} from '../../src/durable-objects/project-data/project-events';
-import {
-  runProjectEventWakeMaterializationBatch,
-  selectProjectEventWakeMaterializationCandidates,
-} from '../../src/durable-objects/project-data/project-events-materialization';
 import type { Env } from '../../src/env';
 import { isSessionRecoverySourceTaskGuardValid } from '../../src/services/session-recovery-authority';
 import { sleepWorkspaceSession } from '../../src/services/session-sleep';
@@ -121,7 +124,7 @@ describe('a slept VM task is woken through the durable prompt queue', () => {
 
   describe('scheduled message_session self-wake', () => {
     async function scheduleWhileAwake() {
-      await requireScheduleAction(sql, env as never, PROJECT, USER, selfWake);
+      await requireScheduleAction(sql, env as never, PROJECT, USER, selfWake, OWNER_ONLY_SCHEDULE);
       return hooks.transactionSync(() =>
         createSchedule(
           sql,
@@ -162,12 +165,18 @@ describe('a slept VM task is woken through the durable prompt queue', () => {
       await runDeliveryAlarm();
 
       expect(recovery.ensure).toHaveBeenCalledOnce();
-      expect(recovery.ensure).toHaveBeenCalledWith(env, PROJECT, CHAT, {
-        taskId: TASK,
-        projectId: PROJECT,
-        chatSessionId: CHAT,
-        requiredProjectMemberId: USER,
-      });
+      expect(recovery.ensure).toHaveBeenCalledWith(
+        env,
+        PROJECT,
+        CHAT,
+        {
+          taskId: TASK,
+          projectId: PROJECT,
+          chatSessionId: CHAT,
+          requiredProjectMemberId: USER,
+        },
+        { isDeliveryStillAuthorized: expect.any(Function) }
+      );
       // A wake in progress keeps the message queued for retry rather than failing it.
       expect(inbox('scheduled_action')).toEqual([
         { target: CHAT, sourceTask: TASK, state: 'retry_wait' },
@@ -177,9 +186,12 @@ describe('a slept VM task is woken through the durable prompt queue', () => {
     it('accepts a new self-wake schedule created after the task already slept', async () => {
       await sleepTheTask();
 
-      await expect(requireScheduleAction(sql, env as never, PROJECT, USER, selfWake)).resolves.toBe(
-        TASK
-      );
+      await expect(
+        requireScheduleAction(sql, env as never, PROJECT, USER, selfWake, OWNER_ONLY_SCHEDULE)
+      ).resolves.toMatchObject({
+        targetTaskId: TASK,
+        writer: { role: 'owner', ownerUserId: USER },
+      });
     });
 
     it.each([
@@ -281,12 +293,18 @@ describe('a slept VM task is woken through the durable prompt queue', () => {
       await runDeliveryAlarm();
 
       expect(recovery.ensure).toHaveBeenCalledOnce();
-      expect(recovery.ensure).toHaveBeenCalledWith(env, PROJECT, CHAT, {
-        taskId: TASK,
-        projectId: PROJECT,
-        chatSessionId: CHAT,
-        projectEventWake: { batchId: expect.any(String), subscriptionId: subscription.id },
-      });
+      expect(recovery.ensure).toHaveBeenCalledWith(
+        env,
+        PROJECT,
+        CHAT,
+        {
+          taskId: TASK,
+          projectId: PROJECT,
+          chatSessionId: CHAT,
+          projectEventWake: { batchId: expect.any(String), subscriptionId: subscription.id },
+        },
+        { isDeliveryStillAuthorized: expect.any(Function) }
+      );
       expect(inbox('project_event_wake')).toEqual([
         { target: CHAT, sourceTask: TASK, state: 'retry_wait' },
       ]);

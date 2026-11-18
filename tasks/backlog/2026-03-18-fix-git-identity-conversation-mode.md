@@ -1,5 +1,9 @@
 # Fix: Git identity not configured in conversation-mode workspaces
 
+> **Reconciliation 2026-10-26:** Still open; one pointer moved. The Instant create payload is now
+> `apps/api/src/services/instant-session.ts:478-496` and still carries no Git identity; the VM
+> recovery path, `standalone_git.go` and `Dockerfile.vm-agent-container` are unchanged.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

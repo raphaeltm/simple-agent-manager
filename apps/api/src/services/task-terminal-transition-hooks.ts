@@ -47,6 +47,25 @@ export function createProjectEventTaskTerminalTransitionHook(
   return {
     name: 'project-lifecycle-task-terminal',
     async handle(event) {
+      try {
+        const step = await env.DATABASE.prepare(
+          `SELECT s.mission_id FROM mission_steps s JOIN missions m ON m.id = s.mission_id
+        WHERE s.task_id = ? AND m.project_id = ? AND m.status = 'active'`
+        )
+          .bind(event.taskId, event.projectId)
+          .first<{ mission_id: string }>();
+        if (step) {
+          const { notifyTaskEvent } = await import('./project-orchestrator');
+          await notifyTaskEvent(env, event.projectId, {
+            missionId: step.mission_id,
+            taskId: event.taskId,
+            event: event.status,
+            timestamp: Date.now(),
+          });
+        }
+      } catch (error) {
+        log.warn('workflow.terminal_nudge_failed', { taskId: event.taskId, error: String(error) });
+      }
       if (!event.projectEventSourceIntentId && options.captureAtHook) {
         // Explicit legacy terminal writers have already won their status CAS.
         // Capture at this hook boundary; unlike transitionTaskToTerminal this is

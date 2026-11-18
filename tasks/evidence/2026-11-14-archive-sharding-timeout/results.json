@@ -1,0 +1,734 @@
+{
+  "ideaId": "01M7C75DDYYXGHDW5WW7X1M8WY",
+  "status": "validation_complete",
+  "recordedAt": "2026-11-14T06:27:21.216889+00:00",
+  "codeCommit": "90994fa7a3024b5e6e922d1e1c9a7edb0d4ae2ab",
+  "inputSha256": {
+    "apps/api/tests/unit/durable-objects/project-data-archive-sharding.test.ts": "ae0674f1086c7f2ee6c94d95555101d6cf7a99beb0c64aa9a0252a4ca39d5cd7",
+    "packages/project-data/src/do/archive-sharding.ts": "7f500432847bca9a14596f30306f354473370950c71c52415f48403cc6a16d1f"
+  },
+  "method": {
+    "runner": "fresh Vitest CLI process for every full-file run",
+    "casesPerFile": 47,
+    "normal": "five-run bounded batches; up to three independent batches concurrently, no synthetic load",
+    "loaded": "each batch pins Vitest and a busy Python worker to the same CPU; simultaneous batches use distinct cores; worker liveness and actual CPU time checked",
+    "perFileProcessDeadlineSeconds": 120,
+    "batchStartDeadlineSeconds": 440,
+    "caseTimeoutMs": 10000,
+    "fixtureRowsPerTable": 1205,
+    "hashPageRows": 500
+  },
+  "summary": {
+    "normal": {
+      "fileRuns": 30,
+      "passedCases": 1410,
+      "failedCases": 0,
+      "targetMinMs": 1669.293,
+      "targetMedianMs": 1924.1505000000002,
+      "targetP95Ms": 2115.371,
+      "targetMaxMs": 2368.604,
+      "maxCommandSeconds": 42.835
+    },
+    "loaded": {
+      "fileRuns": 30,
+      "passedCases": 1410,
+      "failedCases": 0,
+      "targetMinMs": 3621.808,
+      "targetMedianMs": 4123.388,
+      "targetP95Ms": 5637.365,
+      "targetMaxMs": 5722.175,
+      "maxCommandSeconds": 105.0
+    }
+  },
+  "runs": [
+    {
+      "mode": "loaded",
+      "run": 1,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 76.939,
+      "target_ms": 4160.009,
+      "cpu": 0,
+      "load_cpu_s": 35.91
+    },
+    {
+      "mode": "loaded",
+      "run": 2,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 74.982,
+      "target_ms": 3803.632,
+      "cpu": 0,
+      "load_cpu_s": 34.84
+    },
+    {
+      "mode": "loaded",
+      "run": 3,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 84.85,
+      "target_ms": 4809.205,
+      "cpu": 0,
+      "load_cpu_s": 39.78
+    },
+    {
+      "mode": "loaded",
+      "run": 4,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 97.605,
+      "target_ms": 5588.276,
+      "cpu": 0,
+      "load_cpu_s": 45.45
+    },
+    {
+      "mode": "loaded",
+      "run": 5,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 103.23,
+      "target_ms": 5637.365,
+      "cpu": 0,
+      "load_cpu_s": 47.98
+    },
+    {
+      "mode": "loaded",
+      "run": 6,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 75.775,
+      "target_ms": 3883.041,
+      "cpu": 1,
+      "load_cpu_s": 35.3
+    },
+    {
+      "mode": "loaded",
+      "run": 7,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 76.323,
+      "target_ms": 3780.433,
+      "cpu": 1,
+      "load_cpu_s": 35.38
+    },
+    {
+      "mode": "loaded",
+      "run": 8,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 85.551,
+      "target_ms": 4800.039,
+      "cpu": 1,
+      "load_cpu_s": 40.2
+    },
+    {
+      "mode": "loaded",
+      "run": 9,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 95.891,
+      "target_ms": 4736.189,
+      "cpu": 1,
+      "load_cpu_s": 44.73
+    },
+    {
+      "mode": "loaded",
+      "run": 10,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 102.33,
+      "target_ms": 5188.599,
+      "cpu": 1,
+      "load_cpu_s": 47.71
+    },
+    {
+      "mode": "loaded",
+      "run": 11,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 80.103,
+      "target_ms": 4906.801,
+      "cpu": 2,
+      "load_cpu_s": 37.84
+    },
+    {
+      "mode": "loaded",
+      "run": 12,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 78.275,
+      "target_ms": 4139.809,
+      "cpu": 2,
+      "load_cpu_s": 36.72
+    },
+    {
+      "mode": "loaded",
+      "run": 13,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 85.303,
+      "target_ms": 5152.128,
+      "cpu": 2,
+      "load_cpu_s": 40.0
+    },
+    {
+      "mode": "loaded",
+      "run": 14,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 97.118,
+      "target_ms": 5722.175,
+      "cpu": 2,
+      "load_cpu_s": 45.3
+    },
+    {
+      "mode": "loaded",
+      "run": 15,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 105.0,
+      "target_ms": 5330.204,
+      "cpu": 2,
+      "load_cpu_s": 49.17
+    },
+    {
+      "mode": "loaded",
+      "run": 16,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 81.503,
+      "target_ms": 3954.148,
+      "cpu": 0,
+      "load_cpu_s": 38.04
+    },
+    {
+      "mode": "loaded",
+      "run": 17,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 76.266,
+      "target_ms": 4151.983,
+      "cpu": 0,
+      "load_cpu_s": 35.52
+    },
+    {
+      "mode": "loaded",
+      "run": 18,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 76.454,
+      "target_ms": 4006.32,
+      "cpu": 0,
+      "load_cpu_s": 35.6
+    },
+    {
+      "mode": "loaded",
+      "run": 19,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 77.532,
+      "target_ms": 4102.604,
+      "cpu": 0,
+      "load_cpu_s": 36.14
+    },
+    {
+      "mode": "loaded",
+      "run": 20,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 78.088,
+      "target_ms": 3956.014,
+      "cpu": 0,
+      "load_cpu_s": 36.39
+    },
+    {
+      "mode": "loaded",
+      "run": 21,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 81.281,
+      "target_ms": 3771.557,
+      "cpu": 1,
+      "load_cpu_s": 38.02
+    },
+    {
+      "mode": "loaded",
+      "run": 22,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 77.921,
+      "target_ms": 4320.949,
+      "cpu": 1,
+      "load_cpu_s": 36.65
+    },
+    {
+      "mode": "loaded",
+      "run": 23,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 77.558,
+      "target_ms": 3934.898,
+      "cpu": 1,
+      "load_cpu_s": 36.04
+    },
+    {
+      "mode": "loaded",
+      "run": 24,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 78.238,
+      "target_ms": 4243.463,
+      "cpu": 1,
+      "load_cpu_s": 36.61
+    },
+    {
+      "mode": "loaded",
+      "run": 25,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 77.687,
+      "target_ms": 3919.707,
+      "cpu": 1,
+      "load_cpu_s": 36.18
+    },
+    {
+      "mode": "loaded",
+      "run": 26,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 78.975,
+      "target_ms": 3621.808,
+      "cpu": 2,
+      "load_cpu_s": 36.85
+    },
+    {
+      "mode": "loaded",
+      "run": 27,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 76.564,
+      "target_ms": 4021.67,
+      "cpu": 2,
+      "load_cpu_s": 35.7
+    },
+    {
+      "mode": "loaded",
+      "run": 28,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 79.474,
+      "target_ms": 3810.842,
+      "cpu": 2,
+      "load_cpu_s": 37.03
+    },
+    {
+      "mode": "loaded",
+      "run": 29,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 76.494,
+      "target_ms": 4106.967,
+      "cpu": 2,
+      "load_cpu_s": 35.63
+    },
+    {
+      "mode": "loaded",
+      "run": 30,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 78.238,
+      "target_ms": 3871.422,
+      "cpu": 2,
+      "load_cpu_s": 36.57
+    },
+    {
+      "mode": "normal",
+      "run": 1,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 40.209,
+      "target_ms": 1833.21
+    },
+    {
+      "mode": "normal",
+      "run": 2,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 38.719,
+      "target_ms": 1849.735
+    },
+    {
+      "mode": "normal",
+      "run": 3,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 41.711,
+      "target_ms": 2058.982
+    },
+    {
+      "mode": "normal",
+      "run": 4,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 41.429,
+      "target_ms": 2108.575
+    },
+    {
+      "mode": "normal",
+      "run": 5,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 40.617,
+      "target_ms": 1959.394
+    },
+    {
+      "mode": "normal",
+      "run": 6,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 40.159,
+      "target_ms": 1828.031
+    },
+    {
+      "mode": "normal",
+      "run": 7,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 39.371,
+      "target_ms": 1966.964
+    },
+    {
+      "mode": "normal",
+      "run": 8,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 41.513,
+      "target_ms": 2039.438
+    },
+    {
+      "mode": "normal",
+      "run": 9,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 42.835,
+      "target_ms": 2081.58
+    },
+    {
+      "mode": "normal",
+      "run": 10,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 39.65,
+      "target_ms": 1774.375
+    },
+    {
+      "mode": "normal",
+      "run": 11,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 39.52,
+      "target_ms": 1912.986
+    },
+    {
+      "mode": "normal",
+      "run": 12,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 39.416,
+      "target_ms": 2110.716
+    },
+    {
+      "mode": "normal",
+      "run": 13,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 42.674,
+      "target_ms": 1952.616
+    },
+    {
+      "mode": "normal",
+      "run": 14,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 42.629,
+      "target_ms": 2104.456
+    },
+    {
+      "mode": "normal",
+      "run": 15,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 40.516,
+      "target_ms": 2016.101
+    },
+    {
+      "mode": "normal",
+      "run": 16,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 40.01,
+      "target_ms": 1956.404
+    },
+    {
+      "mode": "normal",
+      "run": 17,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 38.66,
+      "target_ms": 1669.293
+    },
+    {
+      "mode": "normal",
+      "run": 18,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 38.495,
+      "target_ms": 1751.094
+    },
+    {
+      "mode": "normal",
+      "run": 19,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 42.553,
+      "target_ms": 2368.604
+    },
+    {
+      "mode": "normal",
+      "run": 20,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 37.291,
+      "target_ms": 1886.219
+    },
+    {
+      "mode": "normal",
+      "run": 21,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 39.984,
+      "target_ms": 1848.982
+    },
+    {
+      "mode": "normal",
+      "run": 22,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 38.946,
+      "target_ms": 2077.937
+    },
+    {
+      "mode": "normal",
+      "run": 23,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 38.466,
+      "target_ms": 1672.172
+    },
+    {
+      "mode": "normal",
+      "run": 24,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 41.759,
+      "target_ms": 2115.371
+    },
+    {
+      "mode": "normal",
+      "run": 25,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 38.667,
+      "target_ms": 1732.806
+    },
+    {
+      "mode": "normal",
+      "run": 26,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 38.96,
+      "target_ms": 1800.278
+    },
+    {
+      "mode": "normal",
+      "run": 27,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 38.366,
+      "target_ms": 1684.068
+    },
+    {
+      "mode": "normal",
+      "run": 28,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 38.779,
+      "target_ms": 1693.289
+    },
+    {
+      "mode": "normal",
+      "run": 29,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 41.233,
+      "target_ms": 1863.658
+    },
+    {
+      "mode": "normal",
+      "run": 30,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 37.782,
+      "target_ms": 1935.315
+    }
+  ],
+  "preAllowanceStress": {
+    "timeoutMs": 5000,
+    "normalPassedFiles": 10,
+    "loadedRuns": [
+      {
+        "mode": "loaded",
+        "run": 1,
+        "pass": 47,
+        "fail": 0,
+        "wall_s": 75.556,
+        "target_ms": 3716.762
+      },
+      {
+        "mode": "loaded",
+        "run": 2,
+        "pass": 47,
+        "fail": 0,
+        "wall_s": 77.599,
+        "target_ms": 4508.327
+      },
+      {
+        "mode": "loaded",
+        "run": 3,
+        "pass": 47,
+        "fail": 0,
+        "wall_s": 90.793,
+        "target_ms": 4495.473
+      },
+      {
+        "mode": "loaded",
+        "run": 4,
+        "pass": 46,
+        "fail": 1,
+        "wall_s": 97.772,
+        "target_ms": 5387.596
+      }
+    ],
+    "fixedLifecyclePhaseProfileMs": {
+      "migrations": 1000.965209,
+      "seedAndFts": 405.859551,
+      "prepare": 100.769073,
+      "copy": 1003.885769,
+      "seal": 1989.412364,
+      "finalize": 179.999137,
+      "reclaim": 537.275014,
+      "sum": 5218.166117,
+      "caseDuration": 5246
+    },
+    "timingScope": "local full-file run, one-core contention; temporary 30s profiling allowance; instrumentation removed"
+  },
+  "lookupBenchmark": {
+    "scope": "local isolated better-sqlite3 query-only benchmark, not production lifecycle latency",
+    "measurements": [
+      {
+        "checks": 300,
+        "documents": 600,
+        "oldSessionScanMs": 40.635,
+        "uniqueIdentitySeekMs": 2.802,
+        "oldPlan": "SEARCH docs USING INDEX session_idx (session_id=?)",
+        "newPlan": "SEARCH docs USING INDEX sqlite_autoindex_docs_1 (projection_id=?)"
+      },
+      {
+        "checks": 1200,
+        "documents": 2400,
+        "oldSessionScanMs": 662.94,
+        "uniqueIdentitySeekMs": 10.636,
+        "oldPlan": "SEARCH docs USING INDEX session_idx (session_id=?)",
+        "newPlan": "SEARCH docs USING INDEX sqlite_autoindex_docs_1 (projection_id=?)"
+      },
+      {
+        "checks": 4800,
+        "documents": 9600,
+        "oldSessionScanMs": 11663.666,
+        "uniqueIdentitySeekMs": 26.8,
+        "oldPlan": "SEARCH docs USING INDEX session_idx (session_id=?)",
+        "newPlan": "SEARCH docs USING INDEX sqlite_autoindex_docs_1 (projection_id=?)"
+      },
+      {
+        "checks": 19200,
+        "documents": 38400,
+        "oldSessionScanMs": 222662.125,
+        "uniqueIdentitySeekMs": 160.199,
+        "oldPlan": "SEARCH docs USING INDEX session_idx (session_id=?)",
+        "newPlan": "SEARCH docs USING INDEX sqlite_autoindex_docs_1 (projection_id=?)"
+      }
+    ]
+  },
+  "mutations": [
+    {
+      "removed": "unique-seek",
+      "failedCases": 1,
+      "failures": [
+        {
+          "test": "ProjectData archive terminal-version hashing streams bounded pages keeps every source-side scan bounded through seal and finalize on a multi-page session",
+          "message": "AssertionError: expected false to be true // Object.is equality"
+        }
+      ],
+      "restored": true
+    },
+    {
+      "removed": "page-bound",
+      "failedCases": 1,
+      "failures": [
+        {
+          "test": "ProjectData archive terminal-version hashing streams bounded pages keeps every source-side scan bounded through seal and finalize on a multi-page session",
+          "message": "AssertionError: expected 1205 to be less than or equal to 500"
+        }
+      ],
+      "restored": true
+    },
+    {
+      "removed": "identity-guard",
+      "failedCases": 2,
+      "failures": [
+        {
+          "test": "ProjectData archive terminal-version hashing streams bounded pages refuses a noncanonical projection identity (legacy-document) before source flip or reclaim",
+          "message": "Error: promise resolved \"{ \u2026(4) }\" instead of rejecting"
+        },
+        {
+          "test": "ProjectData archive terminal-version hashing streams bounded pages refuses a noncanonical projection identity (raw:other-session:document) before source flip or reclaim",
+          "message": "Error: promise resolved \"{ \u2026(4) }\" instead of rejecting"
+        }
+      ],
+      "restored": true
+    }
+  ],
+  "otherChecks": {
+    "projectDataPackage": {
+      "files": 50,
+      "passed": 528
+    },
+    "realWorkerdArchiveBridge": {
+      "passed": 16
+    },
+    "apiTypecheck": "passed",
+    "projectDataBuild": "passed",
+    "apiBuild": "passed",
+    "changedTestEslint": "passed",
+    "projectDataLint": "passed",
+    "doMigrationSafety": "passed"
+  },
+  "pendingReleaseGates": [
+    "draft PR with needs-human-review",
+    "technical CI (label intentionally blocks review-evidence check)",
+    "explicit coordinator staging grant and verification",
+    "CodeRabbit trusted request and wait",
+    "exact-SHA coordinator approval",
+    "matched-head merge and main CI / Deploy Production monitoring"
+  ]
+}

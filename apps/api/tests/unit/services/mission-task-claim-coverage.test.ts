@@ -53,8 +53,10 @@ function findTaskInserts(source: string, file: string): TaskInsert[] {
       setsChatSession: /\bchat_session_id\b/.test(columns),
     });
   }
-  // Drizzle: `db.insert(schema.tasks).values({ ..., missionId, ... })`.
-  for (const match of source.matchAll(/insert\(\s*schema\.tasks\s*\)\s*\.values\(\s*\{/g)) {
+  // Drizzle values and the typed retry INSERT helper both derive columns from this object.
+  for (const match of source.matchAll(
+    /(?:insert\(\s*schema\.tasks\s*\)\s*\.values\(|insertMcpRetriedTask\(\s*[^,]+,)\s*\{/g
+  )) {
     const values = balancedFrom(source, match.index + match[0].length - 1, '{', '}') ?? '';
     inserts.push({
       location: `${file}:${lineOf(source, match.index)}`,
@@ -66,7 +68,7 @@ function findTaskInserts(source: string, file: string): TaskInsert[] {
 }
 
 describe('mission task creators claim their session in the task INSERT', () => {
-  const inserts = collectSourceFiles(SRC_ROOT).flatMap((file) =>
+  const inserts = collectSourceFiles().flatMap((file) =>
     findTaskInserts(
       readFileSync(file, 'utf8'),
       path.relative(SRC_ROOT, file).split(path.sep).join('/')
@@ -79,8 +81,9 @@ describe('mission task creators claim their session in the task INSERT', () => {
     const creatorFiles = missionCreators.map((insert) => insert.location.split(':')[0]);
     expect(creatorFiles).toEqual(
       expect.arrayContaining([
-        'routes/mcp/dispatch-tool.ts',
-        'durable-objects/sam-session/tools/dispatch-task.ts',
+        'routes/mcp/dispatch-task-storage.ts',
+        'routes/mcp/orchestration-tools.ts',
+        'durable-objects/sam-session/tools/dispatch-task-storage.ts',
         'durable-objects/sam-session/tools/retry-subtask.ts',
       ])
     );
@@ -112,5 +115,13 @@ describe('mission task creators claim their session in the task INSERT', () => {
       { location: 'drizzle.ts:1', setsMission: true, setsChatSession: false },
     ]);
     expect(findTaskInserts(claimed, 'claimed.ts')[0]?.setsChatSession).toBe(true);
+    const retry = 'await insertMcpRetriedTask(db, { id, missionId, title });';
+    expect(findTaskInserts(retry, 'retry.ts')).toEqual([
+      { location: 'retry.ts:1', setsMission: true, setsChatSession: false },
+    ]);
+    expect(
+      findTaskInserts(retry.replace('title }', 'title, chatSessionId }'), 'retry.ts')[0]
+        ?.setsChatSession
+    ).toBe(true);
   });
 });

@@ -8,15 +8,15 @@
  * would have decided it. Each test below pairs the error's age with a measurement clock that
  * points the other way, so reading the wrong clock fails it.
  */
-import { env, runInDurableObject } from 'cloudflare:test';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
-import { runProjectDataGroupedFtsCleanup } from '../../src/durable-objects/project-data/grouped-fts-cleanup';
+import { runProjectDataGroupedFtsCleanup } from '@simple-agent-manager/project-data/internal/do/grouped-fts-cleanup';
 import {
   classifyStorageUsage,
   resolveStorageSafetyConfig,
-} from '../../src/durable-objects/project-data/storage-safety';
-import { recordStorageSafetyError } from '../../src/durable-objects/project-data/storage-safety-meta';
+} from '@simple-agent-manager/project-data/internal/do/storage-safety';
+import { recordStorageSafetyError } from '@simple-agent-manager/project-data/internal/do/storage-safety-meta';
+import { env, runInDurableObject } from 'cloudflare:test';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
 import type { Env as WorkerEnv } from '../../src/env';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';

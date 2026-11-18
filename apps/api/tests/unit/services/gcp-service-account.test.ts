@@ -408,3 +408,68 @@ describe('service-account verification and caching', () => {
     );
   });
 });
+
+describe('WIF impersonation scopes', () => {
+  function stubWifExchange() {
+    const impersonationScopes: string[][] = [];
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === DEFAULT_GCP_STS_TOKEN_URL) {
+        return new Response(
+          JSON.stringify({ access_token: 'sts-token', token_type: 'Bearer', expires_in: 3600 }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      const body = JSON.parse(String(init?.body)) as { scope: string[] };
+      impersonationScopes.push(body.scope);
+      return new Response(
+        JSON.stringify({
+          accessToken: `token-${impersonationScopes.length}`,
+          expireTime: new Date(Date.now() + 3_600_000).toISOString(),
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return { fetchMock, impersonationScopes };
+  }
+
+  it('mints provisioning tokens with compute only, and a separately cached billing-only token on request', async () => {
+    const credential = workloadIdentityCredential();
+    const kv = createKv();
+    const env = { KV: kv.namespace } as Env;
+    const { impersonationScopes } = stubWifExchange();
+
+    const provisioning = await getGcpAccessToken('user-1', 'project-a', credential, env);
+    const pricing = await getGcpAccessToken('user-1', 'project-a', credential, env, undefined, {
+      scopes: ['https://www.googleapis.com/auth/cloud-billing.readonly'],
+    });
+
+    expect(impersonationScopes).toEqual([
+      ['https://www.googleapis.com/auth/compute'],
+      ['https://www.googleapis.com/auth/cloud-billing.readonly'],
+    ]);
+    // Different scopes never share a cached token, in either order.
+    expect(provisioning).toBe('token-1');
+    expect(pricing).toBe('token-2');
+    expect(await getGcpAccessToken('user-1', 'project-a', credential, env)).toBe('token-1');
+    expect(kv.puts.map((put) => put.key)).toEqual([
+      getGcpAccessTokenCacheKey('user-1', 'project-a', credential),
+      expect.stringMatching(/:scopes:/),
+    ]);
+  });
+
+  it('clears the scoped token with the rest of the credential cache', async () => {
+    const credential = workloadIdentityCredential();
+    const kv = createKv();
+    const env = { KV: kv.namespace } as Env;
+    stubWifExchange();
+    await getGcpAccessToken('user-1', 'project-a', credential, env, undefined, {
+      scopes: ['https://www.googleapis.com/auth/cloud-billing.readonly'],
+    });
+    expect(kv.values.size).toBe(1);
+
+    await clearGcpAccessTokenCache(env, 'user-1', credential);
+
+    expect(kv.values.size).toBe(0);
+  });
+});

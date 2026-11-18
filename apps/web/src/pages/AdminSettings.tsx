@@ -1,10 +1,12 @@
 import { Alert, Button, Spinner } from '@simple-agent-manager/ui';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRef, useState } from 'react';
 
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { useQueryScope } from '../hooks/useQueryScope';
 import {
+  ADMIN_SETTING_CATEGORIES,
   type AdminSetting,
-  type AdminSettingsView,
   fetchAdminSettings,
   patchAdminSettings,
   type SettingValue,
@@ -70,6 +72,12 @@ function appendOAuthPartner(
     throw new Error(
       'Enter both client ID and client secret for this OAuth provider before saving.'
     );
+}
+
+const OTHER_CATEGORY = 'Other';
+const KNOWN_CATEGORIES: ReadonlySet<string> = new Set(ADMIN_SETTING_CATEGORIES);
+function settingCategory(setting: AdminSetting): string {
+  return KNOWN_CATEGORIES.has(setting.category) ? setting.category : OTHER_CATEGORY;
 }
 
 function choiceLabel(choice: string) {
@@ -161,6 +169,16 @@ function SettingCard({
         Source: {setting.source} · {setting.configured ? 'Configured' : 'Not configured'}
         {setting.risky ? ' · Requires confirmation' : ''}
       </p>
+      {setting.storedValueInvalid && (
+        <Alert variant="warning">
+          {setting.storedValueFallback === 'safe' ? 'Safe fallback' : 'Default'} in effect, stored
+          value invalid.
+          {!setting.secret && setting.storedValue !== undefined && (
+            <span className="block break-all">Stored value: {setting.storedValue}</span>
+          )}
+          <span className="block">Save a valid value or reset the override.</span>
+        </Alert>
+      )}
       <SettingInput
         setting={setting}
         id={id}
@@ -173,7 +191,11 @@ function SettingCard({
           ? 'Current secret is never returned.'
           : `Code default: ${displayValue(setting.defaultValue) || '(empty)'}`}
         {setting.type === 'string-list' ? ' · One entry per line.' : ''}
-        {setting.range ? ` · Range: ${setting.range.min}–${setting.range.max}` : ''}
+        {setting.range
+          ? setting.range.max === Number.MAX_SAFE_INTEGER
+            ? ` · Minimum: ${setting.range.min}`
+            : ` · Range: ${setting.range.min}–${setting.range.max}`
+          : ''}
       </p>
       <div className="flex flex-wrap gap-2">
         <Button disabled={disabled || conflict || !dirty} onClick={() => requestSave(setting)}>
@@ -181,7 +203,9 @@ function SettingCard({
         </Button>
         <Button
           variant="secondary"
-          disabled={disabled || conflict || setting.source !== 'database'}
+          disabled={
+            disabled || conflict || (setting.source !== 'database' && !setting.storedValueInvalid)
+          }
           onClick={() => requestSave(setting, true)}
         >
           Reset override
@@ -192,33 +216,38 @@ function SettingCard({
 }
 
 export function AdminSettings() {
-  const [view, setView] = useState<AdminSettingsView | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const scope = useQueryScope();
+  const client = useQueryClient();
+  const queryKey = ['auth', scope, 'admin', 'settings'] as const;
+  const settings = useQuery({
+    queryKey,
+    queryFn: ({ signal }) => fetchAdminSettings(signal),
+    enabled: Boolean(scope),
+  });
+  const view = settings.data;
+  const loading = settings.isPending;
+  const setView = (next: NonNullable<typeof view>) => client.setQueryData(queryKey, next);
+  const [actionError, setError] = useState<string | null>(null);
+  const error =
+    actionError ??
+    (settings.error ? 'Could not load settings. Retry to read the current configuration.' : null);
   const [message, setMessage] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const draftRevision = useRef<number | null>(null);
   const [saving, setSaving] = useState(false);
   const inFlight = useRef(false);
   const [conflict, setConflict] = useState(false);
   const [pending, setPending] = useState<{ name: string; value: SettingValue }[] | null>(null);
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = async () => {
     setError(null);
-    try {
-      setView(await fetchAdminSettings());
+    const result = await settings.refetch();
+    if (result.error) setError('Could not load settings. Retry to read the current configuration.');
+    else {
+      draftRevision.current = result.data?.revision ?? null;
       setConflict(false);
-    } catch {
-      setError('Could not load settings. Retry to read the current configuration.');
-    } finally {
-      setLoading(false);
     }
-  }, []);
-  // Only initial mount/retry loads remote state. Editing and saving never trigger a reload effect.
-  useEffect(() => {
-    void load();
-  }, [load]);
-
+  };
   const save = async (changes: { name: string; value: SettingValue }[]) => {
     if (!view || inFlight.current || conflict) return;
     inFlight.current = true;
@@ -226,7 +255,9 @@ export function AdminSettings() {
     setError(null);
     setMessage(null);
     try {
-      const next = await patchAdminSettings(view.revision, changes);
+      await client.cancelQueries({ queryKey: queryKey, exact: true });
+      const next = await patchAdminSettings(draftRevision.current ?? view.revision, changes);
+      draftRevision.current = next.revision;
       setView(next);
       setDrafts((current) => {
         const remaining = { ...current };
@@ -254,6 +285,7 @@ export function AdminSettings() {
     }
   };
   const requestSave = (setting: AdminSetting, reset = false) => {
+    if (!Object.keys(drafts).length) draftRevision.current = view?.revision ?? null;
     setMessage(null);
     try {
       let value: SettingValue = null;
@@ -321,8 +353,10 @@ export function AdminSettings() {
           {!filtered.length && (
             <p className="text-sm text-fg-muted">No settings match your search.</p>
           )}
-          {(['OAuth', 'Connector', 'Operations', 'Trials'] as const).map((category) => {
-            const settings = filtered.filter((item) => item.category === category);
+          {/* A category this build does not know yet still renders, under "Other", instead of
+              silently hiding its settings. */}
+          {[...ADMIN_SETTING_CATEGORIES, OTHER_CATEGORY].map((category) => {
+            const settings = filtered.filter((item) => settingCategory(item) === category);
             return (
               settings.length > 0 && (
                 <section key={category} aria-label={category} className="space-y-3">
@@ -336,7 +370,10 @@ export function AdminSettings() {
                         dirty={Object.hasOwn(drafts, setting.name)}
                         disabled={saving || loading}
                         conflict={conflict}
-                        onChange={(value) => setDrafts({ ...drafts, [setting.name]: value })}
+                        onChange={(value) => {
+                          if (!Object.keys(drafts).length) draftRevision.current = view.revision;
+                          setDrafts({ ...drafts, [setting.name]: value });
+                        }}
                         requestSave={requestSave}
                       />
                     ))}

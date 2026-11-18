@@ -234,7 +234,7 @@ describe('runNodeCleanupSweep', () => {
           .mocked(env.DATABASE.prepare)
           .mock.calls.some(
             ([sql]) =>
-              sql.includes('cleanup_backoff_until = ?') && sql.includes("status = 'destroying'")
+              sql.includes('cleanup_backoff_until = CASE') && sql.includes("status = 'destroying'")
           )
       ).toBe(true);
     });
@@ -277,11 +277,58 @@ describe('runNodeCleanupSweep', () => {
       .mocked(env.DATABASE.prepare)
       .mock.calls.map(([sql]) => sql)
       .filter((sql) => sql.includes('FROM nodes n'));
-    expect(nodeCandidateQueries).toHaveLength(8);
+    // The max-lifetime sweep runs two bounded pages (`max-lifetime-candidates.ts`); the
+    // provider-deletion confirm phase adds one.
+    expect(nodeCandidateQueries).toHaveLength(10);
     expect(nodeCandidateQueries.every((sql) => sql.includes('cleanup_backoff_until'))).toBe(true);
   });
 
   describe('Layer 1: stale warm node destruction', () => {
+    it('continues to the next node when teardown and its failure handler both fail', async () => {
+      const { deleteNodeResourcesStrict } = await import('../../src/services/nodes');
+      const outcomes = await import('../../src/scheduled/node-cleanup/cleanup-outcome');
+      const { log } = await import('../../src/lib/logger');
+      const failureHandler = vi
+        .spyOn(outcomes, 'handleCleanupFailure')
+        .mockRejectedValueOnce(new Error('failure diagnosis unavailable'));
+      vi.mocked(deleteNodeResourcesStrict).mockRejectedValueOnce(new Error('provider unavailable'));
+      const warmSince = new Date(Date.now() - 40 * 60 * 1000).toISOString();
+      const env = createMockEnv(
+        new Map([
+          [
+            'n.warm_since IS NOT NULL',
+            ['node-failed', 'node-next'].map((id) => ({
+              id,
+              user_id: 'user-1',
+              warm_since: warmSince,
+              active_ws_count: 0,
+            })),
+          ],
+        ])
+      );
+
+      try {
+        const result = await runNodeCleanupSweep(env);
+
+        expect(vi.mocked(deleteNodeResourcesStrict).mock.calls.map(([id]) => id)).toEqual([
+          'node-failed',
+          'node-next',
+        ]);
+        expect(result.staleDestroyed).toBe(1);
+        expect(result.errors).toBe(1);
+        expect(log.error).toHaveBeenCalledWith(
+          'node_cleanup.failure_handler_failed',
+          expect.objectContaining({
+            nodeId: 'node-failed',
+            error: 'failure diagnosis unavailable',
+            originalError: 'provider unavailable',
+          })
+        );
+      } finally {
+        failureHandler.mockRestore();
+      }
+    });
+
     it('destroys stale warm nodes with no active workspaces', async () => {
       const { deleteNodeResourcesStrict } = await import('../../src/services/nodes');
       const now = Date.now();
@@ -369,8 +416,14 @@ describe('runNodeCleanupSweep', () => {
         'user-1',
         env,
         {
+          preservedVm: undefined,
+          boundedStrandedRetirement: undefined,
           providerRequestContext: { signal: expect.any(AbortSignal) },
           requestDeadlineMs: expect.any(Number),
+          // Two-phase: start the provider deletion; a later tick confirms it.
+          providerDeletion: 'request',
+          providerDeletionConfirmMaxMs: 30 * 60 * 1000,
+          providerDeletionSendGraceMs: 15_000,
         }
       );
     });
@@ -465,6 +518,8 @@ describe('runNodeCleanupSweep', () => {
         stoppedWorkspacesQueued: 0,
         stoppedWorkspacesDeleted: 0,
         unhealthyHeld: 0,
+        providerDeletionsRequested: 0,
+        providerDeletionsPending: 0,
         unhealthyReleased: 0,
         cfContainersDestroyed: 0,
         incompatibleDestroyed: 0,

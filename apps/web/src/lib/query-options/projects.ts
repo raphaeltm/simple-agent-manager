@@ -2,8 +2,10 @@ import { queryOptions } from '@tanstack/react-query';
 
 import {
   getArtifactsEnabled,
+  getInstantRuntimeEnabled,
   getProject,
   getProjectCredentialAttributionHealth,
+  getProjectRuntimeConfig,
   listProjects,
 } from '../api';
 import { QUERY_PERSIST_MAX_AGE_MS } from '../query-persist-config';
@@ -39,6 +41,13 @@ export const projectQueryKeys = {
     [...projectQueryKeys.details(queryScope), projectId] as const,
   artifactsEnabled: (queryScope: string) =>
     [...projectQueryKeys.all(queryScope), 'artifacts-enabled'] as const,
+  instantRuntimeEnabled: (queryScope: string) =>
+    [...projectQueryKeys.all(queryScope), 'instant-runtime-enabled'] as const,
+  runtimeConfig: (queryScope: string, projectId: string) =>
+    [...projectQueryKeys.all(queryScope), 'runtime-config', projectId] as const,
+  /** One agent secret request (metadata only), read by the in-chat card. */
+  secretRequest: (queryScope: string, projectId: string, requestId: string) =>
+    [...projectQueryKeys.all(queryScope), 'secret-request', projectId, requestId] as const,
   credentialHealth: (queryScope: string, projectId: string) =>
     [...projectQueryKeys.all(queryScope), 'credential-health', projectId] as const,
 };
@@ -54,7 +63,7 @@ export function projectListQueryOptions(queryScope: string, limit?: number) {
 export function projectDetailQueryOptions(queryScope: string, projectId: string) {
   return queryOptions({
     queryKey: projectQueryKeys.detail(queryScope, projectId),
-    queryFn: () => getProject(projectId),
+    queryFn: ({ signal }) => getProject(projectId, signal),
   });
 }
 
@@ -66,9 +75,25 @@ export function projectArtifactsEnabledQueryOptions(queryScope: string) {
   });
 }
 
+export function instantRuntimeEnabledQueryOptions(queryScope: string) {
+  return queryOptions({
+    queryKey: projectQueryKeys.instantRuntimeEnabled(queryScope),
+    queryFn: getInstantRuntimeEnabled,
+    staleTime: PROJECT_CREATE_CONFIG_STALE_TIME_MS,
+  });
+}
+
 export function projectCredentialHealthQueryOptions(queryScope: string, projectId: string) {
   return queryOptions({
     queryKey: projectQueryKeys.credentialHealth(queryScope, projectId),
     queryFn: () => getProjectCredentialAttributionHealth(projectId),
+  });
+}
+
+export function projectRuntimeConfigQueryOptions(queryScope: string, projectId: string) {
+  return queryOptions({
+    queryKey: projectQueryKeys.runtimeConfig(queryScope, projectId),
+    queryFn: ({ signal }) => getProjectRuntimeConfig(projectId, signal),
+    enabled: Boolean(queryScope && projectId),
   });
 }

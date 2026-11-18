@@ -1,0 +1,263 @@
+/**
+ * GET /api/projects/:projectId/sessions/:sessionId — session detail with its newest messages,
+ * task embed, agent state, and the viewer's session access (owner, grantee or reader) plus
+ * the active shared-access grants. Split out of `chat.ts`
+ * (`.claude/rules/18-file-size-limits.md`).
+ */
+import type { OperationContext } from '@simple-agent-manager/operations';
+import { getPullRequestStates } from '@simple-agent-manager/operations';
+import { parseProviderLimitWait } from '@simple-agent-manager/scheduler-core';
+import type { ChatSessionTaskEmbed } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT,
+  isTaskExecutionStep,
+  isTaskMode,
+} from '@simple-agent-manager/shared';
+import { eq } from 'drizzle-orm';
+import type { Hono } from 'hono';
+
+import * as schema from '../db/schema';
+import type { Env } from '../env';
+import { log } from '../lib/logger';
+import { expectJsonRecord } from '../lib/runtime-validation';
+import { errors } from '../middleware/error';
+import { operationDeps } from '../operation-ports';
+import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
+import * as projectDataService from '../services/project-data';
+import { canResumeProviderLimitTaskAnyway } from '../services/provider-limit-force-resume';
+import { canStartProviderLimitTaskAnyway } from '../services/provider-limit-recovery';
+import { publicPlacementExplanationJson } from '../services/public-placement-explanation';
+import { isTaskStatus } from '../services/task-status';
+import { attachWakeState } from './chat/wake-state';
+import { resolveChatAgentState } from './chat-agent-state';
+import { recordChatSessionLoadFailure } from './chat-load-diagnostics';
+import {
+  getDefaultCompactMode,
+  getMessageCursor,
+  getMessageOrder,
+  getSessionMessageLimit,
+} from './chat-message-query';
+import { getChatSessionRouteContext } from './chat-route-context';
+import { enrichSessionWithAccess } from './chat-session-ownership';
+import { readChatToolChanges } from './chat-tool-changes';
+
+export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env }>): void {
+  /**
+   * GET /api/projects/:projectId/sessions/:sessionId
+   * Get a single session with its messages (cursor-paginated).
+   */
+  chatRoutes.get('/:sessionId', async (c) => {
+    const { db, projectId, sessionId, userId } = await getChatSessionRouteContext(c);
+
+    let loaded: Awaited<ReturnType<typeof projectDataService.getSessionWithAccessGrants>>;
+    try {
+      // One RPC: the session row, the viewer's access and the active grants.
+      loaded = await projectDataService.getSessionWithAccessGrants(
+        c.env,
+        projectId,
+        sessionId,
+        userId
+      );
+    } catch (err) {
+      return recordChatSessionLoadFailure(c, {
+        err,
+        phase: 'get_session',
+        projectId,
+        sessionId,
+        userId,
+      });
+    }
+
+    const { session } = loaded;
+    if (!session) {
+      throw errors.notFound('Chat session');
+    }
+
+    const toolChanges = await readChatToolChanges(c, projectId, sessionId);
+    const limit = getSessionMessageLimit(c.env, c.req.query('limit'));
+    const before = getMessageCursor('before', c.req.query('before'));
+    const after = getMessageCursor('after', c.req.query('after'));
+    const configuredDeltaLimit = Number.parseInt(c.env.CHAT_SESSION_DELTA_MESSAGE_LIMIT || '', 10);
+    const deltaLimit =
+      Number.isFinite(configuredDeltaLimit) && configuredDeltaLimit > 0
+        ? configuredDeltaLimit
+        : DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT;
+    const effectiveLimit =
+      after !== null && c.req.query('limit') === undefined ? deltaLimit : limit;
+
+    const compact = getDefaultCompactMode(c.env);
+
+    let messagesResult: Awaited<ReturnType<typeof projectDataService.getMessages>>;
+    try {
+      messagesResult = await projectDataService.getMessages(
+        c.env,
+        projectId,
+        sessionId,
+        effectiveLimit,
+        before,
+        after,
+        undefined,
+        compact,
+        getMessageOrder(undefined, { before, after })
+      );
+    } catch (err) {
+      return recordChatSessionLoadFailure(c, {
+        err,
+        phase: 'get_messages',
+        projectId,
+        sessionId,
+        userId,
+      });
+    }
+
+    // Embed task summary if session is linked to a task (D1 lookup, best-effort)
+    let task: ChatSessionTaskEmbed | null = null;
+    const sessionRecord = expectJsonRecord(session, 'chat.session');
+    const taskId = typeof sessionRecord.taskId === 'string' ? sessionRecord.taskId : null;
+    if (taskId) {
+      try {
+        const [taskRow] = await db
+          .select({
+            id: schema.tasks.id,
+            status: schema.tasks.status,
+            executionStep: schema.tasks.executionStep,
+            admissionState: schema.tasks.admissionState,
+            admissionReason: schema.tasks.admissionReason,
+            providerLimitWaitJson: schema.tasks.providerLimitWaitJson,
+            terminalReason: schema.tasks.terminalReason,
+            errorMessage: schema.tasks.errorMessage,
+            placementExplanationJson: schema.tasks.placementExplanationJson,
+            outputBranch: schema.tasks.outputBranch,
+            outputPrUrl: schema.tasks.outputPrUrl,
+            outputSummary: schema.tasks.outputSummary,
+            finalizedAt: schema.tasks.finalizedAt,
+            taskMode: schema.tasks.taskMode,
+            agentProfileHint: schema.tasks.agentProfileHint,
+            userId: schema.tasks.userId,
+          })
+          .from(schema.tasks)
+          .where(eq(schema.tasks.id, taskId))
+          .limit(1);
+
+        if (taskRow) {
+          let prNumber: number | null = null;
+          let prState: Awaited<ReturnType<typeof getPullRequestStates>>[string] = null;
+          if (taskRow.outputPrUrl) {
+            try {
+              const states = await getPullRequestStates(
+                {
+                  ...operationDeps(c.env),
+                  execCtx: c.executionCtx as OperationContext['execCtx'],
+                },
+                projectId,
+                [{ url: taskRow.outputPrUrl }],
+                { refresh: 'single' }
+              );
+              const [canonicalUrl, state] = Object.entries(states)[0] ?? [];
+              prNumber = canonicalUrl
+                ? Number(canonicalUrl.slice(canonicalUrl.lastIndexOf('/') + 1))
+                : null;
+              prState = state ?? null;
+            } catch (error) {
+              log.warn('chat.session_pr_state_failed', {
+                projectId,
+                sessionId,
+                error: String(error),
+              });
+            }
+          }
+          const agentProfileHint = await resolveTaskAgentProfileHint(db, {
+            hint: taskRow.agentProfileHint,
+            projectId,
+            userId,
+          });
+
+          task = {
+            id: taskRow.id,
+            providerLimitReason: taskRow.admissionState?.startsWith('provider_limit_')
+              ? taskRow.admissionReason
+              : null,
+            providerLimitVersion: taskRow.admissionState?.startsWith('provider_limit_')
+              ? (parseProviderLimitWait(taskRow.providerLimitWaitJson)?.scheduleKey ?? null)
+              : null,
+            // Only the task's owner may start it anyway (startProviderLimitTaskAnyway).
+            providerLimitCanStartAnyway:
+              taskRow.userId === userId &&
+              canStartProviderLimitTaskAnyway(
+                taskRow,
+                parseProviderLimitWait(taskRow.providerLimitWaitJson)
+              ),
+            providerLimitCanResumeAnyway:
+              taskRow.userId === userId &&
+              sessionRecord.status === 'sleeping' &&
+              canResumeProviderLimitTaskAnyway(
+                taskRow,
+                parseProviderLimitWait(taskRow.providerLimitWaitJson)
+              ),
+            status: isTaskStatus(taskRow.status) ? taskRow.status : 'draft',
+            executionStep: isTaskExecutionStep(taskRow.executionStep)
+              ? taskRow.executionStep
+              : null,
+            terminalReason: taskRow.terminalReason ?? null,
+            errorMessage: taskRow.errorMessage ?? null,
+            placementExplanationJson: publicPlacementExplanationJson(
+              taskRow.placementExplanationJson
+            ),
+            outputBranch: taskRow.outputBranch,
+            outputPrUrl: taskRow.outputPrUrl,
+            pr: prNumber
+              ? {
+                  number: prNumber,
+                  state: prState?.state ?? null,
+                  checks: prState?.checksState ?? null,
+                }
+              : null,
+            outputSummary: taskRow.outputSummary ?? null,
+            finalizedAt: taskRow.finalizedAt ?? null,
+            taskMode: isTaskMode(taskRow.taskMode) ? taskRow.taskMode : null,
+            agentProfileHint,
+          };
+        }
+      } catch {
+        // D1 lookup failure is non-fatal — return session without task
+      }
+    }
+
+    const { agentSessionId, agentType, state } = await resolveChatAgentState(c.env, {
+      projectId,
+      sessionId,
+      lookupFailureEvent: 'chat.agent_session_id_lookup_failed',
+    });
+
+    let stateWithRecovery = await attachWakeState(db, state, {
+      projectId,
+      sessionId,
+      sessionStatus: sessionRecord.status,
+      env: c.env,
+    });
+
+    // Hydration may have repaired a lost post-commit activation signal. Return the
+    // actual DO lifecycle, rather than a synthetic ready status from the snapshot.
+    let visibleSession = session;
+    if (sessionRecord.status === 'sleeping' && stateWithRecovery?.recoveryStatus === 'restored') {
+      visibleSession =
+        (await projectDataService.getSession(c.env, projectId, sessionId)) ?? session;
+      if (visibleSession.status === 'sleeping') {
+        stateWithRecovery = { ...stateWithRecovery, recoveryStatus: 'waking' };
+      }
+    }
+
+    return c.json({
+      session: await enrichSessionWithAccess(
+        db,
+        { ...visibleSession, agentSessionId, agentType, task },
+        userId,
+        { access: loaded.access, grants: loaded.grants, undelivered: loaded.undelivered }
+      ),
+      messages: messagesResult.messages,
+      ...(toolChanges ? { toolChanges } : {}),
+      hasMore: messagesResult.hasMore,
+      state: stateWithRecovery,
+    });
+  });
+}

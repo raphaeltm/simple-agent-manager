@@ -7,10 +7,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import * as projectDataService from './project-data';
-import {
-  parseSessionSleepFallbackRecord,
-  sessionSleepEpisodeConfig,
-} from './session-sleep-episode';
+import { parseSessionSleepFallbackRecord } from './session-sleep-episode';
 import { endSessionSleepEpisodeBlocked } from './session-sleep-fallback';
 import { sessionSleepBlockedNotice, sessionSleepNoticeId } from './session-sleep-fallback-messages';
 import { sessionSleepRuntimeChanged } from './session-sleep-runtime-identity';
@@ -29,19 +26,11 @@ export async function settleUnconfirmedSleepStop(
     .from(schema.sessionSnapshots)
     .where(eq(schema.sessionSnapshots.chatSessionId, chatSessionId))
     .get();
-  if (snapshot?.sleepStatus !== 'stopping' || snapshot.sleepClaimId !== claimId)
-    return false;
-  const config = sessionSleepEpisodeConfig(env);
+  if (snapshot?.sleepStatus !== 'stopping' || snapshot.sleepClaimId !== claimId) return false;
+  // Snapshot capture is bounded; external deletion/stop must keep retrying until
+  // confirmed. Terminalizing an ambiguous stop would leave paid resources stranded.
   const runtimeChanged = sessionSleepRuntimeChanged(error);
-  const started = Date.parse(
-    snapshot.sleepEpisodeStartedAt ?? snapshot.sleepStoppingSince ?? snapshot.createdAt
-  );
-  if (
-    !runtimeChanged &&
-    (snapshot.sleepEpisodeFailures ?? 0) < config.failureMaxAttempts &&
-    (!Number.isFinite(started) || now.getTime() - started < config.failureMaxElapsedMs)
-  )
-    return false;
+  if (!runtimeChanged) return false;
   const blocked = await endSessionSleepEpisodeBlocked(env, {
     chatSessionId,
     reason: runtimeChanged ? 'runtime_changed' : 'teardown_unconfirmed',

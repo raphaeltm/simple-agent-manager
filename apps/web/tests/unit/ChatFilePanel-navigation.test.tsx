@@ -39,6 +39,7 @@ vi.mock('../../src/components/MarkdownRenderer', () => ({
 
 import { ChatFilePanel } from '../../src/components/chat/ChatFilePanel';
 import {
+  downloadSessionFile,
   getSessionFileContent,
   getSessionFileList,
   getSessionGitDiff,
@@ -232,5 +233,37 @@ describe('ChatFilePanel back navigation', () => {
     await user.click(closeButton);
 
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('ChatFilePanel download', () => {
+  it('says why a download failed, and clears it when the file is opened again', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getSessionFileContent).mockResolvedValue({ content: 'hello from the repo' } as never);
+    // A teammate whose access ended while the panel was open.
+    vi.mocked(downloadSessionFile).mockRejectedValueOnce(
+      new Error(
+        'Only the session owner or someone they shared it with can read files in this session.'
+      )
+    );
+    render(
+      <ChatFilePanel projectId="proj-1" sessionId="sess-1" initialMode="browse" onClose={vi.fn()} />
+    );
+
+    await user.click(await body().findByText('hello.ts'));
+    expect(await body().findByText('hello from the repo')).toBeInTheDocument();
+    await user.click(body().getByRole('button', { name: 'Download file' }));
+
+    expect(await body().findByRole('alert')).toHaveTextContent(
+      'Download failed. Only the session owner or someone they shared it with can read files in this session.'
+    );
+    expect(downloadSessionFile).toHaveBeenCalledWith('proj-1', 'sess-1', 'hello.ts');
+    // Liveness: the file is still on screen beside the error.
+    expect(body().getByText('hello from the repo')).toBeInTheDocument();
+
+    await user.click(body().getByLabelText('Back'));
+    await user.click(await body().findByText('hello.ts'));
+    expect(await body().findByText('hello from the repo')).toBeInTheDocument();
+    expect(body().queryByRole('alert')).toBeNull();
   });
 });

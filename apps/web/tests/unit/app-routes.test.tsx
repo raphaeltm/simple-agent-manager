@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const mockUseAuth = vi.fn(() => ({ isSuperadmin: false }));
@@ -20,7 +20,9 @@ vi.mock('../../src/components/ProtectedRoute', () => ({
   ProtectedRoute: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('../../src/components/AppShell', () => ({
+vi.mock('../../src/components/AppShell', async (importOriginal) => ({
+  // The real hook: it falls back to a default shell context outside an AppShell.
+  useAppShell: (await importOriginal<typeof import('../../src/components/AppShell')>()).useAppShell,
   AppShell: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="app-shell">{children}</div>
   ),
@@ -63,10 +65,6 @@ vi.mock('../../src/pages/AdminInfrastructure', () => ({
 
 vi.mock('../../src/pages/AdminAIProxy', () => ({
   AdminAIProxy: () => <div data-testid="admin-ai-proxy-page" />,
-}));
-
-vi.mock('../../src/pages/AdminTrials', () => ({
-  AdminTrials: () => <div data-testid="admin-trials-page" />,
 }));
 
 vi.mock('../../src/pages/AdminCosts', () => ({
@@ -113,10 +111,6 @@ vi.mock('../../src/pages/SettingsInfrastructure', () => ({
   SettingsInfrastructure: () => <div data-testid="settings-infrastructure-page" />,
 }));
 
-vi.mock('../../src/pages/CreateWorkspace', () => ({
-  CreateWorkspace: () => <div data-testid="create-workspace-page" />,
-}));
-
 vi.mock('../../src/pages/Workspace', () => ({
   Workspace: () => <div data-testid="workspace-page" />,
 }));
@@ -141,12 +135,12 @@ vi.mock('../../src/pages/UiStandards', () => ({
   UiStandards: () => <div data-testid="ui-standards-page" />,
 }));
 
-vi.mock('../../src/pages/SamPrototype', () => ({
-  SamPrototype: () => <div data-testid="sam-prototype-page" />,
+vi.mock('../../src/pages/Sam', () => ({
+  Sam: () => <div data-testid="sam-page" />,
 }));
 
-vi.mock('../../src/pages/TrialChatGateHarness', () => ({
-  TrialChatGateHarness: () => <div data-testid="trial-chat-gate-harness-page" />,
+vi.mock('../../src/pages/RetiredTrial', () => ({
+  RetiredTrial: () => <div data-testid="retired-trial-page" />,
 }));
 
 vi.mock('../../src/pages/Projects', () => ({
@@ -165,8 +159,12 @@ vi.mock('../../src/pages/Project', async () => {
   };
 });
 
-vi.mock('../../src/pages/ProjectOverview', () => ({
+vi.mock('../../src/pages/project-overview', () => ({
   ProjectOverview: () => <div data-testid="project-overview-page" />,
+}));
+
+vi.mock('../../src/pages/project-chat', () => ({
+  ProjectChat: () => <div data-testid="project-chat-page" />,
 }));
 
 vi.mock('../../src/pages/ProjectTasks', () => ({
@@ -180,8 +178,8 @@ vi.mock('../../src/pages/ProjectSessions', () => ({
 vi.mock('../../src/pages/ProjectSettings', () => ({
   ProjectSettings: () => <div data-testid="project-settings-page" />,
   ProjectSettingsAccess: () => <div data-testid="project-settings-access-page" />,
+  ProjectSettingsAccounts: () => <div data-testid="project-settings-accounts-page" />,
   ProjectSettingsAgents: () => <div data-testid="project-settings-agents-page" />,
-  ProjectSettingsConnections: () => <div data-testid="project-settings-connections-page" />,
   ProjectSettingsDeploy: () => <div data-testid="project-settings-deploy-page" />,
   ProjectSettingsGeneral: () => <div data-testid="project-settings-general-page" />,
   ProjectSettingsIndexRedirect: () => <div data-testid="project-settings-index-redirect" />,
@@ -199,6 +197,45 @@ vi.mock('../../src/pages/TaskRedirect', () => ({
 
 vi.mock('../../src/pages/ChatSessionView', () => ({
   ChatSessionView: () => <div data-testid="chat-session-page" />,
+}));
+
+vi.mock('../../src/pages/ProjectContext', () => ({
+  useProjectContext: () => ({
+    projectId: 'proj-1',
+    project: null,
+    installations: [],
+    reload: async () => undefined,
+  }),
+}));
+
+/** Automation page stand-ins that print where they landed and the params they received. */
+async function automationStandIn(testId: string) {
+  const { useLocation, useParams } = await import('react-router');
+  return function StandIn() {
+    const location = useLocation();
+    const params = useParams();
+    return (
+      <div data-testid={testId}>
+        {location.pathname + location.search} {JSON.stringify(params)}
+      </div>
+    );
+  };
+}
+
+vi.mock('../../src/pages/automation/AutomationOverview', async () => ({
+  AutomationOverview: await automationStandIn('automation-overview-page'),
+}));
+vi.mock('../../src/pages/automation/AutomationEditor', async () => ({
+  AutomationEditor: await automationStandIn('automation-editor-page'),
+}));
+vi.mock('../../src/pages/automation/AutomationDetail', async () => ({
+  AutomationDetail: await automationStandIn('automation-detail-page'),
+}));
+vi.mock('../../src/pages/automation/AutomationHistory', async () => ({
+  AutomationHistory: await automationStandIn('automation-history-page'),
+}));
+vi.mock('../../src/pages/automation/AutomationBehind', async () => ({
+  AutomationBehind: await automationStandIn('automation-behind-page'),
 }));
 
 import App, { DEV_ONLY_ROUTE_PATHS, devOnlyRoutesEnabled } from '../../src/App';
@@ -224,6 +261,100 @@ describe('App routes', () => {
     expect(screen.queryByTestId('dashboard-page')).not.toBeInTheDocument();
   });
 
+  describe('Automation', () => {
+    it('routes every Automation view, with the automation id apart from the project id', async () => {
+      renderAt('/projects/proj-1/automation/new');
+      const editor = await screen.findByTestId('automation-editor-page');
+      expect(editor).toHaveTextContent('/projects/proj-1/automation/new');
+      expect(editor).not.toHaveTextContent('automationId');
+
+      cleanup();
+      renderAt('/projects/proj-1/automation/trigger/t1');
+      expect(await screen.findByTestId('automation-detail-page')).toHaveTextContent(
+        '"kind":"trigger","automationId":"t1"'
+      );
+
+      cleanup();
+      renderAt('/projects/proj-1/automation/watch/w1/edit');
+      expect(await screen.findByTestId('automation-editor-page')).toHaveTextContent(
+        '"kind":"watch","automationId":"w1"'
+      );
+
+      cleanup();
+      renderAt('/projects/proj-1/automation/history');
+      expect(await screen.findByTestId('automation-history-page')).toBeInTheDocument();
+    });
+
+    it.each([
+      ['/projects/proj-1/events', 'automation-overview-page', '/projects/proj-1/automation'],
+      [
+        '/projects/proj-1/events?section=channels',
+        'automation-behind-page',
+        '/automation/behind?tab=channels',
+      ],
+      [
+        '/projects/proj-1/events?sessionId=s1',
+        'automation-behind-page',
+        '/automation/behind?sessionId=s1',
+      ],
+      ['/projects/proj-1/triggers', 'automation-overview-page', '/projects/proj-1/automation'],
+      ['/projects/proj-1/triggers?edit=new', 'automation-editor-page', '/automation/new'],
+      [
+        '/projects/proj-1/triggers?edit=t1',
+        'automation-editor-page',
+        '/automation/trigger/t1/edit',
+      ],
+      ['/projects/proj-1/triggers/t1', 'automation-detail-page', '/automation/trigger/t1'],
+    ])('sends the old URL %s to the view that replaced it', async (from, testId, to) => {
+      renderAt(from);
+      expect(await screen.findByTestId(testId)).toHaveTextContent(to);
+    });
+  });
+
+  // Router-major guard (react-router 8): drive the real BrowserRouter through the
+  // browser History API — a deep link, an index `<Navigate replace>`, a later
+  // navigation, then Back/Forward — the way a user's browser does.
+  it('keeps deep links, replace redirects and Back/Forward coherent', async () => {
+    const popTo = async (move: () => void) => {
+      const popped = new Promise<void>((resolve) =>
+        window.addEventListener('popstate', () => resolve(), { once: true })
+      );
+      move();
+      await popped;
+    };
+
+    window.history.pushState({}, '', '/dashboard');
+    renderAt('/projects/proj-1');
+    expect(await screen.findByTestId('project-overview-page')).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/projects/proj-1/overview');
+
+    await act(async () => {
+      window.history.pushState({}, '', '/projects/proj-1/chat');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    expect(await screen.findByTestId('project-chat-page')).toBeInTheDocument();
+
+    await act(() => popTo(() => window.history.back()));
+    expect(await screen.findByTestId('project-overview-page')).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/projects/proj-1/overview');
+
+    // The index redirect replaced its entry, so one more Back leaves the project
+    // instead of bouncing through `/projects/proj-1` back to Overview.
+    await act(() => popTo(() => window.history.back()));
+    expect(await screen.findByTestId('dashboard-page')).toBeInTheDocument();
+    expect(screen.queryByTestId('project-overview-page')).not.toBeInTheDocument();
+
+    await act(() => popTo(() => window.history.forward()));
+    expect(await screen.findByTestId('project-overview-page')).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/projects/proj-1/overview');
+  });
+
+  it('redirects the removed /workspaces/new form to Nodes', async () => {
+    renderAt('/workspaces/new');
+    expect(await screen.findByTestId('nodes-page')).toBeInTheDocument();
+    expect(screen.queryByTestId('workspace-page')).not.toBeInTheDocument();
+  });
+
   it('routes /tools to the Tools page', async () => {
     renderAt('/tools');
     expect(await screen.findByTestId('tools-page')).toBeInTheDocument();
@@ -232,6 +363,20 @@ describe('App routes', () => {
   it('routes /tools/cli to the CLI download page', async () => {
     renderAt('/tools/cli');
     expect(await screen.findByTestId('tools-cli-page')).toBeInTheDocument();
+  });
+
+  it('lands a project on its Overview, not on chat (inbox slice F2)', async () => {
+    renderAt('/projects/proj-1');
+
+    expect(await screen.findByTestId('project-overview-page')).toBeInTheDocument();
+    await waitFor(() => expect(window.location.pathname).toBe('/projects/proj-1/overview'));
+    expect(screen.queryByTestId('project-chat-page')).not.toBeInTheDocument();
+  });
+
+  it('still routes the project chat, one tap from the Overview', async () => {
+    renderAt('/projects/proj-1/chat');
+    expect(await screen.findByTestId('project-chat-page')).toBeInTheDocument();
+    expect(screen.queryByTestId('project-overview-page')).not.toBeInTheDocument();
   });
 
   it('routes /projects/:id/tasks/:taskId to the task redirect (redirects to chat session)', async () => {
@@ -243,15 +388,24 @@ describe('App routes', () => {
     expect(await screen.findByTestId('task-redirect-page')).toBeInTheDocument();
   });
 
-  it('keeps prototype and test harness routes available in local/test mode', async () => {
+  it('routes the account SAM assistant in production', async () => {
+    vi.stubEnv('DEV', false);
+    vi.stubEnv('PROD', true);
+    vi.stubEnv('MODE', 'production');
     renderAt('/sam');
-    expect(await screen.findByTestId('sam-prototype-page')).toBeInTheDocument();
+    expect(await screen.findByTestId('sam-page')).toBeInTheDocument();
+  });
 
-    cleanup();
-    renderAt('/__test/trial-chat-gate');
-    expect(await screen.findByTestId('trial-chat-gate-harness-page')).toBeInTheDocument();
+  it.each(['/try', '/try/trial_01ABC', '/try/cap-exceeded', '/try/waitlist/thanks'])(
+    'sends the retired anonymous-trial link %s to the retired-trial page',
+    async (path) => {
+      renderAt(path);
+      expect(await screen.findByTestId('retired-trial-page')).toBeInTheDocument();
+      expect(screen.queryByTestId('landing-page')).not.toBeInTheDocument();
+    }
+  );
 
-    cleanup();
+  it('keeps test harness routes available in local/test mode', async () => {
     renderAt('/ui-standards');
     expect(await screen.findByTestId('ui-standards-page')).toBeInTheDocument();
   });
@@ -307,8 +461,6 @@ describe('App routes', () => {
     vi.stubEnv('MODE', 'production');
 
     expect(DEV_ONLY_ROUTE_PATHS).toEqual([
-      '/sam',
-      '/__test/trial-chat-gate',
       '/__test/error-boundary',
       '/ui-standards',
     ]);
@@ -319,8 +471,7 @@ describe('App routes', () => {
       renderAt(routePath);
 
       expect(screen.getByTestId('landing-page')).toBeInTheDocument();
-      expect(screen.queryByTestId('sam-prototype-page')).not.toBeInTheDocument();
-      expect(screen.queryByTestId('trial-chat-gate-harness-page')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('sam-page')).not.toBeInTheDocument();
       expect(screen.queryByTestId('ui-standards-page')).not.toBeInTheDocument();
     }
   });

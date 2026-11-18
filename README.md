@@ -1,140 +1,135 @@
 <p align="center">
-  <img src="assets/images/sam-banner.png" alt="Simple Agent Manager" width="400" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/images/sam-banner-dark.png" />
+    <img src="assets/images/sam-banner.png" alt="SAM, Simple Agent Manager" width="380" />
+  </picture>
+</p>
+
+<h3 align="center">Run a fleet of coding agents on your own cloud.</h3>
+
+<p align="center">
+  Every task gets its own agent and dev environment, on machines you own.<br />
+  Agents can start helper agents, message them, and review what they send back.<br />
+  Mix Claude Code, Codex, and other agents, and steer the whole fleet from your browser or phone.
 </p>
 
 <p align="center">
-  <strong>Run AI coding agents in parallel on your own cloud.</strong>
+  <a href="https://simple-agent-manager.org">Website</a> &bull;
+  <a href="https://simple-agent-manager.org/docs/">Docs</a> &bull;
+  <a href="https://simple-agent-manager.org/docs/guides/self-hosting/">Deploy your own</a>
 </p>
 
 <p align="center">
-  Every agent gets its own isolated container on a VM billed to <em>your</em> cloud account — full Linux, Docker + git, reachable in the browser. Run 5 or 500 at once.
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3%2B-blue?style=flat-square" alt="License: AGPL v3+" /></a>
+  <a href="https://app.codspeed.io/raphaeltm/simple-agent-manager?utm_source=badge"><img src="https://img.shields.io/endpoint?url=https://codspeed.io/badge.json" alt="CodSpeed" /></a>
 </p>
 
 <p align="center">
-  <a href="https://app.simple-agent-manager.org">Try it</a> &bull;
-  <a href="https://github.com/raphaeltm/simple-agent-manager">Star on GitHub</a> &bull;
-  <a href="https://simple-agent-manager.org/docs/">Documentation</a> &bull;
-  <a href="https://simple-agent-manager.org/docs/guides/self-hosting/">Self-Hosting Guide</a>
+  <img src="assets/images/readme/hero.webp" alt="A SAM project chat. A lead agent has split one request across three helper agents with dispatch_task and is waiting for them. The chat list shows the three helpers running, and another agent marked Needs input." width="880" />
+  <br />
+  <sub>A lead agent splits one request across helpers on Codex, Claude Code, and OpenCode. The real SAM interface with sample data.</sub>
 </p>
+
+## Built for more than a few agents
+
+Running a few agents in terminal tabs works until your laptop becomes the bottleneck. They compete for ports, Docker, and memory. Your laptop has to stay awake. And each one stops to ask you something the moment you step away.
+
+SAM moves the fleet off your laptop.
+
+- **A workspace for every task.** On VMs in your cloud account, each agent gets its own dev container, built from your repo's `.devcontainer` by default, with Docker, git, and its own branch. Several agents share a VM when they fit, and VMs that SAM manages are removed after sitting idle for a while. For quick jobs, Instant sessions start in seconds on Cloudflare Containers, with no VM provider needed.
+- **Agents that run agents.** An agent can start helpers, send them instructions, wait for them, and stop them. Ask a lead agent to split a job, hand out the pieces, and review what comes back.
+- **The agents you already use.** Claude Code, Codex, Gemini CLI, Google Antigravity, Mistral Vibe, OpenCode, and Amp, side by side in one project. Save an agent, model, and effort level as a profile and pick one per task, so Claude Code can plan while Codex writes the code. Use API keys or your Claude and ChatGPT subscriptions.
+- **Everything visible, from anywhere.** Every message and tool call streams into the project chat and stays there. The chat list shows which agents are working, finished, or waiting on you. Turn on push notifications to hear when a task finishes or an agent asks for your input.
+- **Work that starts without you.** Schedules, GitHub events, and webhooks start agents: a nightly dependency sweep, a pass over every new issue, a first look at every production alert.
+- **Your accounts, your bill.** SAM runs on your Cloudflare account. VMs run in your Hetzner, Scaleway, GCP, Vultr, UpCloud, DigitalOcean, or Infomaniak account, at their prices. Open source under AGPL-3.0.
+
+## Agents that run agents
+
+Give one agent the whole job:
+
+> Add CSV export to the billing page. Break the work into the API, the UI, and the tests, run them in parallel, and review each branch before you tell me it is ready.
+
+That is the conversation at the top of this page. The lead agent starts three helpers, each in its own workspace on its own branch. In this example, two helpers have finished, and the lead found a bug in the third and sent it back:
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3%2B-blue?style=flat-square" alt="License" /></a>
-  <a href="https://app.codspeed.io/raphaeltm/simple-agent-manager?utm_source=badge"><img src="https://img.shields.io/endpoint?url=https://codspeed.io/badge.json" alt="CodSpeed"/></a>
+  <img src="assets/images/readme/review-loop.webp" alt="The lead agent reports that two helpers finished with PR 512 and PR 514, that the UI branch formats amounts wrongly for yen, and that it asked that helper for a fix. Below are its calls to get_session_messages, send_message_to_subtask, and wait_for_subtasks." width="764" />
 </p>
+
+The lead does this with tools SAM gives its agents:
+
+- `dispatch_task` starts a helper with a brief, a profile, and a branch.
+- `send_message_to_subtask` sends a running helper new instructions.
+- `get_session_messages` reads a helper's conversation.
+- `wait_for_subtasks` pauses the lead until its helpers finish or a deadline passes. SAM wakes it up, so it never polls.
+- `stop_subtask` and `retry_subtask` stop or retry a helper it started.
+- `start_workflow_run` hands SAM a plan of steps that depend on each other.
+
+Agents in the same project can message each other, so a helper can report back or ask the lead a question. Your deployment's settings cap how deep and how wide agents can fan out.
+
+### Plans with dependencies
+
+For work in stages, an agent can hand SAM a workflow, such as "draft the release notes, have two agents review them at the same time, then apply both reviews". SAM starts each agent step once the steps it depends on finish, can wait for an event like a CI result between steps, and shows everyone in the project how the plan is going.
 
 <p align="center">
-  <img src="assets/images/sam-screenshot-byoc.webp" alt="SAM nodes and workspaces dashboard" width="760" />
+  <img src="assets/images/readme/workflow.webp" alt="A workflow graph: a draft step done by Claude Code, then two review steps at the same time, one running on Codex and one done, then two waiting steps." width="880" />
 </p>
 
----
+## Your fleet from your phone
 
-## What You Get
-
-**Agents in parallel, each in a real environment.** Every agent runs in its own isolated Docker container on a VM you own — full Linux, Docker, and git, reachable from any browser. Run a handful or hundreds at once, each in a clean workspace.
-
-**Bring your own cloud.** VMs are provisioned in your own Hetzner, Scaleway, GCP, Vultr, or UpCloud account and billed directly to you. SAM never stores your cloud provider credentials as platform env vars — they're encrypted per-user. Your agents, your infra, your data.
-
-**Bring your own agent.** Six harnesses work today: [Claude Code](https://www.anthropic.com/claude-code), Codex, Gemini, Mistral, OpenCode, and Amp. Use your own API key, your OAuth/subscription token, or the platform proxy.
-
-**Chat-first, and it outlives workspaces.** Link a GitHub repo, describe a task in natural language, and watch every tool call stream back. Conversations persist at the project level — stop a workspace, spin up a new one weeks later, and your full history is still there.
-
-**Serverless control plane.** Self-hosted on Cloudflare ($5/mo Workers Paid plan) — the control plane provisions, schedules, and tears down workspaces with nothing to babysit. A workspace costs ~$0.007–0.03/hr compared to $0.18–0.36/hr on GitHub Codespaces.
+On your phone, see which agents are working, finished, or waiting on you, and answer the one that has a question. Here, the nightly dependency agent wants a decision before it takes on a major upgrade:
 
 <p align="center">
-  <img src="assets/images/sam-screenshot-chat.webp" alt="SAM live agent session with tool stream" width="760" />
+  <img src="assets/images/readme/phone-question.webp" alt="SAM on a phone: the nightly dependency sweep agent asks whether to upgrade stripe to a new major version, with a recommended answer selected and Send answer and Decline buttons." width="340" />
 </p>
 
-## How It Works
+## On machines you own
 
-```
-You: "Add rate limiting to the /api/upload endpoint"
-         |
-    Project Chat (app.{domain})
-         |
-    Cloudflare Worker API
-         |
-    TaskRunner -- alarm-driven orchestrator that:
-      1. Claims a warm node or provisions a new VM in your cloud
-      2. Creates a Docker workspace with your repo
-      3. Starts your chosen agent with the task description
-      4. Streams agent output back to project chat
-         |
-    Agent streams results back as it works
-```
+Every VM shows its provider, size, price, and load, and the agents running on it. Create VMs yourself, or let SAM create them as agents need them.
 
-## Architecture
+<p align="center">
+  <img src="assets/images/readme/node-card.webp" alt="A Hetzner VM in Falkenstein running three agent workspaces, with its size, monthly price, and CPU, memory, and disk use." width="460" />
+</p>
 
-| Layer              | What                              | How                                                                                                                                        |
-| ------------------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Control plane**  | API, auth, orchestration          | Cloudflare Workers + D1 + KV + R2                                                                                                          |
-| **Real-time data** | Chat messages, activity, sessions | Durable Objects with embedded SQLite (per project)                                                                                         |
-| **Compute**        | Workspaces running coding agents  | VMs in your own cloud (Hetzner, Scaleway, GCP, Vultr, or UpCloud) with a Go agent managing Docker containers, WebSocket terminal, and auth |
-| **Warm pool**      | Fast workspace starts             | Completed VMs stay warm for 30 min for instant reuse                                                                                       |
+## Teams and long-running work
 
-The control plane is serverless — no servers to manage, no databases to back up. Compute scales to zero when you're not using it.
+Sessions sleep when they go idle and wake when you reply, with the conversation kept. Teammates can follow each other's agents, comment on an agent's reply, and share a chat for a set time. SAM tells every new session to load the project's knowledge and rules first. See [what's in SAM](https://simple-agent-manager.org/docs/overview/).
 
-### Repository Structure
+## How it works
 
-```
-apps/
-  api/          Cloudflare Worker API (Hono)
-  web/          Control plane UI (React + Vite)
-  www/          Marketing site, blog & docs (Astro + Starlight)
-packages/
-  shared/       Shared types and utilities
-  providers/    Cloud provider abstraction (Hetzner, Scaleway, GCP, Vultr, UpCloud)
-  cloud-init/   Cloud-init template generator
-  vm-agent/     Go VM agent (PTY, WebSocket, MCP tool endpoints)
-  ui/           Design system tokens and shared UI components
-  terminal/     Shared terminal component
-```
+| Part              | What it does                                                      | Built on                                              |
+| ----------------- | ----------------------------------------------------------------- | ----------------------------------------------------- |
+| **Control plane** | API, auth, scheduling, chat history, agent-to-agent messaging     | Cloudflare Workers, D1, Durable Objects, KV, R2       |
+| **Nodes**         | VMs that run workspaces. Several agents can share one VM          | Your cloud account, a Go agent on each VM, Docker     |
+| **Workspaces**    | One dev container per task, with the agent, your repo, and Docker | Your repo's `.devcontainer`, or a fast prebuilt image |
+| **Instant**       | Containers for quick work when you don't need a VM                | Cloudflare Containers                                 |
 
-For the full architecture with diagrams, see the **[Architecture Overview](https://simple-agent-manager.org/docs/architecture/overview/)**.
+The control plane runs on Cloudflare Workers, so there is no control-plane VM to maintain. Read the [architecture overview](https://simple-agent-manager.org/docs/architecture/overview/) for the details.
 
-## Quick Deploy
+## Deploy your own
 
-SAM deploys through the **Deploy Production** GitHub Actions workflow in your fork. Fork, configure the `production` environment, then run the workflow manually. For the complete setup guide with detailed steps and troubleshooting, see the **[Self-Hosting Guide](https://simple-agent-manager.org/docs/guides/self-hosting/)**.
+You need:
 
-### Prerequisites
+- A [Cloudflare account](https://dash.cloudflare.com/sign-up) on the Workers Paid plan ($5 a month minimum), with a domain on Cloudflare
+- A [GitHub App](https://simple-agent-manager.org/docs/guides/self-hosting/#step-4-create-github-app) for sign-in and repository access
+- A cloud provider account for VMs (optional if you only use Instant sessions)
 
-- A [Cloudflare account](https://dash.cloudflare.com/sign-up) (Workers Paid plan, $5/mo) with a token that includes Containers permission
-- A domain with nameservers pointing to Cloudflare
-- A [GitHub App](https://simple-agent-manager.org/docs/guides/self-hosting/#github-setup) for OAuth + repo access
+SAM deploys from GitHub Actions in your fork. The [self-hosting guide](https://simple-agent-manager.org/docs/guides/self-hosting/) walks through every step.
 
-### Steps
-
-1. **Fork this repository**
-2. **Create a GitHub Environment** named `production` in your fork's Settings > Environments
-3. **Add the required secrets** (Cloudflare API token with `Containers: Edit`, GitHub App credentials, etc. — see the [Self-Hosting Guide](https://simple-agent-manager.org/docs/guides/self-hosting/) for the full list)
-4. **Run Actions → Deploy Production → Run workflow** on `main` — GitHub Actions provisions all infrastructure, deploys the API + UI, runs migrations, and verifies health
-
-To update an existing self-hosted instance, run the **Update Self-Hosted Instance** workflow to sync the latest upstream release and deploy automatically, or manually sync your fork and run **Deploy Production** (SHA is optional and must be the current `main` tip when supplied).
-
-Your instance is live at `app.{your-domain}`. Users sign in with GitHub and provide their own cloud provider API token (Hetzner, Scaleway, GCP, Vultr, or UpCloud) to create workspaces.
-
-## Development
+## Develop
 
 ```bash
-pnpm install        # Install dependencies
-pnpm build          # Build all packages
-pnpm test           # Run tests
-pnpm typecheck      # Type check
-pnpm lint           # Lint
-pnpm format         # Format
+pnpm install && pnpm build && pnpm test
 ```
 
-Build packages in dependency order: `shared` > `providers` > `cloud-init` > `api` / `web`.
+See the [local development guide](https://simple-agent-manager.org/docs/guides/local-development/) to run SAM on your machine.
 
-For local development details, see the **[Local Development Guide](https://simple-agent-manager.org/docs/guides/local-development/)**.
+## Learn more
 
-## Documentation
-
-Full documentation is available at **[simple-agent-manager.org/docs](https://simple-agent-manager.org/docs/)**:
-
-- [Self-Hosting Guide](https://simple-agent-manager.org/docs/guides/self-hosting/) — deploy your own instance
-- [Architecture Overview](https://simple-agent-manager.org/docs/architecture/overview/) — how the system works
-- [Security Model](https://simple-agent-manager.org/docs/architecture/security/) — BYOC, encryption, credentials
-- [Local Development](https://simple-agent-manager.org/docs/guides/local-development/) — contributing and development setup
+- [Docs](https://simple-agent-manager.org/docs/): agents, workflows, automation, and teams
+- [Self-hosting guide](https://simple-agent-manager.org/docs/guides/self-hosting/): deploy your own instance
+- [Security model](https://simple-agent-manager.org/docs/architecture/security/): how credentials are encrypted and isolated
+- [How work moves through SAM](https://simple-agent-manager.org/#how-work-moves): one request from idea to a running change
+- [Blog](https://simple-agent-manager.org/blog/): what we are building and why
 
 ## License
 

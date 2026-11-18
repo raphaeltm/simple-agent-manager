@@ -10,7 +10,10 @@ import {
 import { errors } from '../../middleware/error';
 import { WorkspaceResourceUploadSchema } from '../../schemas';
 import { type CallbackTokenPayload, verifyCallbackToken } from '../../services/jwt';
-import { callbackTokenMatchesNode } from '../../services/node-callback-auth';
+import {
+  callbackTokenMatchesNode,
+  callbackTokenMatchesWorkspace,
+} from '../../services/node-callback-auth';
 import {
   getWorkspaceResourceUploadMaxBytes,
   storeWorkspaceResourceChunk,
@@ -23,16 +26,6 @@ import {
  */
 const workspaceResourceHistoryCallbackRoute = new Hono<{ Bindings: Env }>();
 
-function callbackTokenMatchesWorkspaceOrLegacy(
-  payload: CallbackTokenPayload,
-  workspaceId: string
-): boolean {
-  return (
-    (payload.scope === 'workspace' || payload.scope === undefined) &&
-    payload.workspace === workspaceId
-  );
-}
-
 function authorizedUploader(
   payload: CallbackTokenPayload,
   body: WorkspaceResourceUploadBody
@@ -44,7 +37,7 @@ function authorizedUploader(
     return payload.workspace;
   }
 
-  if (callbackTokenMatchesWorkspaceOrLegacy(payload, body.workspaceId)) {
+  if (callbackTokenMatchesWorkspace(payload, body.workspaceId)) {
     return null;
   }
 

@@ -15,7 +15,7 @@ webhookClaimRoutes.post('/webhook-claims/:claimId', async (c) => {
   c.header('Cache-Control', 'private, no-store');
   c.header('Referrer-Policy', 'no-referrer');
   c.header('X-Content-Type-Options', 'nosniff');
-  const [token] = await authenticateMcpRequest(c.req.header('Authorization'), c.env.KV, c.env);
+  const [token] = await authenticateMcpRequest(c.req.header('Authorization'), c.env);
   if (!token) throw errors.unauthorized('Invalid or expired MCP token');
   const rate = await checkMcpRateLimit(
     c.env.KV,

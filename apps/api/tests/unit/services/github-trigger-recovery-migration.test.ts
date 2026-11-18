@@ -59,3 +59,38 @@ describe('GitHub trigger recovery additive migration', () => {
     }
   );
 });
+
+it('adds queue and routing state without losing legacy tasks or narrowing status values', async () => {
+  const { default: queueMigration } =
+    await import('../../../src/db/migrations/0209_github_trigger_queue.sql?raw');
+  const db = new Database(':memory:');
+  try {
+    db.exec(
+      'PRAGMA foreign_keys=ON; CREATE TABLE projects(id TEXT PRIMARY KEY); CREATE TABLE users(id TEXT PRIMARY KEY); CREATE TABLE agent_profiles(id TEXT PRIMARY KEY); CREATE TABLE tasks(id TEXT PRIMARY KEY);'
+    );
+    db.exec(triggersMigration);
+    db.exec(githubMigration);
+    db.exec(recoveryMigration);
+    db.exec(
+      "INSERT INTO projects VALUES('p'); INSERT INTO users VALUES('u'); INSERT INTO triggers(id,project_id,user_id,name,source_type,prompt_template) VALUES('t','p','u','legacy','github','prompt'); INSERT INTO trigger_executions(id,trigger_id,project_id,status) VALUES('legacy','t','p','running'); INSERT INTO tasks(id,trigger_execution_id) VALUES('task','legacy'); INSERT INTO github_trigger_configs(id,trigger_id,event_type) VALUES('config','t','issues');"
+    );
+    db.exec(queueMigration);
+    expect(
+      db
+        .prepare(
+          'SELECT subject_affinity,queue_max_pending,queue_ttl_seconds FROM github_trigger_configs'
+        )
+        .get()
+    ).toEqual({ subject_affinity: 0, queue_max_pending: 50, queue_ttl_seconds: 86400 });
+    for (const status of ['waiting', 'routing', 'routed', 'dropped'])
+      db.prepare(
+        'INSERT INTO trigger_executions(id,trigger_id,project_id,status,subject_key,queue_expires_at,routed_task_id,routed_session_id) VALUES(?,?,?,?,?,?,?,?)'
+      ).run(status, 't', 'p', status, 'github:42:7', 'future', 'task', 'session');
+    expect(db.prepare('SELECT trigger_execution_id FROM tasks').get()).toEqual({
+      trigger_execution_id: 'legacy',
+    });
+    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  } finally {
+    db.close();
+  }
+});

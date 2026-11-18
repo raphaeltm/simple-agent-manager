@@ -23,6 +23,7 @@ export const mcpConnectionQueryKeys = {
 export function mcpConnectionsQueryOptions(queryScope: string, projectId: string | null) {
   return queryOptions({
     queryKey: mcpConnectionQueryKeys.list(queryScope, projectId),
-    queryFn: () => listMcpConnections(projectId),
+    enabled: Boolean(queryScope),
+    queryFn: ({ signal }) => listMcpConnections(projectId, signal),
   });
 }

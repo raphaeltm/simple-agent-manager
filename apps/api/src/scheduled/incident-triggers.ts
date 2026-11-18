@@ -258,7 +258,7 @@ export async function runIncidentTriggerSweep(
     .bind(projectId)
     .first<ProjectRow>();
   if (!project)
-    throw new Error('Configured feedback project does not reference an existing project');
+    throw new Error('Configured Operations project does not reference an existing project');
 
   const now = deps.now?.() ?? Date.now();
   const config = getIncidentConfig(env);
@@ -266,7 +266,7 @@ export async function runIncidentTriggerSweep(
   const reclaim = await reclaimExpiredIncidentDispatches(env, now, config);
   base.requeuedDispatches = reclaim.requeued;
   base.rejectedDispatches = reclaim.rejected;
-  base.requeuedClaims = await reclaimExpiredIncidentClaims(env, now);
+  base.requeuedClaims = await reclaimExpiredIncidentClaims(env, now, config);
   base.autoTriggerCreated = (await ensureDefaultIncidentTrigger(env, project, config, now)) ? 1 : 0;
 
   const triggers = await loadIncidentTriggers(env, projectId, config.triggerLimit);
@@ -278,6 +278,7 @@ export async function runIncidentTriggerSweep(
   for (const trigger of triggers) {
     const summary = await buildIncidentBacklogSummary(env, config.summaryLimit, now, config, {
       expireStale: false,
+      reclaimClaims: false,
     });
     base.pendingIncidents = Math.max(base.pendingIncidents, summary.pendingCount);
     if (summary.pendingCount === 0) break;

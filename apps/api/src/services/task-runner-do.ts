@@ -26,6 +26,7 @@ import type {
   TaskStartCapacityCandidate,
   TaskStartCapacityPoolSelection,
 } from './placement-resolver';
+import type { ProviderLimitRecoveryApproval } from './provider-limit-recovery-approval';
 import { assertReplacementDeletionConfirmed } from './replacement-deletion-fence';
 import type { ProjectEventWakeRecoveryGuard } from './session-recovery-authority';
 import type { TaskRunnerStartGuard } from './task-runner-start-guard';
@@ -81,17 +82,75 @@ function compactCapacityPoolSelectionForTaskRunner(
     ),
   };
 
-  if (
-    new TextEncoder().encode(JSON.stringify(compactSelection)).length <=
-    TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES
-  ) {
-    return compactSelection;
+  const fitsCandidates = (candidates: TaskStartCapacityCandidate[]) =>
+    selectionBytes({ ...compactSelection, candidates }) <= TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES;
+  const all = compactSelection.candidates;
+  if (fitsCandidates(all)) return compactSelection;
+  if (!fitsCandidates(all.slice(0, 1))) {
+    // Even the primary alone would push TaskRunner state toward the Durable Object value
+    // limit, where `start()` fails with a storage error that names nothing. Fail here instead.
+    const bytes = selectionBytes({ ...compactSelection, candidates: all.slice(0, 1) });
+    log.error('task_runner_do.capacity_selection_too_large', {
+      poolId: selection.poolId,
+      bytes,
+      maxBytes: TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES,
+    });
+    throw new Error(
+      `Capacity pool ${selection.poolId} selection is ${bytes} bytes with one candidate, over the ${TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES}-byte TaskRunner budget`
+    );
   }
 
+  // Candidates are ranked best first and every one after the first is a fallback the
+  // exhaustion chain may try (another zone or machine type when one is sold out). Keep the
+  // longest ranked prefix that fits, not just the first: a live catalog spanning many zones
+  // otherwise reaches the TaskRunner with no fallback at all. Always keep at least one.
+  //
+  // With a provider order, rank sorts the first source's candidates ahead of every other, and
+  // a live GCP catalog alone exceeds the budget, so that prefix would drop every later provider
+  // tier. Keep each source's best `k` candidates instead, for the largest `k` that fits.
+  const perSource = hasProviderOrder(all) ? bestPerSource(all) : null;
+  const usePerSource = perSource !== null && fitsCandidates(perSource.take(1));
+  const take = usePerSource ? perSource.take : (k: number) => all.slice(0, k);
+  let low = 1;
+  let high = usePerSource ? perSource.largestSource : all.length - 1;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (fitsCandidates(take(mid))) low = mid;
+    else high = mid - 1;
+  }
+  const kept = take(low);
+  log.info('task_runner_do.capacity_candidates_truncated', {
+    poolId: selection.poolId,
+    kept: kept.length,
+    dropped: all.length - kept.length,
+    perSource: usePerSource,
+    maxBytes: TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES,
+  });
+  return { ...compactSelection, candidates: kept };
+}
+
+function hasProviderOrder(candidates: readonly TaskStartCapacityCandidate[]): boolean {
+  return candidates.some(
+    (candidate) => candidate.sourceRank !== null && candidate.sourceRank !== undefined
+  );
+}
+
+/** `take(k)`: every source's first `k` candidates, in their original (ranked) order. */
+function bestPerSource(candidates: readonly TaskStartCapacityCandidate[]) {
+  const seen = new Map<string, number>();
+  const indexInSource = candidates.map((candidate) => {
+    const index = seen.get(candidate.capacitySourceId) ?? 0;
+    seen.set(candidate.capacitySourceId, index + 1);
+    return index;
+  });
   return {
-    ...compactSelection,
-    candidates: compactSelection.candidates.slice(0, 1),
+    largestSource: Math.max(...seen.values()),
+    take: (k: number) => candidates.filter((_, index) => (indexInSource[index] ?? 0) < k),
   };
+}
+
+function selectionBytes(selection: TaskStartCapacityPoolSelection): number {
+  return new TextEncoder().encode(JSON.stringify(selection)).length;
 }
 
 function compactCapacityCandidateForTaskRunner(
@@ -168,6 +227,8 @@ export async function startTaskRunnerDO(
     systemPromptAppend?: string | null;
     /** Agent profile ID — stored on workspace for GitHub CLI policy enforcement. */
     agentProfileHint?: string | null;
+    /** Skill selected for the task and replacement agent session. */
+    skillId?: string | null;
     /** File attachments uploaded to R2 before task submission. */
     attachments?: TaskAttachment[] | null;
     /** Per-project scaling overrides. */
@@ -212,6 +273,7 @@ export async function startTaskRunnerDO(
     projectEventWakeGuard?: ProjectEventWakeRecoveryGuard | null;
     /** Member whose continued write permission authorizes a scheduled wake. */
     recoveryRequiredProjectMemberId?: string | null;
+    providerLimitRecoveryApproval?: ProviderLimitRecoveryApproval | null;
   },
   options: { reactivate?: boolean } = {}
 ): Promise<void> {
@@ -234,6 +296,7 @@ export async function startTaskRunnerDO(
     config: {
       vmSize: input.vmSize,
       vmLocation: initialCapacityCandidate?.location ?? input.vmLocation,
+      explicitVmLocation: input.explicitVmLocation === true,
       branch: input.branch,
       defaultBranch: input.defaultBranch ?? input.branch,
       preferredNodeId: input.preferredNodeId ?? null,
@@ -274,6 +337,7 @@ export async function startTaskRunnerDO(
       opencodeBaseUrl: input.opencodeBaseUrl ?? null,
       systemPromptAppend: input.systemPromptAppend ?? null,
       agentProfileHint: input.agentProfileHint ?? null,
+      skillId: input.skillId ?? null,
       attachments: input.attachments ?? null,
       projectScaling: input.projectScaling ?? null,
       resourceRequirements: input.resourceRequirements ?? null,
@@ -289,6 +353,9 @@ export async function startTaskRunnerDO(
       startGuard: input.startGuard ?? null,
       projectEventWakeGuard: input.projectEventWakeGuard ?? null,
       recoveryRequiredProjectMemberId: input.recoveryRequiredProjectMemberId ?? null,
+      ...(input.providerLimitRecoveryApproval
+        ? { providerLimitRecoveryApproval: input.providerLimitRecoveryApproval }
+        : {}),
     },
   };
 
@@ -376,8 +443,9 @@ export async function ensureTaskRunnerStarted(
 export async function nudgeTaskRunnerDO(
   env: Env,
   taskId: string,
-  reason?: string
+  reason?: string,
+  approval?: ProviderLimitRecoveryApproval
 ): Promise<boolean> {
   const stub = getStub(env, taskId);
-  return stub.nudge(reason);
+  return approval ? stub.nudge(reason, approval) : stub.nudge(reason);
 }

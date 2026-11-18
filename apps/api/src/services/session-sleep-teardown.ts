@@ -6,7 +6,7 @@
  * workspace through the same idempotent lifecycle. Split out of
  * `session-sleep-execution.ts` (`.claude/rules/18-file-size-limits.md`).
  */
-import { and, desc, eq, exists, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, exists, inArray, isNull, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -18,7 +18,14 @@ import { handOffEmptyWorkspaceNode } from './node-warm-handoff';
 import * as projectDataService from './project-data';
 import { finishConfirmedSleepAttention } from './session-sleep-attention';
 import { finishSleepingWorkspaceComputeCleanup } from './session-sleep-cleanup';
-import { sessionSleepRuntimeChanged, SessionSleepRuntimeChangedError } from './session-sleep-runtime-identity';
+import { sessionSleepDeferralReason, sleepTeardownSafetyGate } from './session-sleep-eligibility';
+import { sleptFallbackRecord } from './session-sleep-episode';
+import type { SleepRequirement } from './session-sleep-requirement';
+import {
+  sessionSleepRuntimeChanged,
+  SessionSleepRuntimeChangedError,
+} from './session-sleep-runtime-identity';
+import type { SleepWorkspace } from './session-sleep-workspace';
 import {
   finalizeSessionSnapshotSleeping,
   getRestorableSessionSnapshot,
@@ -33,63 +40,7 @@ export interface SleepWorkspaceSessionResult {
   snapshotExpiresAt: string;
 }
 
-export async function loadSleepWorkspace(env: Env, workspaceId: string, userId: string) {
-  const db = drizzle(env.DATABASE, { schema });
-  const [workspace] = await db
-    .select({
-      id: schema.workspaces.id,
-      userId: schema.workspaces.userId,
-      projectId: schema.workspaces.projectId,
-      chatSessionId: schema.workspaces.chatSessionId,
-      status: schema.workspaces.status,
-      evictionGeneration: schema.workspaces.evictionGeneration,
-      nodeId: schema.workspaces.nodeId,
-      nodeRuntime: schema.nodes.runtime,
-      taskId: schema.tasks.id,
-      taskStatus: schema.tasks.status,
-      taskCompletedAt: sql<
-        string | null
-      >`COALESCE(${schema.tasks.completedAt}, ${schema.tasks.updatedAt})`,
-      warmNodeTimeoutMs: schema.projects.warmNodeTimeoutMs,
-    })
-    .from(schema.workspaces)
-    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
-    .leftJoin(
-      schema.sessionSummaries,
-      eq(schema.sessionSummaries.id, schema.workspaces.chatSessionId)
-    )
-    .leftJoin(
-      schema.tasks,
-      or(
-        eq(schema.tasks.id, schema.sessionSummaries.taskId),
-        and(
-          isNull(schema.sessionSummaries.taskId),
-          eq(schema.tasks.chatSessionId, schema.workspaces.chatSessionId)
-        )
-      )
-    )
-    .leftJoin(schema.projects, eq(schema.projects.id, schema.workspaces.projectId))
-    .where(and(eq(schema.workspaces.id, workspaceId), eq(schema.workspaces.userId, userId)))
-    .limit(1);
-  if (
-    !workspace?.projectId ||
-    !workspace.chatSessionId ||
-    !workspace.nodeId ||
-    !workspace.nodeRuntime
-  ) {
-    throw new Error('Workspace is missing persistent-session ownership metadata');
-  }
-
-  return {
-    ...workspace,
-    projectId: workspace.projectId,
-    chatSessionId: workspace.chatSessionId,
-    nodeId: workspace.nodeId,
-    nodeRuntime: workspace.nodeRuntime,
-  };
-}
-
-export type SleepWorkspace = Awaited<ReturnType<typeof loadSleepWorkspace>>;
+export { loadSleepWorkspace, type SleepWorkspace } from './session-sleep-workspace';
 
 function sleepRuntimeIdentity(workspace: SleepWorkspace) {
   return and(
@@ -108,8 +59,12 @@ async function assertSleepRuntimeIdentity(env: Env, workspace: SleepWorkspace): 
   const current = await drizzle(env.DATABASE, { schema })
     .select({ id: schema.workspaces.id })
     .from(schema.workspaces)
-    .where(and(sleepRuntimeIdentity(workspace),
-      inArray(schema.workspaces.status, ['running', 'recovery', 'sleeping', 'stopped'])))
+    .where(
+      and(
+        sleepRuntimeIdentity(workspace),
+        inArray(schema.workspaces.status, ['running', 'recovery', 'sleeping', 'stopped'])
+      )
+    )
     .get();
   if (!current) throw new SessionSleepRuntimeChangedError();
 }
@@ -123,8 +78,8 @@ function workspaceStopAlreadyConfirmed(error: unknown): boolean {
     return (
       !!body &&
       typeof body === 'object' &&
-      'message' in body && body.message ===
-        'Workspace cannot be stopped from current state: stopped'
+      'message' in body &&
+      body.message === 'Workspace cannot be stopped from current state: stopped'
     );
   } catch {
     return false;
@@ -161,7 +116,12 @@ export async function scheduleSleepingWorkspaceDeletion(
   if (workspace.nodeRuntime === 'cf-container') return;
   const stub = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(workspace.nodeId));
   await (stub as unknown as import('../durable-objects/node-lifecycle').NodeLifecycle)
-    .scheduleWorkspaceDeletion(workspace.nodeId, workspace.id, workspace.userId)
+    // A verified sleeping source must release its bytes before replacement can
+    // wake. The queue still verifies preservation and every deletion fence;
+    // delaying it by the ordinary stopped-workspace TTL only delays wake.
+    .scheduleWorkspaceDeletion(workspace.nodeId, workspace.id, workspace.userId, {
+      retryAfterMs: 0,
+    })
     .catch((error) => {
       log.warn(logEvent, {
         workspaceId: workspace.id,
@@ -206,14 +166,20 @@ export async function ensureProjectDataSleeping(
     env,
     workspace.projectId,
     workspace.chatSessionId,
-    ...(claimId ? [{ runtimeGuard: {
-      projectId: workspace.projectId,
-      userId: workspace.userId,
-      workspaceId: workspace.id,
-      nodeId: workspace.nodeId,
-      evictionGeneration: workspace.evictionGeneration ?? null,
-      claimId,
-    } }] as const : [] as const)
+    ...(claimId
+      ? ([
+          {
+            runtimeGuard: {
+              projectId: workspace.projectId,
+              userId: workspace.userId,
+              workspaceId: workspace.id,
+              nodeId: workspace.nodeId,
+              evictionGeneration: workspace.evictionGeneration ?? null,
+              claimId,
+            },
+          },
+        ] as const)
+      : ([] as const))
   );
   if (slept) return;
   if (claimId) throw new SessionSleepRuntimeChangedError();
@@ -233,10 +199,17 @@ export async function completeSleepTeardown(
   agentSession: { id: string },
   claimId: string,
   verified: Awaited<ReturnType<typeof getRestorableSessionSnapshot>>,
-  options: { fallback?: boolean; requestTimeoutMs?: number } = {}
+  options: { fallback?: boolean; requestTimeoutMs?: number; requirement?: SleepRequirement } = {}
 ) {
   const db = drizzle(env.DATABASE, { schema });
   await assertSleepRuntimeIdentity(env, workspace);
+  const activity = await projectDataService.getSessionState(
+    env,
+    workspace.projectId,
+    agentSession.id
+  );
+  const safe = await sleepTeardownSafetyGate(env, workspace, options.requirement)(activity);
+  if (!safe.idle) throw new Error(sessionSleepDeferralReason(safe, activity));
   await ensureProjectDataSleeping(env, workspace, claimId);
 
   // `stopping` is durable before this I/O. An interrupted or ambiguous stop
@@ -259,9 +232,12 @@ export async function completeSleepTeardown(
   }
 
   const now = new Date().toISOString();
-  const confirmedRuntime = exists(db.select({ id: schema.workspaces.id })
-    .from(schema.workspaces)
-    .where(and(sleepRuntimeIdentity(workspace), eq(schema.workspaces.status, 'sleeping'))));
+  const confirmedRuntime = exists(
+    db
+      .select({ id: schema.workspaces.id })
+      .from(schema.workspaces)
+      .where(and(sleepRuntimeIdentity(workspace), eq(schema.workspaces.status, 'sleeping')))
+  );
   const workspaceSleeping = db
     .update(schema.workspaces)
     .set({ status: 'sleeping', errorMessage: null, updatedAt: now })
@@ -331,6 +307,9 @@ export async function completeSleepTeardown(
         healthStatus: 'unhealthy',
         errorMessage: null,
         updatedAt: now,
+        cleanupBlockedSince: null,
+        cleanupBlockedReason: null,
+        cleanupBlockedAlertedAt: null,
       })
       .where(and(eq(schema.nodes.id, workspace.nodeId), confirmedRuntime));
     const result = await db.batch([workspaceSleeping, agentSleeping, nodeSleeping]);
@@ -344,7 +323,7 @@ export async function completeSleepTeardown(
   }
   if (!workspaceChanges) throw new SessionSleepRuntimeChangedError();
   const sleepWarning = options.fallback
-    ? `Workspace slept through the bounded sleep fallback (transcript and Git recovery point, snapshot ${verified?.status ?? 'unknown'}/${verified?.degradation ?? 'unknown'})`
+    ? `Workspace slept through the bounded sleep fallback (conversation and available backups, snapshot ${verified?.status ?? 'unknown'}/${verified?.degradation ?? 'unknown'})`
     : verified?.status === 'degraded'
       ? `Workspace slept with degraded snapshot (${verified.degradation})`
       : null;
@@ -389,7 +368,8 @@ export async function finishAlreadySleeping(
 ): Promise<SleepWorkspaceSessionResult | null> {
   if (
     workspace.status === 'sleeping' &&
-    isSessionSnapshotSleepReleasable(snapshot) &&
+    snapshot &&
+    (isSessionSnapshotSleepReleasable(snapshot) || sleptFallbackRecord(snapshot)) &&
     snapshot.sleepStatus === 'sleeping' &&
     snapshot.sleepingAt
   ) {

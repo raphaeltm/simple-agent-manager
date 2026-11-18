@@ -67,6 +67,7 @@ export {
 } from './types';
 
 // Re-export utilities
+export { isProviderCreateNotDispatched, markProviderCreateNotDispatched } from './create-dispatch';
 export { hasAmbiguousLabel } from './kv-tags';
 export {
   completeAbortableResponse,
@@ -78,6 +79,13 @@ export {
   rethrowIfProviderRequestAborted,
   throwIfProviderRequestAborted,
 } from './provider-fetch';
+export type {
+  ProviderVmDeletionRequests,
+  VmDeletionRequestOptions,
+  VmDeletionRequestResult,
+  VmDeletionStatus,
+  VmDeletionTicket,
+} from './vm-deletion';
 
 // Re-export providers and classification functions
 export type { DigitalOceanProviderRuntimeOptions } from './digitalocean';
@@ -98,7 +106,7 @@ export {
   DIGITALOCEAN_VOLUME_MAX_SIZE_GB,
   DIGITALOCEAN_VOLUME_MIN_SIZE_GB,
 } from './digitalocean-volumes';
-export type { GcpTokenProvider } from './gcp';
+export type { GcpCatalogOptions, GcpTokenProvider } from './gcp';
 export {
   classifyGcpError,
   DEFAULT_GCP_AGENT_PORTS,
@@ -109,7 +117,36 @@ export {
   GCP_LOCATIONS,
   GcpProvider,
 } from './gcp';
+export {
+  applyGcpBootDiskPolicy,
+  DEFAULT_GCP_BOOT_DISK_GB_PER_VCPU,
+  DEFAULT_GCP_BOOT_DISK_MIN_GB,
+  DEFAULT_GCP_BOOT_DISK_POLICY,
+  GCP_BOOT_DISK_FLOOR_GB,
+  GCP_BOOT_DISK_MAX_GB,
+  type GcpBootDiskPolicy,
+  gcpBootDiskSizeGb,
+  normalizeGcpBootDiskPolicy,
+} from './gcp-boot-disk';
+export { GCP_MACHINE_TYPE_NAME_PATTERN } from './gcp-catalog';
 export { SIZE_MAP as GCP_SIZE_CONFIGS } from './gcp-metadata';
+export {
+  fetchGcpComputePriceTable,
+  type GcpPriceTable,
+  parseStoredGcpPriceTable,
+  probeGcpBillingAccess,
+} from './gcp-pricing';
+export {
+  classifyGcpQuotaBucket,
+  describeGcpQuotaBucket,
+  gcpMachineSeries,
+  gcpOfferingQuotaBucketKey,
+  type GcpQuotaBucket,
+  gcpQuotaBucketCovers,
+  type GcpQuotaOffering,
+  type GcpQuotaResource,
+} from './gcp-quota-buckets';
+export { type GoogleErrorInfo, googleErrorInfoOf } from './google-error-info';
 export type { HetznerProviderRuntimeOptions } from './hetzner';
 export {
   classifyHetznerError,
@@ -136,6 +173,14 @@ export {
 } from './hetzner-account-limits';
 export { HETZNER_SIZE_CONFIGS } from './hetzner-metadata';
 export {
+  applyInfomaniakBootVolumeSize,
+  assertInfomaniakRequestedBootVolumeAllowed,
+  DEFAULT_INFOMANIAK_BOOT_VOLUME_GB,
+  INFOMANIAK_BOOT_VOLUME_MAX_GB,
+  INFOMANIAK_BOOT_VOLUME_MIN_GB,
+  INFOMANIAK_ROOT_DISK_METADATA_KEY,
+} from './infomaniak-boot-volume';
+export {
   classifyInfomaniakError,
   DEFAULT_INFOMANIAK_AUTH_URL,
   DEFAULT_INFOMANIAK_IMAGE_NAME,
@@ -150,9 +195,9 @@ export {
   INFOMANIAK_VOLUME_CAPABILITIES,
   INFOMANIAK_VOLUME_MAX_SIZE_GB,
   INFOMANIAK_VOLUME_MIN_SIZE_GB,
-  InfomaniakProvider,
   mapInfomaniakStatus,
-} from './infomaniak';
+} from './infomaniak-metadata';
+export { InfomaniakProvider };
 export {
   getProviderCatalogOfferings,
   getProviderInstanceOfferingForLegacySize,
@@ -240,6 +285,7 @@ export function createProvider(config: ProviderConfig): Provider {
           requestTimeoutMs: config.requestTimeoutMs,
           ipPollTimeoutMs: config.ipPollTimeoutMs,
           ipPollIntervalMs: config.ipPollIntervalMs,
+          bootVolumeSizeGb: config.bootVolumeSizeGb,
           logger: config.logger,
         }
       );
@@ -284,13 +330,14 @@ export function createProvider(config: ProviderConfig): Provider {
         config.defaultZone,
         config.imageFamily,
         config.imageProject,
-        config.diskSizeGb,
+        config.bootDiskPolicy,
         config.timeoutMs,
         config.operationPollTimeoutMs,
         config.firewallSourceRanges,
         config.agentPorts,
         config.appRouteSourceRanges,
-        config.appRoutePorts
+        config.appRoutePorts,
+        config.catalog
       );
     default: {
       const _exhaustive: never = config;

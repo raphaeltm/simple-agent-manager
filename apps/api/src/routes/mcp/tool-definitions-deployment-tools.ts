@@ -167,7 +167,7 @@ export const DEPLOYMENT_TOOLS = [
       'Call this whenever a user asks to deploy, launch, publish, ship, or release an app. ' +
       "Returns a briefing covering SAM's agent-first / never-through-CI deployment model, the " +
       'full tool-by-tool flow in order (list environments, preview routes, set Variables/Secrets, ' +
-      'build_and_publish, poll publish status, list routes, read logs, check DNS), Variables vs ' +
+      'publish, poll publish status, list routes, read logs, check DNS), Variables vs ' +
       'Secrets semantics, Compose authoring, and common pitfalls.',
     inputSchema: {
       type: 'object' as const,

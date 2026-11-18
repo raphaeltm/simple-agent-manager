@@ -51,6 +51,8 @@ export const GITHUB_TRIGGER_ACTIONS: Record<GitHubTriggerEventType, readonly str
     'unlabeled',
     'unlocked',
   ],
+  pull_request_review: ['submitted', 'edited', 'dismissed'],
+  pull_request_review_comment: ['created', 'edited', 'deleted'],
   push: [],
 };
 
@@ -58,6 +60,8 @@ export const GITHUB_TRIGGER_DEFAULT_ACTIONS: Record<GitHubTriggerEventType, stri
   issue_comment: 'created',
   issues: 'opened',
   pull_request: 'opened',
+  pull_request_review: 'submitted',
+  pull_request_review_comment: 'created',
   push: '',
 };
 
@@ -70,3 +74,49 @@ export function areGitHubTriggerActionsValid(
     actions.every((action) => GITHUB_TRIGGER_ACTIONS[eventType].includes(action))
   );
 }
+
+/** These scopes are shared by filtering, serializers and presentation. */
+export function isGitHubCommentEvent(event: string): boolean {
+  return ['issue_comment', 'pull_request_review', 'pull_request_review_comment'].includes(event);
+}
+export function isGitHubPullRequestEvent(event: string): boolean {
+  return ['pull_request', 'pull_request_review', 'pull_request_review_comment'].includes(event);
+}
+export const GITHUB_AUTHOR_ASSOCIATIONS = [
+  'COLLABORATOR',
+  'CONTRIBUTOR',
+  'FIRST_TIMER',
+  'FIRST_TIME_CONTRIBUTOR',
+  'MANNEQUIN',
+  'MEMBER',
+  'NONE',
+  'OWNER',
+] as const;
+export const GITHUB_REVIEW_STATES = [
+  'approved',
+  'changes_requested',
+  'commented',
+  'dismissed',
+  'pending',
+] as const;
+export const GITHUB_TEMPLATE_KEYS = [
+  'event',
+  'action',
+  'actor',
+  'repository',
+  'number',
+  'title',
+  'body',
+  'comment',
+  'labels',
+  'branch',
+  'sha',
+  'commentId',
+  'commentUrl',
+  'isPullRequest',
+  'authorAssociation',
+  'url',
+  'reviewState',
+  'path',
+  'line',
+] as const;

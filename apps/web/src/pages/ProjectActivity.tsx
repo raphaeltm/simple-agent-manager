@@ -14,28 +14,33 @@ export function ProjectActivity() {
   const eventsRef = useRef(activityEvents);
   eventsRef.current = activityEvents;
 
-  const loadActivityEvents = useCallback(async (loadMore = false) => {
-    try {
-      if (loadMore || eventsRef.current.length === 0) {
-        setActivityLoading(true);
+  const loadActivityEvents = useCallback(
+    async (loadMore = false) => {
+      try {
+        if (loadMore || eventsRef.current.length === 0) {
+          setActivityLoading(true);
+        }
+        const lastEvent = loadMore ? eventsRef.current[eventsRef.current.length - 1] : undefined;
+        const before = lastEvent?.createdAt;
+        const result = await listActivityEvents(projectId, { limit: 20, before });
+        if (loadMore) {
+          setActivityEvents((prev) => [...prev, ...result.events]);
+        } else {
+          setActivityEvents(result.events);
+        }
+        setActivityHasMore(result.hasMore);
+      } catch {
+        // Best-effort
+      } finally {
+        setActivityLoading(false);
       }
-      const lastEvent = loadMore ? eventsRef.current[eventsRef.current.length - 1] : undefined;
-      const before = lastEvent?.createdAt;
-      const result = await listActivityEvents(projectId, { limit: 20, before });
-      if (loadMore) {
-        setActivityEvents((prev) => [...prev, ...result.events]);
-      } else {
-        setActivityEvents(result.events);
-      }
-      setActivityHasMore(result.hasMore);
-    } catch {
-      // Best-effort
-    } finally {
-      setActivityLoading(false);
-    }
-  }, [projectId]);
+    },
+    [projectId]
+  );
 
-  useEffect(() => { void loadActivityEvents(); }, [loadActivityEvents]);
+  useEffect(() => {
+    void loadActivityEvents();
+  }, [loadActivityEvents]);
 
   return (
     <section className="glass-surface rounded-md overflow-hidden">

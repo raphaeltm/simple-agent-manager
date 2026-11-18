@@ -140,14 +140,24 @@ export const PROJECT_AWARENESS_TOOLS = [
           description: 'Optional session ID to retrieve archived tool payloads from.',
         },
         startTime: {
-          type: ['number', 'string'],
-          description:
-            'Optional inclusive lower bound for message created time, as epoch milliseconds or an ISO timestamp.',
+          anyOf: [
+            {
+              type: 'number',
+              description:
+                'Optional inclusive lower bound for message created time, as epoch milliseconds or an ISO timestamp.',
+            },
+            { type: 'string' },
+          ],
         },
         endTime: {
-          type: ['number', 'string'],
-          description:
-            'Optional inclusive upper bound for message created time, as epoch milliseconds or an ISO timestamp.',
+          anyOf: [
+            {
+              type: 'number',
+              description:
+                'Optional inclusive upper bound for message created time, as epoch milliseconds or an ISO timestamp.',
+            },
+            { type: 'string' },
+          ],
         },
         limit: {
           type: 'number',

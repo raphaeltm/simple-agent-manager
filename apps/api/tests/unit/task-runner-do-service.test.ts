@@ -9,6 +9,8 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { buildProvisioningExhaustionPlan } from '../../src/durable-objects/task-runner/node-provisioning-exhaustion';
+import type { TaskRunnerState } from '../../src/durable-objects/task-runner/types';
 import type { Env } from '../../src/env';
 import { resolveReusableNodeCapacitySnapshot } from '../../src/services/placement-resolver';
 import { startTaskRunnerDO } from '../../src/services/task-runner-do';
@@ -18,13 +20,18 @@ const serviceSource = readFileSync(
   'utf8'
 );
 const taskSubmitSource = readFileSync(
-  resolve(process.cwd(), 'src/services/submit-task.ts'),
+  resolve(process.cwd(), 'src/services/submit-vm-task.ts'),
   'utf8'
 );
 const taskRunsSource = readFileSync(resolve(process.cwd(), 'src/routes/tasks/run.ts'), 'utf8');
 const workspacesSource = [
   readFileSync(resolve(process.cwd(), 'src/routes/workspaces/lifecycle.ts'), 'utf8'),
   readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime.ts'), 'utf8'),
+  readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime-agent-key.ts'), 'utf8'),
+  readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime-git-token.ts'), 'utf8'),
+  readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime-message-helpers.ts'), 'utf8'),
+  readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime-messages.ts'), 'utf8'),
+  readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime-callback-response.ts'), 'utf8'),
 ].join('\n');
 const stuckTasksSource = readFileSync(
   resolve(process.cwd(), 'src/scheduled/stuck-tasks.ts'),
@@ -241,6 +248,21 @@ describe('task-runner-do service', () => {
     expect(forwarded.config.capacityPoolSelection).toBeNull();
   });
 
+  it.each([
+    { explicitVmLocation: true, expected: true },
+    { explicitVmLocation: false, expected: false },
+    { explicitVmLocation: undefined, expected: false },
+  ])(
+    'records whether the location was explicit (input $explicitVmLocation)',
+    async ({ explicitVmLocation, expected }) => {
+      const { env, start } = createTaskRunnerEnv();
+      await startTaskRunnerDO(env, { ...minimalStartInput, explicitVmLocation });
+
+      // Node ranking puts an explicit location ahead of startup backlog and a default one after.
+      expect(start.mock.calls[0]?.[0].config.explicitVmLocation).toBe(expected);
+    }
+  );
+
   it('persists exact event wake authority in the TaskRunner start config', async () => {
     const { env, start } = createTaskRunnerEnv();
 
@@ -386,6 +408,30 @@ describe('task-runner-do service', () => {
     const serializedBytes = new TextEncoder().encode(JSON.stringify(forwarded.config)).length;
 
     expect(serializedBytes).toBeLessThan(131_072);
+    // Over budget, the ranked prefix that fits is kept, not just the first candidate: every
+    // later candidate is a fallback the exhaustion chain may need. Order is preserved.
+    const kept = forwarded.config.capacityPoolSelection?.candidates ?? [];
+    const selectionBytes = new TextEncoder().encode(
+      JSON.stringify(forwarded.config.capacityPoolSelection)
+    ).length;
+    expect(kept.length).toBeGreaterThan(1);
+    expect(kept.length).toBeLessThan(160);
+    expect(selectionBytes).toBeLessThanOrEqual(96 * 1024);
+    // The prefix is the longest that fits: one more compacted candidate would not.
+    const next = capacityPoolSelection({
+      provider: 'hetzner',
+      location: 'fsn1',
+      candidateCount: 160,
+    }).candidates[kept.length]!;
+    const withNext = {
+      ...forwarded.config.capacityPoolSelection,
+      // Compacted the way the service compacts a non-primary candidate.
+      candidates: [...kept, { ...next, snapshot: undefined, machineClass: null }],
+    };
+    expect(new TextEncoder().encode(JSON.stringify(withNext)).length).toBeGreaterThan(96 * 1024);
+    expect(kept.map((candidate: { candidateOrder: number }) => candidate.candidateOrder)).toEqual(
+      Array.from({ length: kept.length }, (_, index) => index)
+    );
     expect(forwarded.config.capacityPoolSelection?.candidates[0]).toMatchObject({
       provider: 'hetzner',
       location: 'fsn1',
@@ -393,6 +439,85 @@ describe('task-runner-do service', () => {
       providerInstancePriceDisplay: '€5.00/mo',
       providerInstancePriceCurrency: 'EUR',
     });
+  });
+  it('with a provider order, keeps the next provider’s candidates when the first fills the budget', async () => {
+    const { env, start } = createTaskRunnerEnv();
+    const gcp = capacityPoolSelection({
+      provider: 'hetzner',
+      location: 'fsn1',
+      candidateCount: 160,
+    });
+    // The first source ranks first and alone exceeds the budget, as a live GCP catalog does.
+    const first = gcp.candidates.map((candidate) => ({
+      ...candidate,
+      capacitySourceId: 'source-first',
+      sourceRank: 1,
+    }));
+    const second = capacityPoolSelection({
+      provider: 'hetzner',
+      location: 'fsn1',
+      candidateCount: 3,
+    }).candidates.map((candidate, index) => ({
+      ...candidate,
+      id: `candidate-second-${index}`,
+      capacitySourceId: 'source-second',
+      providerInstanceType: `cpx${21 + index}`,
+      sourceRank: 2,
+    }));
+    const selection = {
+      ...gcp,
+      exhaustionPolicy: 'fallback-chain' as const,
+      candidates: [...first, ...second],
+    };
+
+    await startTaskRunnerDO(env, {
+      ...minimalStartInput,
+      cloudProvider: 'hetzner',
+      explicitVmLocation: false,
+      capacityPoolSelection: selection,
+    });
+
+    const forwarded = start.mock.calls[0]?.[0];
+    const kept: Array<{ id: string; capacitySourceId: string }> =
+      forwarded.config.capacityPoolSelection.candidates;
+    expect(
+      new TextEncoder().encode(JSON.stringify(forwarded.config.capacityPoolSelection)).length
+    ).toBeLessThanOrEqual(96 * 1024);
+    const firstKept = kept.filter((c) => c.capacitySourceId === 'source-first');
+    const secondKept = kept.filter((c) => c.capacitySourceId === 'source-second');
+    expect(firstKept.length).toBeGreaterThan(1);
+    expect(secondKept.map((c) => c.id)).toEqual(second.map((c) => c.id));
+    // Each source keeps its own best candidates, in rank order.
+    expect(firstKept.map((c) => c.id)).toEqual(first.slice(0, firstKept.length).map((c) => c.id));
+
+    // Through to the TaskRunner's plan: the second provider is still a fallback tier.
+    const plan = buildProvisioningExhaustionPlan(
+      { config: forwarded.config } as unknown as TaskRunnerState,
+      forwarded.config.capacityPoolSelection.candidates
+    );
+    expect(new Set(plan.attempts.map((attempt) => attempt.tierIndex))).toEqual(new Set([0, 1]));
+  });
+
+  it('refuses a selection whose first candidate alone exceeds the budget', async () => {
+    const { env, start } = createTaskRunnerEnv();
+    const selection = capacityPoolSelection({
+      provider: 'hetzner',
+      location: 'fsn1',
+      candidateCount: 2,
+    });
+    selection.candidates[0]!.providerInstancePriceDisplay = 'x'.repeat(100 * 1024);
+
+    await expect(
+      startTaskRunnerDO(env, {
+        ...minimalStartInput,
+        cloudProvider: 'hetzner',
+        explicitVmLocation: false,
+        capacityPoolSelection: selection,
+      })
+    ).rejects.toThrow(
+      /selection is \d+ bytes with one candidate, over the 98304-byte TaskRunner budget/
+    );
+    expect(start).not.toHaveBeenCalled();
   });
 });
 

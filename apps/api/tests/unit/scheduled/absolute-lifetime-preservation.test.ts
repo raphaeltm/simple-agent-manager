@@ -81,6 +81,8 @@ describe('absolute lifetime active-workspace preservation', () => {
       schema.tasks,
       schema.workspaces,
       schema.sessionSnapshots,
+      schema.capacityPools,
+      schema.capacityPoolCandidates,
       schema.agentSessions,
       schema.nodeHealthEvents,
     ]);
@@ -106,11 +108,12 @@ describe('absolute lifetime active-workspace preservation', () => {
     sqlite.close();
   });
 
-  it('holds the old-node shape with home-skipped and nine failed attempts even after escalation', async () => {
+  it('queues guarded session cleanup with nine failures without deleting an occupied node', async () => {
     seed(sqlite, 9, 'failed');
     const config = resolveCleanupConfig(env);
     expect(await prepareAbsoluteLifetimeRelease(env, node, now, config)).toBe(false);
-    expect(mocks.queue).not.toHaveBeenCalled();
+    expect(mocks.queue).toHaveBeenCalledTimes(1);
+    expect(mocks.delete).not.toHaveBeenCalled();
     expect(mocks.message).not.toHaveBeenCalled();
     expect(sqlite.prepare(`SELECT event FROM node_health_events`).pluck().all()).toEqual([
       'absolute_lifetime_preservation_requested',
@@ -223,14 +226,15 @@ describe('absolute lifetime active-workspace preservation', () => {
     ).toBe(1);
   });
 
-  it('stops scheduling new capture attempts once the bounded hold has escalated', async () => {
+  it('keeps scheduling guarded session cleanup after the bounded hold escalates', async () => {
     seed(sqlite, 2, 'failed');
     const config = resolveCleanupConfig(env);
     await prepareAbsoluteLifetimeRelease(env, node, now, config);
     expect(mocks.queue).toHaveBeenCalledTimes(1);
     sqlite.prepare(`UPDATE node_health_events SET created_at = '2026-10-01T05:00:00.000Z'`).run();
     await prepareAbsoluteLifetimeRelease(env, node, now, config);
-    expect(mocks.queue).toHaveBeenCalledTimes(1);
+    expect(mocks.queue).toHaveBeenCalledTimes(2);
+    expect(mocks.delete).not.toHaveBeenCalled();
     expect(mocks.message).toHaveBeenCalledTimes(1);
   });
 
@@ -251,6 +255,38 @@ describe('absolute lifetime active-workspace preservation', () => {
     expect(
       sqlite.prepare(`SELECT cleanup_backoff_until FROM nodes WHERE id = 'old-node'`).pluck().get()
     ).toEqual(expect.any(String));
+  });
+
+  it('reaches a busy node past the ceiling even when empty nodes fill the page', async () => {
+    seed(sqlite, 9, 'failed');
+    // An empty node past the ordinary lifetime but not the ceiling sorts first and fills a
+    // one-node page; the busy node past the ceiling must still have its sessions slept.
+    sqlite
+      .prepare(
+        `INSERT INTO nodes (id, user_id, status, node_role, node_class, created_at, updated_at)
+         VALUES ('empty-young', 'user-1', 'running', 'workspace', 'managed', ?, ?)`
+      )
+      .run('2026-09-30T20:00:00.000Z', '2026-09-30T20:00:00.000Z');
+    sqlite
+      .prepare(
+        `INSERT INTO tasks (id, auto_provisioned_node_id, created_at, updated_at)
+         VALUES ('task-empty-young', 'empty-young', ?, ?)`
+      )
+      .run(node.created_at, node.created_at);
+    const config = { ...resolveCleanupConfig(env), nodeSweepLimit: 1 };
+    expect(
+      '2026-09-30T20:00:00.000Z' >
+        new Date(now.getTime() - config.absoluteMaxLifetimeMs).toISOString()
+    ).toBe(true);
+
+    await sweepMaxLifetimeNodes(drizzle(env.DATABASE, { schema }), env, now, config, emptyResult());
+
+    expect(mocks.queue).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ workspaceId: 'old-workspace', reason: 'absolute_node_lifetime' })
+    );
+    // The empty node on the ordinary page was handled too.
+    expect(mocks.delete.mock.calls.map((call) => call[0])).toEqual(['empty-young']);
   });
 
   it('holds a shared node while any of its active workspaces still needs preservation', async () => {

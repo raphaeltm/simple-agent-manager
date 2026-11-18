@@ -39,3 +39,6 @@ export class Container<Env = unknown> {
 export function switchPort(request: Request): Request {
   return request;
 }
+
+// Worker entrypoint export required by the real SDK during reconstruction.
+export class ContainerProxy {}

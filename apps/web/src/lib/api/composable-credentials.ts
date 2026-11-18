@@ -1,4 +1,9 @@
-import type { CCResolutionStatusResponse } from '@simple-agent-manager/shared';
+import type {
+  CCProfileAttachmentItem,
+  CCProfilePinCandidatesResponse,
+  CCResolutionStatusResponse,
+  SessionAgentCredentialResponse,
+} from '@simple-agent-manager/shared';
 
 import { request } from './client';
 
@@ -132,6 +137,14 @@ export async function createCCAttachment(body: {
   });
 }
 
+/** Make an existing agent account the default for its agent, replacing the current one. */
+export async function makeCCDefault(configurationId: string): Promise<{ id: string }> {
+  return request('/api/cc/attachments/default', {
+    method: 'POST',
+    body: JSON.stringify({ configurationId }),
+  });
+}
+
 export async function updateCCAttachment(
   id: string,
   body: { isActive?: boolean }
@@ -144,4 +157,44 @@ export async function updateCCAttachment(
 
 export async function deleteCCAttachment(id: string): Promise<{ success: boolean }> {
   return request(`/api/cc/attachments/${pathId(id)}`, { method: 'DELETE' });
+}
+
+// Personal profile pins — "when I run this profile, use this account of mine"
+export async function listProfilePins(): Promise<CCProfileAttachmentItem[]> {
+  const data = await request<{ attachments: CCProfileAttachmentItem[] }>(
+    '/api/cc/profile-attachments'
+  );
+  return data.attachments;
+}
+
+export async function listProfilePinCandidates(
+  agentType?: string
+): Promise<CCProfilePinCandidatesResponse> {
+  const query = agentType ? `?agentType=${encodeURIComponent(agentType)}` : '';
+  return request<CCProfilePinCandidatesResponse>(`/api/cc/profile-attachments/profiles${query}`);
+}
+
+/** Replaces my previous pin for that profile and agent. */
+export async function createProfilePin(body: {
+  configurationId: string;
+  profileId: string;
+}): Promise<{ id: string }> {
+  return request('/api/cc/profile-attachments', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteProfilePin(id: string): Promise<{ success: boolean }> {
+  return request(`/api/cc/profile-attachments/${pathId(id)}`, { method: 'DELETE' });
+}
+
+/** Which account a chat's agent ran on, and which tier chose it. */
+export async function getSessionAgentCredential(
+  projectId: string,
+  sessionId: string
+): Promise<SessionAgentCredentialResponse> {
+  return request<SessionAgentCredentialResponse>(
+    `/api/projects/${pathId(projectId)}/sessions/${pathId(sessionId)}/agent-credential`
+  );
 }

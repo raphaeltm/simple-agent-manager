@@ -260,8 +260,6 @@ describe('Agent Profile Service', () => {
         vmSizeOverride: 'cx22',
         resourceRequirementsJson: null,
         runtime: null,
-        provider: null,
-        vmLocation: null,
         workspaceProfile: null,
         devcontainerConfigName: null,
         taskMode: null,
@@ -269,7 +267,7 @@ describe('Agent Profile Service', () => {
       });
     });
 
-    it('propagates extended fields (provider, vmLocation, workspaceProfile, taskMode, githubCliPolicy)', async () => {
+    it('propagates extended fields and drops a legacy provider/vmLocation on the row', async () => {
       const db = createMockDB();
       const profile = makeProfileRow({
         id: 'extended-profile',
@@ -303,8 +301,9 @@ describe('Agent Profile Service', () => {
         env
       );
 
-      expect(result.provider).toBe('hetzner');
-      expect(result.vmLocation).toBe('fsn1');
+      // The row still carries retired values; the compute pool decides placement instead.
+      expect(result).not.toHaveProperty('provider');
+      expect(result).not.toHaveProperty('vmLocation');
       expect(result.workspaceProfile).toBe('lightweight');
       expect(result.taskMode).toBe('conversation');
       expect(result.vmSizeOverride).toBe('cx32');
@@ -322,8 +321,6 @@ describe('Agent Profile Service', () => {
         env
       );
 
-      expect(result.provider).toBeNull();
-      expect(result.vmLocation).toBeNull();
       expect(result.workspaceProfile).toBeNull();
       expect(result.taskMode).toBeNull();
       expect(result.githubCliPolicy).toBeNull();
@@ -557,7 +554,7 @@ describe('Agent Profile Service', () => {
       expect(db.update).toHaveBeenCalledTimes(1);
     });
 
-    it('updates extended fields (provider, vmLocation, workspaceProfile, taskMode)', async () => {
+    it('updates extended fields and never returns a legacy provider/vmLocation', async () => {
       const db = createMockDB();
       const existingRow = makeProfileRow({ id: 'profile-1', name: 'custom', isBuiltin: 0 });
       db._pushResult([existingRow]);
@@ -580,15 +577,13 @@ describe('Agent Profile Service', () => {
         'profile-1',
         'user-1',
         {
-          provider: 'scaleway',
-          vmLocation: 'nl-ams-1',
           workspaceProfile: 'lightweight',
           taskMode: 'conversation',
         }
       );
 
-      expect(result.provider).toBe('scaleway');
-      expect(result.vmLocation).toBe('nl-ams-1');
+      expect(result).not.toHaveProperty('provider');
+      expect(result).not.toHaveProperty('vmLocation');
       expect(result.workspaceProfile).toBe('lightweight');
       expect(result.taskMode).toBe('conversation');
       expect(db.update).toHaveBeenCalledTimes(1);

@@ -6,6 +6,7 @@ import type {
   ListTasksResponse,
   RunTaskRequest,
   RunTaskResponse,
+  SubmitTaskRequest as SharedSubmitTaskRequest,
   Task,
   TaskDependency,
   TaskDetailResponse,
@@ -35,22 +36,23 @@ export interface TaskAttachmentRef {
   contentType: string;
 }
 
-export interface SubmitTaskRequest {
-  message: string;
+/**
+ * The browser's view of `POST /api/projects/:id/tasks/submit`.
+ *
+ * Derived from the canonical `SubmitTaskRequest` in `@simple-agent-manager/shared` rather
+ * than re-typed, so a new field on the contract cannot be forgotten here. Only the three
+ * fields the browser genuinely sees differently are replaced: the two VM hints it passes
+ * through as plain strings from form state, and attachments, which are presigned upload
+ * references at this layer and only become `TaskAttachment`s server-side.
+ */
+export type SubmitTaskRequest = Omit<
+  SharedSubmitTaskRequest,
+  'vmSize' | 'vmLocation' | 'attachments'
+> & {
   vmSize?: string;
   vmLocation?: string;
-  nodeId?: string;
-  agentType?: string;
-  resourceRequirements?: import('@simple-agent-manager/shared').ResourceRequirements;
-  workspaceProfile?: 'full' | 'lightweight';
-  devcontainerConfigName?: string | null;
-  parentTaskId?: string;
-  sourceSessionId?: string;
-  taskMode?: 'task' | 'conversation';
-  agentProfileId?: string;
-  skillId?: string;
   attachments?: TaskAttachmentRef[];
-}
+};
 
 export interface SubmitTaskResponse {
   taskId: string;
@@ -310,14 +312,18 @@ export async function getTaskSessions(
   return request<TaskSessionsResponse>(`/api/projects/${projectId}/tasks/${taskId}/sessions`);
 }
 
-export async function linkSessionIdea(
-  projectId: string,
-  sessionId: string,
-  taskId: string,
-  context?: string
-): Promise<{ linked: boolean }> {
-  return request<{ linked: boolean }>(`/api/projects/${projectId}/sessions/${sessionId}/ideas`, {
-    method: 'POST',
-    body: JSON.stringify({ taskId, ...(context ? { context } : {}) }),
-  });
+/** Owner override for a held first start or saved waiting session. */
+export function startProviderLimitTaskAnyway(projectId: string, taskId: string) {
+  return request<{ status: 'starting' | 'waking'; taskId: string }>(
+    `/api/projects/${projectId}/tasks/${taskId}/provider-limit/start-anyway`,
+    { method: 'POST' }
+  );
+}
+
+/** Resume an owner-held provider-limit wait from its saved snapshot. */
+export function resumeProviderLimitTask(projectId: string, taskId: string) {
+  return request<{ status: 'waking'; taskId: string }>(
+    `/api/projects/${projectId}/tasks/${taskId}/provider-limit/resume`,
+    { method: 'POST' }
+  );
 }

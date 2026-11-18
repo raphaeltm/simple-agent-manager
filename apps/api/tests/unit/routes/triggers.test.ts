@@ -19,6 +19,10 @@ import type { Env } from '../../../src/env';
 
 // Mock auth middleware — pass through, inject auth context
 vi.mock('../../../src/middleware/auth', () => ({
+  // Agent sign-in session guards: inert for these ordinary-session route tests.
+  rejectAgentSignInSession: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  assertNotAgentSignInSession: () => undefined,
+
   requireAuth: () =>
     vi.fn((c: any, next: any) => {
       c.set('auth', { user: { id: 'test-user-id', name: 'Test User', email: 'test@example.com' } });
@@ -45,7 +49,7 @@ vi.mock('../../../src/middleware/project-auth', () => ({
 const mockValidateCron = vi
   .fn()
   .mockReturnValue({ valid: true, humanReadable: 'Every day at 9:00 AM' });
-vi.mock('../../../src/services/cron-utils', () => ({
+vi.mock('@simple-agent-manager/cron', () => ({
   validateCronExpression: (...args: any[]) => mockValidateCron(...args),
   cronToNextFire: vi.fn().mockReturnValue('2026-04-10T09:00:00.000Z'),
   cronToHumanReadable: vi.fn().mockReturnValue('Every day at 9:00 AM (UTC)'),
@@ -104,6 +108,8 @@ vi.mock('../../../src/lib/ulid', () => ({
 // Mock logger
 vi.mock('../../../src/lib/logger', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  // Trigger routes reach admin settings (email trigger limits), whose modules build loggers.
+  createModuleLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
 // =============================================================================
@@ -143,7 +149,7 @@ vi.mock('drizzle-orm/d1', () => ({
       })),
       update: vi.fn(() => ({
         set: vi.fn(() => ({
-          where: vi.fn(() => Promise.resolve()),
+          where: vi.fn(() => Promise.resolve({ meta: { changes: 2 } })),
         })),
       })),
       delete: vi.fn(() => ({

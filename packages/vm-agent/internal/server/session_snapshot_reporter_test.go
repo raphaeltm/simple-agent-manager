@@ -43,6 +43,7 @@ func TestPrimeRestoredMessageReporter_CreatesReporter(t *testing.T) {
 	s, _ := newServerWithoutReporter(t)
 	s.config.ProjectID = "proj-restore-1" // set from PROJECT_ID env at launch
 	ws := "ws-prime-1"
+	s.config.WorkspaceID = ws // the workspace this container launched for
 	rt := s.upsertWorkspaceRuntime(ws, "org/repo", "main", "running", "ws-tok")
 
 	if len(s.messageReporters) != 0 {
@@ -71,5 +72,33 @@ func TestPrimeRestoredMessageReporter_NoOpWithoutProject(t *testing.T) {
 
 	if _, ok := s.messageReporters[ws]; ok {
 		t.Fatal("expected no reporter when project context is unavailable")
+	}
+}
+
+// On a shared node the config describes the boot session. Restoring a different
+// workspace must not bind its reporter, or persist its runtime, to that project;
+// a workspace with its own project still primes (owner-path control).
+func TestPrimeRestoredMessageReporter_OtherWorkspaceDoesNotBorrowBootProject(t *testing.T) {
+	s, _ := newServerWithoutReporter(t)
+	s.config.WorkspaceID = "ws-boot"
+	s.config.ProjectID = "proj-boot"
+
+	borrower := s.upsertWorkspaceRuntime("ws-prime-3", "org/repo", "main", "running", "ws-tok")
+	s.primeRestoredMessageReporter(borrower, "chat-sess-3")
+	if _, ok := s.messageReporters["ws-prime-3"]; ok {
+		t.Error("reporter primed with the boot session's project")
+	}
+	if rt, _ := s.getWorkspaceRuntime("ws-prime-3"); rt.ProjectID != "" {
+		t.Errorf("runtime.ProjectID = %q, want empty (boot project persisted onto another workspace)", rt.ProjectID)
+	}
+
+	owner := s.upsertWorkspaceRuntime("ws-prime-4", "org/repo", "main", "running", "ws-tok",
+		workspaceRuntimeOpts{ProjectID: "proj-own"})
+	s.primeRestoredMessageReporter(owner, "chat-sess-4")
+	if _, ok := s.messageReporters["ws-prime-4"]; !ok {
+		t.Fatal("workspace with its own project was not primed")
+	}
+	if rt, _ := s.getWorkspaceRuntime("ws-prime-4"); rt.ProjectID != "proj-own" {
+		t.Errorf("runtime.ProjectID = %q, want proj-own", rt.ProjectID)
 	}
 }

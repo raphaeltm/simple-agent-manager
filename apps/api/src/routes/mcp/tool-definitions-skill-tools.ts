@@ -5,6 +5,7 @@
  * layer: skill fields override the resolved agent profile when a task runs the skill.
  */
 import {
+  nullableMcpProperty,
   SHARED_CONFIG_FIELD_PROPERTIES,
   VALID_VALUES_HINT,
 } from './tool-definitions-shared-fields';
@@ -12,11 +13,16 @@ import {
 /** Skill field properties = shared config fields + skill-specific extras. */
 const SKILL_FIELD_PROPERTIES = {
   ...SHARED_CONFIG_FIELD_PROPERTIES,
-  resourceRequirementsJson: {
-    type: ['string', 'null'],
+  agentType: nullableMcpProperty({
+    type: 'string',
+    description:
+      'Optional agent type override (e.g., claude-code, openai-codex). Leave unset so the run uses the agent of the profile chosen for it; a skill only overrides what it sets. null or an empty string clears the override.',
+  }),
+  resourceRequirementsJson: nullableMcpProperty({
+    type: 'string',
     description:
       'Compatibility JSON string describing workload requirements for this skill. Prefer resourceRequirements; only supported modern fields are persisted.',
-  },
+  }),
   defaultProfileId: {
     type: 'string',
     description:
@@ -30,7 +36,7 @@ export const SKILL_TOOLS = [
     description:
       'List all skills available in your project. ' +
       'Returns a concise summary of each skill (id, name, description, agentType, model, isBuiltin). ' +
-      'Use get_skill to get full details of a specific skill.',
+      'Use skills_read method get to get full details of a specific skill.',
     inputSchema: {
       type: 'object' as const,
       properties: {},
@@ -57,7 +63,7 @@ export const SKILL_TOOLS = [
     name: 'create_skill',
     description:
       'Create a new skill in the current project. Skills define reusable, repeatable-work configurations ' +
-      'that override the resolved agent profile when a task runs the skill. ' +
+      'layered on the resolved agent profile when a task runs the skill: only the fields a skill sets override the profile. ' +
       VALID_VALUES_HINT,
     inputSchema: {
       type: 'object' as const,

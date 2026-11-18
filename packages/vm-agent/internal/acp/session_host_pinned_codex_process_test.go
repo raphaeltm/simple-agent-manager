@@ -16,7 +16,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
@@ -135,16 +134,7 @@ func runPinnedCodexProcessCase(t *testing.T, completionBeforeAnswer, withoutComp
 					"name": toolName, "arguments": "{}"}
 			}
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		for _, event := range []map[string]any{
-			{"type": "response.created", "response": map[string]any{"id": fmt.Sprintf("response-%d", call)}},
-			{"type": "response.output_item.done", "item": item},
-			{"type": "response.completed", "response": map[string]any{"id": fmt.Sprintf("response-%d", call),
-				"usage": map[string]any{"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}}},
-		} {
-			data, _ := json.Marshal(event)
-			_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event["type"], data)
-		}
+		writeResponsesTurn(w, int(call), item)
 	}))
 	defer model.Close()
 	home := t.TempDir()
@@ -165,39 +155,17 @@ func runPinnedCodexProcessCase(t *testing.T, completionBeforeAnswer, withoutComp
 		host.ConfigureAcpInteractions(testURLConfig())
 	}
 	defer host.Stop()
-	adapterCommand := adapter
-	adapterArgs := []string{}
-	if filepath.Ext(adapter) == ".js" {
-		adapterCommand = "node"
-		adapterArgs = []string{adapter}
-	}
-	cmd := exec.CommandContext(ctx, adapterCommand, adapterArgs...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Env = append(os.Environ(), "CODEX_PATH="+codex, "CODEX_HOME="+home,
-		"CODEX_API_KEY=probe-only", "PROBE_API_KEY=probe-only", "PROBE_MCP_TOKEN=probe-only")
-	cmd.Stderr = io.Discard
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		_ = cmd.Wait()
-	}()
+	bin, binArgs := adapterCommand(adapter)
+	stdin, stdout, stop := startACPAdapterProcess(ctx, t, "", []string{"CODEX_PATH=" + codex, "CODEX_HOME=" + home,
+		"CODEX_API_KEY=probe-only", "PROBE_API_KEY=probe-only", "PROBE_MCP_TOKEN=probe-only"}, bin, binArgs...)
+	defer stop()
 	client := acpsdk.NewClientSideConnection(&sessionHostClient{host: host, interactionGeneration: host.interactionGeneration}, stdin, stdout)
 	host.acpConn = client
 	initialized, err := host.initializeACP(ctx, "openai-codex", 2*time.Second)
 	if err != nil {
 		t.Fatalf("ACP initialize: %v", err)
 	}
-	if initialized.AgentInfo == nil || initialized.AgentInfo.Version != "2.1.1-sam-c2.2" {
+	if initialized.AgentInfo == nil || initialized.AgentInfo.Version != "2.1.1-sam-c2.3" {
 		t.Fatalf("ACP agent identity does not match patched build")
 	}
 	session, err := client.NewSession(ctx, acpsdk.NewSessionRequest{Cwd: home, McpServers: []acpsdk.McpServer{{Http: &acpsdk.McpServerHttpInline{

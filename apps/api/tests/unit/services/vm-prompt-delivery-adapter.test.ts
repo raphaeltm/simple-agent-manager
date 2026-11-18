@@ -1,12 +1,15 @@
 import { readFileSync } from 'node:fs';
 
+import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import {
   DefaultVmPromptDeliveryAdapter,
   type VmPromptDeliveryAdapterInput,
 } from '../../../src/services/vm-prompt-delivery-adapter';
+import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({
   nodeAgentRequest: vi.fn(),
@@ -57,6 +60,9 @@ const protocolFixture = JSON.parse(
 ) as {
   capabilities: Record<string, unknown>;
   ambiguousReceipt: Record<string, unknown>;
+  injectedSteer: Record<string, unknown>;
+  notConsumedSteer: Record<string, unknown>;
+  ambiguousSteer: Record<string, unknown>;
   conflictPrompt: Record<string, unknown>;
   duplicatePrompt: Record<string, unknown>;
   newPrompt: Record<string, unknown>;
@@ -69,6 +75,7 @@ const promptProtocolCapabilities = {
   runtimeIdentity: protocolFixture.capabilities.runtimeIdentity,
   promptReceipts: protocolFixture.capabilities.promptReceipts,
   checkpointRollover: protocolFixture.capabilities.checkpointRollover,
+  steering: protocolFixture.capabilities.steering,
   interactions: {
     supported: true,
     version: 1,
@@ -176,6 +183,80 @@ describe('VM prompt delivery adapter', () => {
     });
   });
 
+  it.each([null, 0])(
+    'committed wake authority result %s controls submission independently of transport success',
+    async (released) => {
+      const sqlite = new Database(':memory:');
+      try {
+        createSchemaTables(sqlite, [
+          schema.nodes,
+          schema.workspaces,
+          schema.agentSessions,
+          schema.tasks,
+          schema.sessionSnapshots,
+        ]);
+        sqlite.exec(`INSERT INTO nodes (id,user_id,runtime,status,health_status,agent_version)
+        VALUES ('node-1','user-1','vm','running','healthy','v1');
+        INSERT INTO workspaces (id,node_id,project_id,user_id,chat_session_id,status)
+        VALUES ('workspace-1','node-1','project-1','user-1','chat-1','running');
+        INSERT INTO agent_sessions (id,workspace_id,user_id,status)
+        VALUES ('acp-1','workspace-1','user-1','running');
+        INSERT INTO tasks (id,project_id,user_id,chat_session_id,workspace_id,status)
+        VALUES ('wake-task','project-1','user-1','chat-1','workspace-1','in_progress');
+        INSERT INTO session_snapshots (id,project_id,user_id,chat_session_id,runtime,recovery_status,
+          recovery_task_id,recovery_workspace_id,recovery_attempt_id)
+        VALUES ('snapshot','project-1','user-1','chat-1','vm','restored','wake-task','workspace-1','wake-attempt');`);
+        const env = { DATABASE: createSqliteD1(sqlite) } as Env;
+        const signalSessionWakeReady = vi.fn().mockResolvedValue(released);
+        env.PROJECT_DATA = {
+          idFromName: vi.fn(),
+          get: vi.fn(() => ({ signalSessionWakeReady })),
+        } as unknown as Env['PROJECT_DATA'];
+        mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+        mocks.sendPromptToAgentOnNode.mockResolvedValue({
+          ...protocolFixture.newPrompt,
+          sessionId: 'acp-1',
+          receipt: {
+            ...(protocolFixture.newPrompt.receipt as Record<string, unknown>),
+            deliveryId: 'delivery-1',
+          },
+        });
+        const result = await new DefaultVmPromptDeliveryAdapter(env).submit(input(false));
+        expect(signalSessionWakeReady).toHaveBeenCalledOnce();
+        expect(result).toMatchObject({ kind: released === null ? 'retry' : 'accepted' });
+        if (released === null) {
+          expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
+          expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+        } else {
+          expect(mocks.sendPromptToAgentOnNode).toHaveBeenCalledOnce();
+        }
+        // Receipt reconciliation is read-only even if the wake signal is unavailable.
+        signalSessionWakeReady.mockClear().mockResolvedValue(null);
+        mocks.nodeAgentRequest
+          .mockReset()
+          .mockResolvedValueOnce(protocolFixture.capabilities)
+          .mockRejectedValueOnce(
+            new mocks.NodeAgentHttpError(
+              404,
+              JSON.stringify({
+                ...protocolFixture.notFoundReceipt,
+                deliveryId: 'delivery-1',
+              })
+            )
+          );
+        const probe = input(false);
+        probe.claim.mode = 'reconcile';
+        expect(await new DefaultVmPromptDeliveryAdapter(env).reconcile(probe)).toMatchObject({
+          kind: 'retry',
+          reason: 'receipt_not_found',
+        });
+        expect(signalSessionWakeReady).not.toHaveBeenCalled();
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
   it('returns a terminal denial when source authority is revoked during transport preparation', async () => {
     mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
     let transportStarted!: () => void;
@@ -254,13 +335,21 @@ describe('VM prompt delivery adapter', () => {
         if (failure === 'storage_failure') throw new Error('SQLite temporarily unavailable');
         return false;
       });
+      const externalSend = vi.fn();
+      mocks.sendPromptToAgentOnNode.mockImplementationOnce(async (...args: unknown[]) => {
+        // The transport owns this last pre-fetch hook; entering it is not a send.
+        const options = args[7] as { beforeExternalMutation: () => Promise<void> };
+        await options.beforeExternalMutation();
+        return externalSend();
+      });
       const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
       await expect(adapter.submit({ ...input(false), beforeSubmit })).resolves.toMatchObject({
         kind: 'retry',
         reason: 'not_ready',
       });
       expect(beforeSubmit).toHaveBeenCalledWith(promptProtocolCapabilities);
-      expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+      expect(mocks.sendPromptToAgentOnNode).toHaveBeenCalledTimes(1);
+      expect(externalSend).not.toHaveBeenCalled();
     }
   );
 
@@ -297,6 +386,82 @@ describe('VM prompt delivery adapter', () => {
 
     expect(result).toMatchObject({ kind: 'accepted', runtimeIdentity: 'runtime-vm-01' });
     expect(adapterEnv.DATABASE.prepare).not.toHaveBeenCalled();
+  });
+
+  it.each([410, 503])(
+    'does not wake a runtime stopped after target resolution (%s)',
+    async (status) => {
+      mocks.nodeAgentRequest.mockRejectedValue(
+        new mocks.NodeAgentHttpError(status, 'RUNTIME_STOPPED')
+      );
+      const result = await new DefaultVmPromptDeliveryAdapter(envWithTarget()).reconcile(
+        input(false)
+      );
+      expect(result).toMatchObject({
+        kind: 'ambiguous',
+        reason: 'receipt_unavailable',
+        capabilities: null,
+      });
+      expect(mocks.nodeAgentRequest).toHaveBeenCalledExactlyOnceWith(
+        'node-1',
+        expect.anything(),
+        '/workspaces/workspace-1/agent-capabilities',
+        expect.objectContaining({ noWakeContainer: true, recoverContainerOnTimeout: false })
+      );
+      expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+      expect(mocks.ensureSessionRecovery).not.toHaveBeenCalled();
+    }
+  );
+
+  it('keeps a real capability endpoint 404 as legacy rather than a stopped runtime', async () => {
+    mocks.nodeAgentRequest.mockRejectedValue(new mocks.NodeAgentHttpError(404, 'not found'));
+    const result = await new DefaultVmPromptDeliveryAdapter(envWithTarget()).reconcile(
+      input(false)
+    );
+    expect(result).toMatchObject({
+      kind: 'ambiguous',
+      reason: 'receipt_unavailable',
+      capabilities: { protocolVersion: 0, promptReceipts: { supported: false } },
+    });
+    expect(mocks.nodeAgentRequest).toHaveBeenCalledOnce();
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+  });
+
+  it.each([410, 503])(
+    'does not recover or replay when stop wins after capability lookup (%s)',
+    async (status) => {
+      mocks.nodeAgentRequest
+        .mockResolvedValueOnce(protocolFixture.capabilities)
+        .mockRejectedValueOnce(new mocks.NodeAgentHttpError(status, 'RUNTIME_STOPPED'));
+      const result = await new DefaultVmPromptDeliveryAdapter(envWithTarget()).reconcile(
+        input(false)
+      );
+      expect(result).toMatchObject({ kind: 'ambiguous', reason: 'receipt_unavailable' });
+      expect(mocks.nodeAgentRequest).toHaveBeenCalledTimes(2);
+      for (const [, , , options] of mocks.nodeAgentRequest.mock.calls) {
+        expect(options).toMatchObject({ noWakeContainer: true, recoverContainerOnTimeout: false });
+      }
+      expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+      expect(mocks.ensureSessionRecovery).not.toHaveBeenCalled();
+    }
+  );
+
+  it('still confirms an accepted receipt using only no-wake reads', async () => {
+    mocks.nodeAgentRequest
+      .mockResolvedValueOnce(protocolFixture.capabilities)
+      .mockResolvedValueOnce({
+        deliveryId: 'delivery-1',
+        state: 'accepted',
+        runtimeIdentity: 'runtime-vm-01',
+        acceptedAt: 500,
+        completedAt: null,
+      });
+    expect(
+      await new DefaultVmPromptDeliveryAdapter(envWithTarget()).reconcile(input(false))
+    ).toMatchObject({ kind: 'accepted', promptEpoch: 500 });
+    for (const [, , , options] of mocks.nodeAgentRequest.mock.calls) {
+      expect(options).toMatchObject({ noWakeContainer: true, recoverContainerOnTimeout: false });
+    }
   });
 
   it('marks a transient capability failure during reconciliation ambiguous', async () => {
@@ -360,7 +525,8 @@ describe('VM prompt delivery adapter', () => {
       expect.anything(),
       'project-1',
       'chat-1',
-      request.sourceTaskGuard
+      request.sourceTaskGuard,
+      { isDeliveryStillAuthorized: expect.any(Function) }
     );
     expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
   });
@@ -418,6 +584,10 @@ describe('VM prompt delivery adapter', () => {
     });
     expect(mocks.nodeAgentRequest).toHaveBeenCalledOnce();
     expect(mocks.reportSessionRecoveryRefusal).not.toHaveBeenCalled();
+    expect(mocks.nodeAgentRequest.mock.calls[0]?.[3]).toMatchObject({
+      noWakeContainer: false,
+      recoverContainerOnTimeout: false,
+    });
   });
 
   // Control (`.claude/rules/61`): only the slept-container verdict stopped reading the health
@@ -850,6 +1020,9 @@ describe('VM prompt delivery adapter', () => {
     const result = await adapter.reconcile(input(false));
 
     expect(result).toMatchObject({ kind: 'retry', reason: 'receipt_not_found' });
+    for (const [, , , options] of mocks.nodeAgentRequest.mock.calls) {
+      expect(options).toMatchObject({ noWakeContainer: true, recoverContainerOnTimeout: false });
+    }
   });
 
   it('does not replay a 200 not_found receipt', async () => {
@@ -1184,5 +1357,57 @@ describe('attachment delivery ordering', () => {
     expect(result.kind).toBe('retry');
     expect(mocks.transferWorkspaceAttachments).not.toHaveBeenCalled();
     expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+  });
+  it('copies a teammate’s own uploads into the owner’s workspace for a prompt sent on their behalf', async () => {
+    vi.clearAllMocks();
+    const env = envWithTarget();
+    env.R2 = { head: vi.fn().mockResolvedValue({ size: 4 }) } as unknown as R2Bucket;
+    const request = input(false);
+    request.claim.message.senderId = 'teammate-1';
+    request.claim.message.metadata = { attachments: [attachment], onBehalfOfUserId: 'user-1' };
+    mocks.nodeAgentRequest.mockResolvedValue(promptProtocolCapabilities);
+    mocks.transferWorkspaceAttachments.mockResolvedValue(undefined);
+    mocks.sendPromptToAgentOnNode.mockResolvedValue(protocolFixture.newPrompt);
+    await new DefaultVmPromptDeliveryAdapter(env).submit(request);
+    expect(env.R2.head).toHaveBeenCalledWith('temp-uploads/teammate-1/upload-1/photo.png');
+    expect(mocks.transferWorkspaceAttachments).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1', uploaderUserId: 'teammate-1' })
+    );
+  });
+  it('rejects a teammate’s attachments for a prompt sent on behalf of someone else', async () => {
+    vi.clearAllMocks();
+    const request = input(false);
+    request.claim.message.senderId = 'teammate-1';
+    request.claim.message.metadata = { attachments: [attachment], onBehalfOfUserId: 'other-owner' };
+    mocks.nodeAgentRequest.mockResolvedValue(promptProtocolCapabilities);
+    const result = await new DefaultVmPromptDeliveryAdapter(envWithTarget()).submit(request);
+    expect(result.kind).toBe('retry');
+    expect(mocks.transferWorkspaceAttachments).not.toHaveBeenCalled();
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+  });
+});
+
+describe('issued prompt receipt reconciliation never wakes a runtime', () => {
+  beforeEach(() => vi.clearAllMocks());
+  it.each([
+    ['sleeping VM', { ...targetRow, workspace_status: 'sleeping' }],
+    ['deleted VM', { ...targetRow, workspace_status: 'deleted' }],
+    ['sleeping Instant', sleptContainerRow],
+    ['missing workspace', null],
+  ])('keeps %s ambiguous without replay, recovery, or provisioning', async (_label, row) => {
+    mocks.ensureSessionRecovery.mockResolvedValue({ status: 'waking', taskId: 'task-1' });
+    const request = input(false);
+    request.claim.mode = 'reconcile';
+    request.claim.message.sourceKind = 'scheduled_action';
+    request.claim.message.runtimeIdentity = 'issued-runtime-1';
+    // The schedule was cancelled after issue; the source guard allows only a
+    // receipt lookup. Target resolution itself must not provision a new runtime.
+    request.beforeSideEffect = async () => null;
+    const result = await new DefaultVmPromptDeliveryAdapter(envWithTarget(row)).reconcile(request);
+    expect(result.kind).toBe('ambiguous');
+    expect(mocks.ensureSessionRecovery).not.toHaveBeenCalled();
+    expect(mocks.wakeSession).not.toHaveBeenCalled();
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+    expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
   });
 });

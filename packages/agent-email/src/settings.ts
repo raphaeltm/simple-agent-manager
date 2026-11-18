@@ -1,0 +1,69 @@
+/** Agent email tunables: admin-editable runtime settings with typed code defaults. */
+import type { AgentEmailPorts } from './ports';
+import { AGENT_EMAIL_SETTINGS, type AgentEmailSettingName } from './setting-definitions';
+
+export interface AgentEmailLimits {
+  setupPlanTimeoutMs: number;
+  readTimeoutMs: number;
+  maxInboundBytes: number;
+  maxBodyChars: number;
+  maxReplyChars: number;
+  maxRepliesPerRun: number;
+  maxAllowedSenders: number;
+  inboundPerTriggerPerHour: number;
+  processingLeaseSeconds: number;
+  loopbackPerHour: number;
+  setupRunsPerHour: number;
+  maxDeliveryAttempts: number;
+  retryBaseSeconds: number;
+  retryMaxSeconds: number;
+  recoveryBatchSize: number;
+  signInCodesPerEmailPerHour: number;
+  signInCodesPerIpPerHour: number;
+  signInCodeAttemptsPerEmailPerHour: number;
+}
+
+const FIELD_BY_SETTING: Record<AgentEmailSettingName, keyof AgentEmailLimits> = {
+  'agentEmail.setupPlanTimeoutMs': 'setupPlanTimeoutMs',
+  'agentEmail.readTimeoutMs': 'readTimeoutMs',
+  'agentEmail.maxInboundBytes': 'maxInboundBytes',
+  'agentEmail.maxBodyChars': 'maxBodyChars',
+  'agentEmail.maxReplyChars': 'maxReplyChars',
+  'agentEmail.maxRepliesPerRun': 'maxRepliesPerRun',
+  'agentEmail.maxAllowedSenders': 'maxAllowedSenders',
+  'agentEmail.inboundPerTriggerPerHour': 'inboundPerTriggerPerHour',
+  'agentEmail.processingLeaseSeconds': 'processingLeaseSeconds',
+  'agentEmail.loopbackPerHour': 'loopbackPerHour',
+  'agentEmail.setupRunsPerHour': 'setupRunsPerHour',
+  'agentEmail.maxDeliveryAttempts': 'maxDeliveryAttempts',
+  'agentEmail.retryBaseSeconds': 'retryBaseSeconds',
+  'agentEmail.retryMaxSeconds': 'retryMaxSeconds',
+  'agentEmail.recoveryBatchSize': 'recoveryBatchSize',
+  'agentEmail.signInCodesPerEmailPerHour': 'signInCodesPerEmailPerHour',
+  'agentEmail.signInCodesPerIpPerHour': 'signInCodesPerIpPerHour',
+  'agentEmail.signInCodeAttemptsPerEmailPerHour': 'signInCodeAttemptsPerEmailPerHour',
+};
+
+// resolveAdminSetting degrades to the registry default on a store outage; the guard only
+// narrows the value's type.
+async function integerSetting(
+  ports: AgentEmailPorts,
+  name: AgentEmailSettingName,
+  fallback: number
+) {
+  const value = await ports.resolveAdminSetting(name);
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+export async function getAgentEmailLimits(ports: AgentEmailPorts): Promise<AgentEmailLimits> {
+  const entries = await Promise.all(
+    AGENT_EMAIL_SETTINGS.map(
+      async (setting) =>
+        [
+          FIELD_BY_SETTING[setting.name],
+          await integerSetting(ports, setting.name, setting.defaultValue),
+        ] as const
+    )
+  );
+  return Object.fromEntries(entries) as Record<keyof AgentEmailLimits, number>;
+}

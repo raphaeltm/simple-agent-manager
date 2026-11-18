@@ -15,6 +15,23 @@
  * ProjectData RPC hop — whose session transitions still run ProjectData's real
  * functions against the same SQLite.
  */
+import * as attention from '@simple-agent-manager/project-data/internal/do/attention';
+import { processPromptDeliveryAlarm } from '@simple-agent-manager/project-data/internal/do/durability-foundation';
+import * as mailbox from '@simple-agent-manager/project-data/internal/do/mailbox';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import {
+  acceptPromptDelivery,
+  nudgePromptDeliveriesForTarget,
+} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import { cancelUnissuedSessionPrompts } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-cancellation';
+import { resolveSessionAccess } from '@simple-agent-manager/project-data/internal/do/session-access';
+import { getSession } from '@simple-agent-manager/project-data/internal/do/session-reads';
+import {
+  applySessionWakeReady,
+  isSessionWakeReadyCurrent,
+  type SessionWakeReadyInput,
+} from '@simple-agent-manager/project-data/internal/do/session-wake-ready';
+import * as sessions from '@simple-agent-manager/project-data/internal/do/sessions';
 import { buildVmPromptDeliveryCapabilitiesPath } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
@@ -22,28 +39,16 @@ import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { runMigrations } from '../../src/durable-objects/migrations';
-import * as attention from '../../src/durable-objects/project-data/attention';
-import { processPromptDeliveryAlarm } from '../../src/durable-objects/project-data/durability-foundation';
-import * as mailbox from '../../src/durable-objects/project-data/mailbox';
-import {
-  acceptPromptDelivery,
-  nudgePromptDeliveriesForTarget,
-} from '../../src/durable-objects/project-data/prompt-delivery';
-import { getSession } from '../../src/durable-objects/project-data/session-reads';
-import {
-  applySessionWakeReady,
-  isSessionWakeReadyCurrent,
-  type SessionWakeReadyInput,
-} from '../../src/durable-objects/project-data/session-wake-ready';
-import * as sessions from '../../src/durable-objects/project-data/sessions';
 import { VmAgentContainer } from '../../src/durable-objects/vm-agent-container';
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { chatRoutes } from '../../src/routes/chat';
 import { agentSessionSuspendResumeRoutes } from '../../src/routes/workspaces/agent-session-suspend-resume';
 import { agentSessionRoutes } from '../../src/routes/workspaces/agent-sessions';
-import { validateMcpToken } from '../../src/services/mcp-token';
+import { emptyResult, resolveCleanupConfig } from '../../src/scheduled/node-cleanup/shared';
+import { sweepStaleStoppedWorkspaces } from '../../src/scheduled/node-cleanup/workspace-phases';
+import { storeMcpToken, validateMcpToken } from '../../src/services/mcp-token';
+import { validateActiveWorkspaceMcpToken } from '../../src/services/mcp-token-lifecycle';
 import { resolveSessionRuntimeContract } from '../../src/services/session-runtime-contract';
 import { sleepWorkspaceSession } from '../../src/services/session-sleep-execution';
 import { endSessionSleepEpisodeBlocked } from '../../src/services/session-sleep-fallback';
@@ -53,7 +58,7 @@ import {
   type SessionSnapshotManifest,
 } from '../../src/services/session-snapshots';
 import { markVmAgentContainerActiveWorkEndedBestEffort } from '../../src/services/vm-agent-container';
-import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
+import { applySqliteMigration, createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 import {
   acceptedPromptResponse,
   versionedPromptCapabilities,
@@ -71,6 +76,16 @@ function projectDataSql(): SqlStorage {
 vi.mock('../../src/services/project-data', () => ({
   getSession: async (_env: unknown, _projectId: string, sessionId: string) =>
     getSession(projectDataSql(), sessionId),
+  // Session-writer checks resolve against the real grant rows, as the ProjectData RPC does.
+  getSessionAccess: async (
+    _env: unknown,
+    _projectId: string,
+    sessionId: string,
+    userId: string
+  ) => {
+    const access = resolveSessionAccess(projectDataSql(), sessionId, userId);
+    return { session: access.found ? getSession(projectDataSql(), sessionId) : null, access };
+  },
   sleepSession: async (_env: unknown, _projectId: string, sessionId: string) =>
     sessions.sleepSession(projectDataSql(), sessionId),
   wakeSession: async (
@@ -83,9 +98,21 @@ vi.mock('../../src/services/project-data', () => ({
   // The agent handed control back and nothing it started is still running.
   getSessionState: async () => ({ activity: 'idle', activityAt: projectData.idleSince }),
   getAcpSession: async () => null,
+  cancelUnissuedSessionPrompts: async (
+    _env: unknown,
+    projectId: string,
+    sessionId: string,
+    taskId: string
+  ) => cancelUnissuedSessionPrompts(projectDataSql(), sessionId, taskId, projectId),
+  linkSessionToTask: async (_env: unknown, _projectId: string, sessionId: string, taskId: string) =>
+    sessions.linkSessionToTask(projectDataSql(), sessionId, taskId),
   // The stop and cancel routes, and the teardown behind the stop route.
-  stopSession: async (_env: unknown, _projectId: string, sessionId: string) =>
-    sessions.stopSession(projectDataSql(), sessionId) !== null,
+  stopSession: async (
+    _env: unknown,
+    _projectId: string,
+    sessionId: string,
+    options?: { guard?: { taskId: string } }
+  ) => sessions.stopSession(projectDataSql(), sessionId, options?.guard) !== null,
   recordSessionTurnEnd: async () => {},
   cleanupWorkspaceActivity: async () => {},
   // The attention-answer route.
@@ -118,11 +145,33 @@ vi.mock('../../src/middleware/auth', () => ({
   getUserId: () => 'user-1',
 }));
 
+/** The credential generation each callback token was minted for, in mint order. */
+const mintedGenerations = vi.hoisted(() => ({
+  node: [] as Array<string | null>,
+  workspace: [] as Array<string | null>,
+}));
+
 vi.mock('../../src/services/jwt', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/services/jwt')>()),
   signNodeManagementToken: async () => ({ token: 'node-management-token' }),
-  signNodeCallbackToken: async () => 'node-callback-token',
-  signCallbackToken: async () => 'workspace-callback-token',
+  signNodeCallbackToken: async (
+    _nodeId: string,
+    _env: unknown,
+    options: { callbackGeneration: string | null }
+  ) => {
+    mintedGenerations.node.push(options.callbackGeneration);
+    return 'node-callback-token';
+  },
+  signCurrentNodeCallbackToken: async () => 'node-callback-token',
+  signCallbackToken: async (
+    _workspaceId: string,
+    _env: unknown,
+    options: { callbackGeneration: string | null }
+  ) => {
+    mintedGenerations.workspace.push(options.callbackGeneration);
+    return 'workspace-callback-token';
+  },
+  signCurrentWorkspaceCallbackToken: async () => 'workspace-callback-token',
 }));
 
 const PROJECT_ID = 'project-1';
@@ -380,8 +429,8 @@ describe('Instant session wake after idle sleep', () => {
     ).run(NODE_ID, USER_ID, now, now);
     d1.prepare(
       `INSERT INTO workspaces (id, user_id, node_id, project_id, chat_session_id, name,
-                               repository, branch, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'instant', 'owner/repo', 'main', 'running', ?, ?)`
+                               repository, branch, status, eviction_generation, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'instant', 'owner/repo', 'main', 'running', NULL, ?, ?)`
     ).run(WORKSPACE_ID, USER_ID, NODE_ID, PROJECT_ID, CHAT_SESSION_ID, now, now);
     d1.prepare(
       `INSERT INTO agent_sessions (id, workspace_id, user_id, status, agent_type, created_at, updated_at)
@@ -489,13 +538,22 @@ describe('Instant session wake after idle sleep', () => {
 
   function wakeFailures() {
     return {
-      markers: projectDataSql()
-        .exec(
-          `SELECT kind, reason FROM session_attention_markers
-            WHERE session_id = ? AND resolved_at IS NULL`,
-          CHAT_SESSION_ID
-        )
-        .toArray(),
+      // A failed wake is one open inbox error item in D1 (slice E), never a marker.
+      markers: [
+        ...projectDataSql()
+          .exec(
+            `SELECT kind, reason FROM session_attention_markers
+              WHERE session_id = ? AND resolved_at IS NULL`,
+            CHAT_SESSION_ID
+          )
+          .toArray(),
+        ...d1
+          .prepare(
+            `SELECT kind, assignee_user_id AS assignee, answer_spec_json AS spec FROM asks
+              WHERE dedupe_key = ? AND status = 'open'`
+          )
+          .all(`error:wake:${CHAT_SESSION_ID}`),
+      ],
       messages: projectDataSql()
         .exec(
           `SELECT content FROM chat_messages
@@ -613,6 +671,10 @@ describe('Instant session wake after idle sleep', () => {
   beforeEach(async () => {
     d1 = new Database(':memory:');
     createAllSchemaTables(d1, schema);
+    // The shipped inbox migrations: a failed wake files an `asks` row on its dedupe index.
+    d1.exec('DROP TABLE asks');
+    for (const file of ['0245_asks.sql', '0247_asks_questions.sql', '0248_asks_system_errors.sql'])
+      applySqliteMigration(d1, new URL(`../../src/db/migrations/${file}`, import.meta.url));
     d1.exec(
       'CREATE UNIQUE INDEX idx_session_snapshots_chat_session_id ON session_snapshots(chat_session_id)'
     );
@@ -651,6 +713,30 @@ describe('Instant session wake after idle sleep', () => {
     } as unknown as Env;
     background = [];
     Object.assign(env, {
+      // NodeLifecycle is an external scheduling boundary in this vertical slice.
+      // The real workspace deletion identity/proof SQL and container teardown execute.
+      NODE_LIFECYCLE: {
+        idFromName: (name: string) => name,
+        get: () => ({
+          claimWorkspaceDeletionAttempt: async (
+            _node: string,
+            _workspace: string,
+            _user: string,
+            expected: { nodeRuntimeIncarnationId: string; workspaceGeneration: string | null }
+          ) => {
+            // An Instant workspace is never evicted: production rows carry a NULL generation
+            // (staging 2026-11-08: every cf-container workspace since October). A string here
+            // hid that every slept Instant deletion threw.
+            expect(expected).toMatchObject({
+              nodeRuntimeIncarnationId: 'incarnation-1',
+              workspaceGeneration: null,
+            });
+            return 'claimed';
+          },
+          confirmWorkspaceDeletion: async () => {},
+          scheduleWorkspaceDeletion: async () => {},
+        }),
+      },
       PROJECT_DATA: {
         idFromName: (name: string) => name,
         get: () => ({
@@ -740,6 +826,52 @@ describe('Instant session wake after idle sleep', () => {
         status: 'active',
       });
     });
+
+    // Staging 2026-11-03..08: the stale-workspace safety net queued slept Instant workspaces
+    // for deletion, each attempt moved the row to `stopping`, and the next follow-up was
+    // refused with "The sleeping container runtime is gone". The sleeping VM control lives in
+    // `tests/workers/instant-sleeping-deletion-guard.test.ts`.
+    it('is not queued for deletion by the stale-workspace safety net, and still wakes', async () => {
+      await sleep();
+      // The fixture helper applies no column defaults; the sweep skips user-owned nodes.
+      d1.prepare(`UPDATE nodes SET node_class = 'managed' WHERE id = ?`).run(NODE_ID);
+      const lifecycle = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(NODE_ID));
+      const queued: string[] = [];
+      Object.assign(env, {
+        NODE_LIFECYCLE: {
+          idFromName: (name: string) => name,
+          get: () => ({
+            ...lifecycle,
+            scheduleWorkspaceDeletion: async (_node: string, workspaceId: string) => {
+              queued.push(workspaceId);
+              return true;
+            },
+          }),
+        },
+      });
+      const result = emptyResult();
+
+      await sweepStaleStoppedWorkspaces(
+        drizzle(env.DATABASE, { schema }),
+        env,
+        new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+        resolveCleanupConfig(env),
+        result
+      );
+
+      expect(queued).toEqual([]);
+      expect(result.errors).toBe(0);
+      expect(runtimeRows()).toEqual(SLEPT_ROWS);
+
+      const deliveryId = await sendFollowUp('Still there?');
+
+      expect(wakeFailures()).toEqual({ markers: [], messages: [] });
+      expect(mailbox.getMessage(projectDataSql(), deliveryId)).toMatchObject({
+        deliveryState: 'acked',
+      });
+      expect(vmAgent.prompts).toEqual(['Still there?']);
+      expect(runtimeRows()).toEqual(AWAKE_ROWS);
+    });
   });
 
   it('hydrates the canonical project default branch rather than the task checkout branch', async () => {
@@ -776,6 +908,62 @@ describe('Instant session wake after idle sleep', () => {
     expect(restoreIndex).toBeGreaterThan(sessionIndex);
     expect(runtimeRows()).toEqual(AWAKE_ROWS);
   });
+  it('retires the slept container credentials and mints the woken runtime its own', async () => {
+    const generationsBeforeWake = () =>
+      d1
+        .prepare(
+          `SELECT w.callback_generation AS workspaceGeneration,
+                  n.callback_generation AS nodeGeneration,
+                  n.runtime_incarnation_id AS incarnation
+             FROM workspaces w JOIN nodes n ON n.id = w.node_id WHERE w.id = ?`
+        )
+        .get(WORKSPACE_ID) as {
+        workspaceGeneration: string | null;
+        nodeGeneration: string | null;
+        incarnation: string | null;
+      };
+    await sleepOnContainerIdleTimeout();
+    const slept = generationsBeforeWake();
+    // The slept runtime's agent session holds an MCP token for the slept generation.
+    await storeMcpToken(env.KV, 'mcp-token-of-slept-runtime', {
+      taskId: TASK_ID,
+      contextType: 'task',
+      taskMode: 'task',
+      projectId: PROJECT_ID,
+      userId: USER_ID,
+      workspaceId: WORKSPACE_ID,
+      chatSessionId: CHAT_SESSION_ID,
+      agentSessionId: AGENT_SESSION_ID,
+      callbackGeneration: slept.workspaceGeneration,
+      createdAt: new Date().toISOString(),
+    });
+    mintedGenerations.node.length = 0;
+    mintedGenerations.workspace.length = 0;
+
+    expect((await postWorkspaceAgentResume()).status).toBe(200);
+    expect(runtimeRows()).toEqual(AWAKE_ROWS);
+
+    // The wake rotated both rows to the new runtime incarnation, in the write that woke it.
+    const woken = generationsBeforeWake();
+    expect(woken.incarnation).not.toBe(slept.incarnation);
+    expect(woken.workspaceGeneration).toBe(woken.incarnation);
+    expect(woken.nodeGeneration).toBe(woken.incarnation);
+    expect(woken.workspaceGeneration).not.toBe(slept.workspaceGeneration);
+    // Every callback token handed to the new container carries the new generation.
+    expect(mintedGenerations.node).toEqual([woken.incarnation]);
+    expect(mintedGenerations.workspace).toEqual([woken.incarnation]);
+    // The restored agent session got a fresh MCP token for the new generation ...
+    const samToken = vmAgent.creations.at(-1)?.mcpServers[0]?.token;
+    expect(samToken).toEqual(expect.any(String));
+    expect(await validateActiveWorkspaceMcpToken(env, samToken!)).toMatchObject({
+      agentSessionId: AGENT_SESSION_ID,
+      callbackGeneration: woken.incarnation,
+    });
+    // ... and the slept runtime's token is refused and revoked although the workspace runs.
+    expect(await validateActiveWorkspaceMcpToken(env, 'mcp-token-of-slept-runtime')).toBeNull();
+    expect(await validateMcpToken(env.KV, 'mcp-token-of-slept-runtime')).toBeNull();
+  });
+
   it('preserves snapshot and creates no session or MCP token if workspace hydration is refused', async () => {
     await sleepOnContainerIdleTimeout();
     const generation = restorableGeneration();
@@ -1057,11 +1245,21 @@ describe('Instant session wake after idle sleep', () => {
       terminalReason: 'wake_refused',
     });
     expect(wakeFailures()).toEqual({
-      markers: [{ kind: 'wake_failed', reason: 'wake_refused' }],
+      markers: [
+        {
+          kind: 'error',
+          assignee: USER_ID,
+          // An Instant chat wakes when it gets a message: no Wake button.
+          spec: JSON.stringify({
+            type: 'actions',
+            actions: [{ id: 'open_chat', label: 'Open chat' }],
+          }),
+        },
+      ],
       messages: [
         {
           content:
-            'Wake failed: The sleeping container runtime is gone and cannot wake in place. (container_runtime_unavailable)',
+            'Wake failed: The sleeping container runtime is gone and cannot wake in place. Your message and this conversation are saved: fork this chat or start a new one to continue. (container_runtime_unavailable)',
         },
       ],
     });
@@ -1076,7 +1274,7 @@ describe('Instant session wake after idle sleep', () => {
     /** What the stop route's teardown leaves; the snapshot row goes with the session. */
     const ARCHIVED_ROWS = {
       node: { status: 'deleted', health_status: 'stale' },
-      workspace: { status: 'deleted' },
+      workspace: undefined,
       agentSession: { status: 'stopped' },
       snapshot: undefined,
     };
@@ -1087,15 +1285,39 @@ describe('Instant session wake after idle sleep', () => {
 
       const response = await postChatAction('stop');
 
-      expect(response.status).toBe(200);
+      expect(response.status, await response.clone().text()).toBe(200);
       expect(await response.json()).toEqual({ status: 'stopped', workspaceDeleted: true });
       expect(vmAgent.starts).toBe(0);
       expect(vmAgent.signals).toEqual([]);
       // Liveness: the real teardown ran to the end.
-      expect(runtimeRows()).toEqual(ARCHIVED_ROWS);
+      expect(runtimeRows(), JSON.stringify(runtimeRows())).toEqual(ARCHIVED_ROWS);
       expect(getSession(projectDataSql(), CHAT_SESSION_ID)).toMatchObject({
         status: 'stopped',
       });
+    });
+
+    it('archives the conversation without destroying another project member’s compute or backups', async () => {
+      await sleepOnContainerIdleTimeout();
+      d1.prepare(
+        `INSERT INTO users(id, name, email) VALUES ('other-owner', 'Other', 'other@example.test')`
+      ).run();
+      d1.prepare(`UPDATE nodes SET user_id='other-owner' WHERE id=?`).run(NODE_ID);
+      d1.prepare(`UPDATE workspaces SET user_id='other-owner' WHERE id=?`).run(WORKSPACE_ID);
+      d1.prepare(`UPDATE tasks SET user_id='other-owner' WHERE id=?`).run(TASK_ID);
+      d1.prepare(`UPDATE session_snapshots SET user_id='other-owner' WHERE chat_session_id=?`).run(
+        CHAT_SESSION_ID
+      );
+      const before = runtimeRows();
+      const backup = d1.prepare('SELECT * FROM session_snapshots').get();
+      const removeBackup = vi.spyOn(env.R2, 'delete');
+      const response = await postChatAction('stop');
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(getSession(projectDataSql(), CHAT_SESSION_ID)).toMatchObject({ status: 'stopped' });
+      expect(runtimeRows()).toEqual(before);
+      expect(d1.prepare('SELECT * FROM session_snapshots').get()).toEqual(backup);
+      expect(removeBackup).not.toHaveBeenCalled();
+      expect(vmAgent.starts).toBe(0);
+      expect(vmAgent.signals).toEqual([]);
     });
 
     it('answers a cancel with nothing in flight without waking its container', async () => {
@@ -1117,9 +1339,16 @@ describe('Instant session wake after idle sleep', () => {
     it('still signals a live agent before archiving it', async () => {
       const response = await postChatAction('stop');
 
-      expect(response.status).toBe(200);
+      expect(response.status, await response.clone().text()).toBe(200);
       expect(vmAgent.signals).toEqual([`${AGENT_PATH}/cancel`, `${AGENT_PATH}/stop`]);
-      expect(runtimeRows()).toEqual(ARCHIVED_ROWS);
+      // The container DO destroys it. The in-container physical-deletion route cannot prove
+      // ownership (the standalone agent has no node identity env) and answered 409 on staging,
+      // so the deletion must not depend on it.
+      expect(vmAgent.requests.map((request) => request.path)).not.toContain(
+        `/workspaces/${WORKSPACE_ID}/physical-deletion`
+      );
+      expect(vmAgent.running).toBe(false);
+      expect(runtimeRows(), JSON.stringify(runtimeRows())).toEqual(ARCHIVED_ROWS);
     });
 
     it('still forwards a cancel to a live agent', async () => {
@@ -1163,13 +1392,16 @@ describe('Instant session wake after idle sleep', () => {
         await sleepThroughSessionSleep();
         expect(runtimeRows().node).toEqual(SLEPT_ROWS.node);
         expect(agentSessionStatus(leftRunning)).toBe('running');
+        // The person's Sleep asked the awake agent to cancel before teardown (required sleep);
+        // only what the workspace page does afterwards is under test here.
+        const signalsBeforeAction = vmAgent.signals.length;
 
         const response = await postWorkspaceAgentAction(action, leftRunning);
 
         expect(response.status).toBe(200);
         expect(await response.json()).toMatchObject({ status });
         expect(vmAgent.starts).toBe(0);
-        expect(vmAgent.signals).toEqual([]);
+        expect(vmAgent.signals.slice(signalsBeforeAction)).toEqual([]);
         // Liveness: the route still recorded the transition it was asked for.
         expect(agentSessionStatus(leftRunning)).toBe(status);
       }

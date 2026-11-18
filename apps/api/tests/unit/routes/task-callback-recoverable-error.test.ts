@@ -102,7 +102,10 @@ vi.mock('../../../src/services/task-runner', () => ({
   cleanupTaskRun: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('../../../src/services/task-status', () => ({
+// Partial: `task-status` also exports the status SETS that other modules read at
+// import time, and a wholesale mock silently drops them.
+vi.mock('../../../src/services/task-status', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/task-status')>()),
   canTransitionTaskStatus: vi.fn().mockReturnValue(true),
   getAllowedTaskTransitions: vi.fn().mockReturnValue(['completed', 'failed', 'cancelled']),
   isTaskStatus: vi.fn().mockReturnValue(true),

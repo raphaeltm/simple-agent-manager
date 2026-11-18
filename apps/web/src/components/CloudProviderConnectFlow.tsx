@@ -9,6 +9,8 @@ import { createCredential, saveProjectCloudCredential } from '../lib/api';
 interface CloudProviderConnectFlowProps {
   projectId?: string;
   initialProvider?: string;
+  /** Hide the provider grid when the caller already chose `initialProvider`. */
+  lockProvider?: boolean;
   mode?: 'connect' | 'replace' | 'project-override';
   onConnected?: () => void;
   onCancel?: () => void;
@@ -133,6 +135,7 @@ function isReady(provider: CredentialProvider | '', form: CloudFormState): boole
 export function CloudProviderConnectFlow({
   projectId,
   initialProvider,
+  lockProvider = false,
   mode = projectId ? 'project-override' : 'connect',
   onConnected,
   onCancel,
@@ -183,36 +186,38 @@ export function CloudProviderConnectFlow({
         </Alert>
       )}
 
-      <div className="flex flex-col gap-1.5">
-        <div className="text-xs font-medium text-fg-muted">Cloud provider</div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {CREDENTIAL_PROVIDERS.map((item) => {
-            const isSelected = provider === item;
-            return (
-              <button
-                key={item}
-                type="button"
-                aria-pressed={isSelected}
-                onClick={() => {
-                  setProvider(item);
-                  setForm(EMPTY_FORM);
-                  setError(null);
-                }}
-                className={`p-2.5 rounded-md text-left transition-all ${
-                  isSelected
-                    ? 'border-2 border-accent bg-accent-tint'
-                    : 'border border-border-default bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_80%,transparent)]'
-                } cursor-pointer`}
-              >
-                <div className="text-sm font-medium text-fg-primary">{PROVIDER_LABELS[item]}</div>
-                <div className="text-xs text-fg-muted mt-0.5">
-                  {PROVIDER_HELP[item].description}
-                </div>
-              </button>
-            );
-          })}
+      {!(lockProvider && provider) && (
+        <div className="flex flex-col gap-1.5">
+          <div className="text-xs font-medium text-fg-muted">Cloud provider</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {CREDENTIAL_PROVIDERS.map((item) => {
+              const isSelected = provider === item;
+              return (
+                <button
+                  key={item}
+                  type="button"
+                  aria-pressed={isSelected}
+                  onClick={() => {
+                    setProvider(item);
+                    setForm(EMPTY_FORM);
+                    setError(null);
+                  }}
+                  className={`p-2.5 rounded-md text-left transition-all ${
+                    isSelected
+                      ? 'border-2 border-accent bg-accent-tint'
+                      : 'border border-border-default bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_80%,transparent)]'
+                  } cursor-pointer`}
+                >
+                  <div className="text-sm font-medium text-fg-primary">{PROVIDER_LABELS[item]}</div>
+                  <div className="text-xs text-fg-muted mt-0.5">
+                    {PROVIDER_HELP[item].description}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
       {provider && (
         <>

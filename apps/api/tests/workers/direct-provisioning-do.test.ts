@@ -1,27 +1,57 @@
 /** Registered HTTP -> real NodeLifecycle RPC/alarm/storage -> provider HTTP -> migrated D1. */
 import { makeSignature } from 'better-auth/crypto';
 import { env, runInDurableObject } from 'cloudflare:test';
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../src/db/schema';
 import type { NodeLifecycle } from '../../src/durable-objects/node-lifecycle';
 import {
   DIRECT_PROVISIONING_KEY,
   type DirectProvisioningIntent,
+  NodeLifecycleProvisioning,
 } from '../../src/durable-objects/node-lifecycle-provisioning';
+import {
+  attemptDeadlineMs,
+  resolveNodeProvisioningAttemptDeadlineMs,
+} from '../../src/durable-objects/node-lifecycle-provisioning-attempt';
 import type { Env } from '../../src/env';
 import { nodesRoutes } from '../../src/routes/nodes';
+import { crudRoutes } from '../../src/routes/workspaces/crud';
 import { registerWorkspaceCreateRoute } from '../../src/routes/workspaces/workspace-create';
+import { updateAdminSettings } from '../../src/services/admin-settings';
+import { findAdminSetting } from '../../src/services/admin-settings-registry';
 import { clearCapacityCatalogCache } from '../../src/services/default-capacity-source-credentials';
 import { encrypt } from '../../src/services/encryption';
-import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
+import { getSession } from '../../src/services/project-data';
+import {
+  attemptWorkspaceDeletion,
+  loadWorkspaceDeletionIdentity,
+} from '../../src/services/workspace-deletion';
+import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
+import { FakeCloudflare } from '../helpers/fake-cloudflare-tunnels';
+import { seedInstallation, seedNode, seedProject, seedUser } from './helpers/seed-d1';
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   clearCapacityCatalogCache();
 });
 
-async function setup(interrupt: boolean, interruptDispatch = false, directNode = false) {
+async function setup(
+  interrupt: boolean,
+  interruptDispatch = false,
+  directNode = false,
+  /** Tunnel transport: route every Cloudflare API call to this stateful fake. */
+  tunnelCf?: FakeCloudflare,
+  options: {
+    /** Admin setting applied before the POST, so even an automatically delivered first alarm sees it. */
+    attemptDeadlineMs?: number;
+    requestTimeoutMs?: number;
+  } = {}
+) {
+  const { attemptDeadlineMs } = options;
   const userId = 'durable-user-' + crypto.randomUUID();
   const projectId = 'durable-project-' + crypto.randomUUID();
   const installationId = 'durable-install-' + crypto.randomUUID();
@@ -63,9 +93,16 @@ async function setup(interrupt: boolean, interruptDispatch = false, directNode =
     SAM_INSTALLATION_ID: '0123456789abcdef0123456789abcdef',
     CF_ZONE_ID: 'durable-zone',
     CF_API_TOKEN: 'durable-dns-test',
-    NODE_PROVISIONING_REQUEST_TIMEOUT_MS: '3000',
+    NODE_PROVISIONING_REQUEST_TIMEOUT_MS: String(options.requestTimeoutMs ?? 3000),
     NODE_PROVISIONING_RETRY_INTERVAL_MS: '30000',
     COMPUTE_QUOTA_ENFORCEMENT_ENABLED: 'false',
+    ...(tunnelCf
+      ? {
+          VM_AGENT_TRANSPORT: 'cloudflare-tunnel',
+          CF_ACCOUNT_ID: tunnelCf.accountId,
+          CF_ZONE_ID: tunnelCf.zoneId,
+        }
+      : {}),
   };
   let stub!: DurableObjectStub<NodeLifecycle>;
   const testEnv = {
@@ -75,7 +112,11 @@ async function setup(interrupt: boolean, interruptDispatch = false, directNode =
       idFromName: (name: string) => env.NODE_LIFECYCLE.idFromName(name),
       get: (id: DurableObjectId) => {
         stub = env.NODE_LIFECYCLE.get(id) as DurableObjectStub<NodeLifecycle>;
+        const target = stub;
         return {
+          confirmUnassignedWorkspaceDeletion: (
+            identity: Parameters<NodeLifecycle['confirmUnassignedWorkspaceDeletion']>[0]
+          ) => target.confirmUnassignedWorkspaceDeletion(identity),
           startProvisioning: async (input: Parameters<NodeLifecycle['startProvisioning']>[0]) => {
             await runInDurableObject(stub, async (instance) => {
               Object.assign((instance as unknown as { env: Env }).env, overrides);
@@ -116,6 +157,8 @@ async function setup(interrupt: boolean, interruptDispatch = false, directNode =
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (tunnelCf && url.startsWith('https://api.cloudflare.com/'))
+        return tunnelCf.fetch(input, init);
       if (url.includes('/server_types'))
         return Response.json({
           server_types: [serverType],
@@ -157,6 +200,21 @@ async function setup(interrupt: boolean, interruptDispatch = false, directNode =
     })
   );
   clearCapacityCatalogCache();
+  // The request places onto the user's pool, built from the mocked catalog above; a new
+  // pool picks nothing by itself.
+  await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
+    userId,
+    projectId,
+    includeInstallation: false,
+    env: testEnv,
+    owner: { userId, projectId },
+  });
+  if (attemptDeadlineMs !== undefined) {
+    await updateAdminSettings(testEnv, {
+      actorUserId: userId,
+      changes: [{ name: 'operations.nodeProvisioningAttemptDeadlineMs', value: attemptDeadlineMs }],
+    });
+  }
   const app = new Hono<{ Bindings: Env }>();
   app.onError((error, c) => c.json({ error: error.message }, 500));
   registerWorkspaceCreateRoute(app);
@@ -184,9 +242,12 @@ async function setup(interrupt: boolean, interruptDispatch = false, directNode =
   const body = (await response.json()) as { id: string; error?: string };
   expect(response.status, body.error).toBe(201);
   await Promise.all(requestBackground);
-  async function tick() {
+  async function tick(onlyInitialAttempt = false) {
     await runInDurableObject(stub, async (instance, state) => {
       const intent = await state.storage.get<DirectProvisioningIntent>(DIRECT_PROVISIONING_KEY);
+      // An automatically delivered first alarm can win the caller's read race.
+      // Do not accidentally run recovery while building an interrupted-create fixture.
+      if (onlyInitialAttempt && intent?.attempts !== 0) return;
       if (intent?.status === 'pending')
         await state.storage.put(DIRECT_PROVISIONING_KEY, { ...intent, nextAttemptAt: 0 });
       await instance.alarm();
@@ -207,8 +268,365 @@ async function setup(interrupt: boolean, interruptDispatch = false, directNode =
     release,
     tick,
     intent,
+    inventory,
+    testEnv,
+    cookie,
   };
 }
+
+async function orphanedDirectCreation() {
+  const f = await setup(true);
+  await f.tick(true);
+  await vi.waitFor(async () => expect((await f.intent())?.lastError).toMatch(/unresolved/));
+  const intent = (await f.intent())!;
+  await runInDurableObject(f.stub, async (instance, state) => {
+    await state.storage.put(DIRECT_PROVISIONING_KEY, {
+      ...intent,
+      createdAt: Date.now() - 60_000,
+      status: 'unresolved',
+      nextAttemptAt: null,
+    });
+    await state.storage.deleteAlarm();
+    (instance as unknown as { provisioningController: unknown }).provisioningController = undefined;
+  });
+  await env.DATABASE.prepare('DELETE FROM nodes WHERE id=?').bind(intent.input.nodeId).run();
+  await env.DATABASE.prepare("UPDATE workspaces SET status='stopping' WHERE id=?")
+    .bind(f.workspaceId)
+    .run();
+  await env.DATABASE.prepare(
+    `INSERT INTO node_health_events(id,node_id,episode_started_at,event,reason,created_at)
+    VALUES(?,?,?,'deleted_by_owner','owner_requested_node_deletion',?)`
+  )
+    .bind(
+      crypto.randomUUID(),
+      intent.input.nodeId,
+      new Date().toISOString(),
+      new Date().toISOString()
+    )
+    .run();
+  const survivingServer = f.inventory[0];
+  f.inventory.splice(0);
+  const identity = (await loadWorkspaceDeletionIdentity(env.DATABASE, f.workspaceId))!;
+  return { ...f, identity, intentSnapshot: intent, survivingServer };
+}
+
+describe('explicit unassigned workspace deletion after host owner deletion', () => {
+  it('keeps terminal intent sealed against start and alarm replay after confirmation and controller restart', async () => {
+    const f = await orphanedDirectCreation();
+    const sealed = await f.intent();
+    expect(await f.stub.confirmUnassignedWorkspaceDeletion(f.identity)).toBe(true);
+    for (const restart of [false, true]) {
+      if (restart)
+        await runInDurableObject(f.stub, async (instance) => {
+          (instance as unknown as { provisioningController: unknown }).provisioningController =
+            undefined;
+        });
+      await f.stub.startProvisioning(sealed!.input);
+      await runInDurableObject(f.stub, (instance) => instance.alarm());
+      expect(await f.intent()).toEqual(sealed);
+      expect(
+        await runInDurableObject(f.stub, (_instance, state) => state.storage.getAlarm())
+      ).toBeNull();
+    }
+    expect(f.creates).toHaveLength(1);
+    expect(f.dispatches).toHaveLength(0);
+  });
+
+  it('rejects proof while the provisioning controller has live work in flight', async () => {
+    const f = await orphanedDirectCreation();
+    // Set only the live-work flag: this isolates the guard without inventing a
+    // provider timeout or leaving an unresolved network promise in the test pool.
+    await runInDurableObject(f.stub, async (instance) => {
+      const controller = (
+        instance as unknown as {
+          provisioning(): { inFlight: boolean };
+        }
+      ).provisioning();
+      controller.inFlight = true;
+    });
+    const before = vi.mocked(fetch).mock.calls.length;
+    expect(await f.stub.confirmUnassignedWorkspaceDeletion(f.identity)).toBe(false);
+    expect(vi.mocked(fetch).mock.calls).toHaveLength(before);
+    await runInDurableObject(f.stub, async (instance) => {
+      (instance as unknown as { provisioning(): { inFlight: boolean } }).provisioning().inFlight =
+        false;
+    });
+    expect(await f.stub.confirmUnassignedWorkspaceDeletion(f.identity)).toBe(true);
+  });
+
+  it.each([false, true])(
+    'uses the saved account, never a different empty account (saved missing: %s)',
+    async (missing) => {
+      const f = await orphanedDirectCreation();
+      const second = await encrypt('different-account-token', f.testEnv.ENCRYPTION_KEY);
+      await env.DATABASE.prepare(
+        `INSERT INTO credentials(id,user_id,provider,credential_type,credential_kind,is_active,encrypted_token,iv,created_at,updated_at)
+      VALUES(?,?,'hetzner','cloud-provider','api-key',1,?,?,?,?)`
+      )
+        .bind(
+          'other-' + f.userId,
+          f.userId,
+          second.ciphertext,
+          second.iv,
+          new Date().toISOString(),
+          new Date().toISOString()
+        )
+        .run();
+      if (missing)
+        await env.DATABASE.prepare('DELETE FROM credentials WHERE id=?')
+          .bind('credential-' + f.userId)
+          .run();
+      const original = fetch;
+      const inventoryAccounts: string[] = [];
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+          if (!String(url).includes('/servers?')) return original(url, init);
+          const account = new Headers(init?.headers).get('Authorization') ?? '';
+          inventoryAccounts.push(account);
+          const selector = new URL(String(url)).searchParams.get('label_selector');
+          expect(selector).toBe(`node=${f.intentSnapshot.input.nodeId.toLowerCase()}`);
+          return Response.json({
+            servers: account === 'Bearer provider-test-token' ? [f.survivingServer] : [],
+            meta: { pagination: { next_page: null } },
+          });
+        })
+      );
+      expect(await f.stub.confirmUnassignedWorkspaceDeletion(f.identity)).toBe(false);
+      expect(inventoryAccounts).toEqual(missing ? [] : ['Bearer provider-test-token']);
+      expect(f.creates).toHaveLength(1);
+    }
+  );
+
+  it.each(
+    ['environment', 'installation', 'missing-configuration'].flatMap((drift) =>
+      [false, true].map((absent) => ({ drift, absent }))
+    )
+  )(
+    'uses node-wide inventory despite current configuration drift: $drift / absent=$absent',
+    async ({ drift, absent }) => {
+      const f = await orphanedDirectCreation();
+      await runInDurableObject(f.stub, async (instance) => {
+        const current = (instance as unknown as { env: Env }).env;
+        if (drift === 'environment') current.ENVIRONMENT = 'changed-environment';
+        if (drift === 'installation')
+          current.SAM_INSTALLATION_ID = 'fedcba9876543210fedcba9876543210';
+        if (drift === 'missing-configuration') {
+          delete current.ENVIRONMENT;
+          delete current.SAM_INSTALLATION_ID;
+        }
+      });
+      const original = fetch;
+      const selectors: string[] = [];
+      const accounts: string[] = [];
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+          if (!String(url).includes('/servers?')) return original(url, init);
+          const selector = new URL(String(url)).searchParams.get('label_selector') ?? '';
+          selectors.push(selector);
+          accounts.push(new Headers(init?.headers).get('Authorization') ?? '');
+          // Model actual provider filtering: querying current deployment labels would
+          // hide this original allocation and turn surviving inventory into false absence.
+          const originalServer = f.survivingServer!;
+          const labels = originalServer.labels as Record<string, string>;
+          const matches = selector.split(',').every((term) => {
+            const [key, value] = term.split('=');
+            return labels[key!] === value;
+          });
+          return Response.json({
+            servers: !absent && matches ? [originalServer] : [],
+            meta: { pagination: { next_page: null } },
+          });
+        })
+      );
+      // Legacy saved intents have credential generation but no immutable deployment labels.
+      expect(await f.stub.confirmUnassignedWorkspaceDeletion(f.identity)).toBe(absent);
+      expect(selectors).toEqual([`node=${f.intentSnapshot.input.nodeId.toLowerCase()}`]);
+      expect(accounts).toEqual(['Bearer provider-test-token']);
+      expect(f.creates).toHaveLength(1);
+      expect(f.dispatches).toHaveLength(0);
+    }
+  );
+
+  it.each([true, false])(
+    'authenticated HTTP DELETE confirms only absent inventory: %s',
+    async (absent) => {
+      const f = await orphanedDirectCreation();
+      if (!absent) f.inventory.push(f.survivingServer!);
+      const app = new Hono<{ Bindings: Env }>();
+      app.route('/api/workspaces', crudRoutes);
+      const background: Promise<unknown>[] = [];
+      const response = await app.request(
+        `https://api.test.example.com/api/workspaces/${f.workspaceId}`,
+        {
+          method: 'DELETE',
+          headers: { Cookie: f.cookie },
+        },
+        { ...f.testEnv, NODE_LIFECYCLE: env.NODE_LIFECYCLE },
+        {
+          waitUntil: (promise: Promise<unknown>) => background.push(promise),
+          passThroughOnException() {},
+        } as unknown as ExecutionContext
+      );
+      expect(response.status, await response.clone().text()).toBe(absent ? 200 : 202);
+      expect(await response.json()).toMatchObject({
+        success: true,
+        deletionStatus: absent ? 'confirmed' : 'pending',
+      });
+      await Promise.all(background);
+      const row = await env.DATABASE.prepare(
+        'SELECT status,runtime_deletion_confirmed_at FROM workspaces WHERE id=?'
+      )
+        .bind(f.workspaceId)
+        .first();
+      if (absent) {
+        expect(row).toBeNull();
+        expect(
+          await getSession(f.testEnv, f.identity.projectId!, f.identity.chatSessionId!)
+        ).toMatchObject({ status: 'stopped' });
+      } else expect(row).toEqual({ status: 'stopping', runtime_deletion_confirmed_at: null });
+      expect(f.creates).toHaveLength(1);
+      expect(f.dispatches).toHaveLength(0);
+      expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
+    }
+  );
+
+  it('probes the exact account after DO restart and finalizes through the normal deletion service without another create', async () => {
+    const f = await orphanedDirectCreation();
+    const result = await attemptWorkspaceDeletion({
+      env: f.testEnv,
+      expected: f.identity,
+      attempt: 1,
+      source: 'explicit',
+      mode: 'explicit',
+    });
+    expect(result).toMatchObject({ status: 'confirmed', proof: 'node_runtime_terminated' });
+    expect(
+      await env.DATABASE.prepare('SELECT status,runtime_deletion_proof FROM workspaces WHERE id=?')
+        .bind(f.workspaceId)
+        .first()
+    ).toEqual({ status: 'deleted', runtime_deletion_proof: 'node_runtime_terminated' });
+    const replay = await attemptWorkspaceDeletion({
+      env: f.testEnv,
+      expected: f.identity,
+      attempt: 2,
+      source: 'explicit',
+      mode: 'explicit',
+    });
+    expect(replay.status).toBe('confirmed');
+    expect(f.creates).toHaveLength(1);
+    expect(f.dispatches).toHaveLength(0);
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
+    const inventoryCall = calls.find(([url]) => String(url).includes('/servers?'));
+    expect(String(inventoryCall?.[0])).not.toContain('incarnation');
+  });
+
+  it.each([
+    'runtime',
+    'credential',
+    'owner',
+    'generation',
+    'audit',
+    'owner-attested-audit',
+    'intent',
+    'pending-intent',
+    'provider-failure',
+    'malformed-inventory',
+    'credential-during-inventory',
+    'generation-during-inventory',
+    'node-during-inventory',
+    'owner-during-inventory',
+    'project-during-inventory',
+    'chat-during-inventory',
+  ])('keeps deletion pending when proof changes: %s', async (failure) => {
+    const f = await orphanedDirectCreation();
+    if (failure === 'runtime') f.inventory.push(f.survivingServer!);
+    if (failure === 'credential')
+      await env.DATABASE.prepare(
+        "UPDATE credentials SET updated_at='2099-01-01T00:00:00Z' WHERE user_id=?"
+      )
+        .bind(f.userId)
+        .run();
+    if (failure === 'owner') f.identity.userId = 'another-user';
+    if (failure === 'generation') f.identity.workspaceGeneration = 'later-generation';
+    if (failure === 'audit')
+      await env.DATABASE.prepare('DELETE FROM node_health_events WHERE node_id=?')
+        .bind(f.intentSnapshot.input.nodeId)
+        .run();
+    if (failure === 'owner-attested-audit')
+      await env.DATABASE.prepare(
+        "UPDATE node_health_events SET reason='owner_attested_manual_deletion' WHERE node_id=?"
+      )
+        .bind(f.intentSnapshot.input.nodeId)
+        .run();
+    if (failure === 'intent')
+      await runInDurableObject(f.stub, async (_instance, state) => {
+        const intent =
+          (await state.storage.get<DirectProvisioningIntent>(DIRECT_PROVISIONING_KEY))!;
+        await state.storage.put(DIRECT_PROVISIONING_KEY, { ...intent, allocationComplete: true });
+      });
+    if (failure === 'pending-intent')
+      await runInDurableObject(f.stub, async (_instance, state) => {
+        const intent =
+          (await state.storage.get<DirectProvisioningIntent>(DIRECT_PROVISIONING_KEY))!;
+        await state.storage.put(DIRECT_PROVISIONING_KEY, { ...intent, status: 'pending' });
+      });
+    if (failure.includes('inventory') || failure === 'provider-failure') {
+      const original = fetch;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+          if (!String(url).includes('/servers?')) return original(url, init);
+          if (failure === 'provider-failure')
+            return Response.json({ error: 'unavailable' }, { status: 503 });
+          if (failure === 'malformed-inventory') return Response.json({ servers: null });
+          const response = await original(url, init);
+          if (failure === 'credential-during-inventory')
+            await env.DATABASE.prepare(
+              "UPDATE credentials SET updated_at='2099-01-01T00:00:00Z' WHERE user_id=?"
+            )
+              .bind(f.userId)
+              .run();
+          if (failure === 'generation-during-inventory')
+            await env.DATABASE.prepare(
+              "UPDATE workspaces SET eviction_generation='changed' WHERE id=?"
+            )
+              .bind(f.workspaceId)
+              .run();
+          if (failure === 'node-during-inventory')
+            await seedNode(f.intentSnapshot.input.nodeId, f.userId);
+          if (failure === 'owner-during-inventory') {
+            const otherOwner = 'new-owner-' + crypto.randomUUID();
+            await seedUser(otherOwner);
+            await env.DATABASE.prepare('UPDATE workspaces SET user_id=? WHERE id=?')
+              .bind(otherOwner, f.workspaceId)
+              .run();
+          }
+          if (failure === 'project-during-inventory')
+            await env.DATABASE.prepare('UPDATE workspaces SET project_id=NULL WHERE id=?')
+              .bind(f.workspaceId)
+              .run();
+          if (failure === 'chat-during-inventory')
+            await env.DATABASE.prepare('UPDATE workspaces SET chat_session_id=NULL WHERE id=?')
+              .bind(f.workspaceId)
+              .run();
+          return response;
+        })
+      );
+    }
+    await expect(f.stub.confirmUnassignedWorkspaceDeletion(f.identity)).resolves.toBe(false);
+    expect(
+      await env.DATABASE.prepare(
+        'SELECT status,runtime_deletion_confirmed_at FROM workspaces WHERE id=?'
+      )
+        .bind(f.workspaceId)
+        .first()
+    ).toEqual({ status: 'stopping', runtime_deletion_confirmed_at: null });
+    expect(f.creates).toHaveLength(1);
+  });
+});
 
 describe('durable direct workspace allocation', () => {
   it('finishes native attachment, priced usage and dispatch after the HTTP request background work has ended', async () => {
@@ -321,5 +739,295 @@ describe('durable direct workspace allocation', () => {
         .bind(f.workspaceId)
         .first()
     ).toEqual({ dispatched_at: expect.any(String) });
+  });
+});
+
+describe('the durable attempt deadline (operations.nodeProvisioningAttemptDeadlineMs)', () => {
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  // A GCP create (insert plus operation poll) takes 9-12 s against the 5 s per-request timeout.
+  // Here the per-request timeout is 3 s. The fake provider holds the create on a deferred
+  // promise (`release`), so the test owns the midpoint: it releases the create only after the
+  // per-request timeout (or the configured attempt budget) has certainly elapsed. Path: real
+  // POST -> NodeLifecycle alarm -> provisionNode -> provider HTTP -> migrated D1.
+  async function holdCreateFor(f: Awaited<ReturnType<typeof setup>>, holdMs: number) {
+    if ((await f.intent())?.attempts === 0) await f.tick();
+    await vi.waitFor(() => expect(f.creates).toHaveLength(1));
+    // The attempt deadline is armed before provisionNode starts, so once the create is seen,
+    // holding it `holdMs` past that point outlasts any deadline shorter than `holdMs`.
+    await sleep(holdMs);
+    f.release();
+  }
+  async function nodeRow(f: Awaited<ReturnType<typeof setup>>) {
+    const nodeId = (await f.intent())?.input.nodeId;
+    return env.DATABASE.prepare(
+      'SELECT provider_instance_id,status,backend_dns_record_id FROM nodes WHERE id=?'
+    )
+      .bind(nodeId)
+      .first();
+  }
+  function attemptLogs(warn: ReturnType<typeof vi.spyOn>) {
+    return warn.mock.calls
+      .map(([line]) => (typeof line === 'string' ? line : ''))
+      .filter((line) => line.includes('node_provisioning.durable_attempt_failed'))
+      .map((line) => JSON.parse(line) as Record<string, any>);
+  }
+
+  it('registers a 60 s default bounded to 5 s - 180 s, and never resolves below the request timeout', async () => {
+    const def = findAdminSetting('operations.nodeProvisioningAttemptDeadlineMs')!;
+    expect(def).toMatchObject({ type: 'integer', defaultValue: 60_000, category: 'Operations' });
+    expect([4_999, 5_000, 180_000, 180_001, 60_000.5].map((value) => def.validate(value))).toEqual([
+      false,
+      true,
+      true,
+      false,
+      false,
+    ]);
+    // Unset: the default, through the real resolver and settings store.
+    const testEnv = env as unknown as Env;
+    expect(await resolveNodeProvisioningAttemptDeadlineMs(testEnv, 3_000)).toBe(60_000);
+    // An install that raised NODE_PROVISIONING_REQUEST_TIMEOUT_MS keeps at least that.
+    expect(await resolveNodeProvisioningAttemptDeadlineMs(testEnv, 90_000)).toBe(90_000);
+  });
+
+  it('adds the tunnel-setup budget only for an incarnation on Cloudflare Tunnel transport', async () => {
+    const testEnv = env as unknown as Env;
+    const incarnation = { incarnationId: 'incarnation-a' };
+    const node = (transport: string | null) =>
+      ({
+        runtimeIncarnationId: 'incarnation-a', // resuming: the node row's transport decides
+        transport,
+        runtime: 'vm',
+        nodeClass: 'managed',
+      }) as Parameters<typeof attemptDeadlineMs>[1];
+    // 60 s attempt budget + the 20 s default `vmTunnels.provisioningBudgetMs`.
+    expect(await attemptDeadlineMs(testEnv, node('cloudflare-tunnel'), incarnation, 3_000)).toBe(
+      80_000
+    );
+    expect(await attemptDeadlineMs(testEnv, node(null), incarnation, 3_000)).toBe(60_000);
+  });
+
+  it('completes a create slower than the request timeout in its first attempt at the default', async () => {
+    // The default budget is what decides: nothing earlier in this file left a setting behind.
+    expect(await resolveNodeProvisioningAttemptDeadlineMs(env as unknown as Env, 3_000)).toBe(
+      60_000
+    );
+    const f = await setup(false);
+    await holdCreateFor(f, 3500);
+    await vi.waitFor(async () => expect((await f.intent())?.status).toBe('complete'), {
+      timeout: 8000,
+    });
+    const intent = (await f.intent())!;
+    expect(intent.attempts).toBe(1);
+    expect(intent.lastError).toBeNull();
+    expect(f.creates).toHaveLength(1);
+    expect(f.dispatches).toHaveLength(1);
+    expect(await nodeRow(f)).toEqual({
+      provider_instance_id: '9876',
+      status: 'running',
+      backend_dns_record_id: 'durable-dns',
+    });
+  }, 20_000);
+
+  it('at the setting minimum, cuts the attempt after the create, records the VM, and adopts it next attempt with one create', async () => {
+    const warn = vi.spyOn(console, 'warn');
+    const f = await setup(false, false, false, undefined, { attemptDeadlineMs: 5000 });
+    await holdCreateFor(f, 5500);
+    await vi.waitFor(
+      async () => expect((await f.intent())?.lastError).toMatch(/deadline elapsed/),
+      { timeout: 8000 }
+    );
+    // The started create was not cut: its VM identity is on the row, the node is still
+    // `creating` (not `error`, not deleted), and the cut DNS step left no record id.
+    expect(await nodeRow(f)).toEqual({
+      provider_instance_id: '9876',
+      status: 'creating',
+      backend_dns_record_id: null,
+    });
+    expect(
+      await env.DATABASE.prepare('SELECT status,node_id FROM workspaces WHERE id=?')
+        .bind(f.workspaceId)
+        .first()
+    ).toMatchObject({ status: 'creating' });
+    // The next attempt is scheduled one retry interval (30 s) after the cut attempt started.
+    const remaining = (await f.intent())!.nextAttemptAt! - Date.now();
+    expect(remaining).toBeGreaterThan(15_000);
+    expect(remaining).toBeLessThanOrEqual(30_000);
+    // The settings writer refuses values outside 5 s - 180 s and keeps the stored one.
+    for (const value of [4_999, 180_001]) {
+      await expect(
+        updateAdminSettings(f.testEnv, {
+          actorUserId: f.userId,
+          changes: [{ name: 'operations.nodeProvisioningAttemptDeadlineMs', value }],
+        })
+      ).rejects.toThrow();
+    }
+    expect(await resolveNodeProvisioningAttemptDeadlineMs(f.testEnv, 3_000)).toBe(5_000);
+    const nodeId = (await f.intent())!.input.nodeId;
+    expect(attemptLogs(warn)).toContainEqual(
+      expect.objectContaining({
+        nodeId,
+        attempt: 1,
+        error: {
+          name: 'NodeAllocationUncertainError',
+          message: 'Provisioning request deadline elapsed',
+        },
+      })
+    );
+
+    await runInDurableObject(f.stub, async (instance) => {
+      (instance as unknown as { provisioningController: unknown }).provisioningController =
+        undefined;
+    });
+    await f.tick();
+    await vi.waitFor(async () => expect((await f.intent())?.status).toBe('complete'), {
+      timeout: 8000,
+    });
+    expect((await f.intent())!.attempts).toBe(2);
+    expect(f.creates).toHaveLength(1);
+    expect(f.dispatches).toHaveLength(1);
+    expect(await nodeRow(f)).toEqual({
+      provider_instance_id: '9876',
+      status: 'running',
+      backend_dns_record_id: 'durable-dns',
+    });
+  }, 30_000);
+
+  it('logs each failed attempt with the wrapped provider cause and keeps raw provider text out of lastError', async () => {
+    const warn = vi.spyOn(console, 'warn');
+    const f = await setup(true);
+    if ((await f.intent())?.attempts === 0) await f.tick();
+    await vi.waitFor(async () => expect((await f.intent())?.lastError).toMatch(/unresolved/));
+    const intent = (await f.intent())!;
+    // The fake's create throws a TypeError whose text providerFetch embeds in its message.
+    expect(intent.lastError).toBe(
+      'Provider allocation is unresolved; exact resource reconciliation is required (ProviderError (hetzner, no HTTP response))'
+    );
+    expect(intent.lastError).not.toContain('lost successful provider response');
+    expect(attemptLogs(warn)).toContainEqual(
+      expect.objectContaining({
+        nodeId: intent.input.nodeId,
+        error: expect.objectContaining({ name: 'NodeAllocationUncertainError' }),
+        cause: {
+          name: 'ProviderError',
+          providerName: 'hetzner',
+          category: 'unknown',
+        },
+      })
+    );
+  });
+});
+
+describe('durable direct allocation on Cloudflare Tunnel transport', () => {
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  it('resumes the same incarnation after its first attempt is cut mid tunnel setup by the real deadline', async () => {
+    const cf = new FakeCloudflare('durable-account', 'durable-zone');
+    // Real POST /nodes -> NodeLifecycle start -> alarm -> provisionNode. The first attempt's
+    // deadline is the 5 s attempt budget (the setting's minimum, above the 4.5 s per-call timeout
+    // used here) plus a 1 ms tunnel budget. The first tunnel list takes 2.5 s and the create
+    // 2.8 s (each well under the per-call timeout), so the real AbortController fires inside the
+    // create POST (between ~2.5 s and 5.3 s): a lost response that commits later.
+    const f = await setup(false, false, true, cf, {
+      attemptDeadlineMs: 5000,
+      requestTimeoutMs: 4500,
+    });
+    await updateAdminSettings(f.testEnv, {
+      actorUserId: f.userId,
+      changes: [{ name: 'vmTunnels.provisioningBudgetMs', value: 1 }],
+    });
+    f.release();
+    cf.inject('tunnel.list', { kind: 'hook', run: () => sleep(2500) });
+    cf.inject('tunnel.create', { kind: 'hook', run: () => sleep(2800) });
+    if ((await f.intent())?.attempts === 0) await f.tick();
+    await vi.waitFor(
+      async () => expect((await f.intent())?.lastError).toMatch(/deadline elapsed/),
+      { timeout: 8000 }
+    );
+    const nodeId = f.workspaceId;
+    const afterFirst = await env.DATABASE.prepare(
+      `SELECT status, tunnel_id, pending_create_count, last_error FROM node_cloudflare_tunnels
+        WHERE node_id = ?`
+    )
+      .bind(nodeId)
+      .first<{ status: string; last_error: string; pending_create_count: number }>();
+    // Not released: the durable allocation will resume this incarnation (pre-fix this row was
+    // cleanup_pending and every later attempt failed "already being cleaned up").
+    expect(afterFirst).toMatchObject({ status: 'provisioning', pending_create_count: 1 });
+    expect(afterFirst?.last_error).toMatch(/^aborted during tunnel: NodeAllocationUncertainError/);
+    expect((await f.intent())?.providerCreateRequested).toBe(false);
+    expect(f.creates).toHaveLength(0);
+    // Observe the premise instead of assuming it: the cut create commits after the abort.
+    await vi.waitFor(() => expect(cf.liveTunnels()).toHaveLength(1), { timeout: 5000 });
+
+    await runInDurableObject(f.stub, async (instance) => {
+      (instance as unknown as { provisioningController: unknown }).provisioningController =
+        undefined;
+    });
+    await f.tick();
+    await vi.waitFor(async () => expect((await f.intent())?.status).toBe('complete'), {
+      timeout: 8000,
+    });
+    // One paid create (no "second create is forbidden" deadlock), one tunnel (adopted by name).
+    expect(f.creates).toHaveLength(1);
+    expect(cf.callCount('tunnel.create')).toBe(1);
+    expect(cf.liveTunnels()).toHaveLength(1);
+    expect(String(f.creates[0]?.user_data)).toContain('sam-cloudflared');
+    const node = await env.DATABASE.prepare(
+      'SELECT status, transport, tunnel_id, backend_dns_record_id FROM nodes WHERE id = ?'
+    )
+      .bind(nodeId)
+      .first<{ tunnel_id: string }>();
+    expect(node).toMatchObject({
+      status: 'running',
+      transport: 'cloudflare-tunnel',
+      tunnel_id: cf.liveTunnels()[0]!.id,
+      backend_dns_record_id: null,
+    });
+    expect(
+      await env.DATABASE.prepare(
+        'SELECT status, tunnel_id FROM node_cloudflare_tunnels WHERE node_id = ?'
+      )
+        .bind(nodeId)
+        .first()
+    ).toEqual({ status: 'active', tunnel_id: node!.tunnel_id });
+    expect(cf.records()).toMatchObject([
+      { type: 'CNAME', content: `${node!.tunnel_id}.cfargotunnel.com`, proxied: true },
+    ]);
+  });
+});
+
+describe('the durable create record is written only by its own attempt', () => {
+  it('marks and withdraws the record for the current attempt and refuses a superseded one', async () => {
+    const stub = env.NODE_LIFECYCLE.get(
+      env.NODE_LIFECYCLE.idFromName('record-' + crypto.randomUUID())
+    );
+    await runInDurableObject(stub, async (_instance, state) => {
+      const intent = {
+        attempts: 3,
+        status: 'pending',
+        providerCreateRequested: false,
+      } as unknown as DirectProvisioningIntent;
+      await state.storage.put(DIRECT_PROVISIONING_KEY, intent);
+      const controller = new NodeLifecycleProvisioning(state, env as unknown as Env) as unknown as {
+        recordCreateRequested(i: DirectProvisioningIntent, requested: boolean): Promise<void>;
+      };
+      const stored = async () =>
+        (await state.storage.get<DirectProvisioningIntent>(DIRECT_PROVISIONING_KEY))
+          ?.providerCreateRequested;
+
+      await controller.recordCreateRequested(intent, true);
+      expect(await stored()).toBe(true);
+      await controller.recordCreateRequested(intent, false);
+      expect(await stored()).toBe(false);
+
+      // A superseded attempt (a later one has started) can neither mark nor withdraw.
+      await state.storage.put(DIRECT_PROVISIONING_KEY, {
+        ...intent,
+        attempts: 4,
+        providerCreateRequested: true,
+      });
+      await expect(controller.recordCreateRequested(intent, false)).rejects.toThrow(/superseded/);
+      expect(await stored()).toBe(true);
+    });
   });
 });

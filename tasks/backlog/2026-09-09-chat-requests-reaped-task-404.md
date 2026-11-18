@@ -1,5 +1,9 @@
 # Project chat requests a reaped task and logs a 404
 
+> **Reconciliation 2026-10-26:** Still open; `useProvisioningTracker.ts` is unchanged. Pointer
+> fixes: the expand-gated header fetch moved to `SessionHeader.tsx:158` (#2389, #2417, #2431), and
+> `DEFAULT_PROVISIONING_RESTORE_RETRIES = 3` to `pages/project-chat/types.ts:122` (#2426, #2430).
+
 > **Reconciliation 2026-10-12:** still open, and the request pattern changed. #2231 (`1c7f8dd90`)
 > moved the restore-provisioning effect out of `useProjectChatState.ts` into
 > `apps/web/src/pages/project-chat/useProvisioningTracker.ts:147-198`. It is the only page-load

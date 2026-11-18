@@ -17,6 +17,12 @@ never copy an abbreviated SHA from a log. A CI completion filter looks like:
 Replace the example SHA with the current PR's full 40-character head SHA. Bare
 `check_run`, `check_suite`, and `workflow_run` do not match completion events.
 
+Draft pull requests run only the quick CI checks (`.github/workflows/ci.yml`: every
+full-suite job is skipped when `github.event.pull_request.draft` is true). A green
+draft run says nothing about the test suites, and the required `Durable Object
+Workers` check is not reported for it. Mark the PR ready (`gh pr ready <PR>`) to start
+the full run, then wait on that run's head SHA.
+
 ## Owner: check, subscribe, reconcile
 
 1. Read current PR state/head and checks (`gh pr view`, `gh pr checks`); record
@@ -25,7 +31,7 @@ Replace the example SHA with the current PR's full 40-character head SHA. Bare
 2. Subscribe only while relevant checks are pending. Check GitHub again immediately
    after subscribing to catch completion between the first read and registration.
 3. Before yielding, persist PR URL, full SHA, subscription ID/expiry and a concrete
-   fallback deadline chosen for the pending runs. Use `create_project_schedule`
+   fallback deadline chosen for the pending runs. Use `schedules_write` method `create`
    with `action.kind = "message_session"` and your current session ID for one
    bounded reconciliation, independent of the subscription expiry. Confirm creation
    and retain the schedule ID. Scheduling is not proof the recipient executed.

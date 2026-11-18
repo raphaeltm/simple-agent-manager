@@ -103,6 +103,18 @@ func ensureDeploymentNetworkHardening(ctx context.Context, reporter *errorreport
 		return fmt.Errorf("stat firewall setup script: %w", err)
 	}
 
+	// Refresh the persisted rules snapshot BEFORE installing iptables-persistent. Its postinst
+	// restores /etc/iptables/rules.v4 with a full flush of the filter table, and cloud-init saved
+	// that file when the firewall first ran. On images where Docker is installed after that point
+	// (GCP's Ubuntu image, not Hetzner's docker-ce image) the snapshot has no Docker chains, so the
+	// restore deleted DOCKER-FORWARD and every later `docker network create` / compose up failed
+	// (staging, GCP deployment node, 2026-11-11). The setup script is idempotent and ends with
+	// iptables-save, so running it first makes the restore reload the current rules. Rules a
+	// container start adds between this save and the postinst restore would still be lost; this
+	// runs inside EnsureRuntime, before the agent serves releases, so nothing starts in between.
+	if err := runRuntimeCommand(ctx, firewallSetupScriptPath); err != nil {
+		return fmt.Errorf("run firewall setup script (pre-persistence snapshot): %w", err)
+	}
 	if err := ensureFirewallPersistence(ctx); err != nil {
 		err = fmt.Errorf("install iptables-persistent: %w", err)
 		slog.Warn("deploy.runtime: firewall persistence package unavailable; continuing with runtime firewall rules", "error", err)
@@ -113,7 +125,7 @@ func ensureDeploymentNetworkHardening(ctx context.Context, reporter *errorreport
 	}
 
 	if err := runRuntimeCommand(ctx, firewallSetupScriptPath); err != nil {
-		return fmt.Errorf("run firewall setup script: %w", err)
+		return fmt.Errorf("run firewall setup script (post-persistence): %w", err)
 	}
 	config.CloseIdleControlPlaneConnections()
 

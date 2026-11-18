@@ -1,5 +1,9 @@
 # LLM-Powered Task Prioritization
 
+> **Reconciliation 2026-10-26:** Pointer correction only; nothing was built. The task schema is
+> `apps/api/src/db/schema.ts:960` (`tasks`, `priority` at `:997`), not `:283-334`, and
+> `packages/shared/src/types.ts` is now the `packages/shared/src/types/` directory.
+
 > **Reconciliation 2026-10-12:** Pointer correction only; nothing this week touched the scope, and
 > no prioritization code exists. The research doc was deleted by #1174 (`cd4c6e83d`); read it with
 > `git show cd4c6e83d^:docs/notes/2026-03-09-llm-task-prioritization-research.md`. Moved paths:

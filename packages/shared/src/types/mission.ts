@@ -86,7 +86,9 @@ export const MISSION_STATE_ENTRY_TYPES = [
 export type MissionStateEntryType = (typeof MISSION_STATE_ENTRY_TYPES)[number];
 
 export function isMissionStateEntryType(value: unknown): value is MissionStateEntryType {
-  return typeof value === 'string' && (MISSION_STATE_ENTRY_TYPES as readonly string[]).includes(value);
+  return (
+    typeof value === 'string' && (MISSION_STATE_ENTRY_TYPES as readonly string[]).includes(value)
+  );
 }
 
 export interface MissionStateEntry {

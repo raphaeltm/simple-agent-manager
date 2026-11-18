@@ -113,6 +113,17 @@ func (s *Server) removeWorkspaceContainer(workspaceID string) {
 }
 
 func (s *Server) stopSessionHostsForWorkspace(workspaceID string) {
+	s.stopSessionHostsForWorkspaceWith(workspaceID, (*acp.SessionHost).Stop)
+}
+
+// stopSessionHostsForWorkspaceEviction stops a committed eviction's hosts. Their
+// in-flight prompts complete as evicted rather than cancelled: the eviction delivery,
+// not a prompt callback, reports the interrupted work to the control plane.
+func (s *Server) stopSessionHostsForWorkspaceEviction(workspaceID string) {
+	s.stopSessionHostsForWorkspaceWith(workspaceID, (*acp.SessionHost).StopForEviction)
+}
+
+func (s *Server) stopSessionHostsForWorkspaceWith(workspaceID string, stop func(*acp.SessionHost)) {
 	s.cancelSecretExecutionsForOwner(workspaceID, "")
 	prefix := workspaceID + ":"
 
@@ -131,7 +142,7 @@ func (s *Server) stopSessionHostsForWorkspace(workspaceID string) {
 	}
 	s.sessionHostMu.Unlock()
 	for _, host := range hosts {
-		host.Stop()
+		stop(host)
 	}
 
 	// Clean up all persisted MCP servers for this workspace (best-effort).
@@ -365,8 +376,22 @@ func (s *Server) startWorkspaceProvision(
 	successType string,
 	successMessage string,
 	detail map[string]interface{},
+	credentialGenerationRotated bool, // restart/rebuild delivered a new callback generation's token
 ) {
 	go func() {
+		if credentialGenerationRotated {
+			// Before anything else, so no provisioning step or agent keeps running
+			// with the previous generation's revoked credentials. The new callback
+			// token already reached every SessionHost during the claim
+			// (propagateWorkspaceCallbackToken). First exchange the sessions'
+			// sam-mcp tokens (bounded by its own budget) and hand them to the
+			// hosts, then restart each host's running agent process in place so
+			// the replacement starts with both. The hosts stay registered: the
+			// control plane's task-liveness probe fails a task whose agent host
+			// is stopped (task_agent_host_stopped).
+			s.rotateWorkspaceSamMcpTokens(provisionRuntime.ID, provisionRuntime.CallbackToken)
+			s.restartSessionAgentsForWorkspace(provisionRuntime.ID)
+		}
 		s.acquireBuildSlot(provisionRuntime.ID)
 		defer s.releaseBuildSlot(provisionRuntime.ID)
 		go s.notifyWorkspaceBuildStarted(provisionRuntime)
@@ -670,12 +695,34 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A replay only observes an admitted provision; it must not queue behind the
+	// long-running bootstrap that owns lifecycle effects.
+	if !s.config.IsStandaloneMode() {
+		s.workspaceMu.RLock()
+		current := s.workspaces[body.WorkspaceID]
+		active := current != nil && current.ProvisioningActive
+		s.workspaceMu.RUnlock()
+		if active {
+			if err := s.requireNoWorkspaceDeletion(body.WorkspaceID); err != nil {
+				writeError(w, 409, err.Error())
+				return
+			}
+			if s.maybeHandleDuplicateWorkspaceCreate(w, body.WorkspaceID, strings.TrimSpace(body.Repository), createWorkspaceBranch(body.Branch), strings.TrimSpace(body.DevcontainerConfigName), body.Lightweight) {
+				return
+			}
+		}
+	}
+
 	lock := s.workspaceLifecycleLock(body.WorkspaceID)
 	if err := lock.Lock(r.Context()); err != nil {
 		writeError(w, http.StatusRequestTimeout, "workspace lifecycle operation canceled")
 		return
 	}
 	defer lock.Unlock()
+	if err := s.requireNoWorkspaceDeletion(body.WorkspaceID); err != nil {
+		writeError(w, 409, err.Error())
+		return
+	}
 	if !s.requireWorkspaceCreateEvictionState(w, body.WorkspaceID) {
 		return
 	}
@@ -803,6 +850,7 @@ func (s *Server) handleAsyncWorkspaceCreate(
 		"workspace.created",
 		"Workspace runtime created",
 		detail,
+		false,
 	)
 
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{
@@ -918,6 +966,7 @@ func (s *Server) handleRestartWorkspace(w http.ResponseWriter, r *http.Request) 
 		"workspace.restarted",
 		"Workspace restarted",
 		map[string]interface{}{},
+		body.CallbackToken != "",
 	)
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{"status": "creating"})
 }
@@ -952,63 +1001,14 @@ func (s *Server) handleRebuildWorkspace(w http.ResponseWriter, r *http.Request) 
 		"workspace.rebuilt",
 		"Workspace rebuilt with devcontainer",
 		map[string]interface{}{},
+		body.CallbackToken != "",
 	)
 
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{"status": "rebuilding"})
 }
 
 func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
-	workspaceID := r.PathValue("workspaceId")
-	if workspaceID == "" {
-		writeError(w, http.StatusBadRequest, workspaceIDRequiredMessage)
-		return
-	}
-
-	if !s.requireNodeManagementAuth(w, r, workspaceID) {
-		return
-	}
-
-	lock := s.workspaceLifecycleLock(workspaceID)
-	if err := lock.Lock(r.Context()); err != nil {
-		writeError(w, http.StatusRequestTimeout, "workspace lifecycle operation canceled")
-		return
-	}
-	defer lock.Unlock()
-
-	s.stopSessionHostsForWorkspace(workspaceID)
-
-	// Stop port scanner for this workspace.
-	s.stopPortScanner(workspaceID)
-
-	// Shut down per-workspace message reporter and telemetry collectors (final best-effort flush before cleanup).
-	s.shutdownReporter(workspaceID)
-	s.stopResourceHistoryForWorkspace(workspaceID, context.Background())
-
-	// Remove the devcontainer and its Docker volume.
-	// The container must be removed before the volume (Docker won't remove a volume in use).
-	s.removeWorkspaceContainer(workspaceID)
-	bootstrap.RemoveCredentialHelperFromHost(workspaceID)
-	if err := bootstrap.RemoveVolume(context.Background(), workspaceID); err != nil {
-		slog.Warn("Failed to remove Docker volume for workspace", "workspace", workspaceID, "error", err)
-	}
-
-	s.removeWorkspaceRuntime(workspaceID)
-
-	// Remove all persisted tabs and MCP server configs for this workspace
-	if s.store != nil {
-		if err := s.store.DeleteWorkspaceTabs(workspaceID); err != nil {
-			slog.Warn("Failed to delete persisted tabs for workspace", "workspace", workspaceID, "error", err)
-		}
-		if err := s.store.DeleteWorkspaceMcpServers(workspaceID); err != nil {
-			slog.Warn("Failed to delete persisted MCP servers for workspace", "workspace", workspaceID, "error", err)
-		}
-		if err := s.store.DeleteWorkspaceExecutionProtocol(workspaceID); err != nil {
-			slog.Warn("Failed to delete durable execution ledgers for workspace", "workspace", workspaceID, "error", err)
-		}
-	}
-
-	s.appendNodeEvent(workspaceID, "info", "workspace.deleted", "Workspace deleted", nil)
-	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+	s.handleSafeDeleteWorkspace(w, r)
 }
 
 func (s *Server) handleListTabs(w http.ResponseWriter, r *http.Request) {
@@ -1021,10 +1021,8 @@ func (s *Server) handleListTabs(w http.ResponseWriter, r *http.Request) {
 	// Accept both workspace session cookies (browser) and management tokens (control plane).
 	// Also accept workspace JWT token via ?token= query param for first-load scenarios
 	// before a session cookie has been established.
-	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
-		if !s.requireNodeManagementAuth(w, r, workspaceID) {
-			return
-		}
+	if !s.requireWorkspaceOrManagementAuth(w, r, workspaceID) {
+		return
 	}
 
 	if s.store == nil {
@@ -1056,10 +1054,8 @@ func (s *Server) handleListAgentSessions(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// Accept both workspace session cookies (browser) and management tokens (control plane).
-	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
-		if !s.requireNodeManagementAuth(w, r, workspaceID) {
-			return
-		}
+	if !s.requireWorkspaceOrManagementAuth(w, r, workspaceID) {
+		return
 	}
 
 	sessions := s.agentSessions.List(workspaceID)
@@ -1154,6 +1150,11 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 	if _, exists := s.agentSessions.Get(workspaceID, strings.TrimSpace(body.SessionID)); !exists && s.workspaceRestorePendingLocked(workspaceID) {
 		s.sessionHostMu.Unlock()
 		writeError(w, http.StatusConflict, "workspace snapshot restore is in progress")
+		return
+	}
+	if s.requestProjectConflicts(workspaceID, projectID) {
+		s.sessionHostMu.Unlock()
+		writeError(w, http.StatusBadRequest, "projectId does not match the workspace's project")
 		return
 	}
 	session, idempotentHit, err := s.agentSessions.CreateRouted(workspaceID, strings.TrimSpace(body.SessionID), strings.TrimSpace(body.Label), idempotencyKey, projectID, chatSID)
@@ -1335,6 +1336,10 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	startFingerprint := evictionStartFingerprint(body)
+	if s.respondToEvictionOwnedStart(w, workspaceID, sessionID, startFingerprint, body.ProtocolVersion, body.DeliveryID, agentStartDeliveryFingerprint(body.ProtocolVersion, body.MessageID, body.InitialPrompt, body.InjectedInstructions, body.AcpInteractions)) {
+		return
+	}
 	// Always store profile overrides so getOrCreateSessionHost can apply them.
 	// Even empty overrides are stored to distinguish "no profile" from "not set".
 	s.sessionHostMu.Lock()
@@ -1343,10 +1348,16 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusConflict, "workspace session bootstrap is in progress")
 		return
 	}
+	if s.requestProjectConflicts(workspaceID, body.ProjectID) {
+		s.sessionHostMu.Unlock()
+		writeError(w, http.StatusBadRequest, "projectId does not match the workspace's project")
+		return
+	}
 	if s.sessionTaskCtx == nil {
 		s.sessionTaskCtx = make(map[string]taskCallbackContext)
 	}
 	s.sessionProfileOvr[hostKey] = profileOverrides{
+		StartFingerprint: s.sessionProfileOvr[hostKey].StartFingerprint,
 		SettingsResolved: body.SettingsResolved,
 		Model:            body.Model,
 		PermissionMode:   body.PermissionMode,
@@ -1392,6 +1403,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusConflict, "workspace snapshot restore is in progress")
 		return
 	}
+	s.refreshSessionSAMEnv(host, hostKey, workspaceID, session, runtime)
 	s.appendNodeEvent(workspaceID, "info", "agent_session.starting", "Starting agent with initial prompt", map[string]interface{}{
 		"sessionId": sessionID,
 		"agentType": body.AgentType,
@@ -1435,7 +1447,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		host.ConfigureAcpInteractions(body.AcpInteractions)
 		observer := s.promptReceiptObserver(workspaceID, sessionID, body.DeliveryID)
 		go s.startAgentWithPromptObserved(host, workspaceID, sessionID, body.AgentType,
-			body.InitialPrompt, body.InjectedInstructions, body.MessageID, observer)
+			body.InitialPrompt, body.InjectedInstructions, body.MessageID, observer, startFingerprint)
 		writeJSON(w, http.StatusAccepted, versionedPromptResponse{
 			Status: "accepted", SessionID: sessionID, Receipt: receipt,
 		})
@@ -1445,7 +1457,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 	// Start agent and send initial prompt in a background goroutine.
 	// The endpoint returns 202 immediately — the agent runs asynchronously.
 	host.ConfigureAcpInteractions(body.AcpInteractions)
-	go s.startAgentWithPrompt(host, workspaceID, sessionID, body.AgentType, body.InitialPrompt, body.InjectedInstructions)
+	go s.startAgentWithPrompt(host, workspaceID, sessionID, body.AgentType, body.InitialPrompt, body.InjectedInstructions, startFingerprint)
 
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{
 		"status":    "starting",
@@ -1476,11 +1488,11 @@ func buildInitialPromptParamsWithMessageID(initialPrompt, injectedInstructions, 
 
 // startAgentWithPrompt runs SelectAgent and then sends the initial prompt.
 // Called as a goroutine from handleStartAgentSession.
-func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessionID, agentType, initialPrompt, injectedInstructions string) {
-	s.startAgentWithPromptObserved(host, workspaceID, sessionID, agentType, initialPrompt, injectedInstructions, "", nil)
+func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessionID, agentType, initialPrompt, injectedInstructions string, fingerprints ...string) {
+	s.startAgentWithPromptObserved(host, workspaceID, sessionID, agentType, initialPrompt, injectedInstructions, "", nil, fingerprints...)
 }
 
-func (s *Server) startAgentWithPromptObserved(host *acp.SessionHost, workspaceID, sessionID, agentType, initialPrompt, injectedInstructions, messageID string, observer acp.PromptTerminalObserver) {
+func (s *Server) startAgentWithPromptObserved(host *acp.SessionHost, workspaceID, sessionID, agentType, initialPrompt, injectedInstructions, messageID string, observer acp.PromptTerminalObserver, fingerprints ...string) {
 	ctx := context.Background()
 
 	// Idempotency: if the host is already prompting, a prompt is in progress —
@@ -1553,18 +1565,20 @@ func (s *Server) startAgentWithPromptObserved(host *acp.SessionHost, workspaceID
 	// callback fires automatically, reporting task status without publishing repository changes.
 	// trustedSource=true: this is the SAM-built initial task prompt, the only
 	// legitimate origin=system producer (the injected instructions block).
-	if observer == nil {
-		host.HandlePrompt(ctx, syntheticReqID, promptParams, "server", true)
-		return
-	}
 	accepted, ok := host.AcceptPrompt(ctx, syntheticReqID, promptParams, "server", true, "", observer)
 	if !ok {
+		if observer == nil {
+			return
+		}
 		promptErr := errors.New("initial prompt was not accepted by the session host")
 		observer("error", promptErr)
 		if cb := host.OnPromptCompleteCallback(); cb != nil {
 			cb("error", promptErr)
 		}
 		return
+	}
+	if len(fingerprints) > 0 {
+		s.rememberSessionStartFingerprint(workspaceID+":"+sessionID, fingerprints[0])
 	}
 	accepted.Run()
 }
@@ -1585,8 +1599,7 @@ func (s *Server) handleSendPrompt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body sendPromptRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if !decodePromptRequestBody(w, r, &body) {
 		return
 	}
 	body.Prompt = strings.TrimSpace(body.Prompt)
@@ -1928,6 +1941,9 @@ func (s *Server) agentCapabilities() map[string]interface{} {
 			"noWaiterStatus":    "no_waiter",
 			"staleStatus":       "stale_generation",
 		},
+		"steering": steeringCapability(),
+		// Restart/rebuild accept a delivered callbackToken and rotate sam-mcp tokens.
+		"callbackTokenRotation": true,
 		"checkpointRollover": map[string]interface{}{
 			"supported": true,
 			"automatic": false,

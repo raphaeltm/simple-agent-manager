@@ -1,0 +1,27 @@
+{
+  "nodeId": "node-1",
+  "agentType": "claude-code",
+  "credentialReference": "cc_credentials:cred-1",
+  "credentialSource": "user",
+  "credentialGeneration": 2,
+  "observedAt": 1794847000000,
+  "source": "vm-agent.run_usage",
+  "rateLimits": [],
+  "tokenUsage": {
+    "epoch": "host-0123456789abcdef01234567",
+    "models": [
+      {
+        "model": "claude-opus-5-5",
+        "inputTokens": 1200,
+        "outputTokens": 340,
+        "cacheReadTokens": 56000,
+        "cacheWriteTokens": 7800
+      },
+      {
+        "inputTokens": 10,
+        "outputTokens": 2,
+        "reasoningTokens": 12
+      }
+    ]
+  }
+}

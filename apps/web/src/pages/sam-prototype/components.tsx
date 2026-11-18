@@ -171,7 +171,10 @@ const STATUS_CONFIG = {
   idle: { color: '#6b7280', label: 'Idle', glowStyle: {} },
 } as const;
 
-export const ProjectNode: FC<{ project: MockProject; onTap: () => void }> = ({ project, onTap }) => {
+export const ProjectNode: FC<{ project: MockProject; onTap: () => void }> = ({
+  project,
+  onTap,
+}) => {
   const cfg = STATUS_CONFIG[project.status];
   const isActive = project.status === 'active' || project.status === 'attention';
 
@@ -231,7 +234,10 @@ const ToolCallChip: FC<{ name: string; result?: unknown }> = ({ name }) => (
   </div>
 );
 
-export const MessageBubble: FC<{ msg: ChatMessage; agentLabel?: string }> = ({ msg, agentLabel = 'SAM' }) => {
+export const MessageBubble: FC<{ msg: ChatMessage; agentLabel?: string }> = ({
+  msg,
+  agentLabel = 'SAM',
+}) => {
   const isAgent = msg.role === 'agent';
   return (
     <div className={`flex ${isAgent ? 'justify-start' : 'justify-end'} mb-4`}>
@@ -268,11 +274,7 @@ export const MessageBubble: FC<{ msg: ChatMessage; agentLabel?: string }> = ({ m
                 }
           }
         >
-          {isAgent ? (
-            <SamMarkdown content={msg.content} />
-          ) : (
-            <span>{msg.content}</span>
-          )}
+          {isAgent ? <SamMarkdown content={msg.content} /> : <span>{msg.content}</span>}
           {msg.toolCalls && msg.toolCalls.length > 0 && (
             <div className="mt-2 flex flex-wrap">
               {msg.toolCalls.map((tc, i) => (

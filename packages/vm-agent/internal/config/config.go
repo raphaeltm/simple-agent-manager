@@ -39,6 +39,13 @@ const (
 	// disconnect. Override via DEFAULT_RECOVERY_WATCHDOG_TIMEOUT.
 	DefaultACPRecoveryWatchdogTimeout = 2 * time.Minute
 
+	// DefaultACPEvictionParkTimeout bounds how long an eviction may own an agent exit
+	// before the session host falls back to ordinary crash handling. It must exceed the
+	// post-stop window an eviction legitimately holds (docker stop, the final capture
+	// bounded by EVICTION_FINAL_SNAPSHOT_TIMEOUT_SECONDS, recording). Override via
+	// EVICTION_PARK_TIMEOUT.
+	DefaultACPEvictionParkTimeout = 15 * time.Minute
+
 	// DefaultACPRestartDecayWindow is the quiet period after which restartCount
 	// resets. Override via DEFAULT_RESTART_DECAY_WINDOW.
 	DefaultACPRestartDecayWindow = 5 * time.Minute
@@ -153,6 +160,14 @@ const (
 	// DefaultDeployBuildPublishTimeout bounds host build + push + release publish
 	// work. Override via DEPLOY_BUILD_PUBLISH_TIMEOUT.
 	DefaultDeployBuildPublishTimeout = 20 * time.Minute
+	// DEFAULT_BUILD_CONTEXT_MAX_ACTIVE_PER_WORKSPACE bounds source spool use.
+	// Override via BUILD_CONTEXT_MAX_ACTIVE_PER_WORKSPACE; excess probes fail fast.
+	DEFAULT_BUILD_CONTEXT_MAX_ACTIVE_PER_WORKSPACE = 1
+	DefaultBuildContextCallbackMaxAttempts         = 3
+	DefaultBuildContextCallbackRetryDelay          = 5 * time.Second
+	// DefaultDeployPublishHeartbeatInterval proves liveness during silent Docker operations.
+	DefaultDeployPublishHeartbeatInterval = time.Minute
+	DefaultHTTPCallbackTimeout            = 30 * time.Second
 
 	// DefaultWorkspaceBuildQueueDepth preserves the historical single devcontainer
 	// build slot per VM while allowing operators to tune the per-node queue depth.
@@ -184,6 +199,8 @@ type Config struct {
 	Port           int
 	Host           string
 	AllowedOrigins []string
+	// Tunnel is the loopback ingress listener for Cloudflare Tunnel nodes (disabled by default).
+	Tunnel TunnelConfig
 
 	// Control plane settings
 	ControlPlaneURL string
@@ -194,24 +211,31 @@ type Config struct {
 	JWTIssuer   string
 
 	// Workspace settings
-	NodeID             string
-	WorkspaceID        string
-	CallbackToken      string
-	BootstrapToken     string
-	Repository         string
-	Branch             string
-	BaseBranch         string
-	RepoProvider       string
-	CloneURL           string
-	RepositoryHost     string
-	RepositoryPath     string
-	WorkspaceDir       string
-	BootstrapStatePath string
-	BootstrapMaxWait   time.Duration
-	BootstrapTimeout   time.Duration // Overall bootstrap timeout including devcontainer build
+	WorkspaceDeletionTombstoneRetention time.Duration
+	WorkspaceDeletionBatchSize          int
+	WorkspaceDeletionAttemptTimeout     time.Duration
+	WorkspaceDeletionRetryInterval      time.Duration
+	NodeRuntimeIncarnationID            string
+	NodeUserID                          string
+	NodeID                              string
+	WorkspaceID                         string
+	CallbackToken                       string
+	BootstrapToken                      string
+	Repository                          string
+	Branch                              string
+	BaseBranch                          string
+	RepoProvider                        string
+	CloneURL                            string
+	RepositoryHost                      string
+	RepositoryPath                      string
+	WorkspaceDir                        string
+	BootstrapStatePath                  string
+	BootstrapMaxWait                    time.Duration
+	BootstrapTimeout                    time.Duration // Overall bootstrap timeout including devcontainer build
 
 	// VM-agent lifecycle/provisioning settings - configurable per constitution principle XI
 	GracefulShutdownTimeout   time.Duration // Max time to wait for HTTP shutdown after SIGTERM (env: GRACEFUL_SHUTDOWN_TIMEOUT, default: 30s)
+	SelfRestartDelay          time.Duration // Delay before an approved self-restart signals SIGTERM (env: VM_AGENT_SELF_RESTART_DELAY, default: 2s)
 	SystemProvisioningTimeout time.Duration // Max time for workspace host provisioning (env: SYSTEM_PROVISIONING_TIMEOUT, default: 15m)
 	CFIPFetchTimeout          time.Duration // Timeout for Cloudflare IP range fetches during firewall setup (env: CF_IP_FETCH_TIMEOUT, default: 10s)
 	BootLogHTTPTimeout        time.Duration // Timeout for boot-log callbacks (env: BOOT_LOG_HTTP_TIMEOUT, default: 10s)
@@ -278,10 +302,12 @@ type Config struct {
 	ACPPongTimeout                    time.Duration // WebSocket pong deadline after ping (default: 10s)
 	ACPPromptTimeout                  time.Duration // Max prompt runtime; 0 = no timeout (default: 0). Only for unmanaged workspace sessions; task prompts use control-plane liveness and absolute ceilings.
 	ACPPromptCancelGrace              time.Duration // Wait for a cancelled prompt to settle before finishing it cancelled and restarting the agent (default: 5s)
+	ACPSteerTimeout                   time.Duration // Bound on one live-steering request to the agent adapter (default: 20s)
 	ACPPromptRetryMaxRetries          int           // Retryable transient provider prompt errors after initial attempt (default: 2)
 	ACPPromptRetryInitial             time.Duration // Initial backoff for transient provider prompt retries (default: 15s)
 	ACPPromptRetryMax                 time.Duration // Max backoff for transient provider prompt retries (default: 2m)
 	ACPRecoveryWatchdog               time.Duration // Max crash recovery duration before terminal error (default: 2m)
+	ACPEvictionParkTimeout            time.Duration // Max time an eviction owns an agent exit before crash handling resumes (default: 15m)
 	ACPRestartDecayWindow             time.Duration // Quiet period before restartCount decays (default: 5m)
 	ACPIdleSuspendTimeout             time.Duration // Auto-suspend after this idle duration with no viewers (default: 30m, 0=disabled)
 	ACPNotifSerializeTimeout          time.Duration // Max wait for previous notification processing before delivering next (default: 5s)
@@ -359,24 +385,25 @@ type Config struct {
 	MetricsInterval   time.Duration // Resource metrics collection interval (default: 1m)
 
 	// Active resource monitoring settings - configurable per constitution principle XI
-	ResourceEventBufferSize          int           // Bounded pressure event queue capacity (env: DEFAULT_RESOURCE_EVENT_BUFFER_SIZE, default: 64)
-	PSIPollInterval                  time.Duration // PSI memory pressure polling interval (env: DEFAULT_PSI_POLL_INTERVAL_SECONDS, default: 10s)
-	ContainerStatsInterval           time.Duration // Docker stats polling interval (env: DEFAULT_CONTAINER_STATS_INTERVAL_SECONDS, default: 30s)
-	PSIMemorySomeWarningThreshold    float64       // some memory PSI warning threshold (env: DEFAULT_PSI_MEMORY_SOME_WARNING_THRESHOLD, default: 25.0)
-	PSIMemorySomeCriticalThreshold   float64       // some memory PSI critical threshold (env: DEFAULT_PSI_MEMORY_SOME_CRITICAL_THRESHOLD, default: 50.0)
-	PSIMemoryFullWarningThreshold    float64       // full memory PSI warning threshold (env: DEFAULT_PSI_MEMORY_FULL_WARNING_THRESHOLD, default: 10.0)
-	PSIMemoryFullCriticalThreshold   float64       // full memory PSI critical threshold (env: DEFAULT_PSI_MEMORY_FULL_CRITICAL_THRESHOLD, default: 25.0)
-	EvictionDebounceWindow           time.Duration // Duplicate eviction debounce window (env: DEFAULT_EVICTION_DEBOUNCE_SECONDS, default: 30s)
-	EvictionSnapshotTimeout          time.Duration // Pre-stop eviction snapshot deadline (env: DEFAULT_EVICTION_SNAPSHOT_TIMEOUT_SECONDS, default: 120s)
-	EvictionDockerStopTimeout        time.Duration // Graceful docker stop timeout for evictions (env: DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS, default: 10s)
-	EvictionCallbackRetryMaxInterval time.Duration // Durable callback retry backoff cap (env: DEFAULT_EVICTION_CALLBACK_RETRY_MAX_SECONDS, default: 300s)
-	EvictionResolveTimeout           time.Duration // Docker label resolution timeout for evictions (env: DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS, default: 5s)
-	ResourceHistorySampleInterval    time.Duration // Retained per-workspace resource sampling cadence (env: RESOURCE_HISTORY_SAMPLE_INTERVAL, default: 5s)
-	ResourceHistoryChunkInterval     time.Duration // Retained resource chunk duration (env: RESOURCE_HISTORY_CHUNK_INTERVAL, default: 15m)
-	ResourceHistorySpoolDir          string        // Node-local retry spool directory (env: RESOURCE_HISTORY_SPOOL_DIR)
-	ResourceHistorySpoolMaxBytes     int64         // Node-local retry spool size (env: RESOURCE_HISTORY_SPOOL_MAX_BYTES, default: 20MiB)
-	ResourceHistoryUploadTimeout     time.Duration // Upload request timeout (env: RESOURCE_HISTORY_UPLOAD_TIMEOUT, default: 10s)
-	ResourceHistoryMaxSamples        int           // Max samples per chunk (env: RESOURCE_HISTORY_MAX_SAMPLES, default: 4096)
+	ResourceEventBufferSize          int                  // Bounded pressure event queue capacity (env: DEFAULT_RESOURCE_EVENT_BUFFER_SIZE, default: 64)
+	PSIPollInterval                  time.Duration        // PSI memory pressure polling interval (env: DEFAULT_PSI_POLL_INTERVAL_SECONDS, default: 10s)
+	ContainerStatsInterval           time.Duration        // Docker stats polling interval (env: DEFAULT_CONTAINER_STATS_INTERVAL_SECONDS, default: 30s)
+	PSIMemorySomeWarningThreshold    float64              // some memory PSI warning threshold (env: DEFAULT_PSI_MEMORY_SOME_WARNING_THRESHOLD, default: 25.0)
+	PSIMemorySomeCriticalThreshold   float64              // some memory PSI critical threshold (env: DEFAULT_PSI_MEMORY_SOME_CRITICAL_THRESHOLD, default: 50.0)
+	PSIMemoryFullWarningThreshold    float64              // full memory PSI warning threshold (env: DEFAULT_PSI_MEMORY_FULL_WARNING_THRESHOLD, default: 10.0)
+	PSIMemoryFullCriticalThreshold   float64              // full memory PSI critical threshold (env: DEFAULT_PSI_MEMORY_FULL_CRITICAL_THRESHOLD, default: 25.0)
+	EvictionDebounceWindow           time.Duration        // Duplicate eviction debounce window (env: DEFAULT_EVICTION_DEBOUNCE_SECONDS, default: 30s)
+	EvictionSnapshotTimeout          time.Duration        // Pre-stop eviction snapshot deadline (env: DEFAULT_EVICTION_SNAPSHOT_TIMEOUT_SECONDS, default: 120s)
+	EvictionDockerStopTimeout        time.Duration        // Graceful docker stop timeout for evictions (env: DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS, default: 10s)
+	EvictionCallbackRetryMaxInterval time.Duration        // Durable callback retry backoff cap (env: DEFAULT_EVICTION_CALLBACK_RETRY_MAX_SECONDS, default: 300s)
+	EvictionResolveTimeout           time.Duration        // Docker label resolution timeout for evictions (env: DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS, default: 5s)
+	SnapshotHelper                   SnapshotHelperConfig // Stopped-workspace capture helper bounds (resource_monitoring.go)
+	ResourceHistorySampleInterval    time.Duration        // Retained per-workspace resource sampling cadence (env: RESOURCE_HISTORY_SAMPLE_INTERVAL, default: 5s)
+	ResourceHistoryChunkInterval     time.Duration        // Retained resource chunk duration (env: RESOURCE_HISTORY_CHUNK_INTERVAL, default: 15m)
+	ResourceHistorySpoolDir          string               // Node-local retry spool directory (env: RESOURCE_HISTORY_SPOOL_DIR)
+	ResourceHistorySpoolMaxBytes     int64                // Node-local retry spool size (env: RESOURCE_HISTORY_SPOOL_MAX_BYTES, default: 20MiB)
+	ResourceHistoryUploadTimeout     time.Duration        // Upload request timeout (env: RESOURCE_HISTORY_UPLOAD_TIMEOUT, default: 10s)
+	ResourceHistoryMaxSamples        int                  // Max samples per chunk (env: RESOURCE_HISTORY_MAX_SAMPLES, default: 4096)
 
 	// Git integration settings - configurable per constitution principle XI
 	GitTokenTimeout          time.Duration // Total git-token exchange budget (GIT_TOKEN_TIMEOUT)
@@ -418,6 +445,12 @@ type Config struct {
 	WorkspaceCallbackTokenRenewalTimeout      time.Duration
 	WorkspaceCallbackTokenRenewalRetryInitial time.Duration
 	WorkspaceCallbackTokenRenewalRetryMax     time.Duration
+
+	// SAM MCP token rotation after a callback generation rotation (see mcp_token_rotation.go)
+	McpTokenRotationTimeout     time.Duration
+	McpTokenRotationMaxAttempts int
+	McpTokenRotationRetryDelay  time.Duration
+	McpTokenRotationBudget      time.Duration
 
 	// Error reporting settings - configurable per constitution principle XI
 	ErrorReportFlushInterval  time.Duration // Background flush interval (default: 30s)
@@ -494,7 +527,11 @@ type Config struct {
 	DeployArtifactIdleTimeout           time.Duration // Max no-progress body read interval for artifact downloads (env: DEPLOY_ARTIFACT_IDLE_TIMEOUT)
 	DeployApplyIdleTimeout              time.Duration // Max no-progress interval for detached apply goroutines (env: DEPLOY_APPLY_IDLE_TIMEOUT)
 	ComposeOutputRetentionBytes         int64         // Max compose output bytes retained (tail) for apply error messages (env: COMPOSE_OUTPUT_RETENTION_BYTES)
+	DeployPublishHeartbeatInterval      time.Duration // env: DEPLOY_PUBLISH_HEARTBEAT_INTERVAL
 	DeployBuildPublishTimeout           time.Duration // Max host build/push/release publish duration (env: DEPLOY_BUILD_PUBLISH_TIMEOUT)
+	BuildContextMaxActivePerWorkspace   int           // Concurrent context collections (env: BUILD_CONTEXT_MAX_ACTIVE_PER_WORKSPACE)
+	BuildContextCallbackMaxAttempts     int           // Bounded init/complete callback attempts
+	BuildContextCallbackRetryDelay      time.Duration // Cancellable delay between transient callback failures
 	DeployPreflightCommandTimeout       time.Duration // Max deployment preflight diagnostic command duration (env: DEPLOY_PREFLIGHT_COMMAND_TIMEOUT)
 }
 

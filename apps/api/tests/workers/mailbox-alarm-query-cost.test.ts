@@ -1,9 +1,8 @@
+import { computeProjectDataAlarmSectionTimes } from '@simple-agent-manager/project-data/internal/do/alarm-schedule';
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
+import { computeMailboxAlarmTime } from '@simple-agent-manager/project-data/internal/do/mailbox';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-
-import type { ProjectData } from '../../src/durable-objects/project-data';
-import { computeProjectDataAlarmSectionTimes } from '../../src/durable-objects/project-data/alarm-schedule';
-import { computeMailboxAlarmTime } from '../../src/durable-objects/project-data/mailbox';
 
 function probe(real: SqlStorage) {
   const cursors: SqlStorageCursor[] = [];
@@ -38,22 +37,29 @@ describe('mailbox alarm scheduling query cost', () => {
       expect(computeMailboxAlarmTime(sql, pollMs)).toBeNull();
       sql.exec(`INSERT INTO chat_sessions (id, status, message_count, started_at, created_at, updated_at)
         VALUES ('target', 'active', 0, 1000, 1000, 1000)`);
-      const seed = (prefix: string, count: number, deliveryState: string) => sql.exec(
-        `WITH RECURSIVE history(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM history WHERE n < ?)
+      const seed = (prefix: string, count: number, deliveryState: string) =>
+        sql.exec(
+          `WITH RECURSIVE history(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM history WHERE n < ?)
         INSERT INTO session_inbox (id, target_session_id, message_type, content, priority,
           created_at, message_class, delivery_state, sender_type, ack_required)
         SELECT ? || n, 'target', 'deliver', 'retained', 'normal', 1000,
           'deliver', ?, 'system', 0 FROM history`,
-        count, prefix, deliveryState
-      );
+          count,
+          prefix,
+          deliveryState
+        );
       sql.exec(`INSERT INTO acp_sessions (id, chat_session_id, node_id, status, created_at, updated_at)
         VALUES ('fixture-acp', 'target', 'fixture-node', 'running', 1000, 1000)`);
       seed('first-', 1, 'delivered');
       const baseline = probe(sql);
-      expectPolling(() => computeProjectDataAlarmSectionTimes(baseline.sql, {}).mailbox_delivery_sweep);
+      expectPolling(
+        () => computeProjectDataAlarmSectionTimes(baseline.sql, {}).mailbox_delivery_sweep
+      );
       seed('retained-', 12_000, 'delivered');
       const loaded = probe(sql);
-      expectPolling(() => computeProjectDataAlarmSectionTimes(loaded.sql, {}).mailbox_delivery_sweep);
+      expectPolling(
+        () => computeProjectDataAlarmSectionTimes(loaded.sql, {}).mailbox_delivery_sweep
+      );
       expect(loaded.rowsRead()).toBeLessThanOrEqual(baseline.rowsRead() + 10);
       const holder = instance as unknown as { sql: SqlStorage };
       const originalSql = holder.sql;
@@ -73,9 +79,18 @@ describe('mailbox alarm scheduling query cost', () => {
         expectPolling(() => computeMailboxAlarmTime(repeated.sql, pollMs));
       }
       expect(repeated.rowsRead()).toBeLessThanOrEqual(200);
-      console.log(JSON.stringify({ metric: 'mailbox_alarm_rows', baseline: baseline.rowsRead(),
-        loaded: loaded.rowsRead(), heartbeat100: heartbeats.rowsRead(), repeated100: repeated.rowsRead() }));
-      sql.exec("UPDATE session_inbox SET delivery_state = 'acked' WHERE delivery_state = 'delivered'");
+      console.log(
+        JSON.stringify({
+          metric: 'mailbox_alarm_rows',
+          baseline: baseline.rowsRead(),
+          loaded: loaded.rowsRead(),
+          heartbeat100: heartbeats.rowsRead(),
+          repeated100: repeated.rowsRead(),
+        })
+      );
+      sql.exec(
+        "UPDATE session_inbox SET delivery_state = 'acked' WHERE delivery_state = 'delivered'"
+      );
       const terminal = probe(sql);
       expect(computeMailboxAlarmTime(terminal.sql, pollMs)).toBeNull();
       expect(terminal.rowsRead()).toBeLessThan(10);

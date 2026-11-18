@@ -1,5 +1,5 @@
 /** Authenticated trigger execution actions. */
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -11,13 +11,14 @@ import { expectJsonRecord } from '../../lib/runtime-validation';
 import { ulid } from '../../lib/ulid';
 import { getAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
+import { toEmailTriggerConfig } from '../../services/agent-email/trigger-config';
 import {
   buildTriggerActionContext,
   type TriggerActionSourceConfig,
 } from '../../services/trigger-action-context';
 import { admitAndSubmitTriggerExecution } from '../../services/trigger-admission';
 import { renderTemplate } from '../../services/trigger-template';
-import { toWebhookTriggerConfig } from '../../services/webhook-trigger-store';
+import { toWebhookTriggerConfig } from '../../services/webhook-trigger-config-rows';
 import { requireProjectTaskRead, requireProjectTaskWrite } from '../task-project-auth';
 
 const actionRoutes = new Hono<{ Bindings: Env }>();
@@ -38,7 +39,8 @@ async function loadTrigger(
 
 async function loadSourceConfig(
   db: ReturnType<typeof drizzle<typeof schema>>,
-  trigger: schema.TriggerRow
+  trigger: schema.TriggerRow,
+  baseDomain: string
 ): Promise<TriggerActionSourceConfig> {
   if (trigger.sourceType === 'webhook') {
     const row = await db
@@ -47,7 +49,10 @@ async function loadSourceConfig(
       .where(eq(schema.webhookTriggerConfigs.triggerId, trigger.id))
       .get();
     if (!row) throw errors.notFound('Webhook trigger');
-    return { sourceType: 'webhook', config: toWebhookTriggerConfig(row) };
+    return {
+      sourceType: 'webhook',
+      config: toWebhookTriggerConfig(row, { BASE_DOMAIN: baseDomain }),
+    };
   }
   if (trigger.sourceType === 'github') {
     const row = await db
@@ -59,6 +64,15 @@ async function loadSourceConfig(
     return { sourceType: 'github', eventType: row.eventType };
   }
   if (trigger.sourceType === 'cron') return { sourceType: 'cron' };
+  if (trigger.sourceType === 'email') {
+    const row = await db
+      .select()
+      .from(schema.triggerEmailConfigs)
+      .where(eq(schema.triggerEmailConfigs.triggerId, trigger.id))
+      .get();
+    if (!row) throw errors.notFound('Email trigger');
+    return { sourceType: 'email', config: toEmailTriggerConfig(row, baseDomain) };
+  }
   throw errors.conflict('Incident triggers run from the private incident backlog sweep');
 }
 
@@ -75,7 +89,7 @@ actionRoutes.post('/:triggerId/test', async (c) => {
   const context = buildTriggerActionContext({
     trigger,
     project,
-    source: await loadSourceConfig(db, trigger),
+    source: await loadSourceConfig(db, trigger, c.env.BASE_DOMAIN),
     now,
     executionId: ulid(),
     sequenceNumber: trigger.nextExecutionSequence,
@@ -96,12 +110,16 @@ actionRoutes.post('/:triggerId/run', async (c) => {
   if (trigger.sourceType === 'incident') {
     throw errors.conflict('Incident triggers run from the private incident backlog sweep');
   }
+  if (trigger.sourceType === 'email') {
+    // A manual run has no email to answer, so reply_to_email could never work in it.
+    throw errors.conflict('Email triggers run when an email arrives at their address');
+  }
   const input: unknown = await c.req.json().catch(() => ({}));
   const preview =
     input && typeof input === 'object' && !Array.isArray(input)
       ? (input as { payload?: Record<string, unknown>; headers?: Record<string, string> })
       : {};
-  const source = await loadSourceConfig(db, trigger);
+  const source = await loadSourceConfig(db, trigger, c.env.BASE_DOMAIN);
   const now = new Date();
   const admission = await admitAndSubmitTriggerExecution(c.env, {
     trigger,
@@ -156,8 +174,12 @@ actionRoutes.delete('/:triggerId/executions/:executionId', async (c) => {
     )
     .get();
   if (!execution) throw errors.notFound('Trigger execution');
-  if (execution.status === 'running') {
-    throw errors.conflict('Cannot delete an actively running execution');
+  if (
+    execution.status === 'running' ||
+    ['waiting', 'routing'].includes(execution.status) ||
+    (execution.status === 'queued' && execution.queueExpiresAt)
+  ) {
+    throw errors.conflict('Cannot delete a pending or actively running execution');
   }
   await db
     .delete(schema.triggerExecutions)
@@ -184,11 +206,12 @@ actionRoutes.post('/:triggerId/executions/cleanup', async (c) => {
       and(
         eq(schema.triggerExecutions.triggerId, triggerId),
         eq(schema.triggerExecutions.projectId, projectId),
-        eq(schema.triggerExecutions.status, 'queued')
+        eq(schema.triggerExecutions.status, 'queued'),
+        isNull(schema.triggerExecutions.queueExpiresAt)
       )
     );
   if (!stuck.length) return c.json({ cleaned: 0 });
-  await db
+  const updated = await db
     .update(schema.triggerExecutions)
     .set({
       status: 'failed',
@@ -202,10 +225,12 @@ actionRoutes.post('/:triggerId/executions/cleanup', async (c) => {
           stuck.map((execution) => execution.id)
         ),
         eq(schema.triggerExecutions.triggerId, triggerId),
-        eq(schema.triggerExecutions.projectId, projectId)
+        eq(schema.triggerExecutions.projectId, projectId),
+        eq(schema.triggerExecutions.status, 'queued'),
+        isNull(schema.triggerExecutions.queueExpiresAt)
       )
     );
-  return c.json({ cleaned: stuck.length });
+  return c.json({ cleaned: updated.meta.changes });
 });
 
 export { actionRoutes };

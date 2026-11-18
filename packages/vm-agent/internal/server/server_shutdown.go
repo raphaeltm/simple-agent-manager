@@ -10,6 +10,7 @@ func (s *Server) Stop(ctx context.Context) error {
 	s.stopOnce.Do(func() {
 		// Signal background goroutines to stop.
 		close(s.done)
+		s.stopWorkspaceDeletionReconciler()
 		s.cancelAndWaitSessionRestores()
 		s.resourceHistoryStarted.Store(false)
 		s.stopAllResourceHistoryCollectors(ctx)
@@ -70,8 +71,8 @@ func (s *Server) Stop(ctx context.Context) error {
 			}
 		}
 
-		// Shutdown HTTP server
-		stopErr := s.httpServer.Shutdown(ctx)
+		// Shutdown HTTP listeners (main and, when enabled, tunnel).
+		stopErr := s.shutdownListeners(ctx)
 		s.stopErrMu.Lock()
 		s.stopErr = stopErr
 		s.stopErrMu.Unlock()

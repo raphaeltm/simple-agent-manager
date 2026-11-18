@@ -15,6 +15,7 @@ export async function loginWithToken(
     apiUrl?: string;
     appUrl?: string;
     token?: string;
+    waitUntil?: 'networkidle' | 'domcontentloaded';
   }
 ): Promise<Page> {
   const apiUrl = options?.apiUrl || process.env.SMOKE_TEST_API_URL || 'https://api.sammy.party';
@@ -47,9 +48,7 @@ export async function loginWithToken(
   // BetterAuth uses __Secure- prefix when baseURL starts with https://.
   // Match either prefixed or unprefixed cookie name.
   const setCookieHeader = response.headers()['set-cookie'] || '';
-  const cookieMatch = setCookieHeader.match(
-    /(__Secure-)?better-auth\.session_token=([^;]+)/
-  );
+  const cookieMatch = setCookieHeader.match(/(__Secure-)?better-auth\.session_token=([^;]+)/);
 
   if (!cookieMatch) {
     throw new Error(
@@ -86,7 +85,7 @@ export async function loginWithToken(
 
   // Create a page and navigate to the app
   const page = await context.newPage();
-  await page.goto(appUrl, { waitUntil: 'networkidle', timeout: 15_000 });
+  await page.goto(appUrl, { waitUntil: options?.waitUntil ?? 'networkidle', timeout: 15_000 });
 
   return page;
 }

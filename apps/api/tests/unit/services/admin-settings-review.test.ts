@@ -41,14 +41,16 @@ describe('independent admin settings review regressions', () => {
       await updateAdminSettings(env, {
         actorUserId: 'admin',
         expectedRevision: 0,
-        changes: [{ name: 'trials.enabled', value: true }],
+        changes: [{ name: 'operations.stalledTaskClassifierEnabled', value: false }],
       });
       const view = await readAdminSettings(requestEnv, { fresh: true });
       expect(view.revision).toBe(1);
       expect(view.history).toEqual([
-        expect.objectContaining({ revision: 1, name: 'trials.enabled' }),
+        expect.objectContaining({ revision: 1, name: 'operations.stalledTaskClassifierEnabled' }),
       ]);
-      expect(view.settings.find((x) => x.name === 'trials.enabled')?.value).toBe(true);
+      expect(
+        view.settings.find((x) => x.name === 'operations.stalledTaskClassifierEnabled')?.value
+      ).toBe(false);
     } finally {
       stale.sqlite.close();
     }
@@ -176,28 +178,34 @@ describe('independent admin settings review regressions', () => {
       old.close();
     }
   });
-  it('refuses a mixed fresh snapshot when an authoritative write occurs during the read', async () => {
-    const prepare = env.DATABASE.prepare.bind(env.DATABASE);
-    vi.spyOn(env.DATABASE, 'prepare').mockImplementation((sql) => {
-      const statement = prepare(sql);
-      if (sql.includes('FROM admin_settings_audit')) {
-        const all = statement.all.bind(statement);
-        statement.all = async () => {
-          const result = await all();
-          sqlite.exec('UPDATE admin_settings_revision SET revision=revision+1');
-          return result;
-        };
-      }
-      return statement;
-    });
-    await expect(readAdminSettings(env, { fresh: true })).rejects.toThrow(
-      'Admin settings are unavailable'
+  it('returns an atomic view when a writer commits immediately after the read batch', async () => {
+    sqlite.exec(
+      "INSERT INTO platform_settings(key,value,updated_at,updated_by) VALUES ('connector.enabled','false','2026-10-29','writer')"
     );
+    const batch = env.DATABASE.batch.bind(env.DATABASE);
+    vi.spyOn(env.DATABASE, 'batch').mockImplementation(async (statements) => {
+      const snapshot = await batch(statements);
+      sqlite.exec(`
+        UPDATE platform_settings SET value='true' WHERE key='connector.enabled';
+        UPDATE admin_settings_revision SET revision=revision+1;
+        INSERT INTO admin_settings_audit(id,name,action,actor_user_id,created_at,revision) VALUES ('concurrent','connector.enabled','set','writer','2026-10-30',1);
+      `);
+      return snapshot;
+    });
+    const view = await readAdminSettings(env, { fresh: true });
+    expect(view.revision).toBe(0);
+    expect(view.history).toEqual([]);
+    expect(view.settings.find((setting) => setting.name === 'connector.enabled')?.value).toBe(
+      false
+    );
+    expect(sqlite.prepare('SELECT revision FROM admin_settings_revision').get()).toEqual({
+      revision: 1,
+    });
   });
   it('a stale enable never clears an emergency brake', async () => {
     await updateAdminSettings(env, {
       actorUserId: 'admin',
-      changes: [{ name: 'trials.enabled', value: false }],
+      changes: [{ name: 'operations.stalledTaskClassifierEnabled', value: false }],
     });
     await env.KV.put('control-loops:cron-enabled', 'false');
     const put = vi.spyOn(env.KV, 'put');

@@ -6,15 +6,15 @@
  * `databaseSize` after deletes, local limits on forcing exact SQLITE_FULL, and
  * alarm-driven telemetry writes.
  */
-import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it, vi } from 'vitest';
-
-import { runProjectDataGroupedFtsCleanup } from '../../src/durable-objects/project-data/grouped-fts-cleanup';
+import { runProjectDataGroupedFtsCleanup } from '@simple-agent-manager/project-data/internal/do/grouped-fts-cleanup';
 import {
   DEFAULT_PROJECT_DATA_STORAGE_LIMIT_BYTES,
   type ProjectDataStorageStatus,
   resolveStorageSafetyConfig,
-} from '../../src/durable-objects/project-data/storage-safety';
+} from '@simple-agent-manager/project-data/internal/do/storage-safety';
+import { env, runInDurableObject } from 'cloudflare:test';
+import { describe, expect, it, vi } from 'vitest';
+
 import type { Env as WorkerEnv } from '../../src/env';
 import * as projectDataService from '../../src/services/project-data';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
@@ -60,17 +60,18 @@ async function withProjectDataStorageEnv<T>(
 
 async function runProjectDataAlarmWithTimerDeliveryPaused<T extends Record<string, unknown>>(
   stub: DurableObjectStub<ProjectDataTestDouble>,
-  readAfterAlarm: (
-    instance: ProjectDataTestDouble,
-    state: DurableObjectState
-  ) => T | Promise<T>
+  readAfterAlarm: (instance: ProjectDataTestDouble, state: DurableObjectState) => T | Promise<T>
 ): Promise<T & { scheduledAlarm: number | null }> {
   return runInDurableObject(stub, async (instance, state) => {
     await state.storage.deleteAlarm();
     const scheduledAlarms: number[] = [];
-    const setAlarm = vi.spyOn(state.storage, 'setAlarm').mockImplementation(async (scheduledTime) => {
-      scheduledAlarms.push(scheduledTime instanceof Date ? scheduledTime.getTime() : scheduledTime);
-    });
+    const setAlarm = vi
+      .spyOn(state.storage, 'setAlarm')
+      .mockImplementation(async (scheduledTime) => {
+        scheduledAlarms.push(
+          scheduledTime instanceof Date ? scheduledTime.getTime() : scheduledTime
+        );
+      });
     try {
       await instance.alarm();
       return {
@@ -1686,36 +1687,39 @@ describe('ProjectData storage safety firebreak', () => {
       },
       async () => {
         const alarmStartedAt = Date.now();
-        const after = await runProjectDataAlarmWithTimerDeliveryPaused(stub, async (_instance, state) => {
-          const sql = state.storage.sql;
-          const activityRows = sql
-            .exec(
-              `SELECT id
+        const after = await runProjectDataAlarmWithTimerDeliveryPaused(
+          stub,
+          async (_instance, state) => {
+            const sql = state.storage.sql;
+            const activityRows = sql
+              .exec(
+                `SELECT id
                FROM activity_events
                WHERE id IN (?, ?, ?, ?, ?, ?, ?, ?, ?)
                ORDER BY id ASC`,
-              ...seeded.terminalActivityIds,
-              ...seeded.activeActivityIds,
-              ...seeded.sleepingActivityIds
-            )
-            .toArray() as Array<{ id: string }>;
-          const acpRows = sql
-            .exec(
-              `SELECT id
+                ...seeded.terminalActivityIds,
+                ...seeded.activeActivityIds,
+                ...seeded.sleepingActivityIds
+              )
+              .toArray() as Array<{ id: string }>;
+            const acpRows = sql
+              .exec(
+                `SELECT id
                FROM acp_session_events
                WHERE id IN (?, ?, ?, ?, ?, ?)
                ORDER BY id ASC`,
-              ...seeded.terminalAcpEventIds,
-              ...seeded.activeAcpEventIds
-            )
-            .toArray() as Array<{ id: string }>;
-          const messageCount = sql
-            .exec('SELECT COUNT(*) AS count FROM chat_messages')
-            .toArray()[0] as {
-            count: number;
-          };
-          return { activityRows, acpRows, messageCount };
-        });
+                ...seeded.terminalAcpEventIds,
+                ...seeded.activeAcpEventIds
+              )
+              .toArray() as Array<{ id: string }>;
+            const messageCount = sql
+              .exec('SELECT COUNT(*) AS count FROM chat_messages')
+              .toArray()[0] as {
+              count: number;
+            };
+            return { activityRows, acpRows, messageCount };
+          }
+        );
 
         const activityIds = new Set(after.activityRows.map((row) => row.id));
         const acpEventIds = new Set(after.acpRows.map((row) => row.id));
@@ -2108,102 +2112,149 @@ describe('storage safety NOMEM regression', () => {
     const limitBytes = await runInDurableObject(stub, async (instance, state) => {
       for (let i = 0; i < 40; i++) {
         const sessionId = await instance.createSession(null, `Cleanup candidate ${i}`);
-        await instance.persistMessage(sessionId, 'assistant', `retained transcript ${i}`, null, null);
+        await instance.persistMessage(
+          sessionId,
+          'assistant',
+          `retained transcript ${i}`,
+          null,
+          null
+        );
         await instance.stopSession(sessionId);
       }
       state.storage.sql.exec('UPDATE chat_sessions SET updated_at = ?', Date.now() - 8 * 86400000);
-      state.storage.sql.exec("INSERT OR REPLACE INTO do_meta(key, value) VALUES ('storageSafetyLastMeasuredAt', ?)", String(Date.now()));
+      state.storage.sql.exec(
+        "INSERT OR REPLACE INTO do_meta(key, value) VALUES ('storageSafetyLastMeasuredAt', ?)",
+        String(Date.now())
+      );
       await state.storage.deleteAlarm();
       return Math.ceil(state.storage.sql.databaseSize / 0.92);
     });
-    await withProjectDataStorageEnv({
-      ...EVERY_TICK_RUNS_STORAGE_SAFETY,
-      PROJECT_DATA_STORAGE_LIMIT_BYTES: String(limitBytes),
-      PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED: 'true',
-      PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS: '2',
-      PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_ROWS: '10',
-      PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES: '0',
-      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED: 'false',
-      PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED: 'false',
-    }, async () => {
-      const result = await runInDurableObject(stub, async (instance, state) => {
-        const cursors: SqlStorageCursor<Record<string, SqlStorageValue>>[] = [];
-        const exec = state.storage.sql.exec.bind(state.storage.sql);
-        const spy = vi.spyOn(state.storage.sql, 'exec').mockImplementation((query, ...bindings) => {
-          const cursor = exec(query, ...bindings);
-          if (/SELECT/i.test(query) && /chat_messages_grouped\b/.test(query)) cursors.push(cursor);
-          return cursor;
+    await withProjectDataStorageEnv(
+      {
+        ...EVERY_TICK_RUNS_STORAGE_SAFETY,
+        PROJECT_DATA_STORAGE_LIMIT_BYTES: String(limitBytes),
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED: 'true',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS: '2',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_ROWS: '10',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES: '0',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED: 'false',
+        PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED: 'false',
+      },
+      async () => {
+        const result = await runInDurableObject(stub, async (instance, state) => {
+          const cursors: SqlStorageCursor<Record<string, SqlStorageValue>>[] = [];
+          const exec = state.storage.sql.exec.bind(state.storage.sql);
+          const spy = vi
+            .spyOn(state.storage.sql, 'exec')
+            .mockImplementation((query, ...bindings) => {
+              const cursor = exec(query, ...bindings);
+              if (/SELECT/i.test(query) && /chat_messages_grouped\b/.test(query))
+                cursors.push(cursor);
+              return cursor;
+            });
+          try {
+            await instance.alarm();
+          } finally {
+            spy.mockRestore();
+          }
+          const rowsRead = cursors.reduce((sum, cursor) => sum + cursor.rowsRead, 0);
+          return {
+            rowsRead,
+            pruned: exec(
+              "SELECT count(*) n FROM chat_sessions WHERE search_index_state = 'grouped_fts_pruned'"
+            ).one().n,
+            raw: exec('SELECT count(*) n FROM chat_messages').one().n,
+          };
         });
-        try {
-          await instance.alarm();
-        } finally {
-          spy.mockRestore();
-        }
-        const rowsRead = cursors.reduce((sum, cursor) => sum + cursor.rowsRead, 0);
-        return {
-          rowsRead,
-          pruned: exec("SELECT count(*) n FROM chat_sessions WHERE search_index_state = 'grouped_fts_pruned'").one().n,
-          raw: exec('SELECT count(*) n FROM chat_messages').one().n,
-        };
-      });
-      expect(result.pruned).toBe(2);
-      expect(result.raw).toBe(40);
-      // Forty eligible sessions must not cause forty content reads. This fails
-      // for the previous GROUP BY/SUM candidate query despite its LIMIT 3.
-      expect(result.rowsRead).toBeLessThan(20);
-    });
+        expect(result.pruned).toBe(2);
+        expect(result.raw).toBe(40);
+        // Forty eligible sessions must not cause forty content reads. This fails
+        // for the previous GROUP BY/SUM candidate query despite its LIMIT 3.
+        expect(result.rowsRead).toBeLessThan(20);
+      }
+    );
   });
 
-  it.each([false, true])('commits alert dedupe before a failing SQLite transaction and continues (diagnostic write failure=%s)', async (failRecording) => {
-    const projectId = `nomem-isolation-${crypto.randomUUID()}`;
-    await seedProjectGraph(projectId);
-    const stub = getStub(projectId);
-    await stub.ensureProjectId(projectId);
-    const limitBytes = await runInDurableObject(stub, async (instance, state) => {
-      const id = await instance.createSession(null, 'Rollback candidate');
-      await instance.persistMessage(id, 'assistant', 'retained rollback transcript', null, null);
-      await instance.stopSession(id);
-      state.storage.sql.exec('UPDATE chat_sessions SET updated_at = ?', Date.now() - 8 * 86400000);
-      state.storage.sql.exec(
-        "INSERT INTO activity_events(id, event_type, actor_type, session_id, created_at) VALUES ('nomem-event', 'test', 'system', ?, ?)",
-        id, Date.now() - 8 * 86400000
-      );
-      state.storage.sql.exec('CREATE TABLE nomem_rollback_probe (id INTEGER PRIMARY KEY)');
-      state.storage.sql.exec('INSERT INTO nomem_rollback_probe VALUES (1)');
-      await state.storage.deleteAlarm();
-      await state.storage.sync();
-      return Math.ceil(state.storage.sql.databaseSize / 0.92);
-    });
-    await withProjectDataStorageEnv({
-      ...EVERY_TICK_RUNS_STORAGE_SAFETY,
-      PROJECT_DATA_STORAGE_LIMIT_BYTES: String(limitBytes),
-      PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED: 'true',
-      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED: 'false',
-      PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED: 'true',
-    }, async () => {
-      // The fault stays inside the DO realm; writes really roll back through
-      // transactionSync, while SQLITE_NOMEM allocator failure is synthetic.
-      const result = await stub.runAlarmWithGroupedCleanupFailureForTest('candidate', failRecording);
-      expect(result).toEqual({ injected: true, laterCleanup: true, markerCommitted: true, rolledBack: true });
-      expect(await runInDurableObject(stub, async (_instance, state) =>
-        state.storage.sql.exec("SELECT count(*) n FROM activity_events WHERE id = 'nomem-event'").one().n
-      )).toBe(0);
-      const marker = await runInDurableObject(stub, async (_instance, state) =>
-        state.storage.sql.exec("SELECT value FROM do_meta WHERE key = 'storageSafetyLastAlertAt'").toArray()
-      );
-      expect(marker).toHaveLength(1);
-      const firstAlertAt = marker[0]!.value;
-      // Force another measurement, but retain the dedupe marker: no new alert.
-      await runInDurableObject(stub, async (instance, state) => {
-        state.storage.sql.exec("DELETE FROM do_meta WHERE key = 'storageSafetyLastMeasuredAt'");
-        await instance.alarm();
+  it.each([false, true])(
+    'commits alert dedupe before a failing SQLite transaction and continues (diagnostic write failure=%s)',
+    async (failRecording) => {
+      const projectId = `nomem-isolation-${crypto.randomUUID()}`;
+      await seedProjectGraph(projectId);
+      const stub = getStub(projectId);
+      await stub.ensureProjectId(projectId);
+      const limitBytes = await runInDurableObject(stub, async (instance, state) => {
+        const id = await instance.createSession(null, 'Rollback candidate');
+        await instance.persistMessage(id, 'assistant', 'retained rollback transcript', null, null);
+        await instance.stopSession(id);
+        state.storage.sql.exec(
+          'UPDATE chat_sessions SET updated_at = ?',
+          Date.now() - 8 * 86400000
+        );
+        state.storage.sql.exec(
+          "INSERT INTO activity_events(id, event_type, actor_type, session_id, created_at) VALUES ('nomem-event', 'test', 'system', ?, ?)",
+          id,
+          Date.now() - 8 * 86400000
+        );
+        state.storage.sql.exec('CREATE TABLE nomem_rollback_probe (id INTEGER PRIMARY KEY)');
+        state.storage.sql.exec('INSERT INTO nomem_rollback_probe VALUES (1)');
+        await state.storage.deleteAlarm();
+        await state.storage.sync();
+        return Math.ceil(state.storage.sql.databaseSize / 0.92);
       });
-      const after = await runInDurableObject(stub, async (_instance, state) =>
-        state.storage.sql.exec("SELECT value FROM do_meta WHERE key = 'storageSafetyLastAlertAt'").one().value
+      await withProjectDataStorageEnv(
+        {
+          ...EVERY_TICK_RUNS_STORAGE_SAFETY,
+          PROJECT_DATA_STORAGE_LIMIT_BYTES: String(limitBytes),
+          PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED: 'true',
+          PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED: 'false',
+          PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED: 'true',
+        },
+        async () => {
+          // The fault stays inside the DO realm; writes really roll back through
+          // transactionSync, while SQLITE_NOMEM allocator failure is synthetic.
+          const result = await stub.runAlarmWithGroupedCleanupFailureForTest(
+            'candidate',
+            failRecording
+          );
+          expect(result).toEqual({
+            injected: true,
+            laterCleanup: true,
+            markerCommitted: true,
+            rolledBack: true,
+          });
+          expect(
+            await runInDurableObject(
+              stub,
+              async (_instance, state) =>
+                state.storage.sql
+                  .exec("SELECT count(*) n FROM activity_events WHERE id = 'nomem-event'")
+                  .one().n
+            )
+          ).toBe(0);
+          const marker = await runInDurableObject(stub, async (_instance, state) =>
+            state.storage.sql
+              .exec("SELECT value FROM do_meta WHERE key = 'storageSafetyLastAlertAt'")
+              .toArray()
+          );
+          expect(marker).toHaveLength(1);
+          const firstAlertAt = marker[0]!.value;
+          // Force another measurement, but retain the dedupe marker: no new alert.
+          await runInDurableObject(stub, async (instance, state) => {
+            state.storage.sql.exec("DELETE FROM do_meta WHERE key = 'storageSafetyLastMeasuredAt'");
+            await instance.alarm();
+          });
+          const after = await runInDurableObject(
+            stub,
+            async (_instance, state) =>
+              state.storage.sql
+                .exec("SELECT value FROM do_meta WHERE key = 'storageSafetyLastAlertAt'")
+                .one().value
+          );
+          expect(after).toBe(firstAlertAt);
+        }
       );
-      expect(after).toBe(firstAlertAt);
-    });
-  });
+    }
+  );
 });
 
 describe('grouped cleanup atomicity', () => {
@@ -2223,23 +2274,40 @@ describe('grouped cleanup atomicity', () => {
       await state.storage.deleteAlarm();
       return { id, limitBytes: Math.ceil(state.storage.sql.databaseSize / 0.92) };
     });
-    const snapshot = () => runInDurableObject(stub, async (_instance, state) => ({
-      grouped: state.storage.sql.exec('SELECT * FROM chat_messages_grouped ORDER BY id').toArray(),
-      matches: state.storage.sql.exec("SELECT rowid FROM chat_messages_grouped_fts WHERE chat_messages_grouped_fts MATCH 'atomicneedle' ORDER BY rowid").toArray(),
-      session: state.storage.sql.exec('SELECT materialized_at, materialized_through_created_at, materialized_through_sequence, search_index_state FROM chat_sessions WHERE id = ?', seeded.id).one(),
-    }));
+    const snapshot = () =>
+      runInDurableObject(stub, async (_instance, state) => ({
+        grouped: state.storage.sql
+          .exec('SELECT * FROM chat_messages_grouped ORDER BY id')
+          .toArray(),
+        matches: state.storage.sql
+          .exec(
+            "SELECT rowid FROM chat_messages_grouped_fts WHERE chat_messages_grouped_fts MATCH 'atomicneedle' ORDER BY rowid"
+          )
+          .toArray(),
+        session: state.storage.sql
+          .exec(
+            'SELECT materialized_at, materialized_through_created_at, materialized_through_sequence, search_index_state FROM chat_sessions WHERE id = ?',
+            seeded.id
+          )
+          .one(),
+      }));
     const before = await snapshot();
     expect(before.grouped).toHaveLength(2);
     expect(before.matches).toHaveLength(2);
-    await withProjectDataStorageEnv({
-      ...EVERY_TICK_RUNS_STORAGE_SAFETY,
-      PROJECT_DATA_STORAGE_LIMIT_BYTES: String(seeded.limitBytes),
-      PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED: 'true',
-      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED: 'false',
-      PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED: 'false',
-    }, async () => {
-      expect((await stub.runAlarmWithGroupedCleanupFailureForTest('second_delete')).injected).toBe(true);
-    });
+    await withProjectDataStorageEnv(
+      {
+        ...EVERY_TICK_RUNS_STORAGE_SAFETY,
+        PROJECT_DATA_STORAGE_LIMIT_BYTES: String(seeded.limitBytes),
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED: 'true',
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED: 'false',
+        PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED: 'false',
+      },
+      async () => {
+        expect(
+          (await stub.runAlarmWithGroupedCleanupFailureForTest('second_delete')).injected
+        ).toBe(true);
+      }
+    );
     expect(await snapshot()).toEqual(before);
   });
 });
@@ -2259,37 +2327,50 @@ describe('grouped cleanup cursor progress', () => {
       await instance.persistMessage(ids[3]!, 'assistant', 'retained follower', null, null);
       for (const id of ids) await instance.stopSession(id);
       const old = Date.now() - 8 * 86400000;
-      state.storage.sql.exec('UPDATE chat_sessions SET updated_at = ?, materialized_at = ?', old, old);
+      state.storage.sql.exec(
+        'UPDATE chat_sessions SET updated_at = ?, materialized_at = ?',
+        old,
+        old
+      );
       await state.storage.deleteAlarm();
       return Math.ceil(state.storage.sql.databaseSize / 0.92);
     });
-    await withProjectDataStorageEnv({
-      PROJECT_DATA_STORAGE_LIMIT_BYTES: String(limitBytes),
-      PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED: 'true',
-      PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS: '1',
-      PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES: '0',
-    }, async () => {
-      await runInDurableObject(stub, async (instance, state) => {
-        // Manual calls represent successive scheduled pages. Prevent the real
-        // timer from consuming another page between these explicit calls.
-        await state.storage.deleteAlarm();
-        const setAlarm = vi.spyOn(state.storage, 'setAlarm').mockResolvedValue();
-        try {
-          for (let i = 0; i < 4; i++) {
-            state.storage.sql.exec("UPDATE do_meta SET value = '0' WHERE key = 'storageSafetyGroupedFtsCleanupRecheckAt'");
-            const result = await instance.runGroupedFtsCleanup();
-            expect(result?.sessionsExamined).toBe(1);
-            expect(result?.sessionsCleaned).toBe(i === 3 ? 1 : 0);
-            if (i < 3) expect(result?.cursor?.sessionId).toBeTruthy();
-          }
-        } finally {
-          setAlarm.mockRestore();
+    await withProjectDataStorageEnv(
+      {
+        PROJECT_DATA_STORAGE_LIMIT_BYTES: String(limitBytes),
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED: 'true',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS: '1',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES: '0',
+      },
+      async () => {
+        await runInDurableObject(stub, async (instance, state) => {
+          // Manual calls represent successive scheduled pages. Prevent the real
+          // timer from consuming another page between these explicit calls.
           await state.storage.deleteAlarm();
-        }
-      });
-    });
-    expect(await runInDurableObject(stub, async (_instance, state) =>
-      state.storage.sql.exec('SELECT count(*) n FROM chat_messages').one().n
-    )).toBe(1);
+          const setAlarm = vi.spyOn(state.storage, 'setAlarm').mockResolvedValue();
+          try {
+            for (let i = 0; i < 4; i++) {
+              state.storage.sql.exec(
+                "UPDATE do_meta SET value = '0' WHERE key = 'storageSafetyGroupedFtsCleanupRecheckAt'"
+              );
+              const result = await instance.runGroupedFtsCleanup();
+              expect(result?.sessionsExamined).toBe(1);
+              expect(result?.sessionsCleaned).toBe(i === 3 ? 1 : 0);
+              if (i < 3) expect(result?.cursor?.sessionId).toBeTruthy();
+            }
+          } finally {
+            setAlarm.mockRestore();
+            await state.storage.deleteAlarm();
+          }
+        });
+      }
+    );
+    expect(
+      await runInDurableObject(
+        stub,
+        async (_instance, state) =>
+          state.storage.sql.exec('SELECT count(*) n FROM chat_messages').one().n
+      )
+    ).toBe(1);
   });
 });

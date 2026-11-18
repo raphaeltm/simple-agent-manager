@@ -157,25 +157,31 @@ func (h *SessionHost) scheduleProviderUsageProbe() bool {
 	if !ok {
 		return false
 	}
-	var probe func(ctx context.Context) ([]usageLimitPayload, string, bool)
+	var probe func(ctx context.Context) ([]usageLimitPayload, string, *tokenUsagePayload, bool)
 	switch attr.AgentType {
 	case "openai-codex":
 		threadID := h.loadMirroredSessionID()
 		if threadID == "" {
 			return false
 		}
-		probe = func(ctx context.Context) ([]usageLimitPayload, string, bool) {
-			limits, ok := h.probeCodexRolloutRateLimits(ctx, threadID)
-			return limits, sourceCodexRollout, ok
+		probe = func(ctx context.Context) ([]usageLimitPayload, string, *tokenUsagePayload, bool) {
+			tail, ok := h.readCodexRolloutTail(ctx, threadID)
+			if !ok {
+				return nil, sourceCodexRollout, nil, false
+			}
+			limits, _ := parseCodexRolloutRateLimits(tail, h.now().UnixMilli())
+			// The rollout's thread total is already cumulative (Insights slice U).
+			tokens := h.codexRolloutTokenUsage(tail, threadID)
+			return limits, sourceCodexRollout, tokens, len(limits) > 0 || tokens != nil
 		}
 	case "opencode":
 		key := h.loadOpencodeUsageProbeKey()
 		if key == "" {
 			return false
 		}
-		probe = func(ctx context.Context) ([]usageLimitPayload, string, bool) {
+		probe = func(ctx context.Context) ([]usageLimitPayload, string, *tokenUsagePayload, bool) {
 			limits, ok := h.probeOpenCodeGoUsage(ctx, key)
-			return limits, sourceOpenCodeGoUsage, ok
+			return limits, sourceOpenCodeGoUsage, nil, ok
 		}
 	default:
 		return false
@@ -185,19 +191,27 @@ func (h *SessionHost) scheduleProviderUsageProbe() bool {
 	}
 	base := h.lifecycleContext()
 	timeout := h.usageProbeTimeout()
+	// The probe's report is drained by Stop/Suspend like an ACP usage callback,
+	// so the last turn's report is not dropped by a concurrent stop.
+	if !h.beginUsageReportCallback() {
+		h.usageProbeInFlight.Store(false)
+		return false
+	}
 	go func() {
+		defer h.finishUsageReportCallback()
 		defer h.usageProbeInFlight.Store(false)
 		ctx, cancel := context.WithTimeout(base, timeout)
 		defer cancel()
-		limits, source, ok := probe(ctx)
-		if !ok || len(limits) == 0 {
+		limits, source, tokens, ok := probe(ctx)
+		if !ok || (len(limits) == 0 && tokens == nil) {
 			return
 		}
 		request, ok := h.buildUsageReportRequest(attr, true, source, h.now().UnixMilli(), limits)
 		if !ok {
 			return
 		}
-		h.enqueueUsageReport(request)
+		request.payload.TokenUsage = tokens
+		h.enqueueUsageReportFromActiveCallback(request)
 	}()
 	return true
 }
@@ -205,21 +219,11 @@ func (h *SessionHost) scheduleProviderUsageProbe() bool {
 // ─── Codex ───────────────────────────────────────────────────────────────────
 
 func (h *SessionHost) probeCodexRolloutRateLimits(ctx context.Context, threadID string) ([]usageLimitPayload, bool) {
-	if !codexThreadIDPattern.MatchString(threadID) {
-		slog.Debug("usageProbe: codex thread id is not a UUID, skipping rollout read")
+	tail, ok := h.readCodexRolloutTail(ctx, threadID)
+	if !ok {
 		return nil, false
 	}
-	reader := h.codexRolloutReader
-	if reader == nil {
-		reader = h.defaultCodexRolloutTailReader
-	}
-	tail, err := reader(ctx, threadID)
-	if err != nil {
-		slog.Debug("usageProbe: codex rollout read failed", "error", err)
-		return nil, false
-	}
-	now := h.now().UnixMilli()
-	return parseCodexRolloutRateLimits(tail, now)
+	return parseCodexRolloutRateLimits(tail, h.now().UnixMilli())
 }
 
 func (h *SessionHost) defaultCodexRolloutTailReader(ctx context.Context, threadID string) ([]byte, error) {

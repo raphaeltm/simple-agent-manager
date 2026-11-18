@@ -1,13 +1,11 @@
-import { and, eq, exists, gt, gte, isNotNull, isNull, lte, not, notInArray, or } from 'drizzle-orm';
-import { alias } from 'drizzle-orm/sqlite-core';
+import { and, eq, gt, gte, isNotNull, isNull, lt, lte, not, or, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { parsePositiveInt } from '../lib/route-helpers';
 import type { SessionRecoverySourceTaskGuard } from './session-recovery-authority';
+import { reconcileSessionRecoveryBindingFailure } from './session-recovery-binding-failure';
 import {
-  DEFAULT_SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS,
   isRestorableSnapshot,
   type SessionSnapshotRecoveryClaim,
 } from './session-snapshot-artifacts';
@@ -23,125 +21,14 @@ import {
 import {
   archiveMigrationFenceCondition,
   type Db,
+  isLiveWakeTaskStatus,
   restorableSnapshotCondition,
-  TERMINAL_TASK_STATUSES,
+  sessionRecoveryClaimLeaseMs,
 } from './session-snapshot-recovery-conditions';
-
-function sourceTaskGuardCondition(db: Db, guard: SessionRecoverySourceTaskGuard | undefined) {
-  if (!guard) return undefined;
-  const sourceTask = alias(schema.tasks, 'recovery_source_task');
-  const recoveryOwner = alias(schema.tasks, 'recovery_session_owner');
-  const markedSuccessor = alias(schema.tasks, 'recovery_marked_successor');
-  const sourceIsWakeable = or(
-    notInArray(sourceTask.status, TERMINAL_TASK_STATUSES),
-    and(
-      eq(sourceTask.status, 'cancelled'),
-      isNotNull(sourceTask.supersededByTaskId),
-      exists(
-        db
-          .select({ id: markedSuccessor.id })
-          .from(markedSuccessor)
-          .where(
-            and(
-              eq(markedSuccessor.id, sourceTask.supersededByTaskId),
-              eq(markedSuccessor.projectId, guard.projectId),
-              eq(markedSuccessor.chatSessionId, guard.chatSessionId),
-              eq(markedSuccessor.triggeredBy, 'session-recovery'),
-              notInArray(markedSuccessor.status, TERMINAL_TASK_STATUSES)
-            )
-          )
-      )
-    )
-  );
-  return exists(
-    db
-      .select({ id: sourceTask.id })
-      .from(sourceTask)
-      .where(
-        and(
-          eq(sourceTask.id, guard.taskId),
-          eq(sourceTask.projectId, guard.projectId),
-          sourceIsWakeable,
-          or(
-            eq(sourceTask.chatSessionId, guard.chatSessionId),
-            exists(
-              db
-                .select({ id: recoveryOwner.id })
-                .from(recoveryOwner)
-                .where(
-                  and(
-                    eq(recoveryOwner.recoverySourceTaskId, sourceTask.id),
-                    eq(recoveryOwner.projectId, guard.projectId),
-                    eq(recoveryOwner.chatSessionId, guard.chatSessionId),
-                    eq(recoveryOwner.triggeredBy, 'session-recovery'),
-                    notInArray(recoveryOwner.status, TERMINAL_TASK_STATUSES)
-                  )
-                )
-            )
-          )
-        )
-      )
-  );
-}
-
-async function sourceTaskGuardIsValid(
-  db: Db,
-  guard: SessionRecoverySourceTaskGuard | undefined
-): Promise<boolean> {
-  if (!guard) return true;
-  const recoveryOwner = alias(schema.tasks, 'recovery_session_owner');
-  const markedSuccessor = alias(schema.tasks, 'recovery_marked_successor');
-  const sourceIsWakeable = or(
-    notInArray(schema.tasks.status, TERMINAL_TASK_STATUSES),
-    and(
-      eq(schema.tasks.status, 'cancelled'),
-      isNotNull(schema.tasks.supersededByTaskId),
-      exists(
-        db
-          .select({ id: markedSuccessor.id })
-          .from(markedSuccessor)
-          .where(
-            and(
-              eq(markedSuccessor.id, schema.tasks.supersededByTaskId),
-              eq(markedSuccessor.projectId, guard.projectId),
-              eq(markedSuccessor.chatSessionId, guard.chatSessionId),
-              eq(markedSuccessor.triggeredBy, 'session-recovery'),
-              notInArray(markedSuccessor.status, TERMINAL_TASK_STATUSES)
-            )
-          )
-      )
-    )
-  );
-  const row = await db
-    .select({ id: schema.tasks.id })
-    .from(schema.tasks)
-    .where(
-      and(
-        eq(schema.tasks.id, guard.taskId),
-        eq(schema.tasks.projectId, guard.projectId),
-        sourceIsWakeable,
-        or(
-          eq(schema.tasks.chatSessionId, guard.chatSessionId),
-          exists(
-            db
-              .select({ id: recoveryOwner.id })
-              .from(recoveryOwner)
-              .where(
-                and(
-                  eq(recoveryOwner.recoverySourceTaskId, guard.taskId),
-                  eq(recoveryOwner.projectId, guard.projectId),
-                  eq(recoveryOwner.chatSessionId, guard.chatSessionId),
-                  eq(recoveryOwner.triggeredBy, 'session-recovery'),
-                  notInArray(recoveryOwner.status, TERMINAL_TASK_STATUSES)
-                )
-              )
-          )
-        )
-      )
-    )
-    .get();
-  return Boolean(row);
-}
+import {
+  sourceTaskGuardCondition,
+  sourceTaskGuardIsValid,
+} from './session-snapshot-recovery-source-guard';
 
 async function archiveMigrationFenceIsClear(db: Db, chatSessionId: string): Promise<boolean> {
   const row = await db
@@ -156,13 +43,6 @@ async function archiveMigrationFenceIsClear(db: Db, chatSessionId: string): Prom
     .limit(1)
     .get();
   return !row;
-}
-
-function sessionRecoveryClaimLeaseMs(env: Env): number {
-  return parsePositiveInt(
-    env.SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS,
-    DEFAULT_SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS
-  );
 }
 
 /** The in-memory half, for diagnosing why a claim was refused. */
@@ -182,23 +62,48 @@ function budgetAvailable(
   });
 }
 
-export async function claimSessionSnapshotRecovery(
+type SessionSnapshotRecoveryClaimInput = {
+  chatSessionId: string;
+  userId: string;
+  taskId: string;
+  recoveryAttemptId?: string;
+  now?: Date;
+  sourceTaskGuard?: SessionRecoverySourceTaskGuard;
+  /** Automatic eviction callbacks and cron retries share one non-decaying budget. */
+  automaticEvictionRecovery?: boolean;
+};
+
+export function claimSessionSnapshotRecovery(
   db: Db,
   env: Env,
-  input: {
-    chatSessionId: string;
-    userId: string;
-    taskId: string;
-    recoveryAttemptId?: string;
-    now?: Date;
-    sourceTaskGuard?: SessionRecoverySourceTaskGuard;
-  }
+  input: SessionSnapshotRecoveryClaimInput
+): Promise<SessionSnapshotRecoveryClaim> {
+  return claimOnce(db, env, input, true);
+}
+
+async function claimOnce(
+  db: Db,
+  env: Env,
+  input: SessionSnapshotRecoveryClaimInput,
+  mayRetry: boolean
 ): Promise<SessionSnapshotRecoveryClaim> {
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
   const maxAttempts = sessionRecoveryMaxAttempts(env);
   const decayMs = sessionRecoveryAttemptDecayMs(env);
   const decayCutoff = sessionRecoveryDecayCutoffIso(env, now.getTime());
+  const nonDecaying =
+    input.automaticEvictionRecovery || Boolean(input.sourceTaskGuard?.evictionRecoveryRetry);
+  const claimBudgetCondition = nonDecaying
+    ? lt(schema.sessionSnapshots.recoveryAttempts, maxAttempts)
+    : sessionRecoveryBudgetCondition(maxAttempts, decayCutoff);
+  const claimBudgetAvailable = (snapshot: {
+    recoveryAttempts: number;
+    recoveryFailedAt: string | null;
+  }) =>
+    nonDecaying
+      ? snapshot.recoveryAttempts < maxAttempts
+      : budgetAvailable(snapshot, maxAttempts, decayMs, now.getTime());
   // Read before the claim clears the anchor, so the warn below can describe the
   // burst that just decayed. Scoped to the same session+user as the claim.
   const priorBurstSpent = await db
@@ -227,7 +132,9 @@ export async function claimSessionSnapshotRecovery(
       // continuing the spent one, so the cap still bounds `maxAttempts` failures
       // per window. `recovery_failed_at` is cleared in the same statement: leaving
       // it would make every later claim look decayed and remove the cap entirely.
-      recoveryAttempts: sessionRecoveryAttemptsAfterClaim(decayCutoff),
+      recoveryAttempts: nonDecaying
+        ? sql`${schema.sessionSnapshots.recoveryAttempts} + 1`
+        : sessionRecoveryAttemptsAfterClaim(decayCutoff),
       recoveryError: null,
       recoveryFailedAt: null,
       recoveryClaimedAt: nowIso,
@@ -240,7 +147,7 @@ export async function claimSessionSnapshotRecovery(
         restorableSnapshotCondition(),
         isNotNull(schema.sessionSnapshots.sleepingAt),
         gt(schema.sessionSnapshots.expiresAt, now.toISOString()),
-        sessionRecoveryBudgetCondition(maxAttempts, decayCutoff),
+        claimBudgetCondition,
         or(
           isNull(schema.sessionSnapshots.recoveryStatus),
           eq(schema.sessionSnapshots.recoveryStatus, 'failed')
@@ -255,7 +162,7 @@ export async function claimSessionSnapshotRecovery(
     // but a session doing it repeatedly is burning real provisioning attempts
     // on something that may never restore, and nothing else surfaces it
     // (`.claude/rules/47` operator visibility).
-    if (priorBurstSpent) {
+    if (priorBurstSpent && !nonDecaying) {
       log.warn('session_recovery.attempt_budget_burst_restarted', {
         chatSessionId: input.chatSessionId,
         taskId: input.taskId,
@@ -275,6 +182,7 @@ export async function claimSessionSnapshotRecovery(
       expiresAt: schema.sessionSnapshots.expiresAt,
       recoveryStatus: schema.sessionSnapshots.recoveryStatus,
       recoveryTaskId: schema.sessionSnapshots.recoveryTaskId,
+      recoveryAttemptId: schema.sessionSnapshots.recoveryAttemptId,
       recoveryAttempts: schema.sessionSnapshots.recoveryAttempts,
       recoveryFailedAt: schema.sessionSnapshots.recoveryFailedAt,
       recoveryClaimedAt: schema.sessionSnapshots.recoveryClaimedAt,
@@ -300,10 +208,7 @@ export async function claimSessionSnapshotRecovery(
       .from(schema.tasks)
       .where(eq(schema.tasks.id, snapshot.recoveryTaskId))
       .get();
-    if (
-      recoveryTask &&
-      ['queued', 'delegated', 'in_progress', 'awaiting_followup'].includes(recoveryTask.status)
-    ) {
+    if (recoveryTask && isLiveWakeTaskStatus(recoveryTask.status)) {
       await db
         .update(schema.sessionSnapshots)
         .set({ recoveryClaimedAt: nowIso, updatedAt: nowIso })
@@ -311,18 +216,38 @@ export async function claimSessionSnapshotRecovery(
           and(
             eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId),
             eq(schema.sessionSnapshots.recoveryStatus, 'waking'),
-            eq(schema.sessionSnapshots.recoveryTaskId, snapshot.recoveryTaskId)
+            eq(schema.sessionSnapshots.recoveryTaskId, snapshot.recoveryTaskId),
+            sourceTaskGuardCondition(db, input.sourceTaskGuard)
           )
         );
       return { status: 'waking', taskId: snapshot.recoveryTaskId };
     }
-    if (budgetAvailable(snapshot, maxAttempts, decayMs, now.getTime())) {
+    // Reconstruct only for ordinary continuation. Automated source-guarded wakes
+    // retain their existing authority path and never mutate this missing anchor.
+    if (
+      !input.sourceTaskGuard &&
+      recoveryTask?.status === 'sleeping' &&
+      snapshot.recoveryAttemptId &&
+      !snapshot.recoveryFailedAt
+    ) {
+      snapshot.recoveryFailedAt = await reconcileSessionRecoveryBindingFailure(env.DATABASE, {
+        chatSessionId: input.chatSessionId,
+        userId: input.userId,
+        taskId: snapshot.recoveryTaskId,
+        recoveryAttemptId: snapshot.recoveryAttemptId,
+        staleBefore,
+        now: nowIso,
+      });
+    }
+    if (claimBudgetAvailable(snapshot)) {
       const reclaimed = await db
         .update(schema.sessionSnapshots)
         .set({
           recoveryTaskId: input.taskId,
           recoveryAttemptId: input.recoveryAttemptId ?? null,
-          recoveryAttempts: sessionRecoveryAttemptsAfterClaim(decayCutoff),
+          recoveryAttempts: nonDecaying
+            ? sql`${schema.sessionSnapshots.recoveryAttempts} + 1`
+            : sessionRecoveryAttemptsAfterClaim(decayCutoff),
           recoveryClaimedAt: nowIso,
           recoveryError: null,
           recoveryFailedAt: null,
@@ -337,7 +262,7 @@ export async function claimSessionSnapshotRecovery(
               isNull(schema.sessionSnapshots.recoveryClaimedAt),
               lte(schema.sessionSnapshots.recoveryClaimedAt, staleBefore)
             ),
-            sessionRecoveryBudgetCondition(maxAttempts, decayCutoff),
+            claimBudgetCondition,
             archiveMigrationFenceCondition(db, input.chatSessionId),
             sourceTaskGuardCondition(db, input.sourceTaskGuard)
           )
@@ -346,27 +271,39 @@ export async function claimSessionSnapshotRecovery(
         return { status: 'claimed', taskId: input.taskId };
       }
       const winner = await db
-        .select({ taskId: schema.sessionSnapshots.recoveryTaskId })
+        .select({
+          taskId: schema.sessionSnapshots.recoveryTaskId,
+          recoveryStatus: schema.sessionSnapshots.recoveryStatus,
+        })
         .from(schema.sessionSnapshots)
         .where(eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId))
         .get();
-      if (winner?.taskId) return { status: 'waking', taskId: winner.taskId };
+      if (winner?.recoveryStatus === 'waking' && winner.taskId) {
+        return { status: 'waking', taskId: winner.taskId };
+      }
+      // The dead-wake sweep (`scheduled/session-wake-claim-reconciliation.ts`) ended the
+      // stale claim between our read and our re-claim. The row is claimable again, so
+      // reporting `waking` would point the caller at a dead task. Claim once more.
+      if (mayRetry) return claimOnce(db, env, input, false);
     }
   }
-  const reason = !snapshot
-    ? 'snapshot_missing'
-    : Date.parse(snapshot.expiresAt) <= now.getTime()
-      ? 'snapshot_expired'
-      : !isRestorableSnapshot(snapshot.status, snapshot.degradation)
-        ? 'snapshot_not_complete'
-        : !budgetAvailable(snapshot, maxAttempts, decayMs, now.getTime())
-          ? 'recovery_attempts_exhausted'
-          : !(await archiveMigrationFenceIsClear(db, input.chatSessionId))
-            ? 'archive_migration_fenced'
-            : !(await sourceTaskGuardIsValid(db, input.sourceTaskGuard))
-              ? 'source_task_not_wakeable'
-              : 'snapshot_not_wakeable';
-  return { status: 'unavailable', reason };
+  if (!snapshot) return { status: 'unavailable', reason: 'snapshot_missing' };
+  if (Date.parse(snapshot.expiresAt) <= now.getTime()) {
+    return { status: 'unavailable', reason: 'snapshot_expired' };
+  }
+  if (!isRestorableSnapshot(snapshot.status, snapshot.degradation)) {
+    return { status: 'unavailable', reason: 'snapshot_not_complete' };
+  }
+  if (!claimBudgetAvailable(snapshot)) {
+    return { status: 'unavailable', reason: 'recovery_attempts_exhausted' };
+  }
+  if (!(await archiveMigrationFenceIsClear(db, input.chatSessionId))) {
+    return { status: 'unavailable', reason: 'archive_migration_fenced' };
+  }
+  if (!(await sourceTaskGuardIsValid(db, input.sourceTaskGuard))) {
+    return { status: 'unavailable', reason: 'source_task_not_wakeable' };
+  }
+  return { status: 'unavailable', reason: 'snapshot_not_wakeable' };
 }
 
 export async function hasRestorableSleepingSessionSnapshot(
@@ -421,6 +358,8 @@ export async function hasAuthorizedRestorableSnapshotWakeClaim(
     workspaceId: string;
     taskId: string;
     recoveryAttemptId?: string | null;
+    /** VM-only replay after the exact restore committed but activation did not. */
+    allowRestored?: boolean;
     now?: Date;
   }
 ): Promise<boolean> {
@@ -449,8 +388,9 @@ export async function hasAuthorizedRestorableSnapshotWakeClaim(
           AND recovery.chat_session_id = snapshot.chat_session_id
           AND replacement.chat_session_id = snapshot.chat_session_id
           AND snapshot.recovery_status IN ('waking', 'restored')
-          AND snapshot.sleeping_at IS NOT NULL
-          AND snapshot.sleep_status = 'sleeping'
+          AND ((snapshot.sleeping_at IS NOT NULL AND snapshot.sleep_status = 'sleeping')
+            OR (? = 1 AND snapshot.runtime = 'vm' AND snapshot.recovery_status = 'restored'
+              AND snapshot.sleeping_at IS NULL AND snapshot.sleep_status IS NULL))
           AND snapshot.expires_at > ? AND julianday(snapshot.expires_at) IS NOT NULL
           AND (
             (snapshot.status = 'available' AND snapshot.degradation = 'none')
@@ -471,6 +411,7 @@ export async function hasAuthorizedRestorableSnapshotWakeClaim(
       input.taskId,
       input.recoveryAttemptId ?? null,
       input.recoveryAttemptId ?? null,
+      input.allowRestored && input.recoveryAttemptId ? 1 : 0,
       now.toISOString()
     )
     .first<{ found: number }>();

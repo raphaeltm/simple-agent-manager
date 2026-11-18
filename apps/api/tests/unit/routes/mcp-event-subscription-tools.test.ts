@@ -290,3 +290,39 @@ describe('MCP ProjectData event subscription tools', () => {
     });
   });
 });
+
+describe('create_project_event_subscription advertises the steering default', () => {
+  it('does not require requestedDelivery, and the handler leaves an omitted or null value to the service default', async () => {
+    const { PROJECT_EVENT_SUBSCRIPTION_TOOLS } =
+      await import('../../../src/routes/mcp/tool-definitions-event-subscription-tools');
+    const create = PROJECT_EVENT_SUBSCRIPTION_TOOLS.find(
+      (tool) => tool.name === 'create_project_event_subscription'
+    )!;
+    expect(create.inputSchema.required).toEqual(['idempotencyKey', 'filter']);
+    expect(create.inputSchema.properties.requestedDelivery.description).toMatch(
+      /^Requested delivery policy\. Defaults to runtime_steer/
+    );
+
+    serviceMocks.createProjectEventSubscriptionForCaller.mockResolvedValue({
+      subscription: {},
+      idempotent: false,
+      changed: true,
+      callerKind: 'agent',
+      wakeInstructions: null,
+    });
+    const filter = { version: 1, source: 'github', subjectType: 'pull_request', subjectId: '42' };
+    for (const requestedDelivery of [undefined, null]) {
+      serviceMocks.createProjectEventSubscriptionForCaller.mockClear();
+      await handleCreateProjectEventSubscription(
+        1,
+        { idempotencyKey: 'k', filter, requestedDelivery },
+        makeToken(),
+        {} as Env
+      );
+      expect(serviceMocks.createProjectEventSubscriptionForCaller).toHaveBeenCalledTimes(1);
+      expect(
+        serviceMocks.createProjectEventSubscriptionForCaller.mock.calls[0]![2].requestedDelivery
+      ).toBeUndefined();
+    }
+  });
+});

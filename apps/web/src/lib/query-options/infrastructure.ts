@@ -1,6 +1,7 @@
 import { queryOptions } from '@tanstack/react-query';
 
 import {
+  getNodeResourceUsage,
   getProviderCatalog,
   listNodes,
   listWorkspacePorts,
@@ -36,7 +37,7 @@ function workspacePortTokenCacheMarker(token: string): string {
  *
  * The node and workspace lists were already on TanStack Query, but with **unscoped**
  * keys (`['nodes','list']`, `['workspaces','list',status]`) declared inline in
- * `pages/Nodes.tsx` and `pages/Workspaces.tsx` — with `Nodes.tsx` importing
+ * `pages/Nodes.tsx` and the since-removed `pages/Workspaces.tsx` — with `Nodes.tsx` importing
  * `workspacesKeys` across a page boundary. Relocating both here scopes them to the
  * authenticated identity and removes the page-to-page coupling.
  *
@@ -58,6 +59,8 @@ function workspacePortTokenCacheMarker(token: string): string {
 export const nodeQueryKeys = {
   all: (queryScope: string) => ['auth', queryScope, 'nodes'] as const,
   list: (queryScope: string) => [...nodeQueryKeys.all(queryScope), 'list'] as const,
+  resourceUsage: (queryScope: string) =>
+    [...nodeQueryKeys.all(queryScope), 'resource-usage'] as const,
   catalog: (queryScope: string, options?: ProviderCatalogRequestOptions) =>
     [
       ...nodeQueryKeys.all(queryScope),
@@ -77,13 +80,25 @@ export const workspaceQueryKeys = {
     workspaceId: string,
     workspaceUrl: string,
     tokenCacheMarker: string
-  ) => [...workspaceQueryKeys.ports(queryScope), workspaceId, { workspaceUrl, tokenCacheMarker }] as const,
+  ) =>
+    [
+      ...workspaceQueryKeys.ports(queryScope),
+      workspaceId,
+      { workspaceUrl, tokenCacheMarker },
+    ] as const,
 };
 
 export function nodeListQueryOptions(queryScope: string) {
   return queryOptions({
     queryKey: nodeQueryKeys.list(queryScope),
     queryFn: listNodes,
+  });
+}
+
+export function nodeResourceUsageQueryOptions(queryScope: string) {
+  return queryOptions({
+    queryKey: nodeQueryKeys.resourceUsage(queryScope),
+    queryFn: getNodeResourceUsage,
   });
 }
 

@@ -24,7 +24,7 @@ This is a Simple Agent Manager platform deployed on Cloudflare:
 **Key Files**:
 - `apps/api/wrangler.toml` - Workers configuration
 - `apps/api/src/auth.ts` - BetterAuth + Cloudflare integration
-- `apps/api/src/db/schema.ts` - Drizzle schema for D1
+- `packages/worker-core/src/schema.ts` - Drizzle schema for D1
 
 ## When Invoked
 
@@ -70,7 +70,7 @@ database_id = "staging-uuid"
 ### 2. D1 Database Patterns
 
 **Files to Review**:
-- `apps/api/src/db/schema.ts`
+- `packages/worker-core/src/schema.ts`
 - `apps/api/drizzle/` (migrations)
 
 **Checklist**:

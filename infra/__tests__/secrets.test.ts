@@ -8,7 +8,7 @@ describe('Security Key Resources', () => {
     secretsModule = await import('../resources/secrets');
   });
 
-  it('protects 32-byte random secrets for encryption, trial claims, and deploy signing', () => {
+  it('protects 32-byte random secrets for encryption, the retired trial claims, and deploy signing', () => {
     const encryptionKey = findRegisteredResource(
       'encryption-key',
       'random:index/randomId:RandomId'
@@ -76,10 +76,13 @@ describe('Security Key Resources', () => {
     await expect(getSecretStatus(secretsModule.encryptionKey)).resolves.toBe(true);
     await expect(getSecretStatus(secretsModule.jwtPrivateKey)).resolves.toBe(true);
     await expect(getSecretStatus(secretsModule.jwtPublicKey)).resolves.toBe(true);
-    await expect(getSecretStatus(secretsModule.trialClaimTokenSecret)).resolves.toBe(true);
     await expect(getSecretStatus(secretsModule.deploySigningPrivateKey)).resolves.toBe(true);
     await expect(getSecretStatus(secretsModule.previewSigningKey)).resolves.toBe(true);
     await expect(getSecretStatus(secretsModule.vapidPrivateKeyPem)).resolves.toBe(true);
+  });
+
+  it('no longer exports the retired trial claim secret', () => {
+    expect(secretsModule).not.toHaveProperty('trialClaimTokenSecret');
   });
 
   it('exports a 32-byte Ed25519 seed for deploy signing', async () => {

@@ -196,6 +196,31 @@
   }
 }
 
+/* Chat notice stage track: a sheen sweeping across the stage in progress */
+.sam-stage-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.55), transparent) no-repeat;
+  background-size: 50% 100%;
+  animation: sam-stage-shimmer 1.6s ease-in-out infinite;
+}
+@keyframes sam-stage-shimmer {
+  from {
+    background-position: -120% 0;
+  }
+  to {
+    background-position: 220% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sam-stage-shimmer::after {
+    animation: none;
+    opacity: 0;
+  }
+}
+
 /* GlobalAudioPlayer — full-width seek bar styled as a thin progress bar */
 .sam-player-seek {
   -webkit-appearance: none;

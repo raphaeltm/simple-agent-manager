@@ -1,3 +1,8 @@
+import {
+  evaluateWorkspaceReservationCapacity,
+  type PlacementAdmissionPolicy,
+  resolveWorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPlacementSnapshot,
   ResolvedResourceReservation,
@@ -6,12 +11,15 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
+import { isNodePastLifetimeAdmissionCutoff } from '../../../src/services/node-lifetime-admission';
 import {
   attachPrecreatedWorkspacePlacement,
-  reserveEvictedWorkspaceRestart,
   reserveWorkspacePlacement,
+  reserveWorkspaceRestart,
 } from '../../../src/services/workspace-placement';
-import type { WorkspaceAdmissionPolicy } from '../../../src/services/workspace-resource-capacity';
+import {
+  loadActiveWorkspaceReservationUsage,
+} from '../../../src/services/workspace-reservation-usage';
 import {
   createAllSchemaTables,
   createSqliteD1,
@@ -103,6 +111,11 @@ function seedAuthority(): void {
 
 function seedNode(overrides: Record<string, unknown> = {}): void {
   seedAuthority();
+  insertNodeRow(overrides);
+}
+
+/** A node row under the authority `seedAuthority` already created. */
+function insertNodeRow(overrides: Record<string, unknown> = {}): void {
   const row = {
     id: 'node-1',
     user_id: 'user-1',
@@ -268,9 +281,10 @@ function reservationV3(
 }
 
 function admissionPolicy(
-  overrides: Partial<WorkspaceAdmissionPolicy> = {}
-): WorkspaceAdmissionPolicy {
+  overrides: Partial<PlacementAdmissionPolicy> = {}
+): PlacementAdmissionPolicy {
   return {
+    lifetimeAdmissionCutoffAgeMs: null,
     cpuShareBudgetPercent: 100,
     hostMemoryReserveMb: 0,
     diskPressureThresholdPercent: 90,
@@ -326,6 +340,67 @@ afterEach(() => {
 });
 
 describe('reserveWorkspacePlacement', () => {
+  it.each(['reserve', 'attach'] as const)(
+    'admits the first workspace during bootstrap CPU and refuses a co-tenant (%s)',
+    async (operation) => {
+      const database = createDb();
+      seedNode({
+        observed_provider_instance_vcpu_count: 2,
+        observed_provider_instance_memory_mb: 4096,
+        observed_provider_instance_disk_gb: 40,
+        last_metrics: JSON.stringify({
+          version: 1,
+          cpuLoadAvg1: 8,
+          memoryPercent: 15,
+          diskPercent: 10,
+        }),
+      });
+      const request = reservation({ cpuMillis: 200, memoryMb: 512, diskMb: 5120 });
+      const policy = { ...resolveWorkspaceAdmissionPolicy({}), lifetimeAdmissionCutoffAgeMs: null };
+      const input = { ...reserveInput(capacitySnapshot()), resolvedReservation: request };
+      if (operation === 'attach') seedPlaceholderWorkspace(input.id);
+      const claim =
+        operation === 'attach' ? attachPrecreatedWorkspacePlacement : reserveWorkspacePlacement;
+      await expect(claim(database, input, policy)).resolves.toBe(true);
+      expect(
+        sqlite?.prepare('SELECT node_id, status FROM workspaces WHERE id = ?').get(input.id)
+      ).toEqual({ node_id: 'node-1', status: 'creating' });
+
+      // Occupancy is re-read at the final claim, even on the same heartbeat.
+      await expect(
+        reserveWorkspacePlacement(database, { ...input, id: 'co-tenant' }, policy)
+      ).resolves.toBe(false);
+      expect(countWorkspace('co-tenant')).toBe(0);
+    }
+  );
+
+  it('refuses an established saturated node with fitting declared reservations', async () => {
+    const database = createDb();
+    seedNode({
+      last_metrics: JSON.stringify({
+        version: 1,
+        cpuLoadAvg1: 8,
+        memoryPercent: 15,
+        diskPercent: 10,
+      }),
+    });
+    seedActiveWorkspace(
+      'established',
+      JSON.stringify(reservation({ cpuMillis: 200, memoryMb: 512 }))
+    );
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        {
+          ...reserveInput(capacitySnapshot()),
+          resolvedReservation: reservation({ cpuMillis: 200, memoryMb: 512, diskMb: 5120 }),
+        },
+        { ...resolveWorkspaceAdmissionPolicy({}), lifetimeAdmissionCutoffAgeMs: null }
+      )
+    ).resolves.toBe(false);
+    expect(countWorkspace()).toBe(0);
+  });
+
   it('keeps the atomic authority reservation within the D1 bind limit', async () => {
     createDb();
     if (!sqlite) throw new Error('SQLite fixture was not initialized');
@@ -333,8 +408,13 @@ describe('reserveWorkspacePlacement', () => {
     const snapshot = capacitySnapshot();
     seedNode();
 
+    // With the lifetime cutoff on, as it is by default, which adds a bind.
     await expect(
-      reserveWorkspacePlacement(database, reserveInput(snapshot), admissionPolicy())
+      reserveWorkspacePlacement(
+        database,
+        reserveInput(snapshot),
+        admissionPolicy({ lifetimeAdmissionCutoffAgeMs: 0.9 * 24 * 60 * 60 * 1000 })
+      )
     ).resolves.toBe(true);
   });
 
@@ -380,7 +460,7 @@ describe('reserveWorkspacePlacement', () => {
       'removed membership',
       `UPDATE project_members SET status = 'removed', removed_at = '${new Date().toISOString()}'`,
     ],
-    ['pool revision changed', `UPDATE capacity_pools SET revision = 99`],
+    ['allocation identity missing', `UPDATE nodes SET provider_instance_id = NULL`],
     ['pool disabled', `UPDATE capacity_pools SET status = 'disabled'`],
     ['pool owned by another project', `UPDATE capacity_pools SET owner_project_id = 'project-2'`],
     ['source disabled', `UPDATE capacity_sources SET status = 'disabled'`],
@@ -421,6 +501,24 @@ describe('reserveWorkspacePlacement', () => {
     ).resolves.toBe(false);
     expect(countWorkspace()).toBe(0);
   });
+
+  it.each(['reserve', 'attach'] as const)(
+    "records the node's location, not the requested default, when ranking chose another region (%s)",
+    async (operation) => {
+      const database = createDb();
+      seedNode(); // runs in fsn1
+      const input = { ...reserveInput(capacitySnapshot()), vmLocation: 'nbg1' as const };
+      if (operation === 'attach') seedPlaceholderWorkspace(input.id);
+      const claim =
+        operation === 'attach' ? attachPrecreatedWorkspacePlacement : reserveWorkspacePlacement;
+
+      await expect(claim(database, input, admissionPolicy())).resolves.toBe(true);
+
+      expect(
+        sqlite?.prepare('SELECT vm_location, status FROM workspaces WHERE id = ?').get(input.id)
+      ).toEqual({ vm_location: 'fsn1', status: 'creating' });
+    }
+  );
 
   it('rejects project viewers without workspace execution capability in final admission', async () => {
     const database = createDb();
@@ -569,7 +667,7 @@ describe('reserveWorkspacePlacement', () => {
       last_metrics: JSON.stringify({
         version: 1,
         cpuLoadAvg1: 0.2,
-        memoryPercent: 99,
+        memoryPercent: 10,
         diskPercent: 10,
       }),
     });
@@ -680,36 +778,27 @@ describe('reserveWorkspacePlacement', () => {
     }
   });
 
-  it('vetoes final placement when fresh measured pressure changes after selection', async () => {
+  it('vetoes final placement when fresh measured CPU saturation appears after selection', async () => {
     const database = createDb();
     const snapshot = capacitySnapshot();
     seedNode();
     seedActiveWorkspace('workspace-existing-pressure');
-
-    for (const [workspaceId, metrics] of [
-      [
-        'workspace-cpu-pressure',
-        { version: 1, cpuLoadAvg1: 8, memoryPercent: 10, diskPercent: 10 },
-      ],
-      [
-        'workspace-creating-pressure',
-        { version: 1, cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10, creatingWorkspaces: 1 },
-      ],
-    ] as const) {
-      sqlite
-        ?.prepare(`UPDATE nodes SET last_metrics = ?, last_heartbeat_at = ? WHERE id = 'node-1'`)
-        .run(JSON.stringify(metrics), new Date().toISOString());
-      await expect(
-        reserveWorkspacePlacement(
-          database,
-          { ...reserveInput(snapshot), id: workspaceId },
-          admissionPolicy({ cpuThresholdPercent: 90, memoryThresholdPercent: 90 })
-        )
-      ).resolves.toBe(false);
-    }
+    sqlite
+      ?.prepare(`UPDATE nodes SET last_metrics = ?, last_heartbeat_at = ? WHERE id = 'node-1'`)
+      .run(
+        JSON.stringify({ version: 1, cpuLoadAvg1: 8, memoryPercent: 10, diskPercent: 10 }),
+        new Date().toISOString()
+      );
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        { ...reserveInput(snapshot), id: 'workspace-cpu-pressure' },
+        admissionPolicy({ cpuThresholdPercent: 90, memoryThresholdPercent: 90 })
+      )
+    ).resolves.toBe(false);
   });
 
-  it('admits an exempt user start during a build but atomically rejects excess reservations', async () => {
+  it('admits onto a node that is building another workspace but atomically rejects excess reservations', async () => {
     const database = createDb();
     const snapshot = capacitySnapshot();
     seedNode();
@@ -726,25 +815,21 @@ describe('reserveWorkspacePlacement', () => {
         new Date().toISOString()
       );
     const input = reserveInput(snapshot);
-    await expect(reserveWorkspacePlacement(database, input, admissionPolicy())).resolves.toBe(
-      false
-    );
-    const policy = admissionPolicy({ allowBusyBuildQueue: true });
     const reservation = { ...input.resolvedReservation!, cpuMillis: 8000, memoryMb: 8192 };
     const results = await Promise.all(
-      ['user-a', 'user-b'].map((id) =>
+      ['start-a', 'start-b'].map((id) =>
         reserveWorkspacePlacement(
           database,
           { ...input, id, resolvedReservation: reservation },
-          policy
+          admissionPolicy()
         )
       )
     );
     expect(results.filter(Boolean)).toHaveLength(1);
-    expect(countWorkspace('user-a') + countWorkspace('user-b')).toBe(1);
+    expect(countWorkspace('start-a') + countWorkspace('start-b')).toBe(1);
   });
 
-  it('does not use live memory percentage as a final placement veto', async () => {
+  it('ignores legacy memory percent thresholds when physical headroom fits', async () => {
     const database = createDb();
     const snapshot = capacitySnapshot();
     seedNode();
@@ -752,7 +837,7 @@ describe('reserveWorkspacePlacement', () => {
     sqlite
       ?.prepare(`UPDATE nodes SET last_metrics = ?, last_heartbeat_at = ? WHERE id = 'node-1'`)
       .run(
-        JSON.stringify({ version: 1, cpuLoadAvg1: 0.2, memoryPercent: 99, diskPercent: 10 }),
+        JSON.stringify({ version: 1, cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10 }),
         new Date().toISOString()
       );
     await expect(
@@ -762,6 +847,132 @@ describe('reserveWorkspacePlacement', () => {
         admissionPolicy({ memoryThresholdPercent: 1 })
       )
     ).resolves.toBe(true);
+  });
+
+  it('reserves measured memory headroom atomically across concurrent starts', async () => {
+    const database = createDb();
+    const snapshot = capacitySnapshot();
+    // 16GiB host: 12GiB used, 512MiB reserved for the host. Only one
+    // additional 2GiB start fits, even though declared budgets fit both.
+    seedNode({
+      last_metrics: JSON.stringify({
+        version: 1,
+        cpuLoadAvg1: 0.2,
+        memoryPercent: 75,
+        diskPercent: 10,
+      }),
+    });
+    seedActiveWorkspace('observed-tenant', JSON.stringify(reservation({ memoryMb: 1024 })));
+    const results = await Promise.all(
+      ['pressure-a', 'pressure-b'].map((id) =>
+        reserveWorkspacePlacement(
+          database,
+          {
+            ...reserveInput(snapshot),
+            id,
+            resolvedReservation: reservation({ memoryMb: 2048 }),
+          },
+          admissionPolicy()
+        )
+      )
+    );
+    expect(results.filter(Boolean)).toHaveLength(1);
+    expect(countWorkspace('pressure-a') + countWorkspace('pressure-b')).toBe(1);
+  });
+
+  it('rejects a live overusing tenant even when declared memory budgets fit', async () => {
+    const database = createDb();
+    const snapshot = capacitySnapshot();
+    seedNode({
+      last_metrics: JSON.stringify({
+        version: 1,
+        cpuLoadAvg1: 0.2,
+        memoryPercent: 90,
+        diskPercent: 10,
+      }),
+    });
+    seedActiveWorkspace('overusing-tenant');
+    await expect(
+      reserveWorkspacePlacement(database, reserveInput(snapshot), admissionPolicy())
+    ).resolves.toBe(false);
+    expect(countWorkspace('workspace-1')).toBe(0);
+  });
+
+  it.each([
+    ['fresh matching running container', 'running', 'valid', true],
+    ['missing container observations', 'running', 'missing', false],
+    ['duplicate identity', 'running', 'duplicate', false],
+    ['different workspace', 'running', 'foreign', false],
+    ['old lifecycle', 'running', 'old-lifecycle', false],
+    ['stale observation', 'running', 'stale', false],
+    ['future observation', 'running', 'future', false],
+    ['malformed observation', 'running', 'malformed', false],
+    ['creating workspace', 'creating', 'valid', false],
+    ['recovery workspace', 'recovery', 'valid', false],
+  ])('credits observed memory safely: %s', async (_name, status, variant, admitted) => {
+    const database = createDb();
+    const snapshot = capacitySnapshot();
+    const heartbeat = new Date().toISOString();
+    const collectedAt =
+      variant === 'old-lifecycle'
+        ? '2026-08-27T00:00:00.000Z'
+        : variant === 'stale'
+          ? new Date(Date.now() - 60_000).toISOString()
+          : variant === 'future'
+            ? new Date(Date.now() + 60_000).toISOString()
+            : heartbeat;
+    const observation = {
+      workspaceId: variant === 'foreign' ? 'another-workspace' : 'observed-tenant',
+      memoryUsageBytes: 3 * 1024 * 1024 * 1024,
+      collectedAt,
+    };
+    const workspaceMemory =
+      variant === 'missing'
+        ? undefined
+        : variant === 'duplicate'
+          ? [observation, observation]
+          : variant === 'malformed'
+            ? ['bad', { ...observation, memoryUsageBytes: 'lots' }]
+            : [observation];
+    const lastMetrics = JSON.stringify({
+      version: 1,
+      cpuLoadAvg1: 0.2,
+      memoryPercent: 75,
+      diskPercent: 10,
+      workspaceMemory,
+    });
+    seedNode({ last_metrics: lastMetrics, last_heartbeat_at: heartbeat });
+    seedActiveWorkspace('observed-tenant', JSON.stringify(reservation({ memoryMb: 3072 })));
+    sqlite?.prepare('UPDATE workspaces SET status = ? WHERE id = ?').run(status, 'observed-tenant');
+    const policy = admissionPolicy({ metricsTtlMs: 30_000 });
+    const request = reservation({ memoryMb: 2048 });
+    const usage = (await loadActiveWorkspaceReservationUsage(database, ['node-1'])).get('node-1');
+    const advisory = evaluateWorkspaceReservationCapacity(
+      {
+        id: 'node-1',
+        providerInstanceId: 'server-1',
+        observedHardwareSource: 'observed',
+        observedProviderInstanceVcpuCount: 8,
+        observedProviderInstanceMemoryMb: 16384,
+        observedProviderInstanceDiskGb: 240,
+        lastMetrics,
+        lastHeartbeatAt: heartbeat,
+      },
+      usage,
+      request,
+      policy
+    );
+    expect(advisory.admitted).toBe(admitted);
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        {
+          ...reserveInput(snapshot),
+          resolvedReservation: request,
+        },
+        policy
+      )
+    ).resolves.toBe(admitted);
   });
 
   it('rejects malformed, future, stale, and incomplete telemetry in final placement', async () => {
@@ -884,6 +1095,310 @@ describe('reserveWorkspacePlacement', () => {
   });
 });
 
+/**
+ * The atomic SQL twin of `measuredHostOverheadMb`, at the default reserve resolved through the real
+ * resolver. A fresh 4 GB node reporting 14% (573 MB, the production idle average) must admit an
+ * exact-fit 3072 MB request: the old SQL charged 573 + 1024 on top of it and refused.
+ */
+describe('shared host-overhead accounting in the atomic claim', () => {
+  const defaultPolicy = (): PlacementAdmissionPolicy => ({
+    ...resolveWorkspaceAdmissionPolicy({}),
+    lifetimeAdmissionCutoffAgeMs: null,
+  });
+
+  function seedFreshCx23(memoryPercent: number): void {
+    seedNode({
+      observed_provider_instance_type: 'cx23',
+      observed_provider_instance_vcpu_count: 2,
+      observed_provider_instance_memory_mb: 4096,
+      observed_provider_instance_disk_gb: 40,
+      last_metrics: JSON.stringify({
+        version: 1,
+        cpuLoadAvg1: 0,
+        memoryPercent,
+        diskPercent: 19.5,
+        creatingWorkspaces: 0,
+      }),
+    });
+  }
+
+  it.each([
+    ['exact fit at the reserve, host use below it', 14, 3072, true],
+    ['one MB over the declared budget', 14, 3073, false],
+    ['host use above the reserve by less than the slack', 30, 2048, true],
+    ['host use above the reserve leaves no room', 60, 3072, false],
+  ])('%s', async (_name, memoryPercent, memoryMb, admitted) => {
+    const database = createDb();
+    seedFreshCx23(memoryPercent);
+    const request = reservation({ cpuMillis: 2000, memoryMb, diskMb: 10_240, exclusiveNode: true });
+    const reserved = await reserveWorkspacePlacement(
+      database,
+      { ...reserveInput(capacitySnapshot()), resolvedReservation: request },
+      defaultPolicy()
+    );
+    expect(reserved).toBe(admitted);
+    expect(countWorkspace('workspace-1')).toBe(admitted ? 1 : 0);
+
+    // The advisory evaluator must reach the same verdict from the same rows.
+    const node = sqlite
+      ?.prepare(
+        `SELECT id, node_role AS nodeRole, provider_instance_id AS providerInstanceId,
+           observed_provider_instance_vcpu_count AS observedProviderInstanceVcpuCount,
+           observed_provider_instance_memory_mb AS observedProviderInstanceMemoryMb,
+           observed_provider_instance_disk_gb AS observedProviderInstanceDiskGb,
+           observed_hardware_source AS observedHardwareSource,
+           last_metrics AS lastMetrics, last_heartbeat_at AS lastHeartbeatAt
+         FROM nodes WHERE id = 'node-1'`
+      )
+      .get() as Parameters<typeof evaluateWorkspaceReservationCapacity>[0];
+    const advisory = evaluateWorkspaceReservationCapacity(
+      node,
+      undefined,
+      request,
+      defaultPolicy()
+    );
+    expect(advisory.admitted, advisory.reasons.join('; ')).toBe(admitted);
+  });
+
+  it('still charges a co-tenant running past its reservation', async () => {
+    const database = createDb();
+    // 16 GB host using 75% (12 GB) while its one tenant declared 1 GB: about 11 GB is unattributed.
+    seedNode({
+      last_metrics: JSON.stringify({
+        version: 1,
+        cpuLoadAvg1: 0.2,
+        memoryPercent: 75,
+        diskPercent: 10,
+      }),
+    });
+    seedActiveWorkspace('overrunning-tenant', JSON.stringify(reservation({ memoryMb: 1024 })));
+    const policy = defaultPolicy();
+    const fits = reservation({ memoryMb: 3072 });
+    const overflows = reservation({ memoryMb: 4096 });
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        { ...reserveInput(capacitySnapshot()), id: 'overflow', resolvedReservation: overflows },
+        policy
+      )
+    ).resolves.toBe(false);
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        { ...reserveInput(capacitySnapshot()), id: 'fits', resolvedReservation: fits },
+        policy
+      )
+    ).resolves.toBe(true);
+  });
+});
+
+describe('startup backlog fairness guard in the atomic reservation', () => {
+  const BUILDING_METRICS = JSON.stringify({
+    version: 1,
+    cpuLoadAvg1: 0.2,
+    memoryPercent: 10,
+    diskPercent: 10,
+    creatingWorkspaces: 1,
+  });
+
+  function seedStartingWorkspace(id: string, nodeId = 'node-1', status = 'creating'): void {
+    sqlite
+      ?.prepare(
+        `INSERT INTO workspaces
+         (id, node_id, user_id, project_id, name, repository, branch, status, vm_size, vm_location,
+          resolved_reservation_json, created_at, updated_at)
+         VALUES (?, ?, 'user-1', 'project-1', ?, 'acme/repo', 'main', ?, 'large', 'fsn1', ?,
+          '2026-11-08T22:00:00.000Z', '2026-11-08T22:00:00.000Z')`
+      )
+      .run(id, nodeId, id, status, JSON.stringify(reservation()));
+  }
+
+  function seedTwoNodes(): void {
+    seedNode();
+    insertNodeRow({ id: 'node-2', name: 'Second node', provider_instance_id: 'provider-node-2' });
+  }
+
+  it('refuses a reservation whose node gained a queued start after ranking, and admits the control', async () => {
+    const database = createDb();
+    seedNode();
+    seedStartingWorkspace('queued-after-ranking');
+    const input = reserveInput(capacitySnapshot());
+
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        { ...input, id: 'ranked-at-zero', maxStartupBacklog: 0 },
+        admissionPolicy()
+      )
+    ).resolves.toBe(false);
+    expect(countWorkspace('ranked-at-zero')).toBe(0);
+
+    // Owner-path controls: the same node admits when the observed backlog still holds, and when
+    // the caller carries no guard at all.
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        { ...input, id: 'ranked-at-one', maxStartupBacklog: 1 },
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        { ...input, id: 'unguarded', maxStartupBacklog: null },
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
+  });
+
+  it('admits when the backlog shrank since ranking, and counts only creating rows', async () => {
+    const database = createDb();
+    seedNode();
+    seedStartingWorkspace('finished-build', 'node-1', 'running');
+    seedStartingWorkspace('recovering', 'node-1', 'recovery');
+    // A start that was cancelled or failed leaves the queue.
+    seedStartingWorkspace('cancelled-start', 'node-1', 'stopped');
+    seedStartingWorkspace('failed-start', 'node-1', 'error');
+    const input = reserveInput(capacitySnapshot());
+
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        { ...input, id: 'ranked-before-finish', maxStartupBacklog: 0 },
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
+  });
+
+  it('never lets a missing guard bypass a capacity check', async () => {
+    const database = createDb();
+    seedNode();
+    const input = reserveInput(capacitySnapshot());
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        {
+          ...input,
+          maxStartupBacklog: null,
+          resolvedReservation: reservation({ cpuMillis: 9_000 }),
+        },
+        admissionPolicy()
+      )
+    ).resolves.toBe(false);
+  });
+
+  /**
+   * K starts that observe the same backlog counts at the same moment, rank the shortest queue
+   * first (node id breaks ties, standing in for the strategy), and race the real reservation.
+   * Losers re-read the counts and rank again. This models the SQL race only: the conflict budget
+   * and the real comparator run through the TaskRunner DO in
+   * `tests/workers/startup-backlog-placement-loop.test.ts`.
+   */
+  async function placeBurst(
+    database: D1Database,
+    starts: number,
+    nodeIds: string[],
+    { guard }: { guard: boolean }
+  ): Promise<{ placedOn: Map<string, string>; rounds: number }> {
+    const placedOn = new Map<string, string>();
+    let remaining = Array.from({ length: starts }, (_, index) => `burst-${index}`);
+    let rounds = 0;
+    while (remaining.length > 0 && rounds <= starts) {
+      rounds += 1;
+      const usage = await loadActiveWorkspaceReservationUsage(database, nodeIds);
+      const backlog = (id: string) => usage.get(id)?.startupBacklog ?? 0;
+      const [target] = [...nodeIds].sort((a, b) => backlog(a) - backlog(b) || a.localeCompare(b));
+      const outcomes = await Promise.all(
+        remaining.map(async (id) => ({
+          id,
+          placed: await reserveWorkspacePlacement(
+            database,
+            {
+              ...reserveInput(capacitySnapshot()),
+              id,
+              nodeId: target,
+              maxStartupBacklog: guard && nodeIds.length > 1 ? backlog(target) : null,
+            },
+            admissionPolicy()
+          ),
+        }))
+      );
+      for (const outcome of outcomes) if (outcome.placed) placedOn.set(outcome.id, target);
+      remaining = outcomes.filter((outcome) => !outcome.placed).map((outcome) => outcome.id);
+    }
+    return { placedOn, rounds };
+  }
+
+  function countOn(placedOn: Map<string, string>, nodeId: string): number {
+    return [...placedOn.values()].filter((id) => id === nodeId).length;
+  }
+
+  it('spreads a simultaneous burst across two building nodes instead of queueing it on one', async () => {
+    const database = createDb();
+    seedTwoNodes();
+    sqlite?.prepare('UPDATE nodes SET last_metrics = ?').run(BUILDING_METRICS);
+
+    const { placedOn, rounds } = await placeBurst(database, 5, ['node-1', 'node-2'], {
+      guard: true,
+    });
+
+    expect(placedOn.size).toBe(5);
+    expect(countOn(placedOn, 'node-1')).toBe(3);
+    expect(countOn(placedOn, 'node-2')).toBe(2);
+    // One reservation wins per round, so a burst of K converges in K rounds.
+    expect(rounds).toBe(5);
+  });
+
+  // Ranking alone cannot spread a burst whose members all read the same counts at once; without
+  // the guard every one of them reserves the node they all ranked first.
+  it('queues the same burst on one node when the guard is absent', async () => {
+    const database = createDb();
+    seedTwoNodes();
+
+    const { placedOn } = await placeBurst(database, 5, ['node-1', 'node-2'], { guard: false });
+
+    expect(countOn(placedOn, 'node-1')).toBe(5);
+    expect(countOn(placedOn, 'node-2')).toBe(0);
+  });
+
+  it('places a whole burst on the only eligible node in one round', async () => {
+    const database = createDb();
+    seedNode({ last_metrics: BUILDING_METRICS });
+
+    const { placedOn, rounds } = await placeBurst(database, 4, ['node-1'], { guard: true });
+
+    expect(countOn(placedOn, 'node-1')).toBe(4);
+    expect(rounds).toBe(1);
+  });
+
+  it('restarts a workspace on its node while that node is building another one', async () => {
+    const database = createDb();
+    seedNode({ last_metrics: BUILDING_METRICS });
+    seedActiveWorkspace('workspace-1');
+    sqlite
+      ?.prepare(
+        "UPDATE workspaces SET status = 'stopped', chat_session_id = 'chat-1' WHERE id = 'workspace-1'"
+      )
+      .run();
+    const restart = {
+      ...reserveInput(capacitySnapshot()),
+      chatSessionId: 'chat-1',
+      evictionGeneration: 'restart-generation',
+      expectedEvictionGeneration: null,
+      expectedStatus: 'stopped' as const,
+    };
+
+    expect(await reserveWorkspaceRestart(database, restart, admissionPolicy())).toBe(true);
+
+    // Control: a real resource veto on the same building node still refuses the restart.
+    sqlite?.prepare("UPDATE workspaces SET status = 'stopped' WHERE id = 'workspace-1'").run();
+    sqlite
+      ?.prepare("UPDATE nodes SET last_metrics = ? WHERE id = 'node-1'")
+      .run(JSON.stringify({ ...JSON.parse(BUILDING_METRICS), diskPercent: 95 }));
+    expect(await reserveWorkspaceRestart(database, restart, admissionPolicy())).toBe(false);
+  });
+});
+
 describe('attachPrecreatedWorkspacePlacement', () => {
   it('atomically attaches a placeholder workspace and writes final authority metadata', async () => {
     const database = createDb();
@@ -997,7 +1512,107 @@ describe('attachPrecreatedWorkspacePlacement', () => {
   });
 });
 
-describe('reserveEvictedWorkspaceRestart', () => {
+describe('per-attempt creating clock (workspace-creating-deadline.ts)', () => {
+  function clockOf(id = 'workspace-1') {
+    return sqlite
+      ?.prepare(
+        'SELECT status, created_at, creating_started_at, build_started_at FROM workspaces WHERE id = ?'
+      )
+      .get(id);
+  }
+
+  it('starts the clock with the reservation', async () => {
+    const database = createDb();
+    seedNode();
+    await expect(
+      reserveWorkspacePlacement(database, reserveInput(capacitySnapshot()), admissionPolicy())
+    ).resolves.toBe(true);
+    expect(clockOf()).toEqual({
+      status: 'creating',
+      created_at: '2026-08-28T00:00:00.000Z',
+      creating_started_at: '2026-08-28T00:00:00.000Z',
+      build_started_at: null,
+    });
+  });
+
+  it("keeps the placeholder's clock when attaching it, and starts one for a legacy placeholder", async () => {
+    const database = createDb();
+    seedNode();
+    seedPlaceholderWorkspace('attach-with-clock');
+    sqlite
+      ?.prepare(
+        "UPDATE workspaces SET creating_started_at = '2026-08-28T00:00:00.000Z' WHERE id = 'attach-with-clock'"
+      )
+      .run();
+    seedPlaceholderWorkspace('attach-legacy');
+
+    const input = reserveInput(capacitySnapshot());
+    await expect(
+      attachPrecreatedWorkspacePlacement(
+        database,
+        { ...input, id: 'attach-with-clock' },
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
+    await expect(
+      attachPrecreatedWorkspacePlacement(
+        database,
+        { ...input, id: 'attach-legacy' },
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
+
+    // Attaching continues the attempt the placeholder started (node provisioning counts).
+    expect(clockOf('attach-with-clock')).toMatchObject({
+      creating_started_at: '2026-08-28T00:00:00.000Z',
+    });
+    const legacy = clockOf('attach-legacy') as { creating_started_at: string | null };
+    expect(legacy.creating_started_at).not.toBeNull();
+  });
+
+  it('starts a new attempt on restart and clears the previous build start', async () => {
+    const database = createDb();
+    seedNode();
+    seedActiveWorkspace('workspace-1');
+    sqlite
+      ?.prepare(
+        `UPDATE workspaces SET status = 'stopped', chat_session_id = 'chat-1',
+           creating_started_at = '2026-08-28T00:00:00.000Z',
+           build_started_at = '2026-08-28T00:01:00.000Z'
+         WHERE id = 'workspace-1'`
+      )
+      .run();
+    const before = Date.now();
+
+    expect(
+      await reserveWorkspaceRestart(
+        database,
+        {
+          ...reserveInput(capacitySnapshot()),
+          chatSessionId: 'chat-1',
+          evictionGeneration: 'restart-generation',
+          expectedEvictionGeneration: null,
+          expectedStatus: 'stopped' as const,
+        },
+        admissionPolicy()
+      )
+    ).toBe(true);
+
+    const clock = clockOf() as {
+      status: string;
+      created_at: string;
+      creating_started_at: string;
+      build_started_at: string | null;
+    };
+    expect(clock.status).toBe('creating');
+    // created_at is the workspace's age, not the attempt's: it is left alone.
+    expect(clock.created_at).toBe('2026-08-28T00:00:00.000Z');
+    expect(Date.parse(clock.creating_started_at)).toBeGreaterThanOrEqual(before - 1000);
+    expect(clock.build_started_at).toBeNull();
+  });
+});
+
+describe('reserveWorkspaceRestart', () => {
   function seedEvicted(id = 'workspace-1') {
     seedActiveWorkspace(id);
     sqlite
@@ -1021,14 +1636,14 @@ describe('reserveEvictedWorkspaceRestart', () => {
     sqlite?.exec(
       "INSERT INTO session_snapshots (id, workspace_id) VALUES ('snapshot', 'workspace-1')"
     );
-    expect(await reserveEvictedWorkspaceRestart(database, input, admissionPolicy())).toBe(true);
+    expect(await reserveWorkspaceRestart(database, input, admissionPolicy())).toBe(true);
     expect(
       sqlite
         ?.prepare("SELECT status, chat_session_id FROM workspaces WHERE id = 'workspace-1'")
         .get()
     ).toEqual({ status: 'creating', chat_session_id: 'chat-1' });
     expect(sqlite?.prepare('SELECT id FROM session_snapshots').all()).toEqual([{ id: 'snapshot' }]);
-    expect(await reserveEvictedWorkspaceRestart(database, input, admissionPolicy())).toBe(false);
+    expect(await reserveWorkspaceRestart(database, input, admissionPolicy())).toBe(false);
   });
 
   it('allows only one restart to take the last reservation slot', async () => {
@@ -1044,7 +1659,7 @@ describe('reserveEvictedWorkspaceRestart', () => {
       .run(JSON.stringify(lastSlotReservation));
     const results = await Promise.all(
       [first, second].map((input) =>
-        reserveEvictedWorkspaceRestart(
+        reserveWorkspaceRestart(
           database,
           { ...input, resolvedReservation: lastSlotReservation },
           admissionPolicy()
@@ -1074,7 +1689,7 @@ describe('reserveEvictedWorkspaceRestart', () => {
       const input = seedEvicted();
       sqlite?.exec(mutation);
       expect(
-        await reserveEvictedWorkspaceRestart(
+        await reserveWorkspaceRestart(
           database,
           input,
           admissionPolicy({ hostMemoryReserveMb: 768 })
@@ -1085,4 +1700,164 @@ describe('reserveEvictedWorkspaceRestart', () => {
       ).toEqual({ status: 'evicted' });
     }
   );
+});
+
+describe('80 percent disk default at every workspace atomic admission', () => {
+  it.each(['insert', 'attach', 'restart'] as const)(
+    'checks %s without changing running siblings',
+    async (path) => {
+      const database = createDb();
+      seedNode();
+      seedActiveWorkspace('sibling');
+      const before = sqlite?.prepare("SELECT * FROM workspaces WHERE id = 'sibling'").get();
+      const input = reserveInput(capacitySnapshot());
+      if (path === 'attach') seedPlaceholderWorkspace(input.id);
+      if (path === 'restart') {
+        seedActiveWorkspace(input.id);
+        sqlite?.exec(
+          "UPDATE workspaces SET status = 'evicted', chat_session_id = 'chat-1', eviction_finalized_at = '2026-09-13T00:00:00.000Z' WHERE id = 'workspace-1'"
+        );
+      }
+      const admit = () =>
+        path === 'insert'
+          ? reserveWorkspacePlacement(database, input, resolveWorkspaceAdmissionPolicy({}))
+          : path === 'attach'
+            ? attachPrecreatedWorkspacePlacement(
+                database,
+                input,
+                resolveWorkspaceAdmissionPolicy({})
+              )
+            : reserveWorkspaceRestart(
+                database,
+                {
+                  ...input,
+                  chatSessionId: 'chat-1',
+                  evictionGeneration: 'next',
+                  expectedEvictionGeneration: null,
+                },
+                resolveWorkspaceAdmissionPolicy({})
+              );
+      for (const diskPercent of [80, 92]) {
+        sqlite
+          ?.prepare("UPDATE nodes SET last_metrics = json_set(last_metrics, '$.diskPercent', ?)")
+          .run(diskPercent);
+        expect(await admit()).toBe(false);
+        expect(sqlite?.prepare("SELECT * FROM workspaces WHERE id = 'sibling'").get()).toEqual(
+          before
+        );
+      }
+      sqlite
+        ?.prepare("UPDATE nodes SET last_metrics = json_set(last_metrics, '$.diskPercent', ?)")
+        .run(79.99);
+      expect(await admit()).toBe(true);
+    }
+  );
+});
+
+describe('lifetime admission cutoff at every new-placement atomic admission (policy a3780107)', () => {
+  const HOUR = 60 * 60 * 1000;
+  // 90% of the 24h absolute lifetime: the default 10% cutoff.
+  const CUTOFF_AGE_MS = 0.9 * 24 * HOUR;
+  const policy = () => admissionPolicy({ lifetimeAdmissionCutoffAgeMs: CUTOFF_AGE_MS });
+
+  function ageNode(ageMs: number) {
+    sqlite
+      ?.prepare("UPDATE nodes SET created_at = ? WHERE id = 'node-1'")
+      .run(new Date(Date.now() - ageMs).toISOString());
+  }
+
+  /** The lifetime sweep only reaps nodes a task auto-provisioned (`sweepMaxLifetimeNodes`). */
+  function autoProvision() {
+    sqlite
+      ?.prepare(
+        `INSERT INTO tasks (id, project_id, user_id, title, status, auto_provisioned_node_id,
+           created_at, updated_at)
+         VALUES ('task-provisioner', 'project-1', 'user-1', 'Provisioner', 'completed', 'node-1',
+           '2026-08-28T00:00:00.000Z', '2026-08-28T00:00:00.000Z')`
+      )
+      .run();
+  }
+
+  function admitter(database: ReturnType<typeof createDb>, path: 'insert' | 'attach') {
+    const input = reserveInput(capacitySnapshot());
+    if (path === 'attach') seedPlaceholderWorkspace(input.id);
+    return () =>
+      path === 'insert'
+        ? reserveWorkspacePlacement(database, input, policy())
+        : attachPrecreatedWorkspacePlacement(database, input, policy());
+  }
+
+  it.each(['insert', 'attach'] as const)(
+    'refuses %s onto an auto-provisioned node past the cutoff, and admits it before',
+    async (path) => {
+      const database = createDb();
+      seedNode();
+      autoProvision();
+      const admit = admitter(database, path);
+
+      ageNode(CUTOFF_AGE_MS + HOUR);
+      expect(await admit()).toBe(false);
+      expect(
+        sqlite?.prepare("SELECT COUNT(*) AS count FROM workspaces WHERE node_id = 'node-1'").get()
+      ).toEqual({ count: 0 });
+
+      // Convergence control: the same node one hour younger than the cutoff is admitted.
+      ageNode(CUTOFF_AGE_MS - HOUR);
+      expect(await admit()).toBe(true);
+    }
+  );
+
+  it('admits an old node the lifetime sweep never reaps (no task auto-provisioned it)', async () => {
+    const database = createDb();
+    seedNode();
+    ageNode(48 * HOUR);
+    expect(await admitter(database, 'insert')()).toBe(true);
+  });
+
+  it('names the cutoff as the refusal reason only for a node past it', async () => {
+    const database = createDb();
+    seedNode();
+    autoProvision();
+    ageNode(CUTOFF_AGE_MS + HOUR);
+    await expect(
+      isNodePastLifetimeAdmissionCutoff(database, 'node-1', CUTOFF_AGE_MS)
+    ).resolves.toBe(true);
+    ageNode(CUTOFF_AGE_MS - HOUR);
+    await expect(
+      isNodePastLifetimeAdmissionCutoff(database, 'node-1', CUTOFF_AGE_MS)
+    ).resolves.toBe(false);
+    await expect(isNodePastLifetimeAdmissionCutoff(database, 'node-1', null)).resolves.toBe(false);
+  });
+
+  it('admits past the cutoff when the cutoff is disabled', async () => {
+    const database = createDb();
+    seedNode();
+    autoProvision();
+    ageNode(CUTOFF_AGE_MS + HOUR);
+    const input = reserveInput(capacitySnapshot());
+    expect(await reserveWorkspacePlacement(database, input, admissionPolicy())).toBe(true);
+  });
+
+  it('still restarts a workspace on its own node past the cutoff', async () => {
+    const database = createDb();
+    seedNode();
+    autoProvision();
+    ageNode(CUTOFF_AGE_MS + HOUR);
+    seedActiveWorkspace('workspace-1');
+    sqlite?.exec(
+      "UPDATE workspaces SET status = 'evicted', chat_session_id = 'chat-1', eviction_finalized_at = '2026-09-13T00:00:00.000Z' WHERE id = 'workspace-1'"
+    );
+    expect(
+      await reserveWorkspaceRestart(
+        database,
+        {
+          ...reserveInput(capacitySnapshot()),
+          chatSessionId: 'chat-1',
+          evictionGeneration: 'next',
+          expectedEvictionGeneration: null,
+        },
+        policy()
+      )
+    ).toBe(true);
+  });
 });

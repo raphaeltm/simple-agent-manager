@@ -10,7 +10,7 @@ import {
 } from '../lib/query-options';
 
 export function ProjectCreate() {
-  const providers = useLoginProviders();
+  const { providers } = useLoginProviders();
   const queryScope = useQueryScope();
 
   const installationsQuery = useQuery({
@@ -56,7 +56,7 @@ export function ProjectCreate() {
         <ProjectOnboardingWizard
           installations={installationsQuery.data ?? []}
           artifactsEnabled={artifactsEnabledQuery.data ?? false}
-          gitlabEnabled={providers.gitlab}
+          gitlabEnabled={providers?.gitlab ?? false}
           loading={loading}
           loadError={loadError}
           onRetryInstallations={retry}

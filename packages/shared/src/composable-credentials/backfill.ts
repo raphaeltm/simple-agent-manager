@@ -79,7 +79,7 @@ export interface BackfillReport {
 
 export function mapKind(
   credentialType: 'agent-api-key' | 'cloud-provider',
-  credentialKind: 'api-key' | 'oauth-token',
+  credentialKind: 'api-key' | 'oauth-token'
 ): CredentialKind {
   if (credentialType === 'cloud-provider') return 'cloud-provider';
   return credentialKind === 'oauth-token' ? 'oauth-token' : 'api-key';
@@ -96,7 +96,7 @@ function credentialName(row: SourceCredentialRow): string {
 
 export function backfill(
   credentialRows: SourceCredentialRow[],
-  platformRows: SourcePlatformRow[],
+  platformRows: SourcePlatformRow[]
 ): BackfillResult {
   const skipped: { rowId: string; reason: string }[] = [];
 
@@ -135,7 +135,7 @@ export function backfill(
 
     configCountByCredential.set(
       credential.id,
-      (configCountByCredential.get(credential.id) ?? 0) + 1,
+      (configCountByCredential.get(credential.id) ?? 0) + 1
     );
 
     const consumer =

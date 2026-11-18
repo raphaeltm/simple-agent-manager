@@ -72,6 +72,11 @@ describe('VM-agent failure callback preserves the failed task work', () => {
   function seed(agentSessionStatus: string) {
     sqlite
       .prepare(
+        `INSERT OR IGNORE INTO projects (id, name, repository) VALUES ('project-1', 'Test', 'acme/widget')`
+      )
+      .run();
+    sqlite
+      .prepare(
         `INSERT INTO nodes (id, user_id, status, node_role, runtime)
          VALUES ('node-1', 'user-1', 'running', 'workspace', 'vm')`
       )
@@ -145,6 +150,9 @@ describe('VM-agent failure callback preserves the failed task work', () => {
     sqlite.exec(
       'CREATE UNIQUE INDEX idx_session_snapshots_chat_session_id ON session_snapshots(chat_session_id)'
     );
+    sqlite.exec(
+      'CREATE UNIQUE INDEX idx_pull_requests_project_repo_number ON pull_requests(project_id, repository, number)'
+    );
     app = new Hono();
     app.route('/api/projects', taskCallbackRoute);
     app.onError((err, c) => {
@@ -196,6 +204,102 @@ describe('VM-agent failure callback preserves the failed task work', () => {
       }
     }
   );
+
+  it('persists callback PR number and SHA, while rejecting cross-repository PR state', async () => {
+    seed('running');
+    const callback = async (prUrl: string) =>
+      postCallback({
+        executionStep: 'awaiting_followup',
+        gitPushResult: {
+          pushed: true,
+          branchName: 'sam/topic',
+          commitSha: 'a'.repeat(40),
+          prUrl,
+          prNumber: 17,
+          hasUncommittedChanges: false,
+          error: null,
+        },
+      });
+    const foreign = await callback('https://github.com/attacker/other/pull/17');
+    expect(foreign.status).toBe(200);
+    expect(sqlite.prepare('SELECT count(*) AS n FROM pull_requests').get()).toEqual({ n: 0 });
+    expect(
+      sqlite
+        .prepare('SELECT output_pr_number, output_commit_sha FROM tasks WHERE id = ?')
+        .get('task-1')
+    ).toEqual({ output_pr_number: null, output_commit_sha: null });
+    const owner = await callback('https://github.com/acme/widget/pull/18');
+    expect(owner.status).toBe(200);
+    expect(
+      sqlite
+        .prepare('SELECT output_pr_number, output_commit_sha FROM tasks WHERE id = ?')
+        .get('task-1')
+    ).toEqual({ output_pr_number: 18, output_commit_sha: 'a'.repeat(40) });
+    expect(
+      sqlite.prepare('SELECT project_id, repository, number FROM pull_requests').get()
+    ).toEqual({ project_id: 'project-1', repository: 'acme/widget', number: 18 });
+    const relink = await postCallback({
+      executionStep: 'awaiting_followup',
+      outputPrUrl: 'https://github.com/acme/widget/pull/20',
+    });
+    expect(relink.status).toBe(200);
+    expect(
+      sqlite
+        .prepare('SELECT output_pr_number, output_commit_sha FROM tasks WHERE id = ?')
+        .get('task-1')
+    ).toEqual({ output_pr_number: 20, output_commit_sha: null });
+    const override = await postCallback({
+      executionStep: 'awaiting_followup',
+      outputPrUrl: 'https://github.com/acme/widget/pull/19',
+      gitPushResult: {
+        pushed: true,
+        branchName: 'sam/topic',
+        commitSha: 'b'.repeat(40),
+        prUrl: 'https://github.com/acme/widget/pull/18',
+        prNumber: 18,
+        hasUncommittedChanges: false,
+        error: null,
+      },
+    });
+    expect(override.status).toBe(200);
+    expect(
+      sqlite
+        .prepare('SELECT output_pr_number, output_commit_sha FROM tasks WHERE id = ?')
+        .get('task-1')
+    ).toEqual({ output_pr_number: 19, output_commit_sha: null });
+    expect(sqlite.prepare('SELECT number FROM pull_requests WHERE number = 19').get()).toEqual({
+      number: 19,
+    });
+  });
+
+  it('persists PR identity through a status-transition callback', async () => {
+    seed('running');
+    const prUrl = 'https://github.com/acme/widget/pull/31';
+    const response = await postCallback({
+      toStatus: 'completed',
+      outputPrUrl: prUrl,
+      gitPushResult: {
+        pushed: true,
+        branchName: 'sam/topic',
+        commitSha: 'c'.repeat(40),
+        prUrl,
+        prNumber: 31,
+        hasUncommittedChanges: false,
+        error: null,
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(
+      sqlite
+        .prepare('SELECT status, output_pr_number, output_commit_sha FROM tasks WHERE id = ?')
+        .get('task-1')
+    ).toEqual({
+      status: 'completed',
+      output_pr_number: 31,
+      output_commit_sha: 'c'.repeat(40),
+    });
+    expect(sqlite.prepare('SELECT number FROM pull_requests').get()).toEqual({ number: 31 });
+  });
 
   it('fails the task but queues a snapshot-backed sleep instead of tearing the workspace down', async () => {
     seed('running');

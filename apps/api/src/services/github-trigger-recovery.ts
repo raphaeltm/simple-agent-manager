@@ -1,3 +1,5 @@
+import { GITHUB_TRIGGER_EVENT_TYPES } from '@simple-agent-manager/shared';
+
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parseJsonRecord } from '../lib/runtime-validation';
@@ -10,8 +12,10 @@ import {
 } from './github-trigger-handler';
 import { githubTriggerRecoveryConfig } from './github-trigger-recovery-config';
 import { areGitHubTriggersConfigured } from './platform-config';
+import { drainTriggerQueue } from './trigger-queue-drain';
+import { areWebhookTriggersEnabled } from './webhook-trigger-config';
 
-const SUPPORTED_EVENTS = new Set(['issues', 'issue_comment', 'pull_request', 'push']);
+const SUPPORTED_EVENTS = new Set<string>(GITHUB_TRIGGER_EVENT_TYPES);
 interface InboxRow {
   id: string;
   event_type: string;
@@ -236,6 +240,28 @@ export async function runGitHubTriggerRecovery(
       } catch {
         log.warn('github_triggers.recovery_storage_error', { deliveryId: row.id });
       }
+    }
+    // Signed webhook events wait in the same queue and must drain whether or not GitHub
+    // triggers are configured.
+    // A failure to read the GitHub configuration, or in the drain itself, is logged here:
+    // this runs after the sweep has reported, so nothing else would surface it.
+    try {
+      const includeGitHub = await areGitHubTriggersConfigured(env).catch((error: unknown) => {
+        // GitHub events wait this tick; webhook events still drain.
+        log.warn('trigger_queue.github_config_unreadable', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return false;
+      });
+      const queue = await drainTriggerQueue(env, undefined, {
+        includeGitHub,
+        includeWebhooks: areWebhookTriggersEnabled(env),
+      });
+      log.info('trigger_queue.drain', queue);
+    } catch (error) {
+      log.error('trigger_queue.drain_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
     log.info('github_triggers.recovery_sweep', stats);
     return stats;

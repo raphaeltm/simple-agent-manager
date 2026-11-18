@@ -8,7 +8,7 @@
  */
 import { Hono } from 'hono';
 
-// Table: session_summaries — see apps/api/src/db/schema.ts:sessionSummaries
+// Table: session_summaries — see packages/worker-core/src/schema.ts:sessionSummaries
 import type { Env } from '../env';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 

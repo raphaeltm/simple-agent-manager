@@ -11,8 +11,8 @@ vi.mock('drizzle-orm/d1', () => ({ drizzle: vi.fn(() => ({})) }));
 vi.mock('../../../src/middleware/project-auth', () => ({
   requireProjectCapability: mocks.authorize,
 }));
-vi.mock('../../../src/routes/chat-session-ownership', () => ({
-  requireSessionCreator: mocks.creator,
+vi.mock('../../../src/services/session-access', () => ({
+  requireSessionWriter: mocks.creator,
 }));
 vi.mock('../../../src/services/mention-enrichment', () => ({
   enrichMessageWithMentions: vi.fn(async (message) => ({ enrichedMessage: message })),
@@ -33,6 +33,17 @@ describe('follow-up attachment acceptance', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.accept.mockResolvedValue({ message: { id: 'delivery' }, transcriptMessageId: 'message' });
+    mocks.creator.mockImplementation(
+      async (_env: unknown, projectId: string, sessionId: string, userId: string) => ({
+        projectId,
+        sessionId,
+        session: { id: sessionId },
+        role: 'owner',
+        actorUserId: userId,
+        ownerUserId: userId,
+        grantId: null,
+      })
+    );
   });
   it('validates owned R2 objects, durably stores refs and exact paths without contacting the workspace', async () => {
     const head = vi.fn().mockResolvedValue({ size: 5 });
@@ -50,7 +61,11 @@ describe('follow-up attachment acceptance', () => {
       expect.objectContaining({
         targetSessionId: 'sleeping-chat',
         senderId: 'owner',
-        metadata: { userId: 'owner', attachments: [attachment] },
+        metadata: {
+          userId: 'owner',
+          wake: expect.objectContaining({ triggeredByUserId: 'owner', actorRole: 'owner' }),
+          attachments: [attachment],
+        },
         deliveryContent: expect.stringContaining('/workspaces/.private/upload-1/context.txt'),
       })
     );

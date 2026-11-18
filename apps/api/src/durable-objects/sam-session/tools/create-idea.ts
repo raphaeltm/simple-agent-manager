@@ -3,6 +3,7 @@
  *
  * Ideas are stored as tasks with status='draft' in D1.
  */
+import { ideaTaskPredicateSql } from '@simple-agent-manager/operations';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -48,7 +49,7 @@ export const createIdeaDef: AnthropicToolDef = {
 
 export async function createIdea(
   input: { projectId: string; title: string; description?: string; priority?: number },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
   const env = ctx.env as unknown as Env;
   const db = drizzle(env.DATABASE, { schema });
@@ -66,30 +67,28 @@ export async function createIdea(
 
   const title = input.title.trim().slice(0, titleMaxLen);
   const description = input.description?.trim().slice(0, descMaxLen) ?? null;
-  const priority = typeof input.priority === 'number'
-    ? Math.min(Math.max(0, Math.round(input.priority)), 10)
-    : 0;
+  const priority =
+    typeof input.priority === 'number' ? Math.min(Math.max(0, Math.round(input.priority)), 10) : 0;
 
   // Verify ownership
   const [project] = await db
     .select({ id: schema.projects.id })
     .from(schema.projects)
-    .where(
-      and(
-        eq(schema.projects.id, input.projectId),
-        eq(schema.projects.userId, ctx.userId),
-      ),
-    )
+    .where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.userId, ctx.userId)))
     .limit(1);
 
   if (!project) {
     return { error: 'Project not found or not owned by you.' };
   }
 
-  // Enforce per-project limit
+  // Enforce per-project limit. Counts IDEAS, through the one shared predicate — before the
+  // flag existed this counted every `draft` row, which is also every undispatched ordinary
+  // task, so a project's idea quota could be spent by work that was never an idea.
   const countRow = await env.DATABASE.prepare(
-    "SELECT COUNT(*) as cnt FROM tasks WHERE project_id = ? AND status = 'draft'",
-  ).bind(project.id).first<{ cnt: number }>();
+    `SELECT COUNT(*) as cnt FROM tasks WHERE project_id = ? AND ${ideaTaskPredicateSql()}`
+  )
+    .bind(project.id)
+    .first<{ cnt: number }>();
   if (countRow && countRow.cnt >= maxIdeas) {
     return { error: `Maximum ideas per project (${maxIdeas}) reached.` };
   }
@@ -98,9 +97,11 @@ export async function createIdea(
   const id = ulid();
   const now = new Date().toISOString();
   await env.DATABASE.prepare(
-    `INSERT INTO tasks (id, project_id, user_id, title, description, status, priority, task_mode, dispatch_depth, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'draft', ?, 'task', 0, ?, ?, ?)`,
-  ).bind(id, project.id, ctx.userId, title, description, priority, ctx.userId, now, now).run();
+    `INSERT INTO tasks (id, project_id, user_id, title, description, status, is_idea, priority, task_mode, dispatch_depth, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'draft', 1, ?, 'task', 0, ?, ?, ?)`
+  )
+    .bind(id, project.id, ctx.userId, title, description, priority, ctx.userId, now, now)
+    .run();
 
   log.info('sam.create_idea.created', {
     ideaId: id,

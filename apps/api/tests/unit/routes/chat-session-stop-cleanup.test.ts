@@ -20,6 +20,16 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('drizzle-orm/d1');
+vi.mock('../../../src/services/task-cancellation-prompts', () => ({
+  retireTaskCancellationPrompts: vi.fn(async () => ({
+    matched: true,
+    cancelled: 0,
+    sessionId: null,
+  })),
+}));
+vi.mock('../../../src/services/task-recovery-cancellation', () => ({
+  taskRecoveryCancellationQuery: vi.fn(() => Promise.resolve()),
+}));
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
   requireApproved: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
@@ -39,14 +49,23 @@ vi.mock('../../../src/services/project-data', () => ({
   getMessages: vi.fn(),
   getMessageToolContent: vi.fn(),
   getSession: mocks.getSession,
+  getSessionAccess: (...args: [unknown, string, string, string]) =>
+    sessionAccessFromGetSession(mocks.getSession)(...args),
+  getSessionWithAccessGrants: async (
+    env: unknown,
+    projectId: string,
+    sessionId: string,
+    userId: string
+  ) => ({
+    ...(await sessionAccessFromGetSession(mocks.getSession)(env, projectId, sessionId, userId)),
+    grants: [],
+  }),
   getSessionState: vi.fn(),
-  linkSessionIdea: vi.fn(),
   listAcpSessions: vi.fn().mockResolvedValue({ sessions: [], total: 0 }),
   listSessionIdeas: vi.fn().mockResolvedValue({ ideas: [] }),
   listSessions: vi.fn(),
   resetIdleCleanup: vi.fn(),
   stopSession: mocks.stopSession,
-  unlinkSessionIdea: vi.fn(),
 }));
 vi.mock('../../../src/services/workspace-cleanup', () => ({
   cleanupWorkspaceForDeletion: (...args: unknown[]) => mocks.cleanupWorkspaceForDeletion(...args),
@@ -72,6 +91,7 @@ vi.mock('../../../src/services/node-agent', () => ({
 }));
 
 import { chatRoutes } from '../../../src/routes/chat';
+import { sessionAccessFromGetSession } from '../../helpers/session-access-mock';
 
 function buildDb(selectResults: unknown[][]) {
   const select = vi.fn(() => {
@@ -85,7 +105,7 @@ function buildDb(selectResults: unknown[][]) {
 
   const update = vi.fn(() => ({
     set: vi.fn(() => ({
-      where: vi.fn(() => Promise.resolve()),
+      where: vi.fn(() => ({ returning: vi.fn(async () => [{ id: 'task' }]) })),
     })),
   }));
 
@@ -93,7 +113,7 @@ function buildDb(selectResults: unknown[][]) {
     values: vi.fn(() => Promise.resolve()),
   }));
 
-  return { insert, select, update };
+  return { insert, select, update, batch: vi.fn(async () => [[{ id: 'task' }], {}]) };
 }
 
 function createApp() {
@@ -220,6 +240,8 @@ describe('POST /api/projects/:projectId/sessions/:sessionId/stop cleanup', () =>
       status: 'cancelled',
       errorMessage: 'Archived by user',
       destructiveSessionEnd: true,
+      requiredUserId: 'user-stop-1',
+      requireStopAcknowledgement: undefined,
       logContext: {
         projectId: 'project-stop-1',
         sessionId: 'session-task-backed-1',
@@ -262,6 +284,8 @@ describe('POST /api/projects/:projectId/sessions/:sessionId/stop cleanup', () =>
         status: 'failed',
         errorMessage: 'Agent prompt failed',
         destructiveSessionEnd: true,
+        requiredUserId: 'user-stop-1',
+        requireStopAcknowledgement: undefined,
         logContext: {
           projectId: 'project-stop-1',
           sessionId: 'session-failed-1',

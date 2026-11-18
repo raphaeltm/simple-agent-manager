@@ -5,6 +5,8 @@ import { createModuleLogger, serializeError } from '../lib/logger';
 import { requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { rateLimitTranscribe } from '../middleware/rate-limit';
+import { getWorkersAiBindingOrNull } from '../services/platform-capabilities';
+import { resolveSpeechTranscriptionBackend } from '../services/speech-backend';
 
 const log = createModuleLogger('transcribe');
 
@@ -47,6 +49,17 @@ const limitTranscription: MiddlewareHandler<{ Bindings: Env }> = (c, next) =>
  */
 transcribeRoutes.post('/', limitTranscription, async (c) => {
   const startTime = Date.now();
+  // Whisper runs on Workers AI. Without the binding, a backend the self-host build installed
+  // (services/speech-backend.ts) serves instead; with neither, refuse before reading the upload
+  // so the client gets a clear answer instead of a 500. With the binding nothing else is read.
+  const ai = getWorkersAiBindingOrNull(c.env);
+  const backend = ai ? null : await resolveSpeechTranscriptionBackend(c.env);
+  if (!ai && !backend) {
+    throw errors.featureUnavailable(
+      'speechToText',
+      'Speech-to-text is not available on this installation'
+    );
+  }
   log.info('request_received');
 
   const maxAudioSizeBytes = parseInt(
@@ -99,6 +112,25 @@ transcribeRoutes.post('/', limitTranscription, async (c) => {
     );
   }
 
+  if (!ai) {
+    if (!backend) throw errors.internal('Speech-to-text has no backend');
+    let text: string;
+    try {
+      text = (await backend.transcribe(audioFile)).trim();
+    } catch (err) {
+      // The cause can name the admin's endpoint host or the provider's status; keep it in the log.
+      log.error('backend_transcription_failed', serializeError(err));
+      throw errors.serviceUnavailable('Speech-to-text failed. Try again shortly.');
+    }
+    log.info('request_complete', {
+      via: 'backend',
+      totalDurationMs: Date.now() - startTime,
+      inputSizeKB: Math.round(audioFile.size / 1024),
+      outputLength: text.length,
+    });
+    return c.json({ text });
+  }
+
   // Convert audio to base64 for Workers AI Whisper input
   const audioBuffer = await audioFile.arrayBuffer();
   const audioBase64 = arrayBufferToBase64(audioBuffer);
@@ -116,7 +148,7 @@ transcribeRoutes.post('/', limitTranscription, async (c) => {
   let result: { text?: string } | undefined;
   try {
     const aiStartTime = Date.now();
-    result = await c.env.AI.run(modelId, {
+    result = await ai.run(modelId, {
       audio: audioBase64,
     });
     const aiDurationMs = Date.now() - aiStartTime;

@@ -203,7 +203,7 @@ func TestSecretExecAcceptedJobSurvivesRequestAndRetriesDoNotReplay(t *testing.T)
 	if err := json.Unmarshal([]byte(job.ResultJSON), &persisted); err != nil {
 		t.Fatal("invalid persisted audit snapshot")
 	}
-	if persisted.Execution.ActorUserID != s.config.NodeID || persisted.Execution.WorkspaceID != "ws" || persisted.Execution.AgentSessionID != "session" || persisted.Execution.CommandMode != "argv" || persisted.Execution.StartedAt == "" || persisted.Execution.CompletedAt == "" || len(persisted.Execution.SecretNames) != 1 {
+	if persisted.Execution.ActorUserID != "user-1" || persisted.Execution.WorkspaceID != "ws" || persisted.Execution.AgentSessionID != "session" || persisted.Execution.CommandMode != "argv" || persisted.Execution.StartedAt == "" || persisted.Execution.CompletedAt == "" || len(persisted.Execution.SecretNames) != 1 {
 		t.Fatal("private audit metadata incomplete")
 	}
 	third := call(context.Background(), input)

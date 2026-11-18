@@ -17,7 +17,6 @@
  */
 
 import { execSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -25,6 +24,7 @@ import * as TOML from '@iarna/toml';
 import * as v from 'valibot';
 
 import { DEPLOYMENT_CONFIG } from './config.js';
+import { readAgentEmailMarker } from './configure-agent-email.js';
 import {
   getDeployedWorkerMigrationTag,
   resolveDurableObjectMigrations,
@@ -33,6 +33,7 @@ import {
   listEnvironmentVarOverrides,
   reportEnvironmentVarOverrides,
 } from './environment-var-overrides.js';
+import { generateSetupToken } from './setup-token.js';
 import type {
   AIBinding,
   AnalyticsEngineDatasetBinding,
@@ -54,13 +55,22 @@ const TAIL_WORKER_WRANGLER_TOML_PATH = resolve(
   '../../apps/tail-worker/wrangler.toml'
 );
 const DEPLOY_STATE_DIR = resolve(import.meta.dirname, '../../.wrangler');
-const SETUP_TOKEN_BYTES = 24;
+/** send_email binding for agent email; mirrors Env.AGENT_EMAIL in apps/api. */
+export const AGENT_EMAIL_BINDING_NAME = 'AGENT_EMAIL';
+/** The API Worker's own script name, shipped with the binding; mirrors Env in apps/api. */
+export const AGENT_EMAIL_WORKER_NAME_VAR = 'AGENT_EMAIL_WORKER_NAME';
 const DEFAULT_SANDBOX_CONTAINER_MAX_INSTANCES = 6;
 const DEFAULT_VM_AGENT_CONTAINER_MAX_INSTANCES = 3;
 const CLOUDFLARE_WORKER_TEXT_BINDING_MAX = 350;
 const CLOUDFLARE_WORKER_TEXT_BINDING_HEADROOM = 10;
 export const CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT =
   CLOUDFLARE_WORKER_TEXT_BINDING_MAX - CLOUDFLARE_WORKER_TEXT_BINDING_HEADROOM;
+/**
+ * Text-binding limit on an ordinary Workers Paid account. SAM's own accounts run with a raised
+ * limit (the guard above); a self-hosted install fails `wrangler secret bulk` with code 10055
+ * above this one, so the checked-in configuration must fit it (sync-wrangler-config.test.ts).
+ */
+export const CLOUDFLARE_STANDARD_WORKER_TEXT_BINDING_MAX = 128;
 
 const EVENTING_OPTIONAL_PROCESS_ENV_VARS = [
   'PROJECT_EVENT_MAX_ACTIVE_SUBSCRIPTIONS_PER_PROJECT',
@@ -169,6 +179,7 @@ const CONTAINER_MAX_INSTANCE_CONFIG = {
     envVar: 'SANDBOX_CONTAINER_MAX_INSTANCES',
     defaultValue: DEFAULT_SANDBOX_CONTAINER_MAX_INSTANCES,
   },
+  ComposeBuilderContainer: { envVar: 'DEPLOY_BUILDER_MAX_INSTANCES', defaultValue: 6 },
   VmAgentContainer: {
     envVar: 'VM_AGENT_CONTAINER_MAX_INSTANCES',
     defaultValue: DEFAULT_VM_AGENT_CONTAINER_MAX_INSTANCES,
@@ -234,10 +245,6 @@ export function ensureTomlMap(value: unknown, path: string): TOML.JsonMap {
   return value as TOML.JsonMap;
 }
 
-function generateSetupToken(): string {
-  return randomBytes(SETUP_TOKEN_BYTES).toString('base64url');
-}
-
 function cloudflareWorkerVariablesUrl(
   accountId: string,
   workerName: string,
@@ -277,11 +284,50 @@ function getConfiguredContainerMaxInstances(
   return parseContainerMaxInstances(config.envVar, config.defaultValue);
 }
 
+const ACCOUNT_IMAGE_REFERENCE =
+  /^registry\.cloudflare\.com\/[a-f0-9]{32}\/[a-z0-9][a-z0-9._-]{0,127}@sha256:[a-f0-9]{64}$/;
+
+/**
+ * Digest-pinned images the installer engine already pushed to the account
+ * registry, by container class (`SAM_CONTAINER_IMAGE_OVERRIDES`). Wrangler then
+ * deploys them instead of building the Dockerfile. Anything malformed fails the
+ * sync rather than silently building something else.
+ */
+export function containerImageOverrides(
+  raw: string | undefined = process.env.SAM_CONTAINER_IMAGE_OVERRIDES
+): Record<string, string> {
+  if (!raw) return {};
+  const parsed: unknown = JSON.parse(raw);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+    throw new Error('SAM_CONTAINER_IMAGE_OVERRIDES must be a JSON object');
+  for (const [className, reference] of Object.entries(parsed)) {
+    if (!/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(className) || typeof reference !== 'string')
+      throw new Error('Invalid container image override');
+    if (!ACCOUNT_IMAGE_REFERENCE.test(reference))
+      throw new Error(
+        `Container image override for ${className} is not a digest-pinned registry image`
+      );
+  }
+  return parsed as Record<string, string>;
+}
+
+function getBuilderInstanceType(): string {
+  const value = process.env.DEPLOY_BUILDER_INSTANCE_TYPE?.trim() || 'standard-4';
+  if (!['lite', 'basic', 'standard-1', 'standard-2', 'standard-3', 'standard-4'].includes(value))
+    throw new Error('DEPLOY_BUILDER_INSTANCE_TYPE must name a supported Cloudflare instance type');
+  return value;
+}
+
 function generateContainerBindings(
   containers: ContainerBinding[] | undefined
 ): ContainerBinding[] | undefined {
+  const overrides = containerImageOverrides();
   return containers?.map((container) => ({
     ...container,
+    image: overrides[container.class_name] ?? container.image,
+    ...(container.class_name === 'ComposeBuilderContainer'
+      ? { instance_type: getBuilderInstanceType() }
+      : {}),
     max_instances: getConfiguredContainerMaxInstances(
       container.class_name,
       container.max_instances
@@ -609,6 +655,9 @@ export function getApiWorkerVars(
     ...(process.env.PREVIEW_URL_TTL_SECONDS
       ? { PREVIEW_URL_TTL_SECONDS: process.env.PREVIEW_URL_TTL_SECONDS }
       : {}),
+    DEPLOY_BUILDER_CLASS_MAX_INSTANCES: String(
+      parseContainerMaxInstances('DEPLOY_BUILDER_MAX_INSTANCES', 6)
+    ),
     VERSION: DEPLOYMENT_CONFIG.version,
     PAGES_PROJECT_NAME: outputs.pagesName,
     SAM_INSTALLATION_ID: outputs.installationId,
@@ -677,7 +726,6 @@ export function getApiWorkerVars(
       'WEB_PUSH_MAX_SUBSCRIPTIONS_PER_USER',
       'WEB_PUSH_USER_AGENT_MAX_LENGTH',
       'RATE_LIMIT_PUSH_SUBSCRIPTION',
-      'HUMAN_INPUT_TIMEOUT_MS',
       'HUMAN_INPUT_ESCALATION_FRACTIONS',
       'HUMAN_INPUT_UNDELIVERED_GRACE_MS',
       'HUMAN_INPUT_MAX_WAIT_MS',
@@ -939,6 +987,7 @@ export function getApiWorkerVars(
       'OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH',
       'OBSERVABILITY_ERROR_STACK_MAX_LENGTH',
       'OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH',
+      'SAM_MODEL',
       'DEBUG_AGENT_MODEL',
       'DEBUG_AGENT_MAX_TURNS',
       'DEBUG_AGENT_RUN_TOKEN_LIMIT',
@@ -1030,6 +1079,13 @@ export function getApiWorkerVars(
       'CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS',
       'CF_CONTAINER_CLONE_FILTER',
       'CF_CONTAINER_VM_AGENT_PORT',
+      'VM_AGENT_TRANSPORT',
+      'VM_AGENT_TUNNEL_PORT',
+      'CLOUDFLARED_VERSION',
+      'VM_AGENT_TUNNEL_LISTENER_WAIT_SECONDS',
+      'VM_AGENT_TUNNEL_PROBE_TIMEOUT_SECONDS',
+      'VM_AGENT_TUNNEL_PROBE_INTERVAL_SECONDS',
+      'VM_AGENT_TUNNEL_RESTART_SECONDS',
       'SANDBOX_ENABLED',
       'SANDBOX_EXEC_TIMEOUT_MS',
       'SANDBOX_VM_AGENT_PORT',
@@ -1049,12 +1105,12 @@ export function getApiWorkerVars(
     ANALYTICS_DATASET: analyticsDataset,
     // Marketing Pages project — used when the wildcard Worker route intercepts www.*
     WWW_PAGES_PROJECT_NAME: `${DEPLOYMENT_CONFIG.prefix}-www`,
-    // Deployment environment — used by trial runner to choose agent type + model
+    // Deployment environment name (staging | production); used for diagnostics and node labels
     ENVIRONMENT: DEPLOYMENT_CONFIG.getEnvironmentFromStack(stack),
     // Artifacts is disabled by default and enabled only with the generated binding.
     ARTIFACTS_ENABLED: includeArtifactsBinding ? 'true' : 'false',
-    // Plaintext by design: first-run admins read this once from the CF dashboard.
-    // Do not print the value in workflow logs; setup.completed gates it after use.
+    // Plaintext by design: first-run admins read this once from the CF dashboard. Inside
+    // GitHub Actions generateSetupToken masks it, because wrangler prints plain-text vars.
     SETUP_TOKEN: generateSetupToken(),
     ...(process.env.SETUP_FORCE === 'true' ? { SETUP_FORCE: 'true' } : {}),
   };
@@ -1100,7 +1156,8 @@ export function generateApiWorkerEnv(
   stack: string,
   includeTailConsumers: boolean,
   artifactsBindingEnabled: boolean,
-  deployedMigrationTag: string | null
+  deployedMigrationTag: string | null,
+  agentEmailBindingEnabled = false
 ): WranglerEnvConfig {
   const staticBindings = extractStaticBindings(topLevel);
   const durableObjectMigrations = resolveDurableObjectMigrations(
@@ -1143,17 +1200,30 @@ export function generateApiWorkerEnv(
     // (see task-runner.ts handleNodeAgentReady and verifyNodeAgentHealthy).
     routes: getApiWorkerRoutes(outputs.stackSummary.baseDomain),
 
-    // Workers Observability
+    // Workers Observability: native traces provide dependency timings without an SDK.
     observability: {
       enabled: true,
+      // Callback and terminal URLs can carry credentials in query parameters.
+      redact_query_string: true,
+      traces: {
+        enabled: true,
+        head_sampling_rate: 1,
+        persist: true,
+        ...topLevel.observability?.traces,
+      },
       logs: {
         invocation_logs: true,
         head_sampling_rate: 1,
       },
     },
 
-    // Vars: merge top-level defaults with dynamic overrides
-    vars: getApiWorkerVars(topLevel, outputs, stack, analyticsDataset, includeArtifactsBinding),
+    // Vars: merge top-level defaults with dynamic overrides. With the agent email binding, the
+    // Worker also learns its own script name: the admin setup points the `agent@` routing rule
+    // at it (packages/agent-email/src/setup.ts).
+    vars: {
+      ...getApiWorkerVars(topLevel, outputs, stack, analyticsDataset, includeArtifactsBinding),
+      ...(agentEmailBindingEnabled ? { [AGENT_EMAIL_WORKER_NAME_VAR]: workerName } : {}),
+    },
 
     // Dynamic bindings from Pulumi outputs
     d1_databases: [
@@ -1186,6 +1256,11 @@ export function generateApiWorkerEnv(
       includeArtifactsBinding,
       durableObjectMigrations
     ),
+
+    // Agent email (preview). Generated here rather than declared at the top level of
+    // wrangler.toml: it exists only after configure-agent-email.ts prepared Email Sending for
+    // this deploy. It does not turn agent email on: an admin does that from the admin panel.
+    ...(agentEmailBindingEnabled ? { send_email: [{ name: AGENT_EMAIL_BINDING_NAME }] } : {}),
 
     // Tail consumers (conditional — omitted on first deploy when tail worker doesn't exist)
     ...getTailConsumers(includeTailConsumers, tailWorkerName),
@@ -1294,6 +1369,10 @@ async function main(): Promise<void> {
     artifactsNamespace
   );
 
+  // Agent email binding ships only when configure-agent-email.ts prepared this deploy.
+  const agentEmailDomain = readAgentEmailMarker();
+  console.log(`  Agent email: ${agentEmailDomain ? `prepared for ${agentEmailDomain}` : 'off'}`);
+
   // Generate complete env section for API worker
   if (!config.env) {
     config.env = {};
@@ -1304,7 +1383,8 @@ async function main(): Promise<void> {
     stack,
     hasTailWorker,
     artifactsBindingEnabled,
-    deployedMigrationTag
+    deployedMigrationTag,
+    agentEmailDomain !== null
   );
   saveWranglerToml(config);
   console.log(`Updated wrangler.toml [env.${envKey}]`);

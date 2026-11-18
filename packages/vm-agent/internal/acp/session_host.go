@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -50,6 +49,8 @@ const (
 	// DefaultRecoveryWatchdogTimeout bounds crash recovery after an ACP stdio
 	// disconnect so a leaked process monitor cannot strand the prompt forever.
 	DefaultRecoveryWatchdogTimeout = 2 * time.Minute
+	// DefaultEvictionParkTimeout bounds how long a pending eviction owns an agent exit.
+	DefaultEvictionParkTimeout = config.DefaultACPEvictionParkTimeout
 
 	// DefaultRestartDecayWindow is the quiet period after which restartCount is
 	// reset before counting a new unexpected agent exit.
@@ -105,6 +106,11 @@ type SessionHostConfig struct {
 	// StartProcess is an internal test hook. Production code leaves it nil and
 	// uses StartProcess via startAgentProcess.
 	StartProcess func(*agentStartup) (agentProcess, error)
+
+	// VerifyCodexRuntime is an internal test hook that replaces the C2 runtime
+	// verification/installation, which needs the real reviewed release. Production
+	// code leaves it nil.
+	VerifyCodexRuntime func(context.Context, agentCommandInfo) error
 
 	// BeforeCheckpointProcessStop is an internal deterministic-race test hook.
 	// Production code leaves it nil.
@@ -198,19 +204,37 @@ type SessionHost struct {
 	// agentSupportsLoadSession is captured from ACP Initialize so prompt error
 	// handling can decide whether a process crash is recoverable.
 	agentSupportsLoadSession bool
-	status                   SessionHostStatus
-	statusErr                string
+	// steering is what the loaded adapter proved at ACP Initialize
+	// (session_host_steering.go). Cleared whenever the ACP connection is.
+	steering  steeringSupport
+	status    SessionHostStatus
+	statusErr string
 	// selectionInProgress is set for the duration of a selectAgent call (from
 	// beginAgentSelection until selectAgent returns). It guards the fresh-host
 	// window where h.process is still nil during the multi-second
 	// credential-fetch/install phase, so two concurrent selections for the same
 	// agent cannot double-spawn a process for one session.
 	selectionInProgress bool
-	// intentionalPromptCancelProcessStop suppresses rapid-exit crash handling
-	// when a user cancel intentionally terminates an agent that lacks native
-	// session/cancel support.
-	intentionalPromptCancelProcessStop bool
-	checkpointRollover                 *checkpointRolloverEpisode
+	// intentionalProcessStop is the agent process that was stopped on purpose,
+	// so the process monitor restarts it in place (LoadSession resume) without
+	// counting a crash: no rapid-exit or active-prompt error, no restartCount
+	// increment. Set by a user prompt cancel that terminates the agent
+	// (StopProcessForPromptCancel, CancelPromptGuarded) and by a workspace
+	// credential rotation (RestartAgentProcessForCredentialRotation).
+	//
+	// It names the process rather than being a per-host flag, and
+	// monitorProcessExit reads it as soon as that process's Wait returns
+	// (intentionalStopForExitedProcess). A stop requested after the process had
+	// already exited on its own therefore cannot relabel that crash as
+	// intentional, and a stale mark can never match a later process. nil means
+	// no intentional stop is pending.
+	intentionalProcessStop agentProcess
+	// processExitObservedHook, when set by a test before the agent starts, runs
+	// right after monitorProcessExit records whether an exit was intentional, so
+	// a test can request a stop between the exit and the restart decision.
+	// Always nil in production.
+	processExitObservedHook func(agentProcess)
+	checkpointRollover      *checkpointRolloverEpisode
 
 	// replaySuppressed is set while an ACP LoadSession is in flight. LoadSession
 	// makes the agent replay the entire transcript as session/update
@@ -226,6 +250,10 @@ type SessionHost struct {
 	// host was created (SetCallbackToken). Lock-free like the fields above:
 	// control-plane reporting runs on the ACP notification goroutine.
 	renewedCallbackToken atomic.Value // string
+	// replacedMcpServers holds MCP server configs delivered after the host was
+	// created (SetMcpServers), for example after a workspace callback generation
+	// rotation re-minted the sam-mcp token. Read through mcpServers().
+	replacedMcpServers atomic.Pointer[[]McpServerEntry]
 
 	// Credential injection metadata (set during startAgent, read during stop).
 	// These track whether the agent used file-based credential injection so
@@ -256,6 +284,13 @@ type SessionHost struct {
 	opencodeUsageKey   atomic.Value // string
 	codexRolloutReader codexRolloutTailReader
 
+	// Run token usage (Insights slice U, session_host_run_usage.go): per-model
+	// running totals for this host's lifetime, reported cumulatively under one
+	// epoch. runUsageModel is the configured model, used when the harness does
+	// not say which model a turn ran on.
+	runUsage      runUsageAccumulator
+	runUsageModel atomic.Value // string
+
 	// Viewers (guarded by viewerMu)
 	viewerMu sync.RWMutex
 	viewers  map[string]*Viewer
@@ -265,12 +300,31 @@ type SessionHost struct {
 	messageBuf []BufferedMessage
 	seqCounter uint64
 
+	// steerMu admits and sends live steers one at a time per host, in order.
+	// Independent of the prompt gate: a steer never takes promptMu across an RPC.
+	steerMu sync.Mutex
+
+	// Lock order: evictionDecisionMu -> evictionReportMu -> mu -> promptMu.
+	// Process decisions may hold decisionMu through the existing one-second settle
+	// and configured restart deadline; Prepare waits before recording ownership.
+	// Stop only latches teardown under reportMu, then releases it before callbacks.
 	// Prompt lifecycle state.
 	// promptMu guards promptInFlight (serialization gate only).
-	promptMu        sync.Mutex
-	promptInFlight  bool
-	evictionPending bool // promptMu: durable eviction owns this runtime; reject new work
-	promptSeq       uint64
+	evictionDecisionMu    sync.Mutex // orders process-exit handling before a new eviction fence
+	evictionReportMu      sync.Mutex // orders parked-exit publication before final teardown
+	evictionTeardown      bool       // evictionReportMu: teardown has consumed late callbacks
+	promptMu              sync.Mutex
+	promptInFlight        bool
+	guardedCancelAttempt  *promptAttempt // promptMu: owns any pending guarded stop
+	guardedCancelProcess  agentProcess   // promptMu: fence survives detach until this process exits
+	guardedCancelPending  bool           // promptMu: a matched process stop still owns admission
+	evictionEpoch         uint64         // promptMu: identifies the current admission fence
+	evictionReplayPending int            // promptMu: detached exit replay still owns admission
+	evictionPending       bool           // promptMu: durable eviction owns this runtime; reject new work
+	evictionParked        evictionParked // promptMu: crash handling deferred while evictionPending
+	evictionParkTimer     *time.Timer    // promptMu: replays parked handling if the eviction never resolves it
+	evictionParkExpired   bool           // promptMu: the deadline fired; this fence no longer parks exits
+	promptSeq             uint64
 	// promptAttempt remains attached until the next accepted prompt so late
 	// terminal signals from the same runtime are absorbed by its exact-once
 	// arbiter instead of reaching the control plane twice.
@@ -319,6 +373,7 @@ type SessionHost struct {
 	// Crash recovery state (guarded by mu). When a prompt fails because the
 	// agent process disconnected, finishPromptWithError records this context
 	// and lets monitorProcessExit attempt LoadSession recovery.
+	crashRecoveryEpoch      uint64 // mu: binds watchdogs to their originating recovery
 	crashRecoveryInProgress bool
 	crashStderr             string
 	crashAgentType          string
@@ -340,6 +395,7 @@ type SessionHost struct {
 	// Durable ACP permission waiters are in-memory by design: Cloudflare owns
 	// durable state, while only the live connection generation may consume an answer.
 	interactionMu           sync.Mutex
+	samEnvFallback          atomic.Pointer[[]string] // set by ConfigureSAMEnvFallback; nil means config.SAMEnvFallback
 	interactionConfig       AcpInteractionRuntimeConfig
 	interactionGeneration   string
 	interactionWaiters      map[string]*acpInteractionWaiter
@@ -566,10 +622,14 @@ func (h *SessionHost) autoSuspend() {
 // as stopped. This is the only way to terminate the agent — browser disconnects
 // do NOT call this.
 func (h *SessionHost) Stop() {
+	h.evictionReportMu.Lock()
+	h.evictionTeardown = true
+	h.evictionReportMu.Unlock()
 	h.cancelInteractionWaiters("session_stopped")
 	h.promptMu.Lock()
 	attempt := h.promptAttempt
 	activePrompt := h.promptInFlight
+	_ = h.takeEvictionParkedLocked() // A stopped host has no parked exit left to resolve.
 	h.promptMu.Unlock()
 	if activePrompt && attempt != nil {
 		attempt.complete(h, "cancelled", context.Canceled)
@@ -641,17 +701,11 @@ func (h *SessionHost) Stop() {
 // on-demand if missing.
 func (h *SessionHost) ensureAgentInstalled(ctx context.Context, info agentCommandInfo) error {
 	if info.verifyOnly {
-		if h.config.ProcessLauncher != nil {
-			if err := exec.CommandContext(ctx, localShellPath, "-c", info.validationCmd).Run(); err != nil {
-				return fmt.Errorf("staged Codex release verification failed: %w", err)
-			}
-			return nil
+		if err := h.verifyCodexRuntime(ctx, info); err != nil {
+			h.releaseCodexRuntimeSelection()
+			return codexRuntimeUnavailable(err)
 		}
-		containerID, err := h.config.ContainerResolver()
-		if err != nil {
-			return fmt.Errorf("failed to discover devcontainer: %w", err)
-		}
-		return h.ensureCodexRuntimeInContainer(ctx, containerID, info)
+		return nil
 	}
 	if info.installCmd == "" {
 		return nil
@@ -689,6 +743,7 @@ func (h *SessionHost) stopCurrentAgentLocked() {
 	h.acpConn = nil
 	h.setSessionIDLocked("")
 	h.agentSupportsLoadSession = false
+	h.steering = steeringSupport{}
 	// Clear credential metadata so stale values don't leak across agent switches.
 	h.credInjectionMode = ""
 	h.credAuthFilePath = ""
@@ -743,65 +798,4 @@ func (h *SessionHost) persistLastPrompt(text string) {
 			slog.Warn("Failed to persist last prompt to tab store", "error", err)
 		}
 	}
-}
-
-// IsPrompting returns true if a prompt is currently in flight.
-// Used by the auto-suspend timer to avoid interrupting active work.
-func (h *SessionHost) IsPrompting() bool {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.status == HostPrompting
-}
-
-func (h *SessionHost) isPromptingOrRecovering() bool {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.status == HostPrompting || h.status == HostStarting || h.crashRecoveryInProgress || h.hasSecretExecutionWork()
-}
-
-// OnPromptCompleteCallback returns the OnPromptComplete callback, if configured.
-// Used by server-initiated prompt flows to report agent start failures back to
-// the control plane without going through HandlePrompt.
-func (h *SessionHost) OnPromptCompleteCallback() func(string, error) {
-	return h.config.OnPromptComplete
-}
-
-// setSessionIDLocked assigns the ACP session ID and its lock-free mirror.
-// Callers must hold h.mu for write.
-func (h *SessionHost) setSessionIDLocked(id acpsdk.SessionId) {
-	h.sessionID = id
-	h.mirrorSessionID.Store(string(id))
-}
-
-// setStatusLocked assigns the host status and its lock-free mirror.
-// Callers must hold h.mu for write.
-func (h *SessionHost) setStatusLocked(status SessionHostStatus) {
-	h.status = status
-	h.mirrorStatus.Store(status)
-}
-
-// loadMirroredSessionID reads the session ID WITHOUT taking h.mu. Safe to call
-// from the ACP notification-processing goroutine.
-func (h *SessionHost) loadMirroredSessionID() string {
-	if v, ok := h.mirrorSessionID.Load().(string); ok {
-		return v
-	}
-	return ""
-}
-
-// loadMirroredStatus reads the host status WITHOUT taking h.mu. Safe to call
-// from the ACP notification-processing goroutine.
-func (h *SessionHost) loadMirroredStatus() SessionHostStatus {
-	if v, ok := h.mirrorStatus.Load().(SessionHostStatus); ok {
-		return v
-	}
-	return HostIdle
-}
-
-// SecretExecutionContext returns the live process container and configured session
-// identity without resolving/recreating a container or waking the session.
-func (h *SessionHost) SecretExecutionContext() (containerID, user, workDir string, active bool) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.secretExecContainerID, h.config.ContainerUser, h.config.ContainerWorkDir, h.process != nil
 }

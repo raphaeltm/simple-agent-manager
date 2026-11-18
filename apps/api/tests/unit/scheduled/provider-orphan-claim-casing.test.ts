@@ -57,7 +57,8 @@ vi.mock('../../../src/lib/secrets', () => ({
 vi.mock('../../../src/services/observability', () => ({
   persistError: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('../../../src/lib/logger', () => ({
+vi.mock('../../../src/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
@@ -115,7 +116,7 @@ beforeEach(() => {
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, status TEXT NOT NULL,
       node_role TEXT NOT NULL DEFAULT 'workspace', node_class TEXT NOT NULL DEFAULT 'managed',
       provider_instance_id TEXT,
-      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, callback_generation TEXT
     );
   `);
   const insert = sqlite.prepare(
@@ -152,7 +153,10 @@ describe('provider orphan claim lookup — ULID casing', () => {
 
     const result = await runProviderOrphanReconciliation(makeEnv());
 
-    expect(deleteVM).toHaveBeenCalledWith('srv-deleted');
+    expect(deleteVM).toHaveBeenCalledWith(
+      'srv-deleted',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
     expect(result.destroyed).toBe(1);
   });
 
@@ -161,7 +165,10 @@ describe('provider orphan claim lookup — ULID casing', () => {
 
     const result = await runProviderOrphanReconciliation(makeEnv());
 
-    expect(deleteVM).toHaveBeenCalledWith('srv-unknown');
+    expect(deleteVM).toHaveBeenCalledWith(
+      'srv-unknown',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
     expect(result.destroyed).toBe(1);
   });
 
@@ -177,9 +184,18 @@ describe('provider orphan claim lookup — ULID casing', () => {
 
     const result = await runProviderOrphanReconciliation(makeEnv());
 
-    expect(deleteVM).toHaveBeenCalledWith('srv-deleted');
-    expect(deleteVM).toHaveBeenCalledWith('srv-unknown');
-    expect(deleteVM).not.toHaveBeenCalledWith('srv-live');
+    expect(deleteVM).toHaveBeenCalledWith(
+      'srv-deleted',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    expect(deleteVM).toHaveBeenCalledWith(
+      'srv-unknown',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    expect(deleteVM).not.toHaveBeenCalledWith(
+      'srv-live',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
     expect(result.destroyed).toBe(2);
     expect(result.skippedClaimed).toBe(1);
   });

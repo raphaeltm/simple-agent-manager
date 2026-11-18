@@ -1,16 +1,29 @@
 /**
  * MCP tool definitions for Project Policies (Phase 4: Policy Propagation).
  */
-import { POLICY_CATEGORIES, POLICY_SCOPES, POLICY_SOURCES } from '@simple-agent-manager/shared';
+import {
+  POLICY_CATEGORIES,
+  POLICY_INJECT_MODES,
+  POLICY_SCOPES,
+  POLICY_SOURCES,
+} from '@simple-agent-manager/shared';
+
+import { nullableMcpProperty } from './tool-definitions-shared-fields';
 
 const SCOPE_DESCRIPTION =
   "How long this policy applies. 'always' (default) is a standing project policy injected into every future session. " +
-  "'task' is a one-shot policy captured for a specific piece of work (\"use profile X for the 2026-08-21 reliability wave\") " +
+  '\'task\' is a one-shot policy captured for a specific piece of work ("use profile X for the 2026-08-21 reliability wave") ' +
   'and REQUIRES expiresAt, so it cannot outlive the work it was captured for.';
 
 const EXPIRES_AT_DESCRIPTION =
   'Epoch milliseconds after which this policy stops being injected into sessions. Omit or null for a policy that never expires. ' +
-  'Must be in the future. Required when scope is "task". The policy stays readable via get_policy and visible in list_policies after it expires.';
+  'Must be in the future. Required when scope is "task". The policy stays readable via policies_read method get and visible in policies_read method list after it expires.';
+
+const INJECT_MODE_DESCRIPTION =
+  "How this policy reaches agent sessions. 'pinned' (default) injects it in full into every session. " +
+  "'on_demand' lists it by title and id in every session and injects the full text only when it matches " +
+  'the session task; agents fetch it with policies_read method get before acting in its area. ' +
+  'Choosing which policies to unpin is a human decision: do not change this unless a person asked you to.';
 
 export const POLICY_TOOLS = [
   {
@@ -26,19 +39,36 @@ export const POLICY_TOOLS = [
       properties: {
         category: {
           type: 'string',
-          description: 'Policy category: rule (must follow), constraint (technical limitation), delegation (agent autonomy), preference (soft guidance)',
+          description:
+            'Policy category: rule (must follow), constraint (technical limitation), delegation (agent autonomy), preference (soft guidance)',
           enum: [...POLICY_CATEGORIES],
         },
-        title: { type: 'string', description: 'Short title summarizing the policy (max 200 chars)' },
-        content: { type: 'string', description: 'Full policy content with details and rationale (max 2000 chars)' },
+        title: {
+          type: 'string',
+          description: 'Short title summarizing the policy (max 200 chars)',
+        },
+        content: {
+          type: 'string',
+          description: 'Full policy content with details and rationale (max 2000 chars)',
+        },
         source: {
           type: 'string',
-          description: 'How this policy was created: explicit (human stated it) or inferred (agent deduced from behavior)',
+          description:
+            'How this policy was created: explicit (human stated it) or inferred (agent deduced from behavior)',
           enum: [...POLICY_SOURCES],
         },
-        confidence: { type: 'number', description: 'Confidence level 0.0-1.0 (default: 0.8). Use 0.9+ for explicit human statements.' },
+        confidence: {
+          type: 'number',
+          description:
+            'Confidence level 0.0-1.0 (default: 0.8). Use 0.9+ for explicit human statements.',
+        },
         scope: { type: 'string', description: SCOPE_DESCRIPTION, enum: [...POLICY_SCOPES] },
         expiresAt: { type: 'number', description: EXPIRES_AT_DESCRIPTION },
+        injectMode: {
+          type: 'string',
+          description: INJECT_MODE_DESCRIPTION,
+          enum: [...POLICY_INJECT_MODES],
+        },
       },
       required: ['category', 'title', 'content'],
       additionalProperties: false,
@@ -55,7 +85,10 @@ export const POLICY_TOOLS = [
           description: 'Optional filter by category: rule, constraint, delegation, preference',
           enum: [...POLICY_CATEGORIES],
         },
-        includeInactive: { type: 'boolean', description: 'Include deactivated policies (default: false)' },
+        includeInactive: {
+          type: 'boolean',
+          description: 'Include deactivated policies (default: false)',
+        },
         limit: { type: 'number', description: 'Max results to return (default: 50)' },
         offset: { type: 'number', description: 'Pagination offset (default: 0)' },
       },
@@ -77,7 +110,7 @@ export const POLICY_TOOLS = [
   {
     name: 'update_policy',
     description:
-      'Update an existing project policy. Can change title, content, category, confidence, scope, expiry, or active status. ' +
+      'Update an existing project policy. Can change title, content, category, confidence, scope, expiry, inject mode, or active status. ' +
       'Use this to give an existing one-shot policy an expiry once you notice it is tied to work that has finished.',
     inputSchema: {
       type: 'object' as const,
@@ -93,9 +126,14 @@ export const POLICY_TOOLS = [
         active: { type: 'boolean', description: 'Set active/inactive' },
         confidence: { type: 'number', description: 'New confidence level 0.0-1.0' },
         scope: { type: 'string', description: SCOPE_DESCRIPTION, enum: [...POLICY_SCOPES] },
-        expiresAt: {
-          type: ['number', 'null'],
+        expiresAt: nullableMcpProperty({
+          type: 'number',
           description: `${EXPIRES_AT_DESCRIPTION} Pass null to clear an existing expiry and make the policy permanent.`,
+        }),
+        injectMode: {
+          type: 'string',
+          description: `${INJECT_MODE_DESCRIPTION} Omit to leave it unchanged.`,
+          enum: [...POLICY_INJECT_MODES],
         },
       },
       required: ['policyId'],
@@ -104,7 +142,8 @@ export const POLICY_TOOLS = [
   },
   {
     name: 'remove_policy',
-    description: 'Deactivate a project policy (soft-delete). The policy remains in history but no longer applies to agents.',
+    description:
+      'Deactivate a project policy (soft-delete). The policy remains in history but no longer applies to agents.',
     inputSchema: {
       type: 'object' as const,
       properties: {

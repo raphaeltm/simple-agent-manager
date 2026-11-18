@@ -49,6 +49,8 @@ interface AuthContextValue {
   isApproved: boolean;
   /** True when BetterAuth is re-checking the session (e.g. after tab regains focus) */
   isRefetching: boolean;
+  sessionError?: string | null;
+  retrySession?: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -69,9 +71,27 @@ interface AuthProviderProps {
  * All authorization decisions are enforced server-side via requireAuth().
  */
 export function AuthProvider({ children }: AuthProviderProps) {
-  const { data: session, isPending, error, isRefetching } = useSession();
+  const {
+    data: session,
+    isPending: sessionRequestPending,
+    error,
+    isRefetching,
+    refetch,
+  } = useSession();
   const lastGoodSessionRef = useRef<typeof session>(null);
+  // BetterAuth marks every background refetch (window focus, reconnect) as pending while the
+  // session is null, so a signed-out visitor looked like a cold load each time they came back
+  // to the tab: the spinner replaced the app and the sign-in code form lost its state. Once the
+  // server has confirmed "signed out", a refetch that still has no session is a background
+  // revalidation (rule 48). Unresolved identity after a signed-in session, and a retry after a
+  // cold failure, still count as pending.
+  const confirmedSignedOutRef = useRef(false);
+  if (session?.user) confirmedSignedOutRef.current = false;
+  else if (!sessionRequestPending && !error) confirmedSignedOutRef.current = true;
+  const isPending = sessionRequestPending && !confirmedSignedOutRef.current;
   const [githubReauthMessage, setGitHubReauthMessage] = useState<string | null>(null);
+  // True when the account has no GitHub link at all: signing out cannot fix that, connecting can.
+  const [githubNotConnected, setGithubNotConnected] = useState(false);
   const [activeCacheNamespace, setActiveCacheNamespace] = useState<string | null | undefined>(
     undefined
   );
@@ -109,11 +129,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   const nextCacheNamespace = buildLibraryCacheNamespace(enrichedUser?.id);
-  const canResolveCacheNamespace = !isPending || Boolean(enrichedUser?.id);
+  // A failed cold verification is unknown, not a confirmed signed-out identity.
+  const canResolveCacheNamespace = Boolean(enrichedUser?.id) || (!isPending && !error);
+  const canShowSignedOutVerificationError =
+    activeCacheNamespace === null && !isPending && Boolean(error) && !enrichedUser?.id;
   const isCacheNamespaceTransitioning =
     activeCacheNamespace === undefined
       ? canResolveCacheNamespace
-      : !canResolveCacheNamespace || activeCacheNamespace !== nextCacheNamespace;
+      : (!canResolveCacheNamespace && !canShowSignedOutVerificationError) ||
+        activeCacheNamespace !== nextCacheNamespace;
 
   // Rehydrate the persisted query cache for the RESOLVED namespace (never the
   // in-flight one). Holding the spinner over this is what makes a reload paint
@@ -172,7 +196,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   useEffect(() => {
     const onGitHubReauthRequired = (event: Event) => {
-      const detail = event instanceof CustomEvent ? (event.detail as { message?: unknown }) : null;
+      const detail =
+        event instanceof CustomEvent
+          ? (event.detail as { message?: unknown; code?: unknown })
+          : null;
+      // Settings already owns the canonical connection controls.
+      if (
+        detail?.code === 'GITHUB_NOT_CONNECTED' &&
+        window.location.pathname === '/settings/github'
+      )
+        return;
+      setGithubNotConnected(detail?.code === 'GITHUB_NOT_CONNECTED');
       setGitHubReauthMessage(
         typeof detail?.message === 'string' && detail.message.length > 0
           ? detail.message
@@ -185,6 +219,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   const handleGitHubReauth = async () => {
+    if (githubNotConnected) {
+      try {
+        window.location.assign('/settings/github');
+      } catch (err) {
+        setGitHubReauthMessage(err instanceof Error ? err.message : 'Could not connect GitHub');
+      }
+      return;
+    }
     await signOut();
   };
 
@@ -201,13 +243,26 @@ export function AuthProvider({ children }: AuthProviderProps) {
       isSuperadmin,
       isApproved,
       isRefetching: effectiveIsRefetching,
+      sessionError: error ? 'Session verification is temporarily unavailable.' : null,
+      retrySession: () => {
+        void refetch();
+      },
     }),
-    [enrichedUser, isPending, isAuthenticated, isSuperadmin, isApproved, effectiveIsRefetching]
+    [
+      enrichedUser,
+      isPending,
+      isAuthenticated,
+      isSuperadmin,
+      isApproved,
+      effectiveIsRefetching,
+      error,
+      refetch,
+    ]
   );
 
   return (
     <AuthContext.Provider value={value}>
-      {isCacheNamespaceTransitioning ? null : isRestoringPersistedQueryCache ? (
+      {isCacheNamespaceTransitioning || isRestoringPersistedQueryCache ? (
         // Keep the SAME affordance ProtectedRoute was already showing while the
         // session resolved, so restoring the persisted cache continues one
         // uninterrupted spinner instead of unmounting it into a silent blank
@@ -225,25 +280,27 @@ export function AuthProvider({ children }: AuthProviderProps) {
       )}
       {githubReauthMessage && (
         <div
-          className="fixed inset-x-4 bottom-4 z-50 mx-auto max-w-md rounded-lg border border-border bg-surface-elevated p-4 shadow-lg"
+          className="sam-glass sam-glass-rim sam-glass-live fixed inset-x-4 bottom-4 z-50 mx-auto max-w-md rounded-[var(--sam-radius-pane)] p-4 shadow-dropdown break-words"
           role="alert"
         >
-          <p className="text-sm font-medium text-fg-primary">GitHub sign-in required</p>
+          <p className="text-sm font-medium text-fg-primary">
+            {githubNotConnected ? 'Connect GitHub to continue' : 'GitHub sign-in required'}
+          </p>
           <p className="mt-1 text-sm text-fg-secondary">{githubReauthMessage}</p>
           <div className="mt-3 flex justify-end gap-2">
             <button
               type="button"
-              className="rounded-md border border-border px-3 py-2 text-sm text-fg-secondary hover:bg-surface-hover"
+              className="sam-raised min-h-11 rounded-md border border-border px-3 py-2 text-sm text-fg-secondary hover:bg-surface-hover"
               onClick={() => setGitHubReauthMessage(null)}
             >
               Dismiss
             </button>
             <button
               type="button"
-              className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-fg-on-accent hover:opacity-90"
+              className="min-h-11 rounded-md bg-accent px-3 py-2 text-sm font-medium text-fg-on-accent hover:opacity-90"
               onClick={() => void handleGitHubReauth()}
             >
-              Sign out and reconnect
+              {githubNotConnected ? 'Connect GitHub' : 'Sign out and reconnect'}
             </button>
           </div>
         </div>

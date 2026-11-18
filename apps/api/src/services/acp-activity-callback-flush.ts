@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import type { ActivityReportOutcome } from '../durable-objects/project-data/session-work-clock';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { AppError, errors } from '../middleware/error';
@@ -44,6 +45,7 @@ export function activityReportExtra(
   runtimeWorkCount?: number;
   runtimeWorkSource?: string;
   runtimeWorkProgressAt?: number | null;
+  steeringSupported?: boolean;
 } {
   return {
     observedAt,
@@ -55,6 +57,7 @@ export function activityReportExtra(
     runtimeWorkCount: body.runtimeWorkCount,
     runtimeWorkSource: body.runtimeWorkSource,
     runtimeWorkProgressAt: body.runtimeWorkProgressAt,
+    steeringSupported: body.steeringSupported,
   };
 }
 
@@ -151,10 +154,16 @@ export async function cancelSleepForActiveActivity(input: {
   sessionId: string;
   chatSessionId: string;
   body: AcpActivityCallbackReport;
+  /** ProjectData's verdict on the report. Absent (older stub/mocks) means a work edge. */
+  outcome?: ActivityReportOutcome;
 }): Promise<void> {
   if (input.body.activity !== 'prompting' && !reportedHarnessWorkKeepsRuntimeActive(input.body)) {
     return;
   }
+  // A same-turn re-report is not new work: the turn's start already fenced any sleep.
+  // Cancelling again would reset an in-flight sleep claim every minute, so a turn that
+  // never returns could never be slept (`session-work-clock.ts`).
+  if (input.outcome === 'same_turn_rereport') return;
   await cancelScheduledSessionSleep(drizzle(input.env.DATABASE, { schema }), input.chatSessionId, {
     preserveCompletedTaskIntent: true,
   }).catch((err) => {
@@ -266,6 +275,7 @@ export async function persistIntermediateActivity(input: {
       sessionId: input.sessionId,
       chatSessionId: input.binding.chatSessionId,
       body: input.body,
+      outcome: applied,
     });
     recordAcpActivityAdmissionSuccess({
       env: input.env,
@@ -349,6 +359,7 @@ export async function flushCoalescedAcpActivity(
       sessionId: snapshot.sessionId,
       chatSessionId: binding.chatSessionId,
       body: snapshot.report,
+      outcome: applied,
     });
     return { action: 'flushed' };
   } catch (err) {

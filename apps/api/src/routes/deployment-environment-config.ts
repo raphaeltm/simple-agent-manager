@@ -3,6 +3,7 @@ import { and, count, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
+import { createDeploymentSecretCipher } from '../app-deployment-ports/secret-cipher';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getCredentialEncryptionKey } from '../lib/secrets';
@@ -141,7 +142,7 @@ deploymentEnvironmentConfigRoutes.post(
       envKey,
       value: body.value,
       isSecret: Boolean(body.isSecret),
-      encryptionKey: getCredentialEncryptionKey(c.env),
+      cipher: createDeploymentSecretCipher(getCredentialEncryptionKey(c.env)),
     });
 
     return c.json(await buildDeploymentEnvironmentConfigResponse(db, envId));

@@ -9,6 +9,12 @@ import {
 import type { UiCommentThread } from '../../../src/components/project-message-view/comments/comment-utils';
 import type { MessageCommentAuthor } from '../../../src/lib/api/comments';
 
+// Cloudflare behaviour: every platform service present. The absent case runs through the real
+// capabilities query in platform-capabilities-ui.test.tsx.
+vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
+  usePlatformCapabilities: () => ({ speechToText: true, textToSpeech: true }),
+}));
+
 const VIEWER = 'user-viewer';
 const OTHER = 'user-other';
 
@@ -51,7 +57,7 @@ function makeInboxItem(thread: UiCommentThread): CommentInboxItem {
     sessionId: 'session-1',
     sessionTopic: 'Ship comment navigation',
     messageId: 'message-1',
-    messageRole: 'assistant',
+    messageDescription: "the agent's reply",
   });
 }
 
@@ -153,7 +159,7 @@ describe('SessionCommentsDrawer', () => {
     fireEvent.submit(replyForm);
 
     await waitFor(() => {
-      expect(onReply).toHaveBeenCalledWith('thread-1', 'Re-check after the patch.', 'note');
+      expect(onReply).toHaveBeenCalledWith('thread-1', 'Re-check after the patch.', 'note', []);
     });
 
     await waitFor(() => {

@@ -1,3 +1,11 @@
+import {
+  newProviderLimitWait,
+  parseProviderLimitWait,
+  PROVIDER_LIMIT_CONTINUATION,
+  PROVIDER_LIMIT_POLICY,
+  providerLimitNeedsImmediateSleep,
+  type ProviderLimitWait,
+} from '@simple-agent-manager/scheduler-core';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
@@ -8,15 +16,8 @@ import { parsePositiveInt } from '../lib/route-helpers';
 import { recordCredentialLimitObservation } from './credential-limit-events';
 import { credentialLimitReferenceKey } from './credential-limit-events/values';
 import * as projectData from './project-data';
-import {
-  newProviderLimitWait,
-  parseProviderLimitWait,
-  PROVIDER_LIMIT_CONTINUATION,
-  PROVIDER_LIMIT_POLICY,
-  providerLimitNeedsImmediateSleep,
-  type ProviderLimitWait,
-} from './provider-limit-policy';
 import { repairProviderLimitRejectionObservation } from './provider-limit-rejection-intent';
+import { resolveProviderLimitResetWindowTolerance } from './provider-limit-settings';
 import { rejectedProviderWindow } from './provider-limit-window';
 import { queueWorkspaceSessionSleep } from './session-sleep';
 import {
@@ -129,6 +130,7 @@ export async function parkTaskForProviderLimit(
     wait = newProviderLimitWait({
       taskId: task.id,
       origin: 'callback',
+      resetWindowToleranceMs: await resolveProviderLimitResetWindowTolerance(env),
       incidentId,
       credentialKey: key,
       previous,
@@ -262,6 +264,9 @@ export async function repairProviderLimitIntents(
   const scheduleResult = await projectData.createProjectSchedule(env, task.projectId, {
     userId: task.userId,
     creatorChatSessionId: task.chatSessionId,
+    creator: 'system',
+    // SAM's fixed continuation text, not model- or agent-written.
+    promptAuthor: 'sam',
     request: {
       action: {
         kind: 'message_session',

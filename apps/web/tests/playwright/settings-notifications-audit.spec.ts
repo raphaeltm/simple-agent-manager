@@ -21,7 +21,14 @@ type NotificationType =
   | 'progress'
   | 'session_ended'
   | 'pr_created'
-  | 'cron_failure';
+  | 'cron_failure'
+  | 'mention'
+  | 'comment'
+  | 'session_access'
+  | 'operations_approval';
+
+/** One in-app switch per notification type, plus the Web Push switch. */
+const TYPE_SWITCH_COUNT = 11;
 
 interface PreferenceMock {
   notificationType: NotificationType | '*';
@@ -56,6 +63,13 @@ async function setupApiMocks(
     saveError = false,
     notifications = [],
   } = options;
+
+  // The first-run cloud onboarding wizard overlays every page for a user with no credentials.
+  // It covered the settings page in every screenshot and intercepted the switch clicks
+  // (.claude/rules/62), so mark it dismissed before the app boots.
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, MOCK_USER.user.id);
 
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
@@ -101,6 +115,15 @@ async function setupApiMocks(
       return respond(200, { subscriptions: [] });
     }
 
+    // The app shell's setup-status check reads both credential lists on every page; the
+    // catch-all `{}` below crashes it ("credentials.some is not a function").
+    if (path === '/api/credentials') {
+      return respond(200, []);
+    }
+    if (path === '/api/credentials/agent') {
+      return respond(200, { credentials: [] });
+    }
+
     // Projects
     if (path === '/api/projects') {
       return respond(200, { projects: [] });
@@ -130,19 +153,19 @@ async function navigateToNotificationSettings(page: Page) {
 // ===========================================================================
 
 test.describe('Notification Settings — Mobile', () => {
-  test('default state: all seven type toggles render enabled', async ({ page }) => {
+  test('default state: every type toggle renders enabled', async ({ page }) => {
     await setupApiMocks(page, { preferences: [] });
     await navigateToNotificationSettings(page);
     await page.waitForSelector('[role="switch"]');
     await screenshot(page, 'notification-settings-mobile-default');
     await assertNoOverflow(page);
 
-    const switches = page.getByRole('switch');
-    await expect(switches).toHaveCount(8);
-    for (let i = 0; i < 7; i++) {
+    const switches = page.locator('[role="switch"]:not([aria-label="Enable SAM assistant"])');
+    await expect(switches).toHaveCount(TYPE_SWITCH_COUNT + 1);
+    for (let i = 0; i < TYPE_SWITCH_COUNT; i++) {
       await expect(switches.nth(i)).toHaveAttribute('aria-checked', 'true');
     }
-    await expect(switches.nth(7)).toHaveAttribute('aria-checked', 'false');
+    await expect(switches.nth(TYPE_SWITCH_COUNT)).toHaveAttribute('aria-checked', 'false');
     await expect(page.getByRole('heading', { name: 'Push Notifications' })).toBeVisible();
     await expect(page.getByRole('switch', { name: 'Enable Web Push notifications' })).toBeVisible();
     await expect(page.getByText('Install SAM')).toBeVisible();
@@ -174,7 +197,7 @@ test.describe('Notification Settings — Mobile', () => {
     await screenshot(page, 'notification-settings-mobile-wildcard-disabled');
     await assertNoOverflow(page);
 
-    const switches = page.getByRole('switch');
+    const switches = page.locator('[role="switch"]:not([aria-label="Enable SAM assistant"])');
     const count = await switches.count();
     for (let i = 0; i < count; i++) {
       await expect(switches.nth(i)).toHaveAttribute('aria-checked', 'false');
@@ -289,8 +312,8 @@ test.describe('Notification Settings — Desktop', () => {
     await screenshot(page, 'notification-settings-desktop-default');
     await assertNoOverflow(page);
 
-    const switches = page.getByRole('switch');
-    await expect(switches).toHaveCount(8);
+    const switches = page.locator('[role="switch"]:not([aria-label="Enable SAM assistant"])');
+    await expect(switches).toHaveCount(TYPE_SWITCH_COUNT + 1);
     await expect(page.getByRole('heading', { name: 'Push Notifications' })).toBeVisible();
     await expect(page.getByRole('switch', { name: 'Enable Web Push notifications' })).toBeVisible();
   });
@@ -370,4 +393,16 @@ test.describe('Notification Settings — Desktop', () => {
       page.getByRole('alert').filter({ hasText: /Could not load notification preferences/i })
     ).toBeVisible();
   });
+});
+
+test('the Operations approvals switch renders, enabled by default', async ({ page }) => {
+  await setupApiMocks(page, { preferences: [] });
+  await navigateToNotificationSettings(page);
+  const row = page.getByRole('switch', { name: /Operations approvals/i });
+  await row.scrollIntoViewIfNeeded();
+  await expect(row).toBeVisible();
+  await expect(row).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByText(/asks you to approve an action/)).toBeVisible();
+  await screenshot(page, 'notification-settings-operations-approvals', { scopeToProject: true });
+  await assertNoOverflow(page);
 });

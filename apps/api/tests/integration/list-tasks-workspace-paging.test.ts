@@ -19,6 +19,7 @@ import {
   createJsonKv,
   createMcpApp,
   postMcp,
+  seedActiveMcpWorkspace,
   storeMcpToken,
   toolResult,
 } from '../helpers/mcp-route';
@@ -59,6 +60,7 @@ describe('list_tasks and search_tasks for workspace agents', () => {
       userId: 'user-1',
       workspaceId: 'ws-own',
     });
+    seedActiveMcpWorkspace(sqlite, { workspaceId: 'ws-own', userId: 'user-1', projectId: PROJECT });
     env = { DATABASE: createSqliteD1(sqlite), KV: kv } as unknown as Env;
     app = await createMcpApp();
   });
@@ -115,12 +117,11 @@ describe('list_tasks and search_tasks for workspace agents', () => {
       }
     ).tools;
 
-    for (const name of ['list_tasks', 'search_tasks']) {
-      const properties = tools.find((tool) => tool.name === name)?.inputSchema.properties;
-      expect(properties?.status?.enum).toEqual([...TASK_STATUSES]);
-      expect(properties?.status?.enum).toContain('sleeping');
-      expect(properties?.cursor).toBeDefined();
-    }
+    // list_tasks and search_tasks are listed as tasks_read methods list and search.
+    const properties = tools.find((tool) => tool.name === 'tasks_read')?.inputSchema.properties;
+    expect(properties?.status?.enum).toEqual([...TASK_STATUSES]);
+    expect(properties?.status?.enum).toContain('sleeping');
+    expect(properties?.cursor).toBeDefined()
   });
 
   it('returns sleeping tasks when asked for them', async () => {

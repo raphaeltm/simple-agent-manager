@@ -1,5 +1,5 @@
 /**
- * Empty managed VM nodes reach NodeLifecycle (tasks/active/2026-10-11-reap-empty-managed-vm-nodes.md).
+ * Empty managed VM nodes reach NodeLifecycle (tasks/archive/2026-10-11-reap-empty-managed-vm-nodes.md).
  *
  * Production incident 2026-10-09: a healthy pool node ran 34 h with no workspace. Its last
  * task was failed by the runaway-cost ceiling, `cleanupTaskRun` only handed a node to
@@ -15,17 +15,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
-import { getCredentialEncryptionKey } from '../../src/lib/secrets';
 import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
 import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
-import { encrypt } from '../../src/services/encryption';
 import { handOffEmptyWorkspaceNode } from '../../src/services/node-warm-handoff';
-import { fingerprintEncryptedProviderCredential } from '../../src/services/provider-credential-exact';
 import { cleanupWorkspaceForDeletion } from '../../src/services/workspace-cleanup';
 import {
+  bindDecryptableProviderCredential,
+  type PoolNodeOptions as SharedPoolNodeOptions,
+  seedRunningPoolNode as seedSharedRunningPoolNode,
+} from './helpers/managed-vm-node';
+import {
   seedInstallation,
-  seedManagedVmAbsenceProof,
-  seedNode,
   seedProject,
   seedTask,
   seedUser,
@@ -58,7 +58,13 @@ beforeEach(() => {
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-      if (url.includes('.vm.test.example.com')) return new Response(null, { status: 204 });
+      if (url.includes('.vm.test.example.com')) {
+        if (url.endsWith('/physical-deletion') && init?.method === 'DELETE') {
+          const identity = JSON.parse(String(init.body));
+          return Response.json({ ...identity, success: true, physicalDeleted: true });
+        }
+        return new Response(null, { status: 204 });
+      }
       if (url.startsWith('https://api.hetzner.cloud/v1/servers/') && init?.method === 'DELETE') {
         providerDeletes.push(url);
         return new Response(null, { status: 204 });
@@ -82,85 +88,10 @@ async function seedBase(): Promise<void> {
   await seedProject(PROJECT_ID, USER_ID, INSTALL_ID);
 }
 
-interface PoolNodeOptions {
-  userId?: string;
-  createdAt?: string;
-  healthStatus?: string;
-  nodeClass?: 'managed' | 'user-owned';
-  nodeRole?: 'workspace' | 'deployment';
-  runtime?: 'vm' | 'cf-container';
-  warmSince?: string | null;
-  provenance?: boolean;
-  cleanupBackoffUntil?: string;
-}
+type PoolNodeOptions = Omit<SharedPoolNodeOptions, 'userId'> & { userId?: string };
 
-/**
- * A running VM shaped like production pool placement: no task link, provenance only in the
- * server-written pool/credential snapshot (the incident node's exact shape).
- */
 async function seedRunningPoolNode(nodeId: string, opts: PoolNodeOptions = {}): Promise<void> {
-  const userId = opts.userId ?? USER_ID;
-  const now = new Date().toISOString();
-  await seedNode(nodeId, userId, {
-    status: 'running',
-    createdAt: opts.createdAt ?? ago(3 * HOUR),
-    updatedAt: now,
-    lastHeartbeatAt: now,
-    healthStatus: opts.healthStatus ?? 'healthy',
-    warmSince: opts.warmSince ?? null,
-    nodeClass: opts.nodeClass ?? 'managed',
-  });
-  if (opts.provenance !== false) {
-    await seedManagedVmAbsenceProof(nodeId, userId);
-    // Running: the provider still holds the server, so there is no termination proof yet.
-    await env.DATABASE.prepare(
-      `UPDATE nodes SET provider_instance_id = ?, runtime_termination_confirmed_at = NULL
-        WHERE id = ?`
-    )
-      .bind(`${nodeId}-server`, nodeId)
-      .run();
-  }
-  if (opts.nodeRole === 'deployment') {
-    await env.DATABASE.prepare(
-      `UPDATE nodes SET node_role = 'deployment', workload_role = 'deployment' WHERE id = ?`
-    )
-      .bind(nodeId)
-      .run();
-  }
-  if (opts.runtime) {
-    await env.DATABASE.prepare('UPDATE nodes SET runtime = ? WHERE id = ?')
-      .bind(opts.runtime, nodeId)
-      .run();
-  }
-  if (opts.cleanupBackoffUntil) {
-    await env.DATABASE.prepare('UPDATE nodes SET cleanup_backoff_until = ? WHERE id = ?')
-      .bind(opts.cleanupBackoffUntil, nodeId)
-      .run();
-  }
-}
-
-/** Make the node's platform credential decryptable so strict provider teardown can run. */
-async function bindDecryptableProviderCredential(nodeId: string): Promise<void> {
-  const credentialId = `${nodeId}-proof-credential`;
-  const token = await encrypt(
-    'hetzner-test-token',
-    getCredentialEncryptionKey(env as unknown as Env)
-  );
-  await env.DATABASE.prepare(
-    'UPDATE platform_credentials SET encrypted_token = ?, iv = ?, is_enabled = 1 WHERE id = ?'
-  )
-    .bind(token.ciphertext, token.iv, credentialId)
-    .run();
-  await env.DATABASE.prepare(
-    `UPDATE nodes SET placement_credential_reference = ?, placement_credential_fingerprint = ?
-      WHERE id = ?`
-  )
-    .bind(
-      `platform_credentials:${credentialId}`,
-      await fingerprintEncryptedProviderCredential(token.ciphertext, token.iv),
-      nodeId
-    )
-    .run();
+  await seedSharedRunningPoolNode(nodeId, { ...opts, userId: opts.userId ?? USER_ID });
 }
 
 async function seedWorkspaceOn(
@@ -175,6 +106,17 @@ async function seedWorkspaceOn(
     createdAt: at,
     updatedAt: at,
   });
+  await env.DATABASE.prepare('UPDATE workspaces SET eviction_generation=? WHERE id=?')
+    .bind(`generation-${workspaceId}`, workspaceId)
+    .run();
+  // A logical tombstone is eligible for retirement only after physical proof.
+  if (status === 'deleted') {
+    await env.DATABASE.prepare(
+      `UPDATE workspaces SET runtime_deletion_confirmed_at = ?, runtime_deletion_proof = 'vm_agent_confirmed' WHERE id = ?`
+    )
+      .bind(at, workspaceId)
+      .run();
+  }
 }
 
 async function nodeRow(nodeId: string): Promise<{

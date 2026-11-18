@@ -1,30 +1,58 @@
 # Codex project configuration for SAM
 
-# Also load CLAUDE.md as a project doc (in addition to AGENTS.md)
+# Codex reads AGENTS.md first in each directory and uses CLAUDE.md only where no AGENTS.md
+# exists: a fallback, not an addition.
 project_doc_fallback_filenames = ["CLAUDE.md"]
-
-# ==============================================================================
-# Hooks — Test Quality Enforcement
-# ==============================================================================
-
-# Stop hook: block task completion if cross-boundary files lack vertical slice tests.
-# Uses the same script as Claude Code for consistency.
 
 # BEGIN SAM MANAGED MCP
 # Added by SAM vm-agent for Codex ACP sessions.
 sandbox_mode = "danger-full-access"
 approval_policy = "never"
-model_reasoning_effort = "low"
-[mcp_servers.sam-mcp]
-url = "https://api.simple-agent-manager.org/mcp"
-bearer_token_env_var = "SAM_MCP_TOKEN"
-
 # END SAM MANAGED MCP
 
-[[hooks.Stop]]
+# ==============================================================================
+# Hooks (schema: https://developers.openai.com/codex/hooks)
+# ==============================================================================
+# Each event holds matcher groups, and each group holds a `hooks` array of handlers.
+# `timeout` is in seconds. Codex runs project hooks only for a trusted project whose hook
+# definitions are trusted. codex-acp trusts the session's project; SAM's vm-agent supplies
+# the hook trust (bypass_hook_trust in buildCodexACPManagedConfigEnv,
+# packages/vm-agent/internal/acp/session_host_agent_config.go).
+# `pnpm quality:agent-context-budget --check` validates these entries.
+
+# Path-scoped rule delivery: Codex loads only the root AGENTS.md by itself. This hook adds
+# the rules (.claude/rules/*.md with `paths`) that govern the files a tool call touches,
+# the same rules Claude Code loads on file access. See .codex/hooks/rule-context.mjs.
+# additionalContextLimit (tokens) sits above the hook's own byte cap so Codex never spills.
+[[hooks.SessionStart]]
+matcher = "^(startup|resume|clear|compact|fork)$"
+
+[[hooks.SessionStart.hooks]]
 type = "command"
-command = ".claude/hooks/verify-test-quality.sh"
-timeout = 30000
+command = 'node "$(git rev-parse --show-toplevel)/.codex/hooks/rule-context.mjs"'
+timeout = 10
+additionalContextLimit = 20000
+statusMessage = "Preparing SAM rule delivery"
+
+[[hooks.PreToolUse]]
+matcher = "^(Bash|apply_patch)$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = 'node "$(git rev-parse --show-toplevel)/.codex/hooks/rule-context.mjs"'
+timeout = 10
+additionalContextLimit = 20000
+statusMessage = "Checking SAM rules for these files"
+
+# Test-quality Stop gate (rule 35), shared with Claude Code. Delivery per finding class is
+# set and measured in .claude/hooks/verify-test-quality.mjs; it never blocks without limit.
+[[hooks.Stop]]
+
+[[hooks.Stop.hooks]]
+type = "command"
+command = 'node "$(git rev-parse --show-toplevel)/.claude/hooks/verify-test-quality.mjs"'
+timeout = 30
+statusMessage = "Checking tests for changed boundary code"
 
 [projects."/workspaces/simple-agent-manager"]
 trust_level = "trusted"

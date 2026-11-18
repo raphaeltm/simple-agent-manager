@@ -13,6 +13,39 @@ export interface UserMessage {
    * broadcast envelope. ACP _meta remains intentionally unused because the SDK strips it.
    */
   origin?: 'user' | 'system';
+  /**
+   * Who actually sent a user-role message when it was not the session owner typing it:
+   * a teammate with shared access, or a comment someone sent to the agent. Absent for the
+   * owner's own messages.
+   */
+  attribution?: UserMessageAttribution;
+  /** Present when the sender asked to steer the agent's running turn. */
+  delivery?: UserMessageDelivery;
+}
+
+/**
+ * What became of a message sent with "Steer now". `steered` means the agent's runtime
+ * accepted it into the running turn, not that the model has acted on it yet.
+ */
+export interface UserMessageDelivery {
+  status: 'steering' | 'steered' | 'queued_instead' | 'unconfirmed' | 'not_delivered';
+  /** For `queued_instead`: why it waits for the next turn instead. */
+  reason?: 'turn_finished' | 'agent_asleep' | 'not_supported' | 'other';
+}
+
+export interface UserMessageAttribution {
+  kind: 'shared_access' | 'comment';
+  /** The person who sent it to the agent. */
+  senderName: string | null;
+  /** For `comment`: who wrote the comment. */
+  commentAuthorName?: string | null;
+  /** For `shared_access`: the sender scheduled it earlier rather than typing it now. */
+  scheduled?: boolean;
+  /**
+   * The prompt was cancelled before reaching the agent because the sender's shared access
+   * ended: revoked (or they left), or its chosen time ran out.
+   */
+  notDelivered?: 'access_removed' | 'access_expired';
 }
 
 export interface AgentMessage {
@@ -55,6 +88,8 @@ export interface ToolCallItem {
   contentSize?: number;
   /** Whether content has been lazy-loaded (false = needs fetch on expand). */
   contentLoaded?: boolean;
+  /** Durable snapshot revision; invalidates cached and in-flight lazy output. */
+  revision?: number;
   /** Message ID for lazy-loading content via the tool-content endpoint. */
   messageId?: string;
 }

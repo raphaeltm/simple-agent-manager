@@ -79,20 +79,27 @@ func Load() (*Config, error) {
 		JWTAudience: getEnv("JWT_AUDIENCE", "workspace-terminal"),
 		JWTIssuer:   getEnv("JWT_ISSUER", ""), // Will be derived from ControlPlaneURL if not set
 
-		NodeID:             getEnv("NODE_ID", getEnv("WORKSPACE_ID", "")),
-		WorkspaceID:        getEnv("WORKSPACE_ID", ""),
-		CallbackToken:      callbackToken,
-		BootstrapToken:     getEnv("BOOTSTRAP_TOKEN", ""),
-		Repository:         repository,
-		Branch:             getEnv("BRANCH", "main"),
-		WorkspaceDir:       workspaceDir,
-		BootstrapStatePath: getEnv("BOOTSTRAP_STATE_PATH", "/var/lib/vm-agent/bootstrap-state.json"),
-		BootstrapMaxWait:   getEnvDuration("BOOTSTRAP_MAX_WAIT", 5*time.Minute),
+		WorkspaceDeletionTombstoneRetention: getEnvDuration("WORKSPACE_DELETION_TOMBSTONE_RETENTION", DefaultWorkspaceDeletionTombstoneRetention),
+		WorkspaceDeletionBatchSize:          getEnvInt("WORKSPACE_DELETION_BATCH_SIZE", DefaultWorkspaceDeletionBatchSize),
+		WorkspaceDeletionAttemptTimeout:     getEnvDuration("WORKSPACE_DELETION_ATTEMPT_TIMEOUT", DefaultWorkspaceDeletionAttemptTimeout),
+		WorkspaceDeletionRetryInterval:      getEnvDuration("WORKSPACE_DELETION_RETRY_INTERVAL", DefaultWorkspaceDeletionRetryInterval),
+		NodeRuntimeIncarnationID:            getEnv("NODE_RUNTIME_INCARNATION_ID", ""),
+		NodeUserID:                          getEnv("NODE_USER_ID", ""),
+		NodeID:                              getEnv("NODE_ID", getEnv("WORKSPACE_ID", "")),
+		WorkspaceID:                         getEnv("WORKSPACE_ID", ""),
+		CallbackToken:                       callbackToken,
+		BootstrapToken:                      getEnv("BOOTSTRAP_TOKEN", ""),
+		Repository:                          repository,
+		Branch:                              getEnv("BRANCH", "main"),
+		WorkspaceDir:                        workspaceDir,
+		BootstrapStatePath:                  getEnv("BOOTSTRAP_STATE_PATH", "/var/lib/vm-agent/bootstrap-state.json"),
+		BootstrapMaxWait:                    getEnvDuration("BOOTSTRAP_MAX_WAIT", 5*time.Minute),
 		// Must be <= API-side TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS (default 30m).
 		// If larger, the API declares the workspace dead while bootstrap is still running.
 		BootstrapTimeout: getEnvDuration("BOOTSTRAP_TIMEOUT", 30*time.Minute),
 
 		GracefulShutdownTimeout:   getEnvDuration("GRACEFUL_SHUTDOWN_TIMEOUT", DefaultGracefulShutdownTimeout),
+		SelfRestartDelay:          getEnvDuration("VM_AGENT_SELF_RESTART_DELAY", DefaultSelfRestartDelay),
 		SystemProvisioningTimeout: getEnvDuration("SYSTEM_PROVISIONING_TIMEOUT", DefaultSystemProvisioningTimeout),
 		CFIPFetchTimeout:          getEnvDuration("CF_IP_FETCH_TIMEOUT", DefaultCFIPFetchTimeout),
 		BootLogHTTPTimeout:        getEnvDuration("BOOT_LOG_HTTP_TIMEOUT", DefaultBootLogHTTPTimeout),
@@ -115,7 +122,7 @@ func Load() (*Config, error) {
 		HTTPReadTimeout:     getEnvDuration("HTTP_READ_TIMEOUT", 15*time.Second),
 		HTTPWriteTimeout:    getEnvDuration("HTTP_WRITE_TIMEOUT", 15*time.Second),
 		HTTPIdleTimeout:     getEnvDuration("HTTP_IDLE_TIMEOUT", 60*time.Second),
-		HTTPCallbackTimeout: getEnvDuration("HTTP_CALLBACK_TIMEOUT", 30*time.Second),
+		HTTPCallbackTimeout: getEnvDuration("HTTP_CALLBACK_TIMEOUT", DefaultHTTPCallbackTimeout),
 
 		// WebSocket buffer sizes and terminal socket limits - configurable per constitution
 		WSReadBufferSize:           getEnvInt("WS_READ_BUFFER_SIZE", 1024),
@@ -154,10 +161,12 @@ func Load() (*Config, error) {
 		ACPPongTimeout:                    getEnvDuration("ACP_PONG_TIMEOUT", 10*time.Second),
 		ACPPromptTimeout:                  getEnvDuration("ACP_PROMPT_TIMEOUT", 0),
 		ACPPromptCancelGrace:              getEnvDuration("ACP_PROMPT_CANCEL_GRACE_PERIOD", 5*time.Second),
+		ACPSteerTimeout:                   getEnvDuration("ACP_STEER_TIMEOUT", 20*time.Second),
 		ACPPromptRetryMaxRetries:          getEnvInt("ACP_PROMPT_RETRY_MAX_RETRIES", 2),
 		ACPPromptRetryInitial:             getEnvDuration("ACP_PROMPT_RETRY_INITIAL_BACKOFF", 15*time.Second),
 		ACPPromptRetryMax:                 getEnvDuration("ACP_PROMPT_RETRY_MAX_BACKOFF", 2*time.Minute),
 		ACPRecoveryWatchdog:               getEnvDuration("DEFAULT_RECOVERY_WATCHDOG_TIMEOUT", DefaultACPRecoveryWatchdogTimeout),
+		ACPEvictionParkTimeout:            getEnvDuration("EVICTION_PARK_TIMEOUT", DefaultACPEvictionParkTimeout),
 		ACPRestartDecayWindow:             getEnvDuration("DEFAULT_RESTART_DECAY_WINDOW", DefaultACPRestartDecayWindow),
 		ACPIdleSuspendTimeout:             getEnvDuration("ACP_IDLE_SUSPEND_TIMEOUT", 30*time.Minute),
 		ACPNotifSerializeTimeout:          getEnvDuration("ACP_NOTIF_SERIALIZE_TIMEOUT", 5*time.Second),
@@ -243,6 +252,7 @@ func Load() (*Config, error) {
 		EvictionDockerStopTimeout:        time.Duration(getEnvInt(EnvDefaultEvictionDockerStopTimeoutSeconds, DefaultEvictionDockerStopTimeoutSeconds)) * time.Second,
 		EvictionCallbackRetryMaxInterval: time.Duration(getEnvInt(EnvDefaultEvictionCallbackRetryMaxSeconds, DefaultEvictionCallbackRetryMaxSeconds)) * time.Second,
 		EvictionResolveTimeout:           time.Duration(getEnvInt(EnvDefaultEvictionResolveTimeoutSeconds, DefaultEvictionResolveTimeoutSeconds)) * time.Second,
+		SnapshotHelper:                   loadSnapshotHelperConfig(),
 		ResourceHistorySampleInterval:    getEnvDuration(EnvResourceHistorySampleInterval, 5*time.Second),
 		ResourceHistoryChunkInterval:     getEnvDuration(EnvResourceHistoryChunkInterval, 15*time.Minute),
 		ResourceHistorySpoolDir:          getEnv(EnvResourceHistorySpoolDir, "/var/lib/vm-agent/resource-history"),
@@ -288,6 +298,11 @@ func Load() (*Config, error) {
 		WorkspaceCallbackTokenRenewalTimeout:      positiveDurationOr(getEnvDuration("WORKSPACE_CALLBACK_TOKEN_RENEWAL_TIMEOUT", DefaultWorkspaceCallbackTokenRenewalTimeout), DefaultWorkspaceCallbackTokenRenewalTimeout),
 		WorkspaceCallbackTokenRenewalRetryInitial: positiveDurationOr(getEnvDuration("WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_INITIAL", DefaultWorkspaceCallbackTokenRenewalRetryInitial), DefaultWorkspaceCallbackTokenRenewalRetryInitial),
 		WorkspaceCallbackTokenRenewalRetryMax:     positiveDurationOr(getEnvDuration("WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_MAX", DefaultWorkspaceCallbackTokenRenewalRetryMax), DefaultWorkspaceCallbackTokenRenewalRetryMax),
+
+		McpTokenRotationTimeout:     positiveDurationOr(getEnvDuration("MCP_TOKEN_ROTATION_TIMEOUT", DefaultMcpTokenRotationTimeout), DefaultMcpTokenRotationTimeout),
+		McpTokenRotationMaxAttempts: getBoundedPositiveEnvInt("MCP_TOKEN_ROTATION_MAX_ATTEMPTS", DefaultMcpTokenRotationMaxAttempts, MaxMcpTokenRotationMaxAttempts),
+		McpTokenRotationRetryDelay:  positiveDurationOr(getEnvDuration("MCP_TOKEN_ROTATION_RETRY_DELAY", DefaultMcpTokenRotationRetryDelay), DefaultMcpTokenRotationRetryDelay),
+		McpTokenRotationBudget:      positiveDurationOr(getEnvDuration("MCP_TOKEN_ROTATION_BUDGET", DefaultMcpTokenRotationBudget), DefaultMcpTokenRotationBudget),
 
 		// Error reporting settings - configurable per constitution principle XI
 		ErrorReportFlushInterval:  getEnvDuration("ERROR_REPORT_FLUSH_INTERVAL", 30*time.Second),
@@ -361,7 +376,11 @@ func Load() (*Config, error) {
 		DeployArtifactIdleTimeout:           getEnvDuration("DEPLOY_ARTIFACT_IDLE_TIMEOUT", DefaultDeployArtifactIdleTimeout),
 		DeployApplyIdleTimeout:              getEnvDuration("DEPLOY_APPLY_IDLE_TIMEOUT", DefaultDeployApplyIdleTimeout),
 		ComposeOutputRetentionBytes:         composeOutputRetentionBytes,
+		DeployPublishHeartbeatInterval:      getEnvDuration("DEPLOY_PUBLISH_HEARTBEAT_INTERVAL", DefaultDeployPublishHeartbeatInterval),
 		DeployBuildPublishTimeout:           getEnvDuration("DEPLOY_BUILD_PUBLISH_TIMEOUT", DefaultDeployBuildPublishTimeout),
+		BuildContextMaxActivePerWorkspace:   getEnvInt("BUILD_CONTEXT_MAX_ACTIVE_PER_WORKSPACE", DEFAULT_BUILD_CONTEXT_MAX_ACTIVE_PER_WORKSPACE),
+		BuildContextCallbackMaxAttempts:     getEnvInt("BUILD_CONTEXT_CALLBACK_MAX_ATTEMPTS", DefaultBuildContextCallbackMaxAttempts),
+		BuildContextCallbackRetryDelay:      getEnvDuration("BUILD_CONTEXT_CALLBACK_RETRY_DELAY", DefaultBuildContextCallbackRetryDelay),
 		DeployPreflightCommandTimeout:       getEnvDuration("DEPLOY_PREFLIGHT_COMMAND_TIMEOUT", DefaultDeployPreflightCommandTimeout),
 	}
 
@@ -442,6 +461,14 @@ func Load() (*Config, error) {
 	}
 	if cfg.WorktreeCacheTTL <= 0 {
 		cfg.WorktreeCacheTTL = 5 * time.Second
+	}
+
+	if err := cfg.validateEvictionParkTimeout(); err != nil {
+		return nil, err
+	}
+
+	if cfg.Tunnel, err = loadTunnelConfig(cfg.Port); err != nil {
+		return nil, err
 	}
 
 	return cfg, nil

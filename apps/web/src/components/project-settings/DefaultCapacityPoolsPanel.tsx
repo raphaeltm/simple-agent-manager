@@ -25,8 +25,9 @@ import {
   updateUserDefaultCapacityPools,
 } from '../../lib/api/capacity-pools';
 import { ApiClientError } from '../../lib/api/client';
-import { POOL_SCOPE_COPY } from '../../lib/compute-pool-copy';
+import { POOL_EDIT_CONFLICT_MESSAGE, POOL_SCOPE_COPY } from '../../lib/compute-pool-copy';
 import { buildMachineGroups } from '../../lib/compute-pool-machines';
+import { initialSourceOrder, orderableSources } from '../../lib/compute-pool-source-order';
 import { capacityPoolQueryKeys } from '../../lib/query-options/capacity-pools';
 import { ComputePoolEditor } from '../compute-pool/ComputePoolEditor';
 import { ComputePoolEmptyState } from '../compute-pool/ComputePoolEmptyState';
@@ -37,6 +38,26 @@ type DefaultCapacityPoolsPanelProps =
   | { scope?: 'project'; projectId: string }
   | { scope: 'user'; projectId?: never }
   | { scope: 'installation'; projectId?: never };
+
+/**
+ * The pool as the editor shows it: only accounts that are still connected. A disconnected or
+ * disabled account's source stays in the database (running work can reference it) but is
+ * never placed, so it disappears from the pool along with its machines.
+ */
+function connectedOnly(
+  summary: DefaultCapacityPoolSummary | null
+): DefaultCapacityPoolSummary | null {
+  if (!summary) return null;
+  const connected = new Set(
+    summary.sources.filter((source) => source.status === 'active').map((source) => source.id)
+  );
+  if (connected.size === summary.sources.length) return summary;
+  return {
+    ...summary,
+    sources: summary.sources.filter((source) => connected.has(source.id)),
+    candidates: summary.candidates.filter((candidate) => connected.has(candidate.capacitySourceId)),
+  };
+}
 
 /** Permission failures get a plain sentence; anything else keeps the server's message. */
 function loadErrorMessage(error: unknown, scope: CapacityPoolScope): string {
@@ -71,7 +92,7 @@ function FallbackNotice({
   return (
     <div className="grid gap-1 rounded-md border border-border-default bg-inset px-3 py-2 text-sm">
       <p className="m-0 text-fg-primary">
-        This project uses{' '}
+        {projectId ? 'This project uses' : 'Your work uses'}{' '}
         {fallbackScope === 'installation'
           ? 'the shared compute pool'
           : 'your personal compute pool'}
@@ -80,7 +101,10 @@ function FallbackNotice({
       {projectId && (
         <p className="m-0 text-xs text-fg-muted">
           To give this project machines of its own,{' '}
-          <Link to={`/projects/${projectId}/settings/connections`} className={TEXT_LINK_CLASS}>
+          <Link
+            to={`/projects/${projectId}/settings/accounts?connect=cloud:any`}
+            className={TEXT_LINK_CLASS}
+          >
             connect a cloud account to the project
           </Link>
           .
@@ -118,7 +142,9 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
           : fetchInstallationDefaultCapacityPools(),
     enabled: Boolean(queryScope),
   });
-  const [isEditing, setIsEditing] = useState(false);
+  // Bumped after a save, a discard or a conflict, so the editor reopens from the server state.
+  const [editorKey, setEditorKey] = useState(0);
+  const resetEditor = () => setEditorKey((key) => key + 1);
 
   const ownedDefault =
     query.data?.defaults.find((item) => item.scope === scope && item.visibility === 'visible')
@@ -126,7 +152,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
   const effective = query.data?.effective ?? null;
   // A scope that owns a pool always shows it, even when it allows no machines yet, so it
   // stays editable. Otherwise show the pool this scope falls back to, read-only.
-  const shown: DefaultCapacityPoolSummary | null = ownedDefault ?? effective;
+  const shown = useMemo(() => connectedOnly(ownedDefault ?? effective), [ownedDefault, effective]);
   const fallbackScope = !ownedDefault && effective ? effective.pool.scope : null;
   const canEdit = Boolean(query.data?.policyMutationSupported && ownedDefault);
   const catalogs = providerCatalog.catalogs;
@@ -134,6 +160,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
     () => (shown ? buildMachineGroups(shown.candidates, catalogs, shown.sources) : []),
     [shown, catalogs]
   );
+  const sources = useMemo(() => (shown ? orderableSources(shown, groups) : []), [shown, groups]);
 
   const reconcileMutation = useMutation({
     mutationFn: () =>
@@ -159,10 +186,18 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
           : updateInstallationDefaultCapacityPools(body),
     onSuccess: (data) => {
       queryClient.setQueryData(queryKey, data);
-      setIsEditing(false);
+      resetEditor();
       toast.success('Compute pool saved');
     },
     onError: (error) => {
+      if (error instanceof ApiClientError && error.status === 409) {
+        // Someone else saved this pool after it loaded. Saving again would resend the same stale
+        // edit, so show the current pool instead.
+        resetEditor();
+        void queryClient.invalidateQueries({ queryKey });
+        toast.error(POOL_EDIT_CONFLICT_MESSAGE);
+        return;
+      }
       toast.error(error instanceof Error ? error.message : 'Failed to save the compute pool');
     },
   });
@@ -181,38 +216,33 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
           </h2>
           <p className="m-0 mt-1 text-sm text-fg-muted">{copy.description}</p>
         </div>
-        {!isEditing && (
-          <div className="flex shrink-0 items-center gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="border-transparent text-fg-muted hover:text-fg-primary"
-              loading={reconcileMutation.isPending}
-              disabled={busy || !queryScope || (scope === 'project' && !projectId)}
-              title="Read the machine list from the cloud account again. Machines you turned off stay off."
-              aria-label="Refresh machine list"
-              onClick={() => reconcileMutation.mutate()}
-            >
-              <RefreshCw
-                size={14}
-                aria-hidden
-                className={reconcileMutation.isPending ? 'animate-spin' : undefined}
-              />
-              Refresh
-            </Button>
-            {canEdit && (
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={busy}
-                onClick={() => setIsEditing(true)}
-              >
-                Edit
-              </Button>
-            )}
-          </div>
-        )}
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="border-transparent text-fg-muted hover:text-fg-primary"
+            loading={reconcileMutation.isPending}
+            disabled={busy || !queryScope || (scope === 'project' && !projectId)}
+            title="Read the machine list from the cloud account again. Machines you turned off stay off."
+            aria-label="Refresh machine list"
+            onClick={() => reconcileMutation.mutate()}
+          >
+            <RefreshCw
+              size={14}
+              aria-hidden
+              className={reconcileMutation.isPending ? 'animate-spin' : undefined}
+            />
+            Refresh
+          </Button>
+        </div>
       </div>
+
+      {shown?.diagnostics?.includes('catalog-refresh-failed') && (
+        <Alert variant="warning">
+          Machine list refresh failed. Check the connected cloud accounts, then select Refresh to
+          retry.
+        </Alert>
+      )}
 
       {query.isLoading && !query.data ? (
         <p className="m-0 text-sm text-fg-muted" role="status">
@@ -222,22 +252,24 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
         <>
           {query.isError && <Alert variant="error">{loadErrorMessage(query.error, scope)}</Alert>}
           {query.data &&
-            (isEditing && ownedDefault ? (
+            (canEdit && shown ? (
               <ComputePoolEditor
-                pool={ownedDefault.pool}
+                key={editorKey}
+                pool={shown.pool}
                 groups={groups}
+                sources={sources}
+                initialOrder={initialSourceOrder(sources, shown.pool.sourceOrder)}
                 saving={updateMutation.isPending}
-                onCancel={() => setIsEditing(false)}
-                onSave={(request) => {
-                  if (request) updateMutation.mutate(request);
-                  else setIsEditing(false);
-                }}
+                onDiscard={resetEditor}
+                onSave={(request) => updateMutation.mutate(request)}
               />
             ) : shown ? (
               <ComputePoolOverview
                 summary={shown}
                 groups={groups}
+                sources={sources}
                 projectId={projectId}
+                placementSettings={query.data.placementSettings}
                 notice={
                   fallbackScope && fallbackScope !== scope ? (
                     <FallbackNotice fallbackScope={fallbackScope} projectId={projectId} />
@@ -249,12 +281,13 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
                 scope={scope}
                 projectId={projectId}
                 shared={query.data.effectiveSummary}
+                placementSettings={query.data.placementSettings}
               />
             ))}
         </>
       )}
 
-      {query.isFetching && query.data && !isEditing && (
+      {query.isFetching && query.data && (
         <p className="m-0 text-xs text-fg-muted" role="status">
           Refreshing…
         </p>

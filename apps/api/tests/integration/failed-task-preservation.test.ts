@@ -1,7 +1,8 @@
 /**
  * Vertical slice for failed-task work preservation (idea 01M1XGHX7NQZQYWQRV5C1PJ60N,
  * policy a3780107): a task that FAILS while its workspace holds unpushed work must
- * end with a verified snapshot and a conversation the resumer will wake.
+ * attempt a verified snapshot, then remove idle compute after bounded failures
+ * while retaining the conversation and any successful backups.
  *
  * Real: D1 lifecycle state (SQLite), `cleanupTerminalTaskResources` (the choke
  * point the VM-agent failure callback and the status route call), the preservation
@@ -9,6 +10,11 @@
  * lifecycle writes, and the resumer's own claim gate. Substituted: ProjectData, the
  * VM agent, R2 and the NodeLifecycle DO — the external control planes.
  */
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import {
+  getSessionState as readProjectDataSessionState,
+  upsertActivityState,
+} from '@simple-agent-manager/project-data/internal/do/session-state';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -30,6 +36,7 @@ import {
 } from '../../src/services/session-snapshots';
 import { cleanupTerminalTaskResources } from '../../src/services/task-terminal-cleanup';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
+import { createSqlStorage } from '../unit/durable-objects/sql-storage-test-utils';
 
 const mocks = vi.hoisted(() => ({
   cleanupTaskRun: vi.fn(),
@@ -41,6 +48,7 @@ const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   getSessionState: vi.fn(),
   sleepSession: vi.fn(),
+  finishConfirmedSessionSleep: vi.fn(),
   transitionAcpSession: vi.fn(),
   hibernateAgentSessionOnNode: vi.fn(),
   stopWorkspaceOnNode: vi.fn(),
@@ -73,6 +81,7 @@ vi.mock('../../src/services/project-data', () => ({
   getSession: (...args: unknown[]) => mocks.getSession(...args),
   getSessionState: (...args: unknown[]) => mocks.getSessionState(...args),
   sleepSession: (...args: unknown[]) => mocks.sleepSession(...args),
+  finishConfirmedSessionSleep: (...args: unknown[]) => mocks.finishConfirmedSessionSleep(...args),
   transitionAcpSession: (...args: unknown[]) => mocks.transitionAcpSession(...args),
 }));
 
@@ -182,8 +191,7 @@ describe('failed-task work preservation vertical slice', () => {
     return state;
   }
 
-  const EXHAUSTION_WRITE =
-    /^update "session_snapshots" set "sleep_status" = \?, "sleep_after" = \?, "sleep_error"/i;
+  const FALLBACK_CLAIM_WRITE = /^update "session_snapshots" set .*"sleep_claimed_at" = \?/i;
 
   /** Run the sweep as the scheduled handler does, then drain its background work. */
   async function sweepAndSettle(now: Date) {
@@ -276,6 +284,7 @@ describe('failed-task work preservation vertical slice', () => {
       return 'notice-1';
     });
     mocks.getAcpSession.mockResolvedValue(null);
+    mocks.finishConfirmedSessionSleep.mockResolvedValue(true);
     mocks.cleanupTaskRun.mockImplementation(async () => {
       order.push('task-cleanup');
     });
@@ -367,6 +376,7 @@ describe('failed-task work preservation vertical slice', () => {
       NODE_LIFECYCLE: {
         idFromName: vi.fn(() => 'node-do-id'),
         get: vi.fn(() => ({
+          claimWorkspaceDeletionAttempt: async () => 'claimed',
           markIdle: mocks.markIdle,
           scheduleWorkspaceDeletion: mocks.scheduleWorkspaceDeletion,
         })),
@@ -571,31 +581,55 @@ describe('failed-task work preservation vertical slice', () => {
       // The episode left its full phase, but the fallback has not run yet.
       expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
 
-      // The bounded fallback finds no Git recovery point (the capture never completed),
-      // so the episode ends blocked and the failed task's own release takes over.
+      // Exhausted capture retries still remove idle compute without exact Git recovery.
       const fallbackAt = new Date(retryAt.getTime() + 60_000);
       vi.setSystemTime(fallbackAt);
       const third = await runSessionSleepSweep(env, fallbackAt);
 
-      expect(third).toMatchObject({ fallbacks: 1, blocked: 1 });
+      expect(third).toMatchObject({ fallbacks: 1, slept: 1, blocked: 0 });
       expect(mocks.hibernateAgentSessionOnNode).toHaveBeenCalledTimes(2);
-      // The release ends the episode, so no later sweep retries it.
-      expect(snapshotRow()).toMatchObject({ sleep_status: 'terminal_failed', sleep_after: null });
-      expectWorkLossNotice('snapshot_retry_exhausted');
-      // A failed task gets its release's notice, not a second "could not sleep" one.
-      expect(mocks.persistMessage).toHaveBeenCalledTimes(1);
-      expect(mocks.failSession).toHaveBeenCalledWith(
-        env,
-        'project-1',
-        'chat-1',
-        'Agent prompt failed'
-      );
-      expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env);
-      expect(order.slice(-3)).toEqual(['system-notice', 'project-data-fail', 'task-cleanup']);
+      expect(snapshotRow()).toMatchObject({ sleep_status: 'sleeping', sleep_after: null });
+      expect(mocks.persistMessage).toHaveBeenCalledTimes(2);
+      expect(mocks.persistMessage.mock.calls[0]?.[4]).toContain('unpublished');
+      expect(mocks.failSession).not.toHaveBeenCalled();
+      expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env, 2700000);
+      expect(statusOf('workspaces', 'workspace-1')).toBe('sleeping');
       const later = new Date(fallbackAt.getTime() + 10 * 60_000);
       expect(await runSessionSleepSweep(env, later)).toMatchObject({ selected: 0 });
     }
   );
+
+  it('removes a legacy failed runtime at its spent attempt count without another capture', async () => {
+    seedFailedTask('vm', 'completed');
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'completed' });
+    sqlite
+      .prepare(
+        `UPDATE session_snapshots SET sleep_status = 'failed', sleep_after = NULL,
+      sleep_attempts = 9, sleep_episode_started_at = NULL, sleep_episode_failures = 0,
+      sleep_fallback_json = NULL WHERE chat_session_id = 'chat-1'`
+      )
+      .run();
+
+    const sweep = await runSessionSleepSweep(env, START);
+
+    expect(sweep).toMatchObject({ fallbacks: 1, slept: 1 });
+    expect(mocks.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
+    expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledOnce();
+    expect(snapshotRow()).toMatchObject({ sleep_status: 'sleeping' });
+    const persisted = sqlite
+      .prepare(
+        `SELECT sleep_fallback_json FROM session_snapshots
+      WHERE chat_session_id = 'chat-1'`
+      )
+      .get() as { sleep_fallback_json: string };
+    expect(JSON.parse(persisted.sleep_fallback_json)).toMatchObject({
+      outcome: 'slept',
+      failedAttempts: 9,
+      recoveryPoint: null,
+    });
+    expect(projectDataStatus).toBe('sleeping');
+    expect(mocks.persistMessage.mock.calls[0]?.[4]).toContain('after 9 attempts');
+  });
 
   it('gives a failure a real sleep attempt even after an earlier sleep spent its budget', async () => {
     // An earlier idle sleep of this still-running workspace exhausted its retries.
@@ -657,10 +691,9 @@ describe('failed-task work preservation vertical slice', () => {
     expect(next).toMatchObject({ selected: 0 });
   });
 
-  it('ends a crash-looping episode at the selection-time ceiling, off the sweep critical path', async () => {
-    // Every claim crashed mid-sleep without recording a failure; each stale re-claim
-    // counted one. At the ceiling the selection itself ends the episode blocked, and
-    // the failed task's release runs in the background.
+  it('removes a crash-looping idle runtime through background fallback at the selection-time ceiling', async () => {
+    // Every stale re-claim spends the bounded budget. The fallback removes idle
+    // compute in the background even when capture never produced a recovery point.
     seedFailedTask('vm');
     await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
     sqlite
@@ -676,19 +709,19 @@ describe('failed-task work preservation vertical slice', () => {
       );
     const { sweep, background } = await sweepAndSettle(START);
 
-    expect(sweep).toMatchObject({ claimed: 0, blocked: 1, exhausted: 1 });
+    expect(sweep).toMatchObject({ claimed: 0, fallbacks: 1, dispatched: 1 });
     expect(mocks.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
     // The teardown is handed to waitUntil, not awaited inside the sweep.
     expect(background).toHaveLength(1);
-    expectWorkLossNotice('snapshot_retry_exhausted');
-    expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env);
-    expect(snapshotRow()).toMatchObject({ sleep_status: 'terminal_failed' });
+    expect(mocks.persistMessage).toHaveBeenCalledTimes(2);
+    expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env, 2700000);
+    expect(snapshotRow()).toMatchObject({ sleep_status: 'sleeping' });
+    expect(statusOf('workspaces', 'workspace-1')).toBe('sleeping');
   });
 
   it('does not exhaust a sleep episode a fresh failure restarted after selection', async () => {
-    // The sweep selected a spent row; before its exhaustion write lands, a replayed
-    // failure callback starts a fresh episode. The write is a compare-and-set on
-    // the attempts it selected, so the new episode survives and nothing is released.
+    // A replayed failure callback resets the budget after selection but before
+    // the fallback claims it. The fallback must recheck the newly claimed episode.
     seedFailedTask('vm');
     await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
     sqlite
@@ -699,7 +732,7 @@ describe('failed-task work preservation vertical slice', () => {
          WHERE chat_session_id = 'chat-1'`
       )
       .run(new Date(START.getTime() - 24 * 60 * 60 * 1000).toISOString());
-    const interleave = interleaveBefore(EXHAUSTION_WRITE, () => {
+    const interleave = interleaveBefore(FALLBACK_CLAIM_WRITE, () => {
       // What `queueFailedTaskSleepEpisode` writes for a replayed failure callback.
       sqlite
         .prepare(
@@ -715,19 +748,19 @@ describe('failed-task work preservation vertical slice', () => {
 
     expect(interleave.fired).toBe(true);
     expect(sweep).toMatchObject({ exhausted: 0 });
-    expect(background).toHaveLength(0);
+    expect(background).toHaveLength(1);
     expect(mocks.persistMessage).not.toHaveBeenCalled();
     expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
     expect(snapshotRow()).toMatchObject({
       sleep_status: 'scheduled',
-      sleep_after: START.toISOString(),
+      sleep_after: expect.any(String),
     });
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
   });
 
   it('does not exhaust a stale claim whose owner moved it on after selection', async () => {
-    // The sweep re-selects a stale `preparing` claim at the attempt limit; before
-    // its exhaustion write lands, the slow owner passes its point of no return.
-    // Overwriting `stopping` with `failed` would strand a stopped runtime.
+    // The slow owner starts stopping and renews its lease after selection.
+    // The selected fallback must leave that current owner alone.
     seedFailedTask('vm');
     await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
     sqlite
@@ -738,13 +771,13 @@ describe('failed-task work preservation vertical slice', () => {
          WHERE chat_session_id = 'chat-1'`
       )
       .run(new Date(START.getTime() - 24 * HOUR).toISOString());
-    const interleave = interleaveBefore(EXHAUSTION_WRITE, () => {
+    const interleave = interleaveBefore(FALLBACK_CLAIM_WRITE, () => {
       sqlite
         .prepare(
-          `UPDATE session_snapshots SET sleep_status = 'stopping', sleep_stopping_since = ?
+          `UPDATE session_snapshots SET sleep_status = 'stopping', sleep_after = NULL, sleep_stopping_since = ?, sleep_claimed_at = ?
            WHERE chat_session_id = 'chat-1'`
         )
-        .run(START.toISOString());
+        .run(START.toISOString(), START.toISOString());
     });
     const { sweep } = await sweepAndSettle(START);
 
@@ -792,12 +825,14 @@ describe('failed-task work preservation vertical slice', () => {
     const wokeAt = new Date(START.getTime() + HOUR);
     await wakeOldInstantFailure(wokeAt);
 
-    // The follow-up's turn hangs, re-reporting every minute; a queued message is
-    // retried against the busy container just before the sweep runs.
+    // The follow-up's turn never ends but keeps producing work, so its drain never
+    // closes; a queued message is retried against the busy container just before the
+    // sweep runs. (A turn that only re-reports ages out and sleeps instead.)
     const later = new Date(wokeAt.getTime() + 9 * HOUR);
     mocks.getSessionState.mockResolvedValue({
       activity: 'prompting',
       activityAt: later.getTime() - 60_000,
+      workAt: later.getTime() - 60_000,
       promptStartedAt: wokeAt.getTime(),
     });
     vi.setSystemTime(new Date(later.getTime() - 60_000));
@@ -840,7 +875,8 @@ describe('failed-task work preservation vertical slice', () => {
       DATABASE: {
         ...base,
         prepare: (query: string) => {
-          if (/from "workspaces" left join "session_summaries"/i.test(query)) {
+          // The sweep's eligibility read: the only statement selecting provider_limit_wait_json.
+          if (/"provider_limit_wait_json"/i.test(query) && /from "workspaces"/i.test(query)) {
             throw new Error('D1_ERROR: overloaded');
           }
           return base.prepare(query);
@@ -899,10 +935,12 @@ describe('failed-task work preservation vertical slice', () => {
     // the maximum wait bounds it. Driven through the real sweep's deferral branch.
     env.FAILED_TASK_PRESERVATION_MAX_WAIT_MS = String(60 * 60_000);
     seedFailedTask('vm', 'failed', new Date(START.getTime() - 61 * 60_000).toISOString());
-    // One turn, hung since before the failure, re-reporting every minute.
+    // One turn, open since before the failure, still producing work every minute. A
+    // turn that only re-reports ages out instead (next test).
     mocks.getSessionState.mockResolvedValue({
       activity: 'prompting',
       activityAt: START.getTime() - 60_000,
+      workAt: START.getTime() - 60_000,
       promptStartedAt: START.getTime() - 2 * HOUR,
     });
     await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
@@ -916,11 +954,78 @@ describe('failed-task work preservation vertical slice', () => {
     expect(next).toMatchObject({ selected: 0 });
   });
 
-  it('keeps a completed task with a still-reporting prompt draining (control)', async () => {
+  it('sleeps a failed task whose hung turn only re-reports, keeping its work', async () => {
+    // Production 2026-11-03: a turn that never returns re-reports `prompting` every
+    // minute, which moves `activityAt` but not the work clock. The drain ends 15 min
+    // after the last real work and the session sleeps with its snapshot, instead of
+    // waiting out the maximum wait and losing the work.
+    seedFailedTask('vm', 'failed', new Date(START.getTime() - 20 * 60_000).toISOString());
+    mocks.getSessionState.mockResolvedValue({
+      activity: 'prompting',
+      activityAt: START.getTime() - 30_000,
+      workAt: START.getTime() - 25 * 60_000,
+      promptStartedAt: START.getTime() - 25 * 60_000,
+    });
+
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
+    const sweep = await runSessionSleepSweep(env, START);
+
+    expect(sweep).toMatchObject({ claimed: 1, slept: 1, deferred: 0 });
+    expect(snapshotRow()).toMatchObject({ status: 'available', sleep_status: 'sleeping' });
+    expect(mocks.persistMessage).not.toHaveBeenCalled();
+  });
+
+  it('sleeps a completed task whose hung turn keeps re-reporting through the real ProjectData writer', async () => {
+    // Production 2026-11-03 (node 01M6EHBZ85GDPDQS5JSAYCKF4Z): the turn that called
+    // complete_task never returned, and the VM re-reported `prompting` every minute for
+    // 13 h. Session state here is the real ProjectData writer and reader; a re-report
+    // lands before EVERY read, including the sleep's own mid-capture re-checks.
+    const projectDataDb = new Database(':memory:');
+    const projectDataSql = createSqlStorage(projectDataDb);
+    runMigrations(projectDataSql);
+    const turnStartedAt = START.getTime() - 25 * 60_000;
+    let reportAt = turnStartedAt;
+    const reReport = () =>
+      upsertActivityState(projectDataSql, 'agent-1', {
+        activity: 'prompting',
+        observedAt: reportAt,
+        now: reportAt,
+        promptStartedAt: turnStartedAt,
+        runtimeWorkState: 'inactive',
+        runtimeWorkCount: 0,
+        runtimeWorkSource: 'claude-background-tasks',
+      });
+    expect(reReport()).toBe('work_edge');
+    while (reportAt < START.getTime() - 60_000) {
+      reportAt += 60_000;
+      expect(reReport()).toBe('same_turn_rereport');
+    }
+    mocks.getSessionState.mockImplementation(async () => {
+      reportAt += 1_000;
+      reReport();
+      return readProjectDataSessionState(projectDataSql, 'agent-1');
+    });
+    seedFailedTask('vm', 'completed', new Date(START.getTime() - 20 * 60_000).toISOString());
+
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'completed' });
+    const sweep = await runSessionSleepSweep(env, START);
+
+    // Liveness: the reader really was consulted, more than once (eligibility plus the
+    // sleep's re-checks), and each read saw a fresher last-report clock.
+    expect(mocks.getSessionState.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(sweep).toMatchObject({ claimed: 1, slept: 1, deferred: 0 });
+    expect(mocks.hibernateAgentSessionOnNode).toHaveBeenCalled();
+    expect(snapshotRow()).toMatchObject({ status: 'available', sleep_status: 'sleeping' });
+    projectDataDb.close();
+  });
+
+  it('keeps a completed task whose agent still persists work draining (control)', async () => {
     seedFailedTask('vm', 'completed', new Date(START.getTime() - 20 * 60_000).toISOString());
     mocks.getSessionState.mockResolvedValue({
       activity: 'prompting',
       activityAt: START.getTime() - 60_000,
+      workAt: START.getTime() - 60_000,
+      promptStartedAt: START.getTime() - 25 * 60_000,
     });
 
     await cleanupTerminalTaskResources(env, 'task-1', { status: 'completed' });
@@ -930,9 +1035,8 @@ describe('failed-task work preservation vertical slice', () => {
     expect(mocks.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
   });
 
-  it('ends an exhausted completed-task sleep blocked: a notice, no teardown, no failure', async () => {
-    // Control: the failed-task release stays scoped to failed tasks. A completed task's
-    // bounded episode with no recovery point ends blocked and keeps its runtime.
+  it('removes an exhausted completed-task runtime while retaining its transcript', async () => {
+    // Completed tasks use the same bounded teardown policy without losing chat.
     env.SESSION_SLEEP_FAILURE_MAX_ATTEMPTS = '2';
     seedFailedTask('vm', 'completed');
     mocks.hibernateAgentSessionOnNode.mockRejectedValue(new Error('VM agent unreachable'));
@@ -946,29 +1050,41 @@ describe('failed-task work preservation vertical slice', () => {
     vi.setSystemTime(fallbackAt);
     const third = await runSessionSleepSweep(env, fallbackAt);
 
-    expect(third).toMatchObject({ fallbacks: 1, blocked: 1 });
-    expect(snapshotRow()).toMatchObject({ sleep_status: 'terminal_failed', sleep_after: null });
+    expect(third).toMatchObject({ fallbacks: 1, slept: 1, blocked: 0 });
+    expect(snapshotRow()).toMatchObject({ sleep_status: 'sleeping', sleep_after: null });
     expect(mocks.persistMessage).toHaveBeenCalledTimes(1);
-    expect(mocks.persistMessage.mock.calls[0]?.[4]).toContain(
-      'SAM could not put this session to sleep.'
-    );
+    expect(mocks.persistMessage.mock.calls[0]?.[4]).toContain('unpublished');
     expect(mocks.failSession).not.toHaveBeenCalled();
-    expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
-    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+    expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env, 2700000);
+    expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledWith(
+      'node-1',
+      'workspace-1',
+      env,
+      'user-1',
+      expect.objectContaining({ expectedEvictionGeneration: '' })
+    );
+    expect(statusOf('workspaces', 'workspace-1')).toBe('sleeping');
+    expect(projectDataStatus).toBe('sleeping');
   });
 
-  it('keeps Archive of a failed task destructive: no sleep, immediate teardown', async () => {
-    // Control (policy e8897480): explicit archive / Complete & Delete.
+  it('retains failed-task resources when Archive cannot establish exact deletion identity', async () => {
+    // Legacy nodes without incarnation/generation cannot authorize physical teardown.
     seedFailedTask('vm');
 
-    await cleanupTerminalTaskResources(env, 'task-1', {
-      status: 'failed',
-      destructiveSessionEnd: true,
-    });
+    await expect(
+      cleanupTerminalTaskResources(env, 'task-1', {
+        status: 'failed',
+        destructiveSessionEnd: true,
+        requiredUserId: 'user-1',
+      })
+    ).rejects.toThrow('Session archive cleanup is pending');
 
     expect(snapshotRow()).toBeUndefined();
-    expect(mocks.failSession).toHaveBeenCalledOnce();
-    expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env, undefined, undefined);
-    expect(order).toEqual(['project-data-fail', 'task-cleanup']);
+    expect(mocks.failSession).not.toHaveBeenCalled();
+    expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
+    expect(sqlite.prepare("SELECT status FROM nodes WHERE id = 'node-1'").pluck().get()).toBe(
+      'running'
+    );
+    expect(order).toEqual([]);
   });
 });

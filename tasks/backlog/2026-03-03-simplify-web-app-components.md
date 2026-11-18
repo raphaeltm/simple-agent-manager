@@ -1,5 +1,11 @@
 # Simplify Web App Components and Pages
 
+> **Reconciliation 2026-10-26:** No merge since 10-12 changed the open scope: the file sizes, both
+> command palettes, the `formatTokens`/`formatBytes` copies and both dead files are unchanged.
+> Pointers moved: the reconnect backoff is `apps/web/src/hooks/useChatWebSocket.ts:134` (#2381),
+> provisioning state is `pages/project-chat/useProjectChatState.ts:205-219`, and the lazy-route
+> examples are `App.tsx:189,411,454`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

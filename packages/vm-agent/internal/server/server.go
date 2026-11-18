@@ -26,6 +26,7 @@ import (
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/container"
 	"github.com/workspace/vm-agent/internal/deploy"
+	"github.com/workspace/vm-agent/internal/diagredact"
 	"github.com/workspace/vm-agent/internal/errorreport"
 	"github.com/workspace/vm-agent/internal/eventstore"
 	"github.com/workspace/vm-agent/internal/logreader"
@@ -42,6 +43,7 @@ import (
 // profileOverrides holds model/permissionMode/effort/opencode provider overrides from agent profiles.
 // Passed from the control plane in the start-agent-session request.
 type profileOverrides struct {
+	StartFingerprint string // immutable request identity for an eviction-owned start replay
 	SettingsResolved bool
 	Model            string
 	PermissionMode   string
@@ -62,17 +64,6 @@ type taskCallbackContext struct {
 
 const fatalErrorStopReason = acp.FatalErrorStopReason
 
-var taskCallbackDiagnosticRedactionPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{16,}`),
-	regexp.MustCompile(`(?i)((?:api[_-]?key|token|secret|password|authorization)\s*[:=]\s*)("[^"]+"|'[^']+'|[^\s,;]+)`),
-	regexp.MustCompile(`(?i)(https?://)([^/\s@]+)@`),
-	regexp.MustCompile(`(?i)([?&](?:access[_-]?token|api[_-]?key|token|secret|password)=)([^&\s]+)`),
-	regexp.MustCompile(`\b(sk-[A-Za-z0-9_-]{12,})\b`),
-	regexp.MustCompile(`\b(gh[pousr]_[A-Za-z0-9_]{12,})\b`),
-	regexp.MustCompile(`\b(github_pat_[A-Za-z0-9_]{12,})\b`),
-	regexp.MustCompile(`\b(sam_test_[A-Za-z0-9_-]{12,})\b`),
-}
-
 var safePromptTimeoutMessage = regexp.MustCompile(`^Prompt timed out after [0-9hms.µ]+$`)
 
 // Server is the HTTP server for the VM Agent.
@@ -80,6 +71,7 @@ type Server struct {
 	systemProvisioning     *systemProvisioningBarrier
 	config                 *config.Config
 	httpServer             *http.Server
+	tunnelServer           *http.Server // loopback Cloudflare Tunnel ingress; nil unless enabled
 	jwtValidator           *auth.JWTValidator
 	sessionManager         *auth.SessionManager
 	ptyManager             *pty.Manager
@@ -89,6 +81,7 @@ type Server struct {
 	buildQueue             chan struct{}
 	readyRetryMu           sync.Mutex // guards retryPendingReadyCallbacks — only one run at a time
 	evictionDeliveryMu     sync.Mutex // One bounded eviction callback delivery at a time.
+	evictionFinalizing     sync.Map   // Workspaces between the eviction stop intent and the recorded eviction.
 	eventMu                sync.RWMutex
 	nodeEvents             []EventRecord
 	workspaceEvents        map[string][]EventRecord
@@ -124,6 +117,7 @@ type Server struct {
 	portScanners           map[string]*ports.Scanner
 	portDiscoveries        map[string]*container.Discovery // per-workspace container discovery
 	bootstrapComplete      atomic.Bool
+	selfRestartRequested   atomic.Bool // set once an Operations-approved restart is pending
 	callbackTokenMu        sync.RWMutex
 	callbackToken          string
 	tokenRenewal           workspaceTokenRenewal // workspace callback token renewal (workspace_callback_token_renewal.go)
@@ -148,6 +142,9 @@ type Server struct {
 	sessionSnapshotLocks  map[string]sessionSnapshotLock
 	sessionSnapshotRunner func(context.Context, *sessionSnapshotHandlerInput) (map[string]interface{}, error)
 
+	workspaceDeletionCancel context.CancelFunc
+	workspaceDeletionDone   chan struct{}
+	workspaceDeletionWake   chan struct{}
 	workspaceLifecycleMu    sync.Mutex
 	workspaceLifecycleLocks map[string]*workspaceLifecycleEntry
 
@@ -387,6 +384,7 @@ func New(cfg *config.Config) (*Server, error) {
 		DefaultRows:        cfg.DefaultRows,
 		DefaultCols:        cfg.DefaultCols,
 		WorkDir:            containerWorkDir,
+		Env:                standalonePTYEnvironment(cfg, cfg.WorkspaceID),
 		ContainerResolver:  containerResolver,
 		ContainerUser:      containerUser,
 		ProcessGroup:       cfg.IsStandaloneMode(),
@@ -460,6 +458,7 @@ func New(cfg *config.Config) (*Server, error) {
 		PongTimeout:                      cfg.ACPPongTimeout,
 		PromptTimeout:                    cfg.ACPPromptTimeout,
 		PromptCancelGracePeriod:          cfg.ACPPromptCancelGrace,
+		SteerTimeout:                     cfg.ACPSteerTimeout,
 		PromptRetryMaxRetries:            cfg.ACPPromptRetryMaxRetries,
 		PromptRetryInitialDelay:          cfg.ACPPromptRetryInitial,
 		PromptRetryMaxDelay:              cfg.ACPPromptRetryMax,
@@ -476,8 +475,8 @@ func New(cfg *config.Config) (*Server, error) {
 		CredentialSyncTimeout:            cfg.ACPCredentialSyncTimeout,
 		RestartAttemptTimeout:            cfg.ACPRestartAttemptTimeout,
 		RecoveryWatchdogTimeout:          cfg.ACPRecoveryWatchdog,
+		EvictionParkTimeout:              cfg.ACPEvictionParkTimeout,
 		RestartDecayWindow:               cfg.ACPRestartDecayWindow,
-		SAMEnvFallback:                   cfg.BuildSAMEnvFallback(),
 		HTTPClient:                       config.NewControlPlaneClient(cfg.HTTPCallbackTimeout),
 	}
 
@@ -659,17 +658,7 @@ func New(cfg *config.Config) (*Server, error) {
 	mux := http.NewServeMux()
 	s.setupRoutes(mux)
 
-	// Create HTTP server with configurable timeouts.
-	// WriteTimeout is intentionally set to 0 because WebSocket connections
-	// are long-lived. Go's http.Server.WriteTimeout sets a deadline on the
-	// underlying net.Conn BEFORE the handler runs, which kills hijacked
-	// WebSocket connections after the timeout period.
-	s.httpServer = &http.Server{
-		Addr:        fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
-		Handler:     corsMiddleware(mux, cfg.AllowedOrigins),
-		ReadTimeout: cfg.HTTPReadTimeout,
-		IdleTimeout: cfg.HTTPIdleTimeout,
-	}
+	s.buildHTTPServers(mux)
 
 	return s, nil
 }
@@ -902,29 +891,18 @@ func (s *Server) StartPortScanner(workspaceID string) {
 		return
 	}
 
-	// Create a per-workspace container discovery using the workspace's actual
-	// ContainerLabelValue. The server-level s.containerDiscovery may have a stale
-	// label value (e.g., "/workspace" when REPOSITORY was empty at startup), while
-	// the workspace runtime has the correct value (e.g., "/workspace/repo-name")
-	// derived from the repository passed during workspace creation.
-	var wsDiscovery *container.Discovery
-	s.workspaceMu.RLock()
-	if runtime, ok := s.workspaces[workspaceID]; ok && runtime.ContainerLabelValue != "" {
-		wsDiscovery = container.NewDiscovery(container.Config{
-			LabelKey:    s.config.ContainerLabelKey,
-			LabelValue:  runtime.ContainerLabelValue,
-			CacheTTL:    s.config.ContainerCacheTTL,
-			BridgeIPTTL: s.config.PortProxyCacheTTL,
-		})
-		slog.Info("Port scanner: using workspace-specific container label",
-			"workspaceId", workspaceID,
-			"labelValue", runtime.ContainerLabelValue)
-	}
-	s.workspaceMu.RUnlock()
+	// A new provision/rebuild may have changed the container label. Preserve
+	// scanner startup's existing behavior of replacing its discovery cache.
+	s.portScannerMu.Lock()
+	delete(s.portDiscoveries, workspaceID)
+	s.portScannerMu.Unlock()
 
-	// Fall back to server-level discovery if no workspace-specific one is available.
-	if wsDiscovery == nil {
-		wsDiscovery = s.containerDiscovery
+	// Scanning and forwarding must resolve the same workspace-owned container,
+	// including when discovery is recreated after a restart.
+	wsDiscovery, err := s.workspacePortDiscovery(workspaceID)
+	if err != nil {
+		slog.Info("Port scanner: workspace container route unavailable", "workspaceId", workspaceID, "error", err)
+		return
 	}
 
 	// Resolve container ID for scanning — if not available yet, the scanner
@@ -1022,8 +1000,10 @@ func (s *Server) stopAllPortScanners() {
 	}
 }
 
-// Start starts the HTTP server (plain HTTP or TLS based on config).
+// Start starts the HTTP listeners: the main listener (plain HTTP or TLS based
+// on config) and, when enabled, the loopback tunnel listener.
 func (s *Server) Start() error {
+	s.startWorkspaceDeletionReconciler()
 	s.startNodeHealthReporter()
 	s.startAcpHeartbeatReporter()
 	s.startResourceGuard()
@@ -1033,13 +1013,7 @@ func (s *Server) Start() error {
 	// Start error reporter background flush
 	s.errorReporter.Start()
 
-	if s.config.TLSEnabled {
-		slog.Info("Starting VM Agent with TLS", "addr", s.httpServer.Addr, "cert", s.config.TLSCertPath, "key", s.config.TLSKeyPath)
-		return s.httpServer.ListenAndServeTLS(s.config.TLSCertPath, s.config.TLSKeyPath)
-	}
-
-	slog.Info("Starting VM Agent", "addr", s.httpServer.Addr)
-	return s.httpServer.ListenAndServe()
+	return s.serveListeners()
 }
 
 func (s *Server) startResourceGuard() {
@@ -1053,9 +1027,18 @@ func (s *Server) startResourceGuard() {
 		return
 	}
 	if s.resourceEviction != nil {
-		if err := s.resourceEviction.Start(context.Background()); err != nil {
-			slog.Warn("Resource eviction controller failed to start", "error", err)
-		}
+		// Reap helpers a crashed agent left behind before any new capture can create
+		// one: the reaper removes every helper, so it must not race a live capture.
+		go func() {
+			reapCtx, cancel := context.WithTimeout(context.Background(), s.config.EvictionSnapshotTimeout)
+			if err := s.reapSnapshotHelpers(reapCtx, ""); err != nil {
+				slog.Warn("Startup snapshot helper reap failed; workspace deletion reaps per workspace", "error", err)
+			}
+			cancel()
+			if err := s.resourceEviction.Start(context.Background()); err != nil {
+				slog.Warn("Resource eviction controller failed to start", "error", err)
+			}
+		}()
 		return
 	}
 	go func() {
@@ -1145,16 +1128,20 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /workspaces/{workspaceId}/stop", s.handleStopWorkspace)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/restart", s.handleRestartWorkspace)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/rebuild", s.handleRebuildWorkspace)
-	mux.HandleFunc("DELETE /workspaces/{workspaceId}", s.handleDeleteWorkspace)
+	mux.HandleFunc("DELETE /workspaces/{workspaceId}", s.handleSafeDeleteWorkspace)
+	mux.HandleFunc("DELETE /workspaces/{workspaceId}/physical-deletion", s.handleSafeDeleteWorkspace)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-sessions", s.handleListAgentSessions)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions", s.handleCreateAgentSession)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/start", s.handleStartAgentSession)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/cancel", s.handleCancelAgentSession)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/cancel-guarded", s.handleGuardedCancelAgentSession)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/stop", s.handleStopAgentSession)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/suspend", s.handleSuspendAgentSession)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/resume", s.handleResumeAgentSession)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/prompt", s.handleSendPrompt)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-sessions/{sessionId}/prompt-receipts/{deliveryId}", s.handleGetPromptReceipt)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/steer", s.handleSteerPrompt)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-sessions/{sessionId}/steer-receipts/{deliveryId}", s.handleGetSteerReceipt)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/interactions/{interactionId}/answer", s.handleAcpInteractionAnswer)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/checkpoint-rollovers", s.handleCheckpointRollover)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-sessions/{sessionId}/checkpoint-rollovers/{operationId}", s.handleGetCheckpointRollover)
@@ -1181,6 +1168,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /workspaces/{workspaceId}/worktrees", s.handleRemoveWorktree)
 
 	mux.HandleFunc("GET /debug-package", s.handleDebugPackage)
+	mux.HandleFunc("POST /admin/restart-agent", s.handleRestartAgent)
 	mux.HandleFunc("GET /events", s.handleListNodeEvents)
 	mux.HandleFunc("GET /events/export", s.handleExportEvents)
 	mux.HandleFunc("GET /metrics/export", s.handleExportMetrics)
@@ -1202,6 +1190,8 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /workspaces/{workspaceId}/mcp/diff-summary", s.handleMcpDiffSummary)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/build-and-publish", s.handleMcpBuildAndPublish)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/build-and-publish-jobs/{jobId}/start", s.handleMcpBuildAndPublishJobStart)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/build-and-publish-jobs/{jobId}/collect", s.handleMcpBuildContextCollect)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/build-and-publish-jobs/{jobId}/cancel", s.handleMcpBuildAndPublishJobCancel)
 
 	mux.HandleFunc("POST /workspaces/{workspaceId}/mcp/secret-exec", s.handleMcpSecretExecStart)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/mcp/secret-exec/{jobId}", s.handleMcpSecretExecStatus)
@@ -1453,6 +1443,14 @@ func (s *Server) makeTaskCompletionCallback(
 		strings.TrimRight(controlPlaneURL, "/"), projectID, taskID)
 
 	return func(stopReason string, promptErr error) {
+		if stopReason == acp.EvictedStopReason {
+			// The eviction delivery owns this task's outcome: it reports the interrupted
+			// work and the control plane resumes the conversation on another workspace.
+			// Any status posted here would race it ("failed" stranded tasks on 2026-11-08).
+			slog.Info("Prompt ended by workspace eviction; task status left to the eviction delivery",
+				"taskId", taskID, "workspaceId", workspaceID)
+			return
+		}
 		if isPromptCancellation(stopReason, promptErr) {
 			s.postTaskCallback(
 				callbackURL,
@@ -1564,20 +1562,7 @@ func taskCallbackErrorMessage(promptErr error) string {
 }
 
 func redactTaskCallbackDiagnosticText(text string) string {
-	redacted := text
-	for _, pattern := range taskCallbackDiagnosticRedactionPatterns {
-		redacted = pattern.ReplaceAllStringFunc(redacted, func(match string) string {
-			submatches := pattern.FindStringSubmatch(match)
-			if len(submatches) >= 3 {
-				return submatches[1] + "[REDACTED]"
-			}
-			if len(submatches) >= 2 && strings.HasSuffix(strings.ToLower(submatches[1]), " ") {
-				return submatches[1] + "[REDACTED]"
-			}
-			return "[REDACTED]"
-		})
-	}
-	return redacted
+	return diagredact.Text(text)
 }
 
 func awaitingFollowupCallbackBody(pushResult *gitPushResult) map[string]interface{} {

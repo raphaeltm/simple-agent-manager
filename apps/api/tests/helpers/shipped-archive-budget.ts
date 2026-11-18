@@ -53,9 +53,7 @@ export function readShippedVar(name: string): string {
 }
 
 /**
- * Archive sweep ticks per UTC day at the shipped cadence — which is also the drain's
- * sessions-per-day ceiling, because the wall-time gate is checked only between candidates and
- * one real candidate outlasts it, so each tick archives one session.
+ * Archive sweep ticks per UTC day at the shipped cadence.
  *
  * The cadence row falls due `interval` after the last claim, but only a cron tick can claim it,
  * so the effective period rounds UP to a whole number of cron periods. This is the jitter-free

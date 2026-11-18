@@ -1,14 +1,55 @@
 import Database from 'better-sqlite3';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
+import { ensureSessionLinked } from '../../src/durable-objects/task-runner/session-linking';
+import type {
+  TaskRunnerContext,
+  TaskRunnerState,
+} from '../../src/durable-objects/task-runner/types';
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { crudRoutes } from '../../src/routes/tasks/crud';
+import { runWorkspaceEvictionRecovery } from '../../src/scheduled/workspace-eviction-recovery';
+import { cancelTask } from '../../src/services/cancel-task';
+import * as projectDataService from '../../src/services/project-data';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
+import * as terminalCleanup from '../../src/services/task-terminal-cleanup';
 import { cancelVmTaskAdmission } from '../../src/services/vm-admission-control';
+import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
+
+/** Gate the actual task handoff, allowing independent catalog batches to run first. */
+function interceptRecoveryBatch(
+  database: D1Database,
+  implementation: (statements: D1PreparedStatement[]) => ReturnType<D1Database['batch']>
+) {
+  const handoffs = new WeakSet<object>();
+  const prepare = database.prepare.bind(database);
+  vi.spyOn(database, 'prepare').mockImplementation((query) => {
+    const statement = prepare(query);
+    const bind = statement.bind.bind(statement);
+    statement.bind = (...values: unknown[]) => {
+      const bound = bind(...values);
+      if (/^\s*UPDATE tasks/.test(query) && /execution_step\s*=\s*'node_selection'/.test(query))
+        handoffs.add(bound);
+      return bound;
+    };
+    return statement;
+  });
+  const batch = database.batch.bind(database);
+  let intercepted = false;
+  vi.spyOn(database, 'batch').mockImplementation(async (statements) => {
+    if (!intercepted && statements.some((statement) => handoffs.has(statement))) {
+      intercepted = true;
+      return implementation(statements);
+    }
+    return batch(statements);
+  });
+}
 
 const { ensureTaskRunnerStartedMock, startTaskRunnerDOMock, getUserIdMock } = vi.hoisted(() => ({
   getUserIdMock: vi.fn(() => 'user-1'),
@@ -34,13 +75,17 @@ vi.mock('../../src/services/workspace-cleanup', () => ({
 }));
 vi.mock('../../src/services/project-data', () => ({
   recordActivityEvent: vi.fn(async () => undefined),
+  cancelUnissuedSessionPrompts: vi.fn(async () => ({ matched: true, cancelled: 0 })),
+  stopSession: vi.fn(async () => undefined),
+  repairFailedSessionForSnapshotRecovery: vi.fn(async () => undefined),
+  linkSessionToWorkspace: vi.fn(async () => undefined),
 }));
 vi.mock('../../src/services/project-lifecycle-events', () => ({
   recordTaskLifecycleEventBestEffort: vi.fn(async () => undefined),
   isLifecycleTaskStatus: () => true,
 }));
 
-async function archive(database: D1Database) {
+async function archive(database: D1Database, cancel = false) {
   const app = new Hono<{ Bindings: Env }>();
   app.onError((error, c) =>
     error instanceof AppError
@@ -49,9 +94,18 @@ async function archive(database: D1Database) {
   );
   app.route('/api/projects/:projectId/tasks', crudRoutes);
   return app.fetch(
-    new Request('https://api.test/api/projects/project-1/tasks/task-1/close', {
-      method: 'POST',
-    }),
+    new Request(
+      `https://api.test/api/projects/project-1/tasks/task-1/${cancel ? 'status' : 'close'}`,
+      {
+        method: 'POST',
+        ...(cancel
+          ? {
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ toStatus: 'cancelled' }),
+            }
+          : {}),
+      }
+    ),
     { DATABASE: database } as Env,
     {
       waitUntil: vi.fn(),
@@ -60,7 +114,7 @@ async function archive(database: D1Database) {
   );
 }
 
-function seedStableRecoveryFixture(sqlite: Database.Database): void {
+async function seedStableRecoveryFixture(sqlite: Database.Database): Promise<void> {
   createAllSchemaTables(sqlite, schema);
   sqlite.exec(`
     INSERT INTO users (id, name, email, github_id, status)
@@ -130,6 +184,15 @@ function seedStableRecoveryFixture(sqlite: Database.Database): void {
        '2099-08-20T00:00:00.000Z', 'sleeping', '2026-08-15T00:00:00.000Z',
        0, '2026-08-15T00:00:00.000Z');
   `);
+  // A person picks machines before work runs: nothing joins a pool on its own, and the wake
+  // places the replacement runtime on the pool. Prepare the validated bundled catalog here;
+  // this identity/handoff fixture's synthetic credential is not encrypted for a live lookup.
+  const env = { DATABASE: createSqliteD1(sqlite) } as Env;
+  await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
+    userId: 'user-1',
+    projectId: 'project-1',
+    includeInstallation: true,
+  });
 }
 
 function makeSnapshotClaimable(sqlite: Database.Database, sleepingAt: string): void {
@@ -195,10 +258,190 @@ describe('session recovery stable task identity', () => {
     startTaskRunnerDOMock.mockResolvedValue(undefined);
   });
 
+  it('normal cancellation with no workspace revokes a human wake suspended before reactivation', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      await seedStableRecoveryFixture(sqlite);
+      sqlite.exec("UPDATE tasks SET workspace_id = NULL WHERE id = 'task-1'");
+      const database = createSqliteD1(sqlite);
+      const batch = database.batch.bind(database);
+      let cancelled = false;
+      interceptRecoveryBatch(database, async (statements) => {
+        const response = await archive(database, true);
+        expect(response.status).toBe(200);
+        cancelled = true;
+        return batch(statements);
+      });
+      const result = await ensureSessionRecovery(
+        { DATABASE: database } as Env,
+        'project-1',
+        'chat-1'
+      );
+      expect(cancelled).toBe(true);
+      expect(result.status).toBe('unavailable');
+      expect(taskRow(sqlite)).toMatchObject({ status: 'cancelled', workspace_id: null });
+      expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+      const snapshot = sqlite
+        .prepare('SELECT status, sleeping_at, recovery_attempt_id FROM session_snapshots')
+        .get();
+      expect(snapshot).toMatchObject({ status: 'available', recovery_attempt_id: null });
+      expect((snapshot as { sleeping_at: string }).sleeping_at).toBeTruthy();
+      // A NEW human intent may still wake the preserved snapshot after cancellation.
+      await expect(
+        ensureSessionRecovery({ DATABASE: database } as Env, 'project-1', 'chat-1')
+      ).resolves.toEqual({ status: 'waking', taskId: 'task-1' });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('revalidates the queued delivery after placement before claiming a snapshot', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      await seedStableRecoveryFixture(sqlite);
+      sqlite.exec("UPDATE tasks SET workspace_id = NULL WHERE id = 'task-1'");
+      const database = createSqliteD1(sqlite);
+      const authority = vi.fn(async () => {
+        expect((await archive(database, true)).status).toBe(200);
+        return false;
+      });
+      await expect(
+        ensureSessionRecovery({ DATABASE: database } as Env, 'project-1', 'chat-1', undefined, {
+          isDeliveryStillAuthorized: authority,
+        })
+      ).resolves.toMatchObject({ status: 'unavailable' });
+      expect(authority).toHaveBeenCalledTimes(1);
+      expect(taskRow(sqlite)).toMatchObject({ status: 'cancelled' });
+      expect(
+        sqlite.prepare('SELECT recovery_attempt_id FROM session_snapshots').pluck().get()
+      ).toBeNull();
+      expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it.each(['cancelled', 'completed', 'failed'] as const)(
+    'a repeated stop fences an in-flight wake while preserving its %s verdict',
+    async (status) => {
+      const sqlite = new Database(':memory:');
+      try {
+        await seedStableRecoveryFixture(sqlite);
+        // The terminal clock may be ahead of this worker's clock; cancellation
+        // still must create a distinct fence rather than reuse the same instant.
+        const prior = new Date(Date.now() + 60_000).toISOString();
+        sqlite
+          .prepare(
+            "UPDATE tasks SET status = ?, completed_at = ?, updated_at = ?, workspace_id = NULL WHERE id = 'task-1'"
+          )
+          .run(status, prior, prior);
+        const database = createSqliteD1(sqlite);
+        const db = drizzle(database, { schema });
+        const batch = database.batch.bind(database);
+        interceptRecoveryBatch(database, async (statements) => {
+          const task = await db
+            .select()
+            .from(schema.tasks)
+            .where(eq(schema.tasks.id, 'task-1'))
+            .get();
+          expect(task).toBeTruthy();
+          await cancelTask({ DATABASE: database } as Env, db, task!, 'user-1');
+          return batch(statements);
+        });
+        await expect(
+          ensureSessionRecovery({ DATABASE: database } as Env, 'project-1', 'chat-1')
+        ).resolves.toMatchObject({ status: 'unavailable' });
+        expect(taskRow(sqlite)).toMatchObject({ status, workspace_id: null });
+        expect(sqlite.prepare("SELECT updated_at FROM tasks WHERE id='task-1'").pluck().get()).toBe(
+          new Date(Date.parse(prior) + 1).toISOString()
+        );
+        expect(
+          sqlite.prepare("SELECT completed_at FROM tasks WHERE id='task-1'").pluck().get()
+        ).toBe(prior);
+        expect(
+          sqlite.prepare('SELECT recovery_attempt_id FROM session_snapshots').pluck().get()
+        ).toBeNull();
+        expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+        await expect(
+          ensureSessionRecovery({ DATABASE: database } as Env, 'project-1', 'chat-1')
+        ).resolves.toMatchObject({ status: 'waking' });
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
+  it('cancels legacy workspace-linked prompts before publishing the task cancellation', async () => {
+    const sqlite = new Database(':memory:');
+    const cleanup = vi
+      .spyOn(terminalCleanup, 'cleanupTerminalTaskResourcesOrThrow')
+      .mockResolvedValueOnce(undefined);
+    try {
+      await seedStableRecoveryFixture(sqlite);
+      sqlite.exec("UPDATE tasks SET chat_session_id = NULL WHERE id='task-1'");
+      const database = createSqliteD1(sqlite);
+      const db = drizzle(database, { schema });
+      const task = await db.select().from(schema.tasks).where(eq(schema.tasks.id, 'task-1')).get();
+      vi.mocked(projectDataService.cancelUnissuedSessionPrompts).mockImplementationOnce(
+        async () => {
+          expect(taskRow(sqlite)).toMatchObject({ status: 'sleeping' });
+          return { matched: true, cancelled: 1 };
+        }
+      );
+      await cancelTask({ DATABASE: database } as Env, db, task!, 'user-1');
+      expect(projectDataService.cancelUnissuedSessionPrompts).toHaveBeenCalledWith(
+        expect.anything(),
+        'project-1',
+        'chat-1',
+        'task-1'
+      );
+      expect(taskRow(sqlite)).toMatchObject({ status: 'cancelled' });
+    } finally {
+      cleanup.mockRestore();
+      sqlite.close();
+    }
+  });
+
+  it('automatically retries a failed accepted eviction wake through the durable runner boundary', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      await seedStableRecoveryFixture(sqlite);
+      sqlite.exec(`UPDATE workspaces SET status = 'evicted', eviction_generation = 'oom-generation', chat_session_id = NULL;
+        UPDATE session_snapshots SET recovery_status = 'failed', recovery_task_id = 'task-1',
+          recovery_attempt_id = 'failed-accepted-attempt', recovery_attempts = 1,
+          recovery_failed_at = '2026-08-15T00:00:00.000Z',
+          eviction_recovery_workspace_id = 'workspace-1', eviction_recovery_node_id = 'node-1',
+          eviction_recovery_generation = 'oom-generation', eviction_recovery_interrupted_work = 1;`);
+      const database = createSqliteD1(sqlite);
+      const pending: Promise<unknown>[] = [];
+      expect(
+        await runWorkspaceEvictionRecovery({ DATABASE: database } as Env, (promise) => {
+          pending.push(promise);
+        })
+      ).toEqual({ selected: 1 });
+      await Promise.all(pending);
+      expect(startTaskRunnerDOMock).toHaveBeenCalledTimes(1);
+      expect(startTaskRunnerDOMock.mock.calls[0]?.[1]).toMatchObject({
+        taskId: 'task-1',
+        chatSessionId: 'chat-1',
+        excludedNodeId: 'node-1',
+        resumeSnapshotChatSessionId: 'chat-1',
+        restoredSessionPrompt: expect.any(String),
+      });
+      expect(taskRow(sqlite)).toMatchObject({ status: 'queued', workspace_id: null });
+      expect(
+        sqlite.prepare('SELECT recovery_status,recovery_attempts FROM session_snapshots').get()
+      ).toEqual({ recovery_status: 'waking', recovery_attempts: 2 });
+      expect(recoveryTaskCount(sqlite)).toBe(0);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('reactivates the sleeping task without creating a recovery task row', async () => {
     const sqlite = new Database(':memory:');
     try {
-      seedStableRecoveryFixture(sqlite);
+      await seedStableRecoveryFixture(sqlite);
       const database = createSqliteD1(sqlite);
 
       await expect(wake(database)).resolves.toEqual({ status: 'waking', taskId: 'task-1' });
@@ -234,10 +477,313 @@ describe('session recovery stable task identity', () => {
     }
   });
 
+  it('wakes from an older snapshot after a later confirmed-deleted runtime retained the binding', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      await seedStableRecoveryFixture(sqlite);
+      sqlite.exec(`
+        CREATE UNIQUE INDEX workspace_chat_unique ON workspaces(chat_session_id);
+        UPDATE workspaces SET status = 'deleted', chat_session_id = NULL,
+          runtime_deletion_confirmed_at = '2026-08-15T01:00:00.000Z' WHERE id = 'workspace-1';
+        UPDATE tasks SET workspace_id = NULL WHERE id = 'task-1';
+        INSERT INTO workspaces (id, user_id, project_id, node_id, status, chat_session_id,
+          runtime_deletion_confirmed_at) VALUES
+          ('later-predecessor', 'user-1', 'project-1', 'node-1', 'deleted', 'chat-1',
+           '2026-08-15T02:00:00.000Z'),
+          ('replacement', 'user-1', 'project-1', 'node-1', 'running', NULL, NULL),
+          ('unrelated-live', 'user-1', 'project-1', 'node-1', 'running', 'other-chat', NULL);
+      `);
+      const database = createSqliteD1(sqlite);
+      // Exercise the actual runtime session-link writer, including the production UNIQUE
+      // constraint. A wake response alone misses the asynchronous linking failure.
+      startTaskRunnerDOMock.mockImplementationOnce(async () => {
+        await ensureSessionLinked(
+          {
+            taskId: 'task-1',
+            projectId: 'project-1',
+            stepResults: { chatSessionId: 'chat-1' },
+            config: { resumeSnapshotChatSessionId: 'chat-1', taskMode: 'conversation' },
+          } as TaskRunnerState,
+          'replacement',
+          {
+            env: { DATABASE: database },
+            assertRecoveryAuthority: vi.fn(async () => undefined),
+          } as unknown as TaskRunnerContext
+        );
+      });
+      let releaseBatch!: () => void;
+      let batchClaimed!: () => void;
+      const heldBatch = new Promise<void>((resolve) => {
+        releaseBatch = resolve;
+      });
+      const claimed = new Promise<void>((resolve) => {
+        batchClaimed = resolve;
+      });
+      const batch = database.batch.bind(database);
+      interceptRecoveryBatch(database, async (statements) => {
+        batchClaimed();
+        await heldBatch;
+        return batch(statements);
+      });
+      const firstWake = wake(database);
+      await claimed;
+      // Overlap two more callers with the claimed-but-not-started first wake.
+      const followers = await Promise.all([wake(database), wake(database)]);
+      releaseBatch();
+      await expect(firstWake).resolves.toEqual({ status: 'waking', taskId: 'task-1' });
+      expect(followers).toEqual([
+        { status: 'waking', taskId: 'task-1' },
+        { status: 'waking', taskId: 'task-1' },
+      ]);
+      expect(taskRow(sqlite)).toMatchObject({
+        id: 'task-1',
+        chat_session_id: 'chat-1',
+        workspace_id: 'replacement',
+        parent_task_id: 'parent-1',
+      });
+      expect(
+        sqlite.prepare('SELECT id, status, chat_session_id FROM workspaces ORDER BY id').all()
+      ).toEqual([
+        { id: 'later-predecessor', status: 'deleted', chat_session_id: null },
+        { id: 'replacement', status: 'running', chat_session_id: 'chat-1' },
+        { id: 'unrelated-live', status: 'running', chat_session_id: 'other-chat' },
+        { id: 'workspace-1', status: 'deleted', chat_session_id: null },
+      ]);
+      expect(
+        sqlite.prepare('SELECT snapshot_generation, workspace_id FROM session_snapshots').get()
+      ).toEqual({ snapshot_generation: 'generation-final', workspace_id: 'workspace-1' });
+      expect(recoveryTaskCount(sqlite)).toBe(0);
+      expect(startTaskRunnerDOMock).toHaveBeenCalledTimes(1);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it.each([
+    ['deleted', 'project-1', 'user-1', null, null, false],
+    ['running', 'project-1', 'user-1', null, null, false],
+    ['stopping', 'project-1', 'user-1', null, null, false],
+    ['running', 'project-1', 'user-1', 'confirmed', 'terminated', false],
+    ['stopping', 'project-1', 'user-1', 'confirmed', 'terminated', false],
+    ['deleted', 'other-project', 'user-1', 'confirmed', null, false],
+    ['deleted', 'project-1', 'other-user', 'confirmed', null, false],
+    ['deleted', 'project-1', 'user-1', null, 'terminated', true],
+  ])(
+    'only releases a scoped confirmed-deleted predecessor (%s/%s/%s/%s/%s)',
+    async (status, projectId, userId, deletionConfirmed, nodeTerminated, released) => {
+      const sqlite = new Database(':memory:');
+      try {
+        await seedStableRecoveryFixture(sqlite);
+        sqlite.exec(`CREATE UNIQUE INDEX workspace_chat_unique ON workspaces(chat_session_id);
+          UPDATE workspaces SET status = 'deleted', chat_session_id = NULL WHERE id = 'workspace-1';
+          UPDATE tasks SET workspace_id = NULL WHERE id = 'task-1';`);
+        sqlite
+          .prepare(
+            `INSERT INTO workspaces
+          (id,user_id,project_id,node_id,status,chat_session_id,runtime_deletion_confirmed_at)
+          VALUES ('retained',?,?, 'node-1',?,'chat-1',?)`
+          )
+          .run(userId, projectId, status, deletionConfirmed);
+        sqlite.prepare('UPDATE nodes SET runtime_termination_confirmed_at = ?').run(nodeTerminated);
+        await wake(createSqliteD1(sqlite));
+        expect(
+          sqlite.prepare("SELECT chat_session_id FROM workspaces WHERE id='retained'").pluck().get()
+        ).toBe(released ? null : 'chat-1');
+        expect(
+          sqlite.prepare("SELECT status FROM workspaces WHERE id='retained'").pluck().get()
+        ).toBe(status);
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
+  it('does not release any predecessor after the claimed attempt is replaced before the batch', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      await seedStableRecoveryFixture(sqlite);
+      sqlite.exec(`UPDATE workspaces SET chat_session_id = NULL WHERE id = 'workspace-1';
+        INSERT INTO workspaces (id,user_id,project_id,status,chat_session_id,runtime_deletion_confirmed_at)
+        VALUES ('retained','user-1','project-1','deleted','chat-1','confirmed');`);
+      const database = createSqliteD1(sqlite);
+      const batch = database.batch.bind(database);
+      interceptRecoveryBatch(database, async (statements) => {
+        sqlite.exec("UPDATE session_snapshots SET recovery_attempt_id = 'newer-attempt'");
+        return batch(statements);
+      });
+      await expect(wake(database)).resolves.toMatchObject({ status: 'unavailable' });
+      expect(
+        sqlite.prepare("SELECT chat_session_id FROM workspaces WHERE id='retained'").pluck().get()
+      ).toBe('chat-1');
+      expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it.each([
+    ['completed collision cleanup', 'sleeping', null, true, true, -60, -65, true],
+    ['cooldown still active', 'sleeping', null, true, true, -2, -65, false],
+    ['active task', 'in_progress', null, true, true, -60, -65, false],
+    ['assigned runtime', 'sleeping', 'workspace-1', true, true, -60, -65, false],
+    ['unconfirmed retained runtime', 'sleeping', null, false, true, -60, -65, false],
+    ['unconfirmed snapshot runtime', 'sleeping', null, true, false, -60, -65, false],
+    ['failure predates this claim', 'sleeping', null, true, true, -70, -65, false],
+    ['live claim lease', 'sleeping', null, true, true, 0, 0, false],
+  ])(
+    'reconciles only a reported stale collision failure: %s',
+    async (
+      _label,
+      status,
+      workspaceId,
+      predecessorConfirmed,
+      originalConfirmed,
+      failedMinutes,
+      claimedMinutes,
+      canWake
+    ) => {
+      const sqlite = new Database(':memory:');
+      try {
+        await seedStableRecoveryFixture(sqlite);
+        const at = (minutes: number) =>
+          new Date(Date.now() + Number(minutes) * 60_000).toISOString();
+        const failedAt = at(Number(failedMinutes));
+        sqlite.exec(`CREATE UNIQUE INDEX workspace_chat_unique ON workspaces(chat_session_id);
+          UPDATE workspaces SET status='deleted', chat_session_id=NULL WHERE id='workspace-1';
+          INSERT INTO workspaces (id,user_id,project_id,status,chat_session_id)
+          VALUES ('retained','user-1','project-1','deleted','chat-1');`);
+        sqlite
+          .prepare("UPDATE workspaces SET runtime_deletion_confirmed_at=? WHERE id='workspace-1'")
+          .run(originalConfirmed ? at(-90) : null);
+        sqlite
+          .prepare("UPDATE workspaces SET runtime_deletion_confirmed_at=? WHERE id='retained'")
+          .run(predecessorConfirmed ? at(-50) : null);
+        sqlite
+          .prepare(
+            `UPDATE tasks SET status=?,workspace_id=?,updated_at=?,
+          error_message='D1_ERROR: UNIQUE constraint failed: workspaces.chat_session_id' WHERE id='task-1'`
+          )
+          .run(status, workspaceId, failedAt);
+        sqlite
+          .prepare(
+            `UPDATE session_snapshots SET recovery_status='waking',recovery_task_id='task-1',
+          recovery_attempt_id='old-attempt',recovery_claimed_at=?,recovery_failed_at=NULL,
+          recovery_attempts=3,recovery_workspace_id='workspace-1'`
+          )
+          .run(at(Number(claimedMinutes)));
+        const database = createSqliteD1(sqlite);
+        const continueConversation = () =>
+          ensureSessionRecovery({ DATABASE: database } as Env, 'project-1', 'chat-1');
+        let result;
+        if (canWake) {
+          let claimed!: () => void;
+          let release!: () => void;
+          const ready = new Promise<void>((resolve) => {
+            claimed = resolve;
+          });
+          const held = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          const batch = database.batch.bind(database);
+          interceptRecoveryBatch(database, async (statements) => {
+            claimed();
+            await held;
+            return batch(statements);
+          });
+          const first = continueConversation();
+          await ready;
+          const followers = await Promise.all([continueConversation(), continueConversation()]);
+          release();
+          result = await first;
+          expect(followers).toEqual([
+            { status: 'waking', taskId: 'task-1' },
+            { status: 'waking', taskId: 'task-1' },
+          ]);
+        } else {
+          result = await continueConversation();
+        }
+        if (canWake) {
+          expect(result).toEqual({ status: 'waking', taskId: 'task-1' });
+          expect(startTaskRunnerDOMock).toHaveBeenCalledTimes(1);
+          expect(
+            sqlite
+              .prepare('SELECT recovery_attempts,recovery_failed_at FROM session_snapshots')
+              .get()
+          ).toEqual({ recovery_attempts: 1, recovery_failed_at: null });
+          expect(
+            sqlite
+              .prepare("SELECT chat_session_id FROM workspaces WHERE id='retained'")
+              .pluck()
+              .get()
+          ).toBeNull();
+        } else {
+          expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+          const snapshot = sqlite
+            .prepare('SELECT recovery_attempts,recovery_failed_at FROM session_snapshots')
+            .get();
+          expect(snapshot).toEqual({
+            recovery_attempts: 3,
+            recovery_failed_at: _label === 'cooldown still active' ? failedAt : null,
+          });
+          expect(
+            sqlite
+              .prepare("SELECT chat_session_id FROM workspaces WHERE id='retained'")
+              .pluck()
+              .get()
+          ).toBe('chat-1');
+        }
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
+  it.each(['sleeping', 'cancelled'])(
+    'never reconciles an exhausted anchor for a source-guarded %s caller',
+    async (status) => {
+      const sqlite = new Database(':memory:');
+      try {
+        await seedStableRecoveryFixture(sqlite);
+        sqlite.exec(`UPDATE workspaces SET status='deleted',chat_session_id=NULL,
+          runtime_deletion_confirmed_at='2026-08-15T01:00:00.000Z';
+          INSERT INTO workspaces (id,user_id,project_id,status,chat_session_id,runtime_deletion_confirmed_at)
+          VALUES ('retained','user-1','project-1','deleted','chat-1','confirmed');
+          UPDATE tasks SET workspace_id=NULL,error_message='UNIQUE constraint failed: workspaces.chat_session_id',
+            updated_at='2026-08-15T03:00:00.000Z' WHERE id='task-1';
+          UPDATE session_snapshots SET recovery_status='waking',recovery_task_id='task-1',
+            recovery_attempt_id='old-attempt',recovery_claimed_at='2026-08-15T02:00:00.000Z',
+            recovery_attempts=3,recovery_failed_at=NULL,recovery_workspace_id='workspace-1';`);
+        sqlite.prepare("UPDATE tasks SET status=? WHERE id='task-1'").run(status);
+        await expect(wake(createSqliteD1(sqlite))).resolves.toMatchObject({
+          status: 'unavailable',
+        });
+        expect(
+          sqlite
+            .prepare(
+              `SELECT recovery_failed_at,recovery_attempts,recovery_attempt_id
+          FROM session_snapshots`
+            )
+            .get()
+        ).toEqual({
+          recovery_failed_at: null,
+          recovery_attempts: 3,
+          recovery_attempt_id: 'old-attempt',
+        });
+        expect(
+          sqlite.prepare("SELECT chat_session_id FROM workspaces WHERE id='retained'").pluck().get()
+        ).toBe('chat-1');
+        expect(taskRow(sqlite)).toMatchObject({ status, workspace_id: null });
+        expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
   it('preserves the coordination channel on the stable task through wake', async () => {
     const sqlite = new Database(':memory:');
     try {
-      seedStableRecoveryFixture(sqlite);
+      await seedStableRecoveryFixture(sqlite);
       sqlite
         .prepare("UPDATE tasks SET coordination_channel = 'feature.wake' WHERE id = 'task-1'")
         .run();
@@ -256,7 +802,7 @@ describe('session recovery stable task identity', () => {
     async (status) => {
       const sqlite = new Database(':memory:');
       try {
-        seedStableRecoveryFixture(sqlite);
+        await seedStableRecoveryFixture(sqlite);
         sqlite
           .prepare(
             "UPDATE tasks SET status = ?, completed_at = '2026-08-15T00:00:00.000Z', error_message = 'previous outcome' WHERE id = 'task-1'"
@@ -280,7 +826,7 @@ describe('session recovery stable task identity', () => {
   it('rolls back completion if atomic snapshot invalidation fails', async () => {
     const sqlite = new Database(':memory:');
     try {
-      seedStableRecoveryFixture(sqlite);
+      await seedStableRecoveryFixture(sqlite);
       sqlite.exec(`CREATE TRIGGER reject_archive BEFORE UPDATE OF sleeping_at ON session_snapshots
         WHEN NEW.sleeping_at IS NULL BEGIN SELECT RAISE(ABORT, 'archive intent unavailable'); END;`);
       const database = createSqliteD1(sqlite);
@@ -304,7 +850,7 @@ describe('session recovery stable task identity', () => {
   ])('destructive archive fences human recovery (%s, caller %s)', async (ordering, caller) => {
     const sqlite = new Database(':memory:');
     try {
-      seedStableRecoveryFixture(sqlite);
+      await seedStableRecoveryFixture(sqlite);
       sqlite.exec(`INSERT INTO users (id, name, email, github_id, status)
         VALUES ('member-1', 'Member', 'member@example.com', 'gh-member', 'active');
         INSERT INTO project_members (project_id, user_id, role, status)
@@ -315,7 +861,7 @@ describe('session recovery stable task identity', () => {
         expect((await archive(database)).status).toBe(caller === 'user-1' ? 409 : 200);
       } else {
         const batch = database.batch.bind(database);
-        vi.spyOn(database, 'batch').mockImplementationOnce(async (statements) => {
+        interceptRecoveryBatch(database, async (statements) => {
           // Recovery claimed the snapshot, but has not yet queued the task.
           expect(
             sqlite.prepare('SELECT recovery_status FROM session_snapshots').pluck().get()
@@ -355,7 +901,7 @@ describe('session recovery stable task identity', () => {
   it('does not revive a terminal conversation for an automated wake', async () => {
     const sqlite = new Database(':memory:');
     try {
-      seedStableRecoveryFixture(sqlite);
+      await seedStableRecoveryFixture(sqlite);
       sqlite.exec("UPDATE tasks SET status = 'cancelled' WHERE id = 'task-1'");
       await expect(wake(createSqliteD1(sqlite))).resolves.toMatchObject({ status: 'unavailable' });
       expect(taskRow(sqlite)).toMatchObject({ status: 'cancelled' });
@@ -368,7 +914,7 @@ describe('session recovery stable task identity', () => {
   it('requires acknowledgment of this wake attempt after an ambiguous runner response', async () => {
     const sqlite = new Database(':memory:');
     try {
-      seedStableRecoveryFixture(sqlite);
+      await seedStableRecoveryFixture(sqlite);
       startTaskRunnerDOMock.mockRejectedValueOnce(new Error('RPC interrupted'));
       ensureTaskRunnerStartedMock.mockResolvedValueOnce(false);
       await expect(wake(createSqliteD1(sqlite))).resolves.toMatchObject({ status: 'unavailable' });
@@ -401,7 +947,7 @@ describe('session recovery stable task identity', () => {
     async (oldAttempt) => {
       const sqlite = new Database(':memory:');
       try {
-        seedStableRecoveryFixture(sqlite);
+        await seedStableRecoveryFixture(sqlite);
         sqlite.exec(`UPDATE session_snapshots SET recovery_task_id='task-1', recovery_attempt_id='new-wake';
         UPDATE tasks SET admission_state='provisioning' WHERE id='task-1';
         INSERT INTO vm_task_admissions (task_id,project_id,user_id,provider,credential_domain_key,provider_domain_key,scope_key,requested_vm_size,requested_vm_location,state)
@@ -438,7 +984,7 @@ describe('session recovery stable task identity', () => {
   it('converges repeated wake attempts on the same task id', async () => {
     const sqlite = new Database(':memory:');
     try {
-      seedStableRecoveryFixture(sqlite);
+      await seedStableRecoveryFixture(sqlite);
       const database = createSqliteD1(sqlite);
 
       await expect(wake(database)).resolves.toEqual({ status: 'waking', taskId: 'task-1' });
@@ -459,7 +1005,7 @@ describe('session recovery stable task identity', () => {
   it('preserves lineage and fan-out parent identity across multiple sleep/wake cycles', async () => {
     const sqlite = new Database(':memory:');
     try {
-      seedStableRecoveryFixture(sqlite);
+      await seedStableRecoveryFixture(sqlite);
       const database = createSqliteD1(sqlite);
 
       await expect(wake(database)).resolves.toEqual({ status: 'waking', taskId: 'task-1' });
@@ -484,7 +1030,7 @@ describe('session recovery stable task identity', () => {
   it('keeps the per-parent fan-out counter anchored to the stable task id', async () => {
     const sqlite = new Database(':memory:');
     try {
-      seedStableRecoveryFixture(sqlite);
+      await seedStableRecoveryFixture(sqlite);
       sqlite.exec(`
         INSERT INTO tasks
           (id, project_id, user_id, parent_task_id, title, description, status,

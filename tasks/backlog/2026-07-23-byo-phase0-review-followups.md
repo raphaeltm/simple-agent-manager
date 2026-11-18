@@ -1,5 +1,13 @@
 # BYO Phase 0 — deferred review follow-ups (MEDIUM/LOW)
 
+> **Reconciliation 2026-11-02:** The deployment half of the zombie-test item is covered. #2472 (`1fcbb9239`) moved deployment teardown into `cleanupDeploymentNode`, which now claims only `node_class = 'managed'` nodes (`services/deployment-node-cleanup.ts:32`). It also added a real-SQL test that a `user-owned` node is neither mutated nor deleted (`deployment-environment-lifecycle-vertical.test.ts:516`). `deployment-environment-lifecycle.ts` no longer holds that predicate. Still open: the `trial-expire.ts` zombie test (guard now `:626`) and every other item. Pointer: the agent-key route is now `routes/workspaces/runtime.ts:747`.
+
+> **Reconciliation 2026-10-26:** Every item is still open. Pointer corrections: the agent-key route
+> is now `apps/api/src/routes/workspaces/runtime.ts:883` (it still resolves via `workspace.userId`),
+> the preferredNodeId query is `durable-objects/task-runner/node-steps.ts:115-117`, and
+> `node-selector.ts` and `node-selector-user-scope.test.ts` were deleted by #2030 (`1d21cb8e1`),
+> so the "`node-selector.ts` half is already pinned" note no longer holds.
+
 **Date:** 2026-07-23
 **Parent:** `tasks/archive/2026-07-23-byo-user-owned-nodes-phase0.md`, PR for branch `sam/build-byo-user-owned-e2d62t`
 **Source:** Phase-0 local specialist review (security-auditor, cloudflare-specialist, test-engineer, task-completion-validator).

@@ -1,0 +1,487 @@
+/**
+ * One read of a team's progress: who is working, idle, asleep or waiting, on what, with which pull
+ * request and evidence, and what usage SAM can actually measure.
+ *
+ * Every section names its source and when it was observed, and the sources disagree in kind:
+ * task and session state are SAM's own records; pull request and check state are the last GitHub
+ * webhook SAM stored; summaries and evidence are what the agent reported, not verified facts.
+ * SAM does not record per-task token counts or which commit a deployment runs, so those are
+ * reported as unavailable instead of being estimated.
+ *
+ * Each source is read once for the whole team (rule 60); a failing source marks its own section
+ * unavailable rather than failing the read.
+ */
+import type { PullRequestState } from '@simple-agent-manager/shared';
+import {
+  chunk,
+  D1_MAX_BOUND_PARAMETERS,
+  log,
+  parseRowsSkippingInvalid,
+} from '@simple-agent-manager/worker-core';
+import * as v from 'valibot';
+
+import { authorizeProjectOperation } from './authorization';
+import { operationLink } from './connector-read-core';
+import { TEAM_TEXT_CHARS_MIN } from './connector-read-settings-definition';
+import { diagnostic } from './operational-projections';
+import { getPullRequestStates, parseProjectPullRequestUrl } from './pull-request-core';
+import { responseBytes, RESULT_FRAMING_RESERVE_BYTES, resultByteBudget } from './response-budget';
+import { readTeamTasks, type TeamScope, type TeamTaskRow } from './team-lineage';
+import { settle, type Settled, usageSection } from './team-usage';
+import type { OperationContext } from './types';
+import { UNTRUSTED_TEXT_GUIDANCE, untrustedTextBlock } from './untrusted-text';
+
+/**
+ * Agent-written text in its untrusted-data envelope, or null when there is none. The guidance
+ * sentence that explains the envelope is stated once per result (`untrustedTextGuidance`).
+ */
+function agentText(kind: string, text: string | null, maxLength: number, moreWith: string) {
+  if (!text) return null;
+  const block = untrustedTextBlock({ kind, text, maxLength, moreWith });
+  return {
+    kind: block.kind,
+    text: block.text,
+    truncated: block.truncated,
+    originalLength: block.originalLength,
+    untrustedContent: block.untrustedContent,
+  };
+}
+
+const AgentSessionRowSchema = v.object({
+  workspaceId: v.string(),
+  agentType: v.nullable(v.string()),
+  agentProfileId: v.nullable(v.string()),
+  providerMode: v.nullable(v.string()),
+  credentialSource: v.nullable(v.string()),
+  status: v.string(),
+});
+type AgentSessionRow = v.InferOutput<typeof AgentSessionRowSchema>;
+
+const ComputeRowSchema = v.object({
+  workspaceId: v.string(),
+  intervals: v.number(),
+  openIntervals: v.number(),
+  durationMs: v.nullable(v.number()),
+  vcpuMs: v.nullable(v.number()),
+});
+type ComputeRow = v.InferOutput<typeof ComputeRowSchema>;
+
+/** Rows that fail their schema are left out (and logged) rather than failing the section. */
+function parseRows<TSchema extends v.GenericSchema>(
+  schema: TSchema,
+  rows: readonly unknown[],
+  context: string
+): Array<v.InferOutput<TSchema>> {
+  return parseRowsSkippingInvalid(schema, rows, (reason) =>
+    log.warn('connector.team_row_skipped', { context, reason })
+  );
+}
+
+function jsonIds(ids: readonly (string | null)[]): string {
+  return JSON.stringify([...new Set(ids.filter((id): id is string => !!id))]);
+}
+
+async function readAgentSessions(ctx: OperationContext, workspaceIds: string) {
+  const result = await ctx.env.DATABASE.prepare(
+    `SELECT workspace_id AS workspaceId, agent_type AS agentType, agent_profile_id AS agentProfileId,
+            agent_provider_mode AS providerMode, agent_credential_source AS credentialSource,
+            status
+     FROM agent_sessions WHERE workspace_id IN (SELECT value FROM json_each(?))
+     ORDER BY created_at DESC, id DESC`
+  )
+    .bind(workspaceIds)
+    .all<Record<string, unknown>>();
+  const newest = new Map<string, AgentSessionRow>();
+  for (const row of parseRows(AgentSessionRowSchema, result.results ?? [], 'agent_sessions')) {
+    if (!newest.has(row.workspaceId)) newest.set(row.workspaceId, row);
+  }
+  return newest;
+}
+
+async function readCompute(ctx: OperationContext, workspaceIds: string, now: string) {
+  // Measured workspace intervals. A node can host several workspaces, so these are runtime
+  // minutes per workspace, not a share of any bill.
+  const result = await ctx.env.DATABASE.prepare(
+    `SELECT workspace_id AS workspaceId, COUNT(*) AS intervals,
+            SUM(CASE WHEN ended_at IS NULL THEN 1 ELSE 0 END) AS openIntervals,
+            SUM((julianday(COALESCE(ended_at, ?)) - julianday(started_at)) * 86400000) AS durationMs,
+            SUM((julianday(COALESCE(ended_at, ?)) - julianday(started_at)) * 86400000 * vcpu_count)
+              AS vcpuMs
+     FROM compute_usage WHERE workspace_id IN (SELECT value FROM json_each(?))
+     GROUP BY workspace_id`
+  )
+    .bind(now, now, workspaceIds)
+    .all<Record<string, unknown>>();
+  const rows = parseRows(ComputeRowSchema, result.results ?? [], 'compute_usage');
+  return new Map(rows.map((row) => [row.workspaceId, row]));
+}
+
+async function readSessions(ctx: OperationContext, projectId: string, taskIds: string[]) {
+  const byTask = new Map<string, Record<string, unknown>>();
+  // The ProjectData lookup binds one parameter per task id and nothing else; Cloudflare's SQL
+  // surfaces (D1 and Durable Object storage alike) reject the statement past that limit.
+  for (const taskChunk of chunk(taskIds, D1_MAX_BOUND_PARAMETERS)) {
+    for (const session of await ctx.ports.projectData.getSessionsByTaskIds(projectId, taskChunk)) {
+      const taskId = typeof session.taskId === 'string' ? session.taskId : null;
+      if (taskId && !byTask.has(taskId)) byTask.set(taskId, session);
+    }
+  }
+  return byTask;
+}
+
+function minutes(ms: number | null | undefined): number | null {
+  return typeof ms === 'number' && Number.isFinite(ms) ? Math.round(ms / 6_000) / 10 : null;
+}
+
+function parseJson(value: string | null): unknown {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+/** What the task is waiting on, derived from SAM's own records only. */
+function waitingOn(task: TeamTaskRow, attentionKind: string | null): string[] {
+  const reasons: string[] = [];
+  if (attentionKind === 'needs_input') reasons.push('person');
+  if (task.admissionState === 'provider_limit_waiting') reasons.push('provider_limit_reset');
+  if (task.admissionState === 'provider_limit_blocked') reasons.push('provider_limit');
+  if (task.credentialBlockedReason) reasons.push('credentials');
+  if (task.executionStep === 'waiting_for_node_capacity') reasons.push('node_capacity');
+  if (task.executionStep === 'awaiting_followup') reasons.push('next_message');
+  return reasons;
+}
+
+function providerLimitReset(task: TeamTaskRow) {
+  const wait = parseJson(task.providerLimitWaitJson);
+  if (!wait || typeof wait !== 'object') return null;
+  const record = wait as Record<string, unknown>;
+  return typeof record.resetsAt === 'string' || typeof record.resetsAt === 'number'
+    ? { resetsAt: record.resetsAt, source: 'provider_reported' }
+    : null;
+}
+
+function sessionAttention(
+  session: Record<string, unknown> | undefined,
+  callerId: string,
+  textChars: number
+) {
+  const attention = session?.attention;
+  if (!attention || typeof attention !== 'object') return null;
+  const record = attention as Record<string, unknown>;
+  const kind = typeof record.kind === 'string' ? record.kind : null;
+  // The question itself is shown to the person who started the chat, as in chat lists.
+  const mine = session?.createdByUserId === callerId;
+  return {
+    markerId: typeof record.markerId === 'string' ? record.markerId : null,
+    kind,
+    createdAt:
+      typeof record.createdAt === 'number' ? new Date(record.createdAt).toISOString() : null,
+    ...(mine
+      ? {
+          question: agentText(
+            'agent question',
+            typeof record.reason === 'string' ? record.reason : null,
+            textChars,
+            'sam_chat_interactions'
+          ),
+          options: Array.isArray(record.options) ? record.options : [],
+        }
+      : { question: 'Visible to the chat owner; they can read it with sam_chat_interactions.' }),
+  };
+}
+
+interface PullRequestLookup {
+  repository: string | null;
+  states: Record<string, PullRequestState | null>;
+}
+
+async function readPullRequests(
+  ctx: OperationContext,
+  projectId: string,
+  tasks: readonly TeamTaskRow[]
+): Promise<PullRequestLookup> {
+  const project = await ctx.env.DATABASE.prepare('SELECT repository FROM projects WHERE id = ?')
+    .bind(projectId)
+    .first<{ repository: string }>();
+  const repository = project?.repository ?? null;
+  if (!repository) return { repository, states: {} };
+  const refs = tasks.flatMap((task) => (task.outputPrUrl ? [{ url: task.outputPrUrl }] : []));
+  return { repository, states: await getPullRequestStates(ctx, projectId, refs, { repository }) };
+}
+
+function pullRequest(task: TeamTaskRow, lookup: Settled<PullRequestLookup>) {
+  if (!task.outputPrUrl) return null;
+  if (!lookup.ok) return { url: task.outputPrUrl, state: 'unavailable' };
+  const parsed = lookup.value.repository
+    ? parseProjectPullRequestUrl(task.outputPrUrl, lookup.value.repository)
+    : null;
+  // A URL outside the project's repository has no stored state to report.
+  if (!parsed) return { url: task.outputPrUrl, state: 'not_tracked' };
+  const url = parsed.url;
+  const state = lookup.value.states[url];
+  if (!state) return { url, state: 'not_synced', source: 'github_webhook' };
+  return {
+    url,
+    state: state.state,
+    isDraft: state.isDraft,
+    checks: state.checksState ?? 'unknown',
+    headSha: state.headSha ?? null,
+    checksUpdatedAt: state.checksUpdatedAt ?? null,
+    mergedAt: state.mergedAt,
+    updatedAt: state.updatedAt,
+    stale: state.stale,
+    source: 'github_webhook',
+  };
+}
+
+interface TaskSources {
+  activity: string;
+  session: Record<string, unknown> | undefined;
+  agent: AgentSessionRow | undefined;
+  usage: ComputeRow | undefined;
+  pullRequests: Settled<PullRequestLookup>;
+}
+
+function projectTeamTask(
+  ctx: OperationContext,
+  input: { projectId: string; scope: TeamScope },
+  task: TeamTaskRow,
+  sources: TaskSources,
+  textChars: number
+) {
+  const { session, agent, usage } = sources;
+  const attention = sessionAttention(session, ctx.actor.userId, textChars);
+  return {
+    taskId: task.id,
+    title: task.title,
+    parentTaskId: task.parentTaskId,
+    depth: task.depth,
+    // Retries and forks also set parent_task_id; dispatched subtasks come from MCP dispatch.
+    relation:
+      task.depth === 0 && input.scope.kind !== 'channel'
+        ? 'root'
+        : task.triggeredBy === 'mcp' || task.dispatchDepth > 0
+          ? 'subtask'
+          : 'retry_or_fork',
+    status: task.status,
+    executionStep: task.executionStep,
+    activity: sources.activity,
+    waitingOn: waitingOn(task, attention?.kind ?? null),
+    providerLimit: providerLimitReset(task),
+    attention,
+    error: diagnostic(task.errorMessage, 'TASK_ERROR'),
+    chat: task.chatSessionId
+      ? {
+          sessionId: task.chatSessionId,
+          status: typeof session?.status === 'string' ? session.status : 'unknown',
+          lastMessageAt:
+            typeof session?.lastMessageAt === 'number'
+              ? new Date(session.lastMessageAt).toISOString()
+              : null,
+          agentCompletedAt:
+            typeof session?.agentCompletedAt === 'number'
+              ? new Date(session.agentCompletedAt).toISOString()
+              : null,
+          link: operationLink(ctx, input.projectId, task.chatSessionId),
+        }
+      : null,
+    agent: agent
+      ? {
+          agentType: agent.agentType,
+          agentProfileId: agent.agentProfileId,
+          providerMode: agent.providerMode,
+          credentialSource: agent.credentialSource,
+          sessionStatus: agent.status,
+        }
+      : null,
+    pullRequest: pullRequest(task, sources.pullRequests),
+    output: {
+      branch: task.outputBranch,
+      commitSha: task.outputCommitSha,
+      summary: agentText('agent summary', task.outputSummary, textChars, 'sam_task_get'),
+      evidence: agentText('agent evidence', task.completionEvidence, textChars, 'sam_task_get'),
+      source: 'agent_reported_not_verified',
+    },
+    compute: usage
+      ? {
+          runtimeMinutes: minutes(usage.durationMs),
+          vcpuMinutes: minutes(usage.vcpuMs),
+          runningNow: usage.openIntervals > 0,
+          source: 'measured_workspace_intervals',
+        }
+      : null,
+    createdAt: task.createdAt,
+    startedAt: task.startedAt,
+    updatedAt: task.updatedAt,
+    completedAt: task.completedAt,
+  };
+}
+
+export type TeamTask = ReturnType<typeof projectTeamTask>;
+
+/** How many of `tasks`, in order, fit `budget` response bytes as one JSON array. */
+function listedWithin(tasks: readonly TeamTask[], budget: number): number {
+  // One byte per task for the separating comma (counted twice: both copies), two for brackets.
+  let total = 4;
+  for (const [index, task] of tasks.entries()) {
+    total += responseBytes(task) + 2;
+    if (total > budget) return index;
+  }
+  return tasks.length;
+}
+
+/**
+ * The tasks that fit `budget` response bytes, in the order `team-lineage.ts` ranks them, so the
+ * deepest, least active and least recently updated are left out first. Agent text is shortened
+ * only when that lists more tasks, since sam_task_get returns it in full; the caller discloses
+ * both.
+ */
+function fitTasks(
+  full: TeamTask[],
+  project: (textChars: number) => TeamTask[],
+  textChars: number,
+  budget: number
+) {
+  let best = { tasks: full, textChars, listed: listedWithin(full, budget) };
+  for (let chars = textChars; best.listed < full.length && chars > TEAM_TEXT_CHARS_MIN;) {
+    chars = Math.max(TEAM_TEXT_CHARS_MIN, Math.floor(chars / 2));
+    const tasks = project(chars);
+    const listed = listedWithin(tasks, budget);
+    if (listed > best.listed) best = { tasks, textChars: chars, listed };
+  }
+  return {
+    tasks: best.tasks.slice(0, best.listed),
+    shortenedTo: best.textChars < textChars ? best.textChars : null,
+    notListed: full.length - best.listed,
+  };
+}
+
+function omittedNote(readCapped: boolean, maxTasks: number, notListed: number): string | null {
+  const notes: string[] = [];
+  if (readCapped)
+    notes.push(`More than ${maxTasks} tasks match, so the least relevant were not read.`);
+  if (notListed > 0) {
+    notes.push(
+      `${notListed} of the tasks read are not listed, to fit the response: the deepest, least active and least recently updated.`
+    );
+  }
+  if (notes.length === 0) return null;
+  notes.push(
+    "Call sam_team_status with a subtask's taskId to read its branch, sam_task_get for one task, or sam_tasks_list to list them."
+  );
+  return notes.join(' ');
+}
+
+export async function teamStatus(
+  ctx: OperationContext,
+  input: { projectId: string; scope: TeamScope }
+) {
+  await authorizeProjectOperation(ctx, input.projectId);
+  const limits = await ctx.ports.settings.connectorReadLimits();
+  const team = await readTeamTasks(ctx.env, input.projectId, input.scope, {
+    maxTasks: limits.teamMaxTasks,
+    maxDepth: limits.teamMaxDepth,
+  });
+  const taskIds = team.rows.map((task) => task.id);
+  const workspaceIds = jsonIds(team.rows.map((task) => task.workspaceId));
+  const now = new Date();
+  const [activity, sessions, prStates, agents, compute, quotas] = await Promise.all([
+    settle('agent_activity', () =>
+      ctx.ports.tasks.listAgentActivity({ projectId: input.projectId, activeOnly: false, taskIds })
+    ),
+    settle('sessions', () => readSessions(ctx, input.projectId, taskIds)),
+    settle('pull_requests', () => readPullRequests(ctx, input.projectId, team.rows)),
+    settle('agent_sessions', () => readAgentSessions(ctx, workspaceIds)),
+    settle('compute_usage', () => readCompute(ctx, workspaceIds, now.toISOString())),
+    settle('credential_limits', () =>
+      ctx.ports.tasks.listCredentialLimits({
+        projectId: input.projectId,
+        userId: ctx.actor.userId,
+      })
+    ),
+  ]);
+  const states = new Map(activity.ok ? activity.value.map((row) => [row.id, row]) : []);
+  const project = (textChars: number) =>
+    team.rows.map((task) =>
+      projectTeamTask(
+        ctx,
+        input,
+        task,
+        {
+          activity: activity.ok
+            ? (states.get(task.id)?.agentActivityState ?? 'unknown')
+            : 'unavailable',
+          session: sessions.ok ? sessions.value.get(task.id) : undefined,
+          agent: agents.ok && task.workspaceId ? agents.value.get(task.workspaceId) : undefined,
+          usage: compute.ok && task.workspaceId ? compute.value.get(task.workspaceId) : undefined,
+          pullRequests: prStates,
+        },
+        textChars
+      )
+    );
+
+  // Counts and usage cover every task read, including any the listing leaves out.
+  const everyTask = project(limits.teamTextChars);
+  const summary = {
+    projectId: input.projectId,
+    scope: input.scope,
+    rootTaskId: team.rootTaskId,
+    observedAt: now.toISOString(),
+    counts: summarize(everyTask),
+    usage: await usageSection(ctx, everyTask, compute.ok, quotas),
+    deployments: {
+      deployedCommit: 'not_recorded',
+      note: 'SAM does not record which commit a deployment runs; check the deploy workflow.',
+    },
+    sources: {
+      status: 'sam_records',
+      activity: activity.ok ? 'sam_records_not_live_verified' : 'unavailable',
+      sessions: sessions.ok ? 'project_data' : 'unavailable',
+      pullRequests: prStates.ok ? 'github_webhook_last_stored' : 'unavailable',
+      agentText: 'agent_reported_not_verified',
+    },
+  };
+  const fitted = fitTasks(
+    everyTask,
+    project,
+    limits.teamTextChars,
+    resultByteBudget(ctx.env) - responseBytes(summary) - RESULT_FRAMING_RESERVE_BYTES
+  );
+  const omitted = omittedNote(team.truncated, limits.teamMaxTasks, fitted.notListed);
+
+  return {
+    projectId: summary.projectId,
+    scope: summary.scope,
+    rootTaskId: summary.rootTaskId,
+    observedAt: summary.observedAt,
+    counts: { ...summary.counts, listed: fitted.tasks.length },
+    tasks: fitted.tasks,
+    ...(fitted.shortenedTo === null ? {} : { agentTextShortenedTo: fitted.shortenedTo }),
+    truncated: team.truncated || fitted.notListed > 0,
+    ...(omitted ? { omitted } : {}),
+    usage: summary.usage,
+    deployments: summary.deployments,
+    sources: summary.sources,
+    untrustedTextGuidance: UNTRUSTED_TEXT_GUIDANCE,
+  };
+}
+
+function summarize(tasks: readonly TeamTask[]) {
+  const count = (values: string[]) =>
+    values.reduce<Record<string, number>>((acc, value) => {
+      acc[value] = (acc[value] ?? 0) + 1;
+      return acc;
+    }, {});
+  const prs = tasks.flatMap((task) => (task.pullRequest ? [task.pullRequest] : []));
+  return {
+    tasks: tasks.length,
+    byStatus: count(tasks.map((task) => task.status)),
+    byActivity: count(tasks.map((task) => task.activity)),
+    waitingOnPerson: tasks.filter((task) => task.waitingOn.includes('person')).length,
+    openPullRequests: prs.filter((pr) => pr.state === 'open').length,
+    failingChecks: prs.filter((pr) => 'checks' in pr && pr.checks === 'failure').length,
+  };
+}

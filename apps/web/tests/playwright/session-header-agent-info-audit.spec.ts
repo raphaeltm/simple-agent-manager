@@ -1,5 +1,7 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
+import { assertNoClippedOverflow } from './audit-helpers';
+
 // ---------------------------------------------------------------------------
 // Visual audit for agent info in the SessionHeader expanded panel.
 //
@@ -40,7 +42,6 @@ const MOCK_PROJECT = {
   githubInstallationId: 'inst-1',
   defaultVmSize: null,
   defaultAgentType: null,
-  defaultProvider: null,
   workspaceIdleTimeoutMs: null,
   nodeIdleTimeoutMs: null,
   createdAt: '2026-01-01T00:00:00Z',
@@ -100,6 +101,7 @@ function makeSession(overrides: Partial<Record<string, unknown>> = {}) {
     isIdle: false,
     isTerminated: false,
     agentSessionId: 'acp-session-1',
+    viewerAccess: 'owner',
     agentType: 'claude-code',
     task: {
       id: 'task-1',
@@ -147,6 +149,10 @@ async function setupApiMocks(
     sessions?: Array<Record<string, unknown>>;
     tasks?: Array<Record<string, unknown>>;
     workspace?: Record<string, unknown>;
+    /** Body of GET /sessions/:id/agent-credential (which account ran the session). */
+    credential?: Record<string, unknown> | null;
+    /** The session's effective configuration (model, effort, permissions, skill). */
+    runtime?: Record<string, unknown> | null;
   } = {}
 ) {
   const session = opts.session ?? makeSession();
@@ -261,6 +267,9 @@ async function setupApiMocks(
         });
         return respond(200, { messages: sorted.slice(0, limit), hasMore: sorted.length > limit });
       }
+      if (subPath.match(/\/sessions\/[^/]+\/agent-credential$/)) {
+        return respond(200, { credential: opts.credential ?? null, runtime: opts.runtime ?? null });
+      }
       if (subPath === '/tasks') return respond(200, { tasks, nextCursor: null });
       if (subPath.match(/\/tasks\//)) return respond(200, { id: 'task-1', status: 'in_progress' });
       if (subPath === '/agents') return respond(200, { agents: [] });
@@ -295,6 +304,29 @@ async function expandHeader(page: Page) {
   await expandBtn.waitFor({ state: 'visible', timeout: 10000 });
   await expandBtn.click();
   await page.waitForTimeout(300);
+}
+
+/** Matches `useIsMobile`: at 767px and below the header is one row and opens a sheet. */
+function isPhone(page: Page): boolean {
+  return (page.viewportSize()?.width ?? 1280) <= 767;
+}
+
+/** On a phone the chips and the public-ports switch live in the session-info sheet. */
+async function openSessionInfoOnPhone(page: Page) {
+  if (!isPhone(page)) return;
+  await page.getByRole('button', { name: /Show session info/ }).click();
+  await expect(page.getByTestId('session-info-sheet')).toBeVisible();
+}
+
+async function expectSessionState(page: Page, label: string) {
+  if (isPhone(page)) {
+    // The phone row shows the state as a dot; its name is on the title button.
+    await expect(
+      page.getByRole('button', { name: new RegExp(`\\. ${label}\\. Show session info`) })
+    ).toBeVisible();
+  } else {
+    await expect(page.getByText(label, { exact: true }).first()).toBeVisible();
+  }
 }
 
 async function assertNoOverflow(page: Page) {
@@ -366,7 +398,7 @@ test.describe('SessionHeader Agent Info — Mobile', () => {
     });
     await page.goto('/projects/proj-agent-1/chat/chat-session-1');
 
-    await expect(page.getByText('Sleeping', { exact: true }).first()).toBeVisible();
+    await expectSessionState(page, 'Sleeping');
     const composer = page.getByPlaceholder('Send a message to wake the agent...');
     await expect(composer).toBeEnabled();
     const promptRequest = page.waitForRequest(
@@ -510,7 +542,7 @@ test.describe('SessionHeader Agent Info — Mobile', () => {
     await expandHeader(page);
     await screenshot(page, 'session-header-source-context-mobile');
 
-    await expect(page.getByText('Source')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Source' })).toBeVisible();
     await expect(
       page.getByRole('link', { name: /Parent session title with a very long description/ })
     ).toBeVisible();
@@ -542,11 +574,22 @@ test.describe('SessionHeader Agent Info — Mobile', () => {
     });
 
     await page.goto('/projects/proj-agent-1/chat/chat-session-1');
-    await expect(page.getByRole('button', { name: 'Show 49 more forwarded ports' })).toBeVisible();
+    if (isPhone(page)) {
+      // One row: the lowest port stays on screen, the other 49 are in the sheet.
+      await expect(page.getByRole('link', { name: 'Open port 3000' })).toBeVisible();
+    } else {
+      await expect(
+        page.getByRole('button', { name: 'Show 49 more forwarded ports' })
+      ).toBeVisible();
+    }
     await expandHeader(page);
     await expect(page.getByText('Initial prompt', { exact: true })).toBeVisible();
     await expect(page.getByText(/Please review the production conversation header/)).toBeVisible();
-    await expect(page.getByText('Ports (50)')).toBeVisible();
+    if (isPhone(page)) {
+      await expect(page.getByTestId('session-port-list').getByRole('link')).toHaveCount(50);
+    } else {
+      await expect(page.getByText('Ports (50)')).toBeVisible();
+    }
     await screenshot(page, 'session-header-title-led-stress-mobile');
     await assertNoOverflow(page);
   });
@@ -562,7 +605,7 @@ test.describe('SessionHeader Agent Info — Desktop', () => {
     });
     await page.goto('/projects/proj-agent-1/chat/chat-session-1');
 
-    await expect(page.getByText('Sleeping', { exact: true }).first()).toBeVisible();
+    await expectSessionState(page, 'Sleeping');
     const composer = page.getByPlaceholder('Send a message to wake the agent...');
     await expect(composer).toBeEnabled();
     await assertNoOverflow(page);
@@ -609,7 +652,7 @@ test.describe('SessionHeader Agent Info — Desktop', () => {
     await expandHeader(page);
     await screenshot(page, 'session-header-source-context-desktop');
 
-    await expect(page.getByText('Source')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Source' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Parent implementation session' })).toBeVisible();
     await assertNoOverflow(page);
   });
@@ -657,6 +700,7 @@ test.describe('SessionHeader Public Ports', () => {
   test('mobile switch toggles without overflow', async ({ page }) => {
     await setupApiMocks(page, { ports, workspace: { portsPublicEnabled: false } });
     await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+    await openSessionInfoOnPhone(page);
 
     const toggle = page.getByRole('switch', { name: 'Enable public forwarded ports' });
     await expect(toggle).toBeVisible();
@@ -676,6 +720,7 @@ test.describe('SessionHeader Public Ports', () => {
   test('desktop switch shows enabled state without overflow', async ({ page }) => {
     await setupApiMocks(page, { ports, workspace: { portsPublicEnabled: true } });
     await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+    await openSessionInfoOnPhone(page);
 
     await expect(
       page.getByRole('switch', { name: 'Disable public forwarded ports' })
@@ -685,5 +730,289 @@ test.describe('SessionHeader Public Ports', () => {
     ).toBeVisible();
     await screenshot(page, 'session-header-public-ports-desktop');
     await assertNoOverflow(page);
+  });
+});
+
+test.describe('workload identity details', () => {
+  test('shows copyable authoritative IDs, safe labels and automation on mobile and desktop', async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await setupApiMocks(page);
+    await page.route('**/api/projects/*/sessions/*/workload-identity', (route) =>
+      respondJson(route, {
+        issuer: 'https://api.example.test/oidc',
+        jwks_uri: 'https://api.example.test/oidc/.well-known/jwks.json',
+        subject: 'project:proj-agent-1:user:user-1:profile:01JPROFILE12345678901234567',
+        ttl_seconds: 300,
+        claims: {
+          project_id: 'proj-agent-1',
+          project_name: 'A project with a descriptive name',
+          user_id: 'user-1',
+          user_name: 'Test User',
+          chat_session_id: 'chat-session-1',
+          session_name: STRESS_TITLE,
+          agent_session_id: 'acp-session-1',
+          workspace_id: 'ws-1',
+          agent_profile_id: '01JPROFILE12345678901234567',
+          agent_profile_name:
+            'Profile Ω <script>alert(1)</script> ' + 'Long profile name '.repeat(12),
+          automation_type: 'trigger',
+          automation_id: '01JTRIGGER12345678901234567',
+          automation_execution_id: '01JEXECUTION123456789012345',
+          automation_name: 'Release automation',
+          trigger_id: '01JTRIGGER12345678901234567',
+        },
+      })
+    );
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+    await expandHeader(page);
+    await page.getByText('Workload identity (OIDC)', { exact: true }).click();
+    await expect(page.getByText('agent_profile_id', { exact: true })).toBeVisible();
+    await page.screenshot({
+      path: `../../.codex/tmp/playwright-screenshots/workload-identity-top-${page.viewportSize()!.width}.png`,
+      fullPage: true,
+    });
+    const row = page
+      .locator('dl > div')
+      .filter({ has: page.getByText('agent_profile_id', { exact: true }) });
+    await row.getByRole('button', { name: 'Copy agent_profile_id', exact: true }).click();
+    await expect(row.getByRole('status')).toHaveText('agent_profile_id copied');
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe('01JPROFILE12345678901234567');
+    await page.getByText(/Tokens last 300 seconds/).scrollIntoViewIfNeeded();
+    await expect(page.getByText(/Tokens last 300 seconds/)).toBeInViewport();
+    await page
+      .getByRole('button', { name: 'Copy automation_execution_id', exact: true })
+      .scrollIntoViewIfNeeded();
+    await expect(
+      page.getByRole('button', { name: 'Copy automation_execution_id', exact: true })
+    ).toBeInViewport();
+    await assertNoOverflow(page);
+    await page.screenshot({
+      path: `../../.codex/tmp/playwright-screenshots/workload-identity-${page.viewportSize()!.width}.png`,
+      fullPage: true,
+    });
+    await page.evaluate(() => {
+      Object.defineProperty(navigator.clipboard, 'writeText', {
+        configurable: true,
+        value: () => Promise.reject(new Error('Permission denied')),
+      });
+    });
+    await row.getByRole('button', { name: 'Copy agent_profile_id', exact: true }).click();
+    await expect(row.getByRole('status')).toHaveText(
+      'Could not copy agent_profile_id. Select and copy the value manually.'
+    );
+    await assertNoOverflow(page);
+  });
+  test('shows an honest unavailable state and reloads when reopened', async ({ page }) => {
+    await setupApiMocks(page);
+    let attempts = 0;
+    await page.route('**/api/projects/*/sessions/*/workload-identity', (route) => {
+      attempts++;
+      return respondJson(route, { error: 'CONFLICT', message: 'No runtime' }, 409);
+    });
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+    await expandHeader(page);
+    await page.getByText('Workload identity (OIDC)', { exact: true }).click();
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'Identity details are unavailable' })
+    ).toBeVisible();
+    await page.getByText('Workload identity (OIDC)', { exact: true }).click();
+    await page.getByText('Workload identity (OIDC)', { exact: true }).click();
+    await expect.poll(() => attempts).toBe(2);
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'Reopen this section to retry' })
+    ).toBeVisible();
+    await assertNoOverflow(page);
+    await page.screenshot({
+      path: `../../.codex/tmp/playwright-screenshots/workload-identity-unavailable-${page.viewportSize()!.width}.png`,
+      fullPage: true,
+    });
+  });
+});
+
+const LONG_ACCOUNT =
+  'Acme-Corporation-Client-Engagement-Anthropic-Max-Plan-Seat-Acme-Corporation-2026 (personal, shared with nobody)';
+
+// Runs once per Playwright project (375x667 and 1280x800).
+const viewportName = () => (test.info().project.name.includes('Desktop') ? 'desktop' : 'mobile');
+
+test.describe('Session details: which account ran it', () => {
+  test('my session on an account chosen for this profile, long name', async ({ page }) => {
+    await setupApiMocks(page, {
+      credential: {
+        agentType: 'claude-code',
+        credentialSource: 'user',
+        credentialScope: 'profile',
+        accountName: LONG_ACCOUNT,
+        isOwnSession: true,
+      },
+    });
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+    await expandHeader(page);
+
+    const line = page.getByTestId('session-agent-credential');
+    await expect(line).toBeVisible();
+    await expect(line).toContainText(`${LONG_ACCOUNT} · chosen for this profile`);
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await screenshot(page, `session-details-credential-profile-${viewportName()}`);
+  });
+
+  test('another member’s session never names their account', async ({ page }) => {
+    await setupApiMocks(page, {
+      credential: {
+        agentType: 'claude-code',
+        credentialSource: 'user',
+        credentialScope: 'project',
+        accountName: null,
+        isOwnSession: false,
+      },
+    });
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+    await expandHeader(page);
+
+    const line = page.getByTestId('session-agent-credential');
+    await expect(line).toHaveText(/Their own account · /);
+    await expect(page.getByText('Claude Code').first()).toBeVisible();
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await screenshot(page, `session-details-credential-member-${viewportName()}`);
+  });
+});
+
+test.describe('Session details: effective configuration', () => {
+  test('model, effort, permissions and skill', async ({ page }) => {
+    await setupApiMocks(page, {
+      runtime: {
+        agentType: 'claude-code',
+        model: 'claude-opus-5-5',
+        effort: 'max',
+        permissionMode: 'bypassPermissions',
+        opencodeProvider: null,
+        skillName: 'do',
+      },
+    });
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+    await expandHeader(page);
+
+    const configuration = page.getByTestId('session-run-configuration');
+    await expect(configuration).toBeVisible();
+    await expect(configuration).toContainText('claude-opus-5-5');
+    await expect(configuration).toContainText('Max');
+    await expect(configuration).toContainText('Bypass Permissions');
+    await configuration.scrollIntoViewIfNeeded();
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await screenshot(page, `session-details-configuration-${viewportName()}`);
+  });
+
+  test('long custom model id and skill name wrap without overflow', async ({ page }) => {
+    await setupApiMocks(page, {
+      runtime: {
+        agentType: 'opencode',
+        model:
+          'custom-provider/an-extremely-long-self-hosted-model-identifier-without-any-spaces-0123456789abcdef',
+        effort: null,
+        permissionMode: 'acceptEdits',
+        opencodeProvider: 'custom',
+        skillName:
+          'Reconcile <script>alert(1)</script> branches across every repository Ω — a deliberately long skill name',
+      },
+    });
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+    await expandHeader(page);
+
+    const configuration = page.getByTestId('session-run-configuration');
+    await expect(configuration).toBeVisible();
+    await expect(configuration).toContainText('Custom (OpenAI-compatible)');
+    await expect(configuration).toContainText('<script>alert(1)</script>');
+    await expect(configuration).not.toContainText('Effort');
+    await configuration.scrollIntoViewIfNeeded();
+    const box = await configuration.boundingBox();
+    expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await screenshot(page, `session-details-configuration-long-${viewportName()}`);
+  });
+
+  test('no section for sessions without a recorded configuration', async ({ page }) => {
+    await setupApiMocks(page, { runtime: null });
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+    await expandHeader(page);
+
+    await expect(page.getByTestId('session-header-details')).toBeVisible();
+    await expect(page.getByTestId('session-run-configuration')).toHaveCount(0);
+  });
+});
+
+test.describe('Phone header and session-info sheet', () => {
+  test('one row on screen; the sheet holds the chips, every port, the switch and the details', async ({
+    page,
+  }) => {
+    test.skip(!isPhone(page), 'The one-row header and sheet are the phone layout (<=767px)');
+    await setupApiMocks(page, {
+      session: makeSession({ topic: STRESS_TITLE, messageCount: 75 }),
+      detailHasMore: true,
+      messageLookupMessages: [makeStressInitialMessage()],
+      ports: makeStressPorts(),
+      workspace: { portsPublicEnabled: false },
+    });
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+
+    // The header is one row: it used to take ~231px at 375px wide.
+    const header = page.getByTestId('session-header');
+    await expect(header).toHaveAttribute('data-layout', 'mobile');
+    const headerBox = await header.boundingBox();
+    expect(headerBox!.height).toBeLessThanOrEqual(56);
+    await expect(page.getByRole('switch')).toHaveCount(0);
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await screenshot(page, 'session-header-phone-row-mobile');
+
+    await page.getByRole('button', { name: /Show session info/ }).click();
+    const sheet = page.getByTestId('session-info-sheet');
+    await expect(sheet).toBeVisible();
+    // A bottom sheet: it meets the bottom edge and spans the width of the screen.
+    const viewport = page.viewportSize()!;
+    await expect
+      .poll(async () => {
+        const box = await sheet.boundingBox();
+        return box ? Math.round(box.y + box.height) : -1;
+      })
+      .toBe(viewport.height);
+    const sheetBox = await sheet.boundingBox();
+    expect(Math.round(sheetBox!.width)).toBe(viewport.width);
+    await expect(
+      sheet.getByRole('heading', { name: /Investigate a crowded mobile session/ })
+    ).toBeVisible();
+    await expect(sheet.getByTestId('session-port-list').getByRole('link')).toHaveCount(50);
+    await expect(
+      sheet.getByRole('switch', { name: 'Enable public forwarded ports' })
+    ).toBeVisible();
+    await expect(sheet.getByRole('heading', { name: 'References' })).toBeVisible();
+    await expect(sheet.getByText('Workload identity (OIDC)', { exact: true })).toBeVisible();
+    await assertNoClippedOverflow(page);
+    await screenshot(page, 'session-info-sheet-top-mobile');
+
+    // Scroll inside the sheet to the details and open the OIDC section.
+    await sheet.getByText('Workload identity (OIDC)', { exact: true }).scrollIntoViewIfNeeded();
+    await sheet.getByText('Workload identity (OIDC)', { exact: true }).click();
+    await expect(
+      sheet.getByText(/Identity details are unavailable|Loading identity details/)
+    ).toBeVisible();
+    await screenshot(page, 'session-info-sheet-details-mobile');
+
+    await page.emulateMedia({ colorScheme: 'light' });
+    await expect(page.locator('html')).toHaveAttribute('data-ui-theme', 'sam-light');
+    await sheet.getByRole('heading', { name: 'References' }).scrollIntoViewIfNeeded();
+    await screenshot(page, 'session-info-sheet-details-light-mobile');
+
+    await page.getByRole('button', { name: 'Close session info' }).click();
+    await expect(sheet).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Show session info/ })).toBeVisible();
   });
 });

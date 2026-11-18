@@ -1,12 +1,38 @@
+import type { ProjectDataArchiveExactReadInput } from '@simple-agent-manager/project-data/internal/archive/contract';
+import {
+  type LogicalTranscriptRequest,
+  readSourceLogicalTranscript,
+} from '@simple-agent-manager/project-data/internal/do/logical-transcript';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import type { Env as ProjectDataEnv } from '@simple-agent-manager/project-data/internal/do/types';
+import Database from 'better-sqlite3';
 import { getTableColumns } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import { groupTokensIntoMessages } from '../../../src/routes/mcp';
+import { MCP_TOOLS } from '../../../src/routes/mcp/tool-definitions';
 import * as projectHelpers from '../../../src/routes/projects/_helpers';
 import * as agentProfileService from '../../../src/services/agent-profiles';
+import {
+  findAnyOfWithSiblings,
+  findGeminiSchemaViolations,
+  opencodeSanitizeGemini,
+} from '../../helpers/gemini-tool-schema';
 import { createUnpublishedStorageSession } from '../../helpers/reliability-storage';
+import { createSqlStorage } from '../durable-objects/sql-storage-test-utils';
+
+// These tool tests run on a mock D1 that has no workspace/node rows. MCP authentication's
+// workspace-lifecycle gate is exercised against real SQL in
+// tests/unit/services/mcp-token-lifecycle.test.ts; here it reduces to KV token validation.
+vi.mock('../../../src/services/mcp-token-lifecycle', async () => {
+  const { validateMcpToken } = await import('../../../src/services/mcp-token');
+  return {
+    validateActiveWorkspaceMcpToken: (env: { KV: KVNamespace }, token: string) =>
+      validateMcpToken(env.KV, token, env),
+  };
+});
 
 const providerCredentialMocks = vi.hoisted(() => ({
   resolveCredentialSource: vi.fn(),
@@ -21,6 +47,13 @@ const instantSessionMocks = vi.hoisted(() => ({
   launchInstantSession: vi.fn(),
 }));
 
+// request_human_input files its question as a D1 `asks` row (inbox slice G); the real create
+// path is covered on SQLite in `tests/unit/services/inbox/question-asks.test.ts`.
+const questionAskMocks = vi.hoisted(() => ({
+  fileQuestionAsk: vi.fn(),
+  linkQuestionNotification: vi.fn(),
+}));
+vi.mock('../../../src/services/inbox/question-asks', () => questionAskMocks);
 const agentActivityMocks = vi.hoisted(() => ({
   listAgentActivityTasks: vi.fn(),
 }));
@@ -48,6 +81,27 @@ vi.mock('../../../src/services/provider-credentials', () => ({
 
 vi.mock('../../../src/services/agent-activity', () => ({
   listAgentActivityTasks: agentActivityMocks.listAgentActivityTasks,
+}));
+
+vi.mock('../../../src/services/admin-settings', async (original) => ({
+  ...(await original<typeof import('../../../src/services/admin-settings')>()),
+  resolveAdminSettingDetailsMany: vi
+    .fn()
+    .mockResolvedValue([
+      { value: 300000 },
+      { value: 100 },
+      { value: 100 },
+      { value: 100000 },
+      { value: 50 },
+      { value: 500 },
+    ]),
+}));
+
+vi.mock('@simple-agent-manager/operations/internal/agent-linked-context', () => ({
+  getAgentLinkedContext: vi.fn().mockImplementation(async (_ctx, input) => ({
+    kind: input.ideaId ? 'idea' : input.fileId ? 'file' : 'session',
+    id: input.ideaId ?? input.fileId ?? input.sessionId,
+  })),
 }));
 
 vi.mock('../../../src/routes/mcp/deployment-tools', async () => {
@@ -119,11 +173,12 @@ function mockDispatchProjectAccess(
   mockD1.prepare.mockImplementation((sql: string) => {
     const projectQuery = sql.includes('from "projects"');
     const memberQuery = sql.includes('from "project_members"');
+    const joinedMembership = projectQuery && sql.includes('inner join "project_members"');
     if (!projectQuery && !memberQuery) return prepare(sql);
 
     const read = async () => {
       if (projectQuery && options.projectExists === false) return [];
-      if (memberQuery && options.memberRole === null) return [];
+      if ((memberQuery || joinedMembership) && options.memberRole === null) return [];
       const configured =
         options.consumeConfigured === false
           ? undefined
@@ -147,6 +202,22 @@ function mockDispatchProjectAccess(
             ...configured,
           };
       const table = memberQuery ? schema.projectMembers : schema.projects;
+      if (joinedMembership) {
+        const membership: Record<string, unknown> = {
+          projectId: 'proj-456',
+          userId: 'user-789',
+          role: options.memberRole ?? 'owner',
+          status: 'active',
+        };
+        return [
+          [
+            ...Object.keys(getTableColumns(schema.projects)).map((key) => row[key] ?? null),
+            ...Object.keys(getTableColumns(schema.projectMembers)).map(
+              (key) => membership[key] ?? null
+            ),
+          ],
+        ];
+      }
       return [Object.keys(getTableColumns(table)).map((key) => row[key] ?? null)];
     };
     return { ...mockD1._stmt, bind: vi.fn().mockReturnThis(), raw: vi.fn(read) };
@@ -253,6 +324,22 @@ function createStatefulTaskD1(task: StatefulTaskRow) {
         raw: vi.fn(async () => {
           if (sql.includes('from "projects"')) {
             const row: Record<string, unknown> = { id: task.project_id };
+            if (sql.includes('inner join "project_members"')) {
+              const membership: Record<string, unknown> = {
+                projectId: task.project_id,
+                userId: task.user_id,
+                role: 'owner',
+                status: 'active',
+              };
+              return [
+                [
+                  ...Object.keys(getTableColumns(schema.projects)).map((key) => row[key] ?? null),
+                  ...Object.keys(getTableColumns(schema.projectMembers)).map(
+                    (key) => membership[key] ?? null
+                  ),
+                ],
+              ];
+            }
             return [Object.keys(getTableColumns(schema.projects)).map((key) => row[key] ?? null)];
           }
           if (sql.includes('from "project_members"')) {
@@ -334,6 +421,48 @@ let mockRootSearchCoverage = {
   keywordScanTruncated: false,
 };
 
+// Whole-message reads (get_task_details' assistant messages) run the real ProjectData reader
+// over a real SQLite transcript; only the Durable Object transport is mocked.
+let transcriptSql: SqlStorage;
+let transcriptRow = 0;
+
+function resetTranscript(): void {
+  transcriptSql = createSqlStorage(new Database(':memory:'));
+  runMigrations(transcriptSql);
+  transcriptRow = 0;
+}
+
+/** Store rows the way the VM agent does: one row per streamed chunk, in transcript order. */
+function seedTranscript(
+  sessionId: string,
+  rows: Array<{ id: string; role: string; content: string; createdAt?: number }>
+): void {
+  transcriptSql.exec(
+    'INSERT OR IGNORE INTO chat_sessions (id, topic, started_at) VALUES (?, ?, ?)',
+    sessionId,
+    'topic',
+    1
+  );
+  for (const row of rows) {
+    transcriptRow += 1;
+    transcriptSql.exec(
+      `INSERT INTO chat_messages (id, session_id, role, content, created_at, sequence)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      row.id,
+      sessionId,
+      row.role,
+      row.content,
+      row.createdAt ?? transcriptRow,
+      transcriptRow
+    );
+  }
+}
+
+const readTranscript = (
+  owner: ProjectDataArchiveExactReadInput,
+  request: LogicalTranscriptRequest
+) => readSourceLogicalTranscript(transcriptSql, {} as ProjectDataEnv, owner, request);
+
 const mockDoStub = {
   fetch: vi.fn().mockResolvedValue(new Response('ok')),
   ensureProjectId: vi.fn(),
@@ -352,6 +481,7 @@ const mockDoStub = {
       order?: 'asc' | 'desc'
     ) => mockDoStub.getMessages(owner.sessionId, limit, before, after, roles, compact, order)
   ),
+  archiveSourceGetLogicalTranscript: vi.fn(readTranscript),
   archiveTargetGetMessages: vi.fn(
     (
       owner: { sessionId: string },
@@ -400,10 +530,9 @@ const mockDoStub = {
     (_owner: unknown, query: string, roles: string[] | null, limit: number) =>
       mockDoStub.searchMessages(query, null, roles, limit)
   ),
-  linkSessionIdea: vi.fn(),
-  unlinkSessionIdea: vi.fn(),
-  getIdeasForSession: vi.fn().mockReturnValue([]),
-  getSessionsForIdea: vi.fn().mockReturnValue([]),
+  recordResourceLink: vi.fn().mockResolvedValue('written'),
+  removeResourceLink: vi.fn().mockResolvedValue(undefined),
+  listResourceLinks: vi.fn().mockResolvedValue([]),
   updateSessionTopic: vi.fn().mockResolvedValue(true),
   getAllHighConfidenceKnowledge: vi.fn().mockResolvedValue([]),
   // Without this, every get_instructions test in this file silently exercises only the
@@ -503,6 +632,8 @@ describe('MCP Routes', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    resetTranscript();
+    mockDoStub.archiveSourceGetLogicalTranscript.mockImplementation(readTranscript);
     mockD1 = createMockD1();
     mockEnv.DATABASE = mockD1;
     mockDispatchProjectAccess({ consumeConfigured: false });
@@ -667,148 +798,120 @@ describe('MCP Routes', () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      const toolNames = body.result.tools.map((t: { name: string }) => t.name);
-      // Task lifecycle tools
-      expect(toolNames).toContain('get_instructions');
-      expect(toolNames).toContain('update_task_status');
-      expect(toolNames).toContain('complete_task');
-      // Project awareness tools
-      expect(toolNames).toContain('list_tasks');
-      expect(toolNames).toContain('get_task_details');
-      expect(toolNames).toContain('search_tasks');
-      expect(toolNames).toContain('list_sessions');
-      expect(toolNames).toContain('get_session_messages');
-      expect(toolNames).toContain('get_archived_tool_payloads');
-      expect(toolNames).toContain('search_messages');
-      const searchMessages = body.result.tools.find(
-        (tool: { name: string }) => tool.name === 'search_messages'
+      const toolNames: string[] = body.result.tools.map((t: { name: string }) => t.name);
+      // The exact catalogue an ordinary task agent sees: domain groups replace their
+      // member tools (tool-groups.ts); incident and Operations tools are listed only to
+      // the Operations project (tests/unit/routes/mcp/tool-listing.test.ts).
+      expect([...toolNames].sort()).toEqual(
+        [
+          // Domain groups
+          'comments_read',
+          'comments_write',
+          'deployments_read',
+          'deployments_write',
+          'ideas_read',
+          'ideas_write',
+          'inbox_read',
+          'inbox_write',
+          'knowledge_read',
+          'knowledge_write',
+          'policies_read',
+          'policies_write',
+          'profiles_read',
+          'profiles_write',
+          'schedules_read',
+          'schedules_write',
+          'sessions_read',
+          'skills_read',
+          'skills_write',
+          'tasks_read',
+          'workspace_read',
+          // Task lifecycle, dispatch and orchestration
+          'add_dependency',
+          'associate_pull_request',
+          'cancel_mission',
+          'complete_task',
+          'create_mission',
+          'dispatch_task',
+          'get_handoff',
+          'get_instructions',
+          'get_mission',
+          'get_mission_state',
+          'get_orchestrator_status',
+          'get_scheduling_queue',
+          'get_trigger',
+          'list_pull_request_associations',
+          'override_task_state',
+          'pause_mission',
+          'publish_handoff',
+          'publish_mission_state',
+          'remove_pending_subtask',
+          'request_human_input',
+          'request_secret',
+          'resume_mission',
+          'retry_subtask',
+          'send_message_to_subtask',
+          'stop_subtask',
+          'update_session_topic',
+          'update_task_status',
+          'wait_for_subtasks',
+          'get_workflow_run',
+          'start_workflow_run',
+          // Messaging and events
+          'ack_event_delivery',
+          'ack_message',
+          'cancel_project_event_subscription',
+          'catch_up_event_channel',
+          'create_project_event_subscription',
+          'follow_event_channel',
+          'get_channel_history',
+          'get_event',
+          'get_pending_messages',
+          'get_project_event_subscription',
+          'list_channel_subscribers',
+          'list_event_channels',
+          'list_project_event_subscriptions',
+          'list_subscription_events',
+          'publish_channel_event',
+          'send_durable_message',
+          // Triggers, profiles and skills deletes
+          'create_trigger',
+          'delete_agent_profile',
+          'delete_skill',
+          'delete_trigger',
+          'list_triggers',
+          'update_trigger',
+          // Library tools (download writes into the workspace; writes render as cards)
+          'download_library_file',
+          'list_library_files',
+          'display_from_library',
+          'replace_library_file',
+          'upload_to_library',
+          // Workspace actions, secrets, models, email
+          'exec_with_secrets',
+          'exec_with_secrets_cancel',
+          'exec_with_secrets_status',
+          'expose_port',
+          'list_ai_models',
+          'reply_to_email',
+          'report_environment_issue',
+          'run_ai_model',
+          // Insights numbers (slice I)
+          'project_insights',
+        ].sort()
       );
-      expect(searchMessages.inputSchema.properties.continuation).toMatchObject({
-        type: 'string',
-      });
-      const searchTasks = body.result.tools.find(
-        (tool: { name: string }) => tool.name === 'search_tasks'
+      const sessionsRead = body.result.tools.find(
+        (tool: { name: string }) => tool.name === 'sessions_read'
       );
-      expect(searchTasks.inputSchema.properties.continuation).toBeUndefined();
-      expect(toolNames).toContain('update_session_topic');
-      expect(toolNames).toContain('dispatch_task');
-      // Message-comment tools
-      expect(toolNames).toContain('list_message_comment_threads');
-      expect(toolNames).toContain('get_message_comment_thread');
-      expect(toolNames).toContain('create_message_comment_thread');
-      expect(toolNames).toContain('reply_to_message_comment_thread');
-      expect(toolNames).toContain('resolve_message_comment_thread');
-      expect(toolNames).toContain('reopen_message_comment_thread');
-      // Orchestration communication tools
-      expect(toolNames).toContain('send_message_to_subtask');
-      expect(toolNames).toContain('stop_subtask');
-      // Agent-initiated notifications
-      expect(toolNames).toContain('request_human_input');
-      // Session–Idea linking tools
-      expect(toolNames).toContain('link_idea');
-      expect(toolNames).toContain('unlink_idea');
-      expect(toolNames).toContain('list_linked_ideas');
-      expect(toolNames).toContain('find_related_ideas');
-      // Idea management tools
-      expect(toolNames).toContain('create_idea');
-      expect(toolNames).toContain('update_idea');
-      expect(toolNames).toContain('get_idea');
-      expect(toolNames).toContain('list_ideas');
-      expect(toolNames).toContain('search_ideas');
-      // Workspace tools (unified from workspace-mcp)
-      expect(toolNames).toContain('get_workspace_info');
-      expect(toolNames).toContain('get_credential_status');
-      expect(toolNames).toContain('get_network_info');
-      expect(toolNames).toContain('expose_port');
-      expect(toolNames).toContain('check_dns_status');
-      expect(toolNames).toContain('list_project_agents');
-      expect(toolNames).toContain('get_peer_agent_output');
-      expect(toolNames).toContain('get_task_dependencies');
-      expect(toolNames).toContain('get_workspace_diff_summary');
-      expect(toolNames).toContain('report_environment_issue');
-      // Project file library tools
-      expect(toolNames).toContain('list_library_files');
-      expect(toolNames).toContain('download_library_file');
-      expect(toolNames).toContain('upload_to_library');
-      expect(toolNames).toContain('replace_library_file');
-      expect(toolNames).toContain('display_from_library');
-      // Onboarding tools
-      expect(toolNames).toContain('get_repo_setup_guide');
-      // Deployment discovery tool — verify it advertises a zero-argument schema
-      expect(toolNames).toContain('get_deployment_guide');
-      const deploymentGuideTool = body.result.tools.find(
-        (t: { name: string }) => t.name === 'get_deployment_guide'
+      expect(sessionsRead.inputSchema.properties.continuation).toMatchObject({ type: 'string' });
+      const tasksRead = body.result.tools.find(
+        (tool: { name: string }) => tool.name === 'tasks_read'
       );
-      expect(deploymentGuideTool.inputSchema.properties).toEqual({});
-      expect(deploymentGuideTool.inputSchema.required).toBeUndefined();
-      // Trigger tools
-      expect(toolNames).toContain('list_triggers');
-      expect(toolNames).toContain('create_trigger');
-      expect(toolNames).toContain('update_trigger');
-      expect(toolNames).toContain('delete_trigger');
-      // Agent profile tools
-      expect(toolNames).toContain('list_agent_profiles');
-      expect(toolNames).toContain('get_agent_profile');
-      expect(toolNames).toContain('create_agent_profile');
-      expect(toolNames).toContain('update_agent_profile');
-      expect(toolNames).toContain('delete_agent_profile');
-      expect(toolNames).toContain('add_profile_env_var');
-      expect(toolNames).toContain('remove_profile_env_var');
-      expect(toolNames).toContain('list_profile_env_vars');
-      // Skill tools
-      expect(toolNames).toContain('list_skills');
-      expect(toolNames).toContain('get_skill');
-      expect(toolNames).toContain('create_skill');
-      expect(toolNames).toContain('update_skill');
-      expect(toolNames).toContain('delete_skill');
-      // Orchestrator lifecycle tools
-      expect(toolNames).toContain('get_orchestrator_status');
-      expect(toolNames).toContain('get_scheduling_queue');
-      expect(toolNames).toContain('pause_mission');
-      expect(toolNames).toContain('resume_mission');
-      expect(toolNames).toContain('cancel_mission');
-      expect(toolNames).toContain('override_task_state');
-      // Compose build + publish (agent-first deployment) tool
-      expect(toolNames).toContain('build_and_publish');
-      expect(toolNames).toContain('get_publish_status');
-      expect(toolNames).toContain('create_deployment_environment');
-      expect(toolNames).toContain('list_deployment_environments');
-      expect(toolNames).toContain('read_deployment_logs');
-      expect(toolNames).toContain('preview_deployment_routes');
-      expect(toolNames).toContain('list_deployment_routes');
-      expect(toolNames).toContain('list_deployment_environment_config');
-      expect(toolNames).toContain('set_deployment_environment_config');
-      expect(toolNames).toContain('wait_for_subtasks');
-      // Private incident backlog tools
-      expect(toolNames).toContain('list_incident_queue');
-      expect(toolNames).toContain('get_incident');
-      expect(toolNames).toContain('claim_incident');
-      expect(toolNames).toContain('resolve_incident');
-      // Library file comment tools
-      expect(toolNames).toContain('list_library_file_comment_threads');
-      expect(toolNames).toContain('create_library_file_comment_thread');
-      // ProjectData event subscription tools
-      expect(toolNames).toContain('create_project_event_subscription');
-      expect(toolNames).toContain('list_project_event_subscriptions');
-      expect(toolNames).toContain('get_project_event_subscription');
-      expect(toolNames).toContain('cancel_project_event_subscription');
-      expect(toolNames).toContain('list_subscription_events');
-      expect(toolNames).toContain('get_event');
-      expect(toolNames).toContain('ack_event_delivery');
-      for (const name of [
-        'publish_channel_event',
-        'list_event_channels',
-        'get_channel_history',
-        'follow_event_channel',
-        'catch_up_event_channel',
-        'create_project_schedule',
-        'list_project_schedules',
-        'get_project_schedule',
-        'reschedule_project_schedule',
-        'cancel_project_schedule',
-      ]) {
-        expect(toolNames).toContain(name);
-      }
+      expect(tasksRead.inputSchema.properties.continuation).toBeUndefined();
+      const deploymentsRead = body.result.tools.find(
+        (t: { name: string }) => t.name === 'deployments_read'
+      );
+      expect(deploymentsRead.inputSchema.properties.method.enum).toContain('guide');
       expect(new Set(toolNames).size).toBe(toolNames.length);
     });
 
@@ -832,19 +935,40 @@ describe('MCP Routes', () => {
       }
     });
 
-    it('advertises bounded message-comment schemas without caller identity fields', async () => {
+    it('serves only input schemas Gemini function calling accepts', async () => {
       const res = await mcpRequest(app, jsonRpcRequest('tools/list'));
 
       const body = await res.json();
-      const listComments = body.result.tools.find(
-        (tool: { name: string }) => tool.name === 'list_message_comment_threads'
+      // profiles_write carries create_agent_profile.runtime, the schema that failed on Gemini.
+      expect(body.result.tools.map((tool: { name: string }) => tool.name)).toContain(
+        'profiles_write'
       );
-      const createComment = body.result.tools.find(
-        (tool: { name: string }) => tool.name === 'create_message_comment_thread'
-      );
-      const replyComment = body.result.tools.find(
-        (tool: { name: string }) => tool.name === 'reply_to_message_comment_thread'
-      );
+      for (const tool of body.result.tools) {
+        expect(findGeminiSchemaViolations(tool.inputSchema, tool.name)).toEqual([]);
+        expect(findAnyOfWithSiblings(opencodeSanitizeGemini(tool.inputSchema), tool.name)).toEqual(
+          []
+        );
+      }
+    });
+
+    it('advertises bounded message-comment schemas without caller identity fields', async () => {
+      // Member schemas (still callable by name) feed the listed comments_* groups.
+      const memberTool = (name: string) =>
+        (
+          MCP_TOOLS as unknown as Array<{ name: string; description: string; inputSchema: any }>
+        ).find((tool) => tool.name === name)!;
+      const listComments = memberTool('list_message_comment_threads');
+      const createComment = memberTool('create_message_comment_thread');
+      const replyComment = memberTool('reply_to_message_comment_thread');
+
+      const res = await mcpRequest(app, jsonRpcRequest('tools/list'));
+      const body = await res.json();
+      for (const group of ['comments_read', 'comments_write']) {
+        const listed = body.result.tools.find((tool: { name: string }) => tool.name === group);
+        expect(listed.inputSchema.properties.projectId).toBeUndefined();
+        expect(listed.inputSchema.properties.author).toBeUndefined();
+        expect(listed.inputSchema.properties.authorRole).toBeUndefined();
+      }
 
       expect(listComments.description).toContain('current SAM chat session');
       expect(listComments.description).toContain('quoted source-message context');
@@ -904,6 +1028,7 @@ describe('MCP Routes', () => {
         'webhook',
         'github',
         'incident',
+        'email',
       ]);
       expect(listTriggers.inputSchema.properties.limit.type).toBe('number');
       expect(listTriggers.inputSchema.properties.limit.minimum).toBe(1);
@@ -1259,21 +1384,21 @@ describe('MCP Routes', () => {
       );
       expect(text).toContain('SAM App Deployment Guide');
       expect(text).toContain('Agent-First Deployment Model');
-      expect(text).toContain('build_and_publish');
-      expect(text).toContain('create_deployment_environment');
-      expect(text).toContain('list_deployment_environments');
-      expect(text).toContain('preview_deployment_routes');
-      expect(text).toContain('list_deployment_routes');
+      expect(text).toContain("deployments_write { method: 'publish'");
+      expect(text).toContain("deployments_write { method: 'create_environment'");
+      expect(text).toContain("deployments_read { method: 'environments'");
+      expect(text).toContain("deployments_read { method: 'preview_routes'");
+      expect(text).toContain("deployments_read { method: 'routes'");
       expect(text).toContain('mode: host');
       expect(text).toContain('ALLOWED_HOSTS');
       expect(text).toContain('custom domains');
       expect(text).toContain('Variables');
       expect(text).toContain('Secrets');
-      expect(text).toContain('read_deployment_logs');
-      expect(text).toContain('check_dns_status');
+      expect(text).toContain("deployments_read { method: 'logs'");
+      expect(text).toContain("workspace_read { method: 'dns' }");
       const quickReference = text.slice(text.indexOf('## Quick Reference'));
-      expect(quickReference.indexOf('preview_deployment_routes')).toBeLessThan(
-        quickReference.indexOf('build_and_publish')
+      expect(quickReference.indexOf("method: 'preview_routes'")).toBeLessThan(
+        quickReference.indexOf("method: 'publish'")
       );
     });
 
@@ -1436,23 +1561,21 @@ describe('MCP Routes', () => {
           completed_at: '2026-03-14T01:00:00Z',
         },
       ]);
-      mockDoStub.getMessages.mockResolvedValue({
-        messages: [
-          {
-            id: 'msg-new',
-            role: 'assistant',
-            content: 'Final detailed findings',
-            createdAt: 1710000002000,
-          },
-          {
-            id: 'msg-old',
-            role: 'assistant',
-            content: 'Earlier analysis',
-            createdAt: 1710000001000,
-          },
-        ],
-        hasMore: false,
-      });
+      seedTranscript('chat-session-99', [
+        {
+          id: 'msg-user-1',
+          role: 'user',
+          content: 'Review the codebase',
+          createdAt: 1710000000000,
+        },
+        { id: 'msg-old', role: 'assistant', content: 'Earlier ', createdAt: 1710000001000 },
+        { id: 'msg-old-2', role: 'assistant', content: 'analysis', createdAt: 1710000001001 },
+        { id: 'msg-tool', role: 'tool', content: '', createdAt: 1710000001500 },
+        { id: 'msg-user-2', role: 'user', content: 'Anything else?', createdAt: 1710000001600 },
+        { id: 'msg-new', role: 'assistant', content: 'Final ', createdAt: 1710000002000 },
+        { id: 'msg-new-2', role: 'assistant', content: 'detailed ', createdAt: 1710000002001 },
+        { id: 'msg-new-3', role: 'assistant', content: 'findings', createdAt: 1710000002002 },
+      ]);
 
       const res = await mcpRequest(
         app,
@@ -1465,15 +1588,18 @@ describe('MCP Routes', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       const data = JSON.parse(body.result.content[0].text);
-      expect(mockDoStub.getMessages).toHaveBeenCalledWith(
-        'chat-session-99',
-        5,
-        null,
-        null,
-        ['assistant'],
-        false,
-        'desc'
+      // One whole-message read serves both the final message and the recent list.
+      expect(mockDoStub.archiveSourceGetLogicalTranscript).toHaveBeenCalledTimes(1);
+      expect(mockDoStub.archiveSourceGetLogicalTranscript).toHaveBeenCalledWith(
+        expect.objectContaining({ projectId: 'proj-456', sessionId: 'chat-session-99' }),
+        expect.objectContaining({ before: null, limit: 5, roles: ['assistant'] })
       );
+      expect(mockDoStub.getMessages).not.toHaveBeenCalled();
+      expect(data.finalAssistantMessage).toEqual({
+        id: 'msg-new',
+        content: 'Final detailed findings',
+        createdAt: 1710000002000,
+      });
       expect(data.recentAssistantMessages).toEqual([
         {
           id: 'msg-new',
@@ -1512,7 +1638,13 @@ describe('MCP Routes', () => {
           completed_at: '2026-03-14T01:00:00Z',
         },
       ]);
-      mockDoStub.getMessages.mockRejectedValue(new Error('ProjectData unavailable'));
+      // Readable rows exist, so an empty list can only come from the failed read.
+      seedTranscript('chat-session-fails', [
+        { id: 'msg-1', role: 'assistant', content: 'Work done' },
+      ]);
+      mockDoStub.archiveSourceGetLogicalTranscript.mockRejectedValue(
+        new Error('ProjectData unavailable')
+      );
 
       const res = await mcpRequest(
         app,
@@ -1527,7 +1659,9 @@ describe('MCP Routes', () => {
       const data = JSON.parse(body.result.content[0].text);
       expect(data.id).toBe('task-session-read-fails');
       expect(data.outputSummary).toBe('Completed');
+      expect(mockDoStub.archiveSourceGetLogicalTranscript).toHaveBeenCalled();
       expect(data.recentAssistantMessages).toEqual([]);
+      expect(data.finalAssistantMessage).toBeNull();
     });
 
     it('should return empty recentAssistantMessages when task has no session', async () => {
@@ -1567,6 +1701,7 @@ describe('MCP Routes', () => {
       const data = JSON.parse(body.result.content[0].text);
       expect(data.id).toBe('task-no-session');
       expect(data.recentAssistantMessages).toEqual([]);
+      expect(mockDoStub.archiveSourceGetLogicalTranscript).not.toHaveBeenCalled();
       expect(mockDoStub.getMessages).not.toHaveBeenCalled();
     });
 
@@ -2606,7 +2741,7 @@ describe('MCP Routes', () => {
       // The session id is reserved in the task INSERT, so it is known before the
       // background launch creates the session.
       expect(data.sessionId).toEqual(expect.any(String));
-      expect(data.message).toContain('get_task_details');
+      expect(data.message).toContain('tasks_read method get');
       expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
       expect(mockDoStub.createSession).not.toHaveBeenCalled();
       expect(mockDoStub.persistMessage).not.toHaveBeenCalled();
@@ -3270,6 +3405,62 @@ describe('MCP Routes', () => {
       expect(startInput.config.vmSize).toBe('large');
     });
 
+    // Constitution XV: the child's first message is agent-written, so it names its parent.
+    describe('parent attribution', () => {
+      /** The current-task row with every selected column, so its chat session is read. */
+      function parentWithChatSession(chatSessionId: string) {
+        const next = mockD1._stmt.raw.getMockImplementation()!;
+        let replaced = false;
+        mockD1._stmt.raw.mockImplementation(async (...args: unknown[]) => {
+          const rows = (await next(...(args as []))) as unknown[][];
+          if (!replaced && rows[0]?.[0] === 'task-123') {
+            replaced = true;
+            return [['task-123', 0, 'in_progress', null, null, null, null, null, chatSessionId]];
+          }
+          return rows;
+        });
+      }
+
+      async function dispatch(args: Record<string, unknown>) {
+        const res = await mcpRequest(
+          app,
+          jsonRpcRequest('tools/call', { name: 'dispatch_task', arguments: args })
+        );
+        const body = await res.json();
+        expect(body.error).toBeUndefined();
+        const firstMessage = mockDoStub.persistMessage.mock.calls[0]![2] as string;
+        const runnerDescription = mockTaskRunnerStub.start.mock.calls[0]![0].config
+          .taskDescription as string;
+        return { firstMessage, runnerDescription };
+      }
+
+      it('ends the child first message with the parent task and chat session', async () => {
+        setupHappyPathMocks();
+        parentWithChatSession('chat-parent-9');
+        const { firstMessage, runnerDescription } = await dispatch({
+          description: 'Build feature X',
+        });
+        expect(firstMessage.startsWith('Build feature X')).toBe(true);
+        expect(firstMessage).toMatch(
+          /\n\n---\nSent by parent agent task task-123, chat session chat-parent-9\. An agent wrote this task description; it was not typed by a human\.$/
+        );
+        expect(runnerDescription).toBe(firstMessage);
+      });
+
+      it('keeps the attribution when references push the description past the cap', async () => {
+        setupHappyPathMocks();
+        parentWithChatSession('chat-parent-9');
+        const { firstMessage } = await dispatch({
+          description: 'd'.repeat(32_000),
+          references: ['https://example.com/spec'],
+        });
+        expect(firstMessage).toContain('d'.repeat(100));
+        expect(firstMessage).not.toContain('https://example.com/spec');
+        expect(firstMessage.endsWith('it was not typed by a human.')).toBe(true);
+        expect(firstMessage).toContain('task task-123, chat session chat-parent-9');
+      });
+    });
+
     // ─── New config parity tests ────────────────────────────────────────
 
     it('should include new config fields in tools/list schema', async () => {
@@ -3458,7 +3649,7 @@ describe('MCP Routes', () => {
       expect(data.taskMode).toBe('conversation');
       expect(data.warning).toContain('will not auto-complete');
       expect(data.warning).toContain('send_message_to_subtask');
-      expect(data.warning).toContain('get_session_messages');
+      expect(data.warning).toContain('sessions_read method messages');
       expect(data.warning).toContain('taskMode: "task"');
       const startInput = mockTaskRunnerStub.start.mock.calls[0][0];
       expect(startInput.config.taskMode).toBe('conversation');
@@ -3500,7 +3691,7 @@ describe('MCP Routes', () => {
       expect(data.taskMode).toBe('conversation');
       expect(data.warning).toContain('will not auto-complete');
       expect(data.warning).toContain('send_message_to_subtask');
-      expect(data.warning).toContain('get_session_messages');
+      expect(data.warning).toContain('sessions_read method messages');
       expect(data.warning).toContain('taskMode: "task"');
     });
 
@@ -4116,8 +4307,14 @@ describe('MCP Routes', () => {
         .mockResolvedValueOnce([['cred-1']])
         .mockResolvedValueOnce([Object.values(raceProject)]); // project (if raw path)
 
-      // Conditional INSERT returns 0 changes — concurrent insert pushed count over limit
-      mockD1._stmt.run.mockResolvedValueOnce({ success: true, meta: { changes: 0 } });
+      // Reject the conditional task INSERT itself; unrelated durable catalog writes may
+      // run first and must not consume this concurrency outcome.
+      const conditionalInsert = vi.fn(async () => ({ success: true, meta: { changes: 0 } }));
+      mockD1._stmt.run.mockImplementation(async () =>
+        mockD1._currentSql().trimStart().startsWith('INSERT INTO tasks')
+          ? conditionalInsert()
+          : { success: true, meta: { changes: 1 } }
+      );
 
       const res = await mcpRequest(
         app,
@@ -4132,6 +4329,7 @@ describe('MCP Routes', () => {
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain('rate limit exceeded');
       expect(body.error.message).toContain('concurrent dispatch');
+      expect(conditionalInsert).toHaveBeenCalledOnce();
     });
   });
 
@@ -4384,18 +4582,23 @@ describe('MCP Routes', () => {
       });
       const statefulD1 = createStatefulTaskD1(task);
       mockEnv.DATABASE = statefulD1 as unknown;
-      mockDoStub.getMessages.mockResolvedValue({
-        messages: [
-          {
-            id: 'msg-final',
-            role: 'assistant',
-            content:
-              'Ranked findings:\n1. HIGH: Preserve completion evidence for review-only subtasks.\n2. MEDIUM: Add regression coverage for generic summaries.',
-            createdAt: 1783123200000,
-          },
-        ],
-        hasMore: false,
-      });
+      // The final reply as the VM agent stores it: one row per streamed chunk.
+      seedTranscript(task.chat_session_id, [
+        { id: 'msg-user', role: 'user', content: 'Review the PR', createdAt: 1783123100000 },
+        {
+          id: 'msg-final',
+          role: 'assistant',
+          content:
+            'Ranked findings:\n1. HIGH: Preserve completion evidence for review-only subtasks.\n',
+          createdAt: 1783123200000,
+        },
+        {
+          id: 'msg-final-2',
+          role: 'assistant',
+          content: '2. MEDIUM: Add regression coverage for generic summaries.',
+          createdAt: 1783123200001,
+        },
+      ]);
 
       const detailsRes = await mcpRequest(
         app,
@@ -4416,23 +4619,9 @@ describe('MCP Routes', () => {
           'Ranked findings:\n1. HIGH: Preserve completion evidence for review-only subtasks.\n2. MEDIUM: Add regression coverage for generic summaries.',
         createdAt: 1783123200000,
       });
-      expect(mockDoStub.getMessages).toHaveBeenCalledWith(
-        task.chat_session_id,
-        200,
-        null,
-        null,
-        undefined,
-        false,
-        'desc'
-      );
-      expect(mockDoStub.getMessages).toHaveBeenCalledWith(
-        task.chat_session_id,
-        5,
-        null,
-        null,
-        ['assistant'],
-        false,
-        'desc'
+      expect(mockDoStub.archiveSourceGetLogicalTranscript).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: task.chat_session_id }),
+        expect.objectContaining({ limit: 5, roles: ['assistant'] })
       );
     });
 
@@ -4489,9 +4678,18 @@ describe('MCP Routes', () => {
     beforeEach(() => {
       vi.clearAllMocks();
       mockKV.get.mockResolvedValue({ ...validTokenData, chatSessionId: 'session-1' });
+      questionAskMocks.fileQuestionAsk.mockResolvedValue({
+        id: 'ask-1',
+        createdAt: 1,
+        expiresAt: 2,
+        notificationScheduled: true,
+      });
     });
 
-    it('should send notification and return success', async () => {
+    // The push and the live chat update are part of filing (`fileAgentAsk` →
+    // `announceAgentAsk`, inbox slice D) and are tested there
+    // (tests/unit/services/inbox/agent-asks.test.ts); the handler reports their outcome.
+    it('files the question and reports the notification outcome', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({
         user_id: 'user-789',
         title: 'Fix the bug',
@@ -4511,17 +4709,22 @@ describe('MCP Routes', () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.result.content[0].text).toContain('Human input request recorded');
-      expect(mockNotificationStub.createNotification).toHaveBeenCalledWith(
-        'user-789',
+      const payload = JSON.parse(body.result.content[0].text);
+      expect(payload.message).toContain('Human input request recorded');
+      // The chat card reads the question by this id; it must be the stored ask's.
+      expect(payload.humanInputRequest).toEqual({ id: 'ask-1', sessionId: 'session-1' });
+      expect(payload.notificationScheduled).toBe(true);
+      expect(questionAskMocks.fileQuestionAsk).toHaveBeenCalledWith(
+        expect.anything(),
         expect.objectContaining({
-          type: 'needs_input',
-          metadata: expect.objectContaining({
-            attentionMarkerId: 'marker-1',
-            options: ['Approach A', 'Approach B'],
-          }),
+          sessionId: 'session-1',
+          userId: 'user-789',
+          context: 'Should I use approach A or B for the database migration?',
+          category: 'decision',
+          options: ['Approach A', 'Approach B'],
         })
       );
+      expect(mockDoStub.createAttentionMarker).not.toHaveBeenCalled();
     });
 
     it('should reject empty context', async () => {
@@ -4622,13 +4825,17 @@ describe('MCP Routes', () => {
       expect(body.error.message).toContain('options must be an array');
     });
 
-    it('should preserve the attention safety marker when notification delivery setup throws', async () => {
+    it('still returns the recorded question when no notification was scheduled', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({
         user_id: 'user-789',
         title: 'Fix the bug',
       });
-      // Make the notification DO throw to exercise the best-effort catch branch
-      mockNotificationStub.createNotification.mockRejectedValueOnce(new Error('DO unavailable'));
+      questionAskMocks.fileQuestionAsk.mockResolvedValueOnce({
+        id: 'ask-1',
+        createdAt: 1,
+        expiresAt: 2,
+        notificationScheduled: false,
+      });
 
       const res = await mcpRequest(
         app,
@@ -4640,8 +4847,12 @@ describe('MCP Routes', () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.result.content[0].text).toContain('notification delivery was not scheduled');
-      expect(mockDoStub.createAttentionMarker).toHaveBeenCalledOnce();
+      const payload = JSON.parse(body.result.content[0].text);
+      expect(payload.message).toContain('notification delivery was not scheduled');
+      expect(payload.notificationScheduled).toBe(false);
+      // The question is still recorded, so the chat card can still be answered.
+      expect(payload.humanInputRequest).toEqual({ id: 'ask-1', sessionId: 'session-1' });
+      expect(questionAskMocks.fileQuestionAsk).toHaveBeenCalledOnce();
     });
 
     it('returns an error instead of claiming safety when no chat session exists', async () => {
@@ -4665,7 +4876,26 @@ describe('MCP Routes', () => {
       const body = await res.json();
       expect(body.error.message).toContain('chat session is missing');
       expect(mockNotificationStub.createNotification).not.toHaveBeenCalled();
-      expect(mockDoStub.createAttentionMarker).not.toHaveBeenCalled();
+      expect(questionAskMocks.fileQuestionAsk).not.toHaveBeenCalled();
+    });
+
+    it('tells the agent which inbox limit it hit (per-chat cap) instead of an internal error', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({ user_id: 'user-789', title: 'Fix the bug' });
+      const { OperationError } = await import('@simple-agent-manager/operations');
+      questionAskMocks.fileQuestionAsk.mockRejectedValueOnce(
+        new OperationError('rate_limited', 'This chat already has 20 open inbox items')
+      );
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'request_human_input',
+          arguments: { context: 'One more question?' },
+        })
+      );
+      const body = await res.json();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toBe('This chat already has 20 open inbox items');
+      expect(mockNotificationStub.createNotification).not.toHaveBeenCalled();
     });
 
     it('should reject context that is only whitespace', async () => {
@@ -4683,7 +4913,7 @@ describe('MCP Routes', () => {
       expect(body.error.message).toContain('context is required');
     });
 
-    it('should call notifyNeedsInput with correct payload for all four categories', async () => {
+    it('passes each of the four categories to the shared filing operation', async () => {
       const categories = ['decision', 'clarification', 'approval', 'error_help'] as const;
 
       for (const category of categories) {
@@ -4705,9 +4935,9 @@ describe('MCP Routes', () => {
         expect(res.status).toBe(200);
         const body = await res.json();
         expect(body.result).toBeDefined();
-        expect(mockNotificationStub.createNotification).toHaveBeenCalledWith(
-          'user-789',
-          expect.objectContaining({ type: 'needs_input' })
+        expect(questionAskMocks.fileQuestionAsk).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({ category, context: 'Need help' })
         );
       }
     });
@@ -4852,9 +5082,9 @@ describe('MCP Routes', () => {
       );
     });
 
-    it('complete_task in conversation mode should call notifySessionEnded', async () => {
-      // complete_task calls .first() once to get task_mode + user_id + title in one query.
-      // Then it calls .run() for the UPDATE. Both queries use raw D1 (prepare/bind pattern).
+    it('complete_task in conversation mode sends no "your turn" notification', async () => {
+      // The agent files what the person needs in the inbox; SAM never files a content-free
+      // "Agent finished" notification (inbox Result items).
       mockD1._stmt.first.mockResolvedValueOnce({
         task_mode: 'conversation',
         user_id: 'user-789',
@@ -4874,8 +5104,9 @@ describe('MCP Routes', () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
+      // Liveness: the remap ran.
       expect(body.result.content[0].text).toContain('Conversation remains open');
-      expect(mockNotificationStub.createNotification).toHaveBeenCalledWith(
+      expect(mockNotificationStub.createNotification).not.toHaveBeenCalledWith(
         'user-789',
         expect.objectContaining({ type: 'session_ended' })
       );
@@ -5089,7 +5320,9 @@ describe('MCP Routes', () => {
     it('should link idea successfully', async () => {
       mockD1._stmt.first
         .mockResolvedValueOnce({ chat_session_id: 'sess-1' })
-        .mockResolvedValueOnce({ id: 'task-1', title: 'Fix auth bug' });
+        .mockResolvedValueOnce({ id: 'task-1', title: 'Fix auth bug' })
+        .mockResolvedValueOnce({ id: 'task-1' });
+      mockDoStub.getSession.mockResolvedValueOnce({ id: 'sess-1' });
 
       const res = await mcpRequest(
         app,
@@ -5105,10 +5338,14 @@ describe('MCP Routes', () => {
       expect(data.linked).toBe(true);
       expect(data.taskTitle).toBe('Fix auth bug');
       expect(data.context).toBe('discussing auth');
-      expect(mockDoStub.linkSessionIdea).toHaveBeenCalledWith(
-        'sess-1',
-        'task-1',
-        'discussing auth'
+      expect(mockDoStub.recordResourceLink).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceId: 'sess-1',
+          targetId: 'task-1',
+          relation: 'linked',
+          context: 'discussing auth',
+        }),
+        expect.any(Object)
       );
     });
   });
@@ -5134,7 +5371,10 @@ describe('MCP Routes', () => {
     });
 
     it('should unlink idea successfully', async () => {
-      mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'sess-1' });
+      mockD1._stmt.first
+        .mockResolvedValueOnce({ chat_session_id: 'sess-1' })
+        .mockResolvedValueOnce({ id: 'task-1' });
+      mockDoStub.getSession.mockResolvedValueOnce({ id: 'sess-1' });
 
       const res = await mcpRequest(
         app,
@@ -5148,7 +5388,13 @@ describe('MCP Routes', () => {
       const body = await res.json();
       const data = JSON.parse(body.result.content[0].text);
       expect(data.unlinked).toBe(true);
-      expect(mockDoStub.unlinkSessionIdea).toHaveBeenCalledWith('sess-1', 'task-1');
+      expect(mockDoStub.removeResourceLink).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceId: 'sess-1',
+          targetId: 'task-1',
+          relation: 'linked',
+        })
+      );
     });
   });
 
@@ -5176,7 +5422,8 @@ describe('MCP Routes', () => {
 
     it('should return empty list when no ideas linked', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'sess-1' });
-      mockDoStub.getIdeasForSession.mockReturnValue([]);
+      mockDoStub.getSession.mockResolvedValueOnce({ id: 'sess-1' });
+      mockDoStub.listResourceLinks.mockResolvedValueOnce([]);
 
       const res = await mcpRequest(
         app,
@@ -5195,8 +5442,30 @@ describe('MCP Routes', () => {
 
     it('should return enriched ideas with task details', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'sess-1' });
-      mockDoStub.getIdeasForSession.mockReturnValue([
-        { taskId: 'task-1', context: 'auth discussion', createdAt: 1000 },
+      mockDoStub.getSession.mockResolvedValueOnce({ id: 'sess-1' });
+      mockDoStub.listResourceLinks.mockResolvedValueOnce([
+        {
+          sourceKind: 'session',
+          sourceId: 'sess-1',
+          targetKind: 'idea',
+          targetId: 'task-1',
+          relation: 'linked',
+          origin: 'explicit',
+          context: 'auth discussion',
+          firstAt: 1000,
+          lastAt: 1000,
+        },
+        {
+          sourceKind: 'session',
+          sourceId: 'sess-1',
+          targetKind: 'idea',
+          targetId: 'task-1',
+          relation: 'read',
+          origin: 'auto',
+          context: null,
+          firstAt: 1001,
+          lastAt: 1001,
+        },
       ]);
       // D1 batch query for task details
       mockD1._stmt.all.mockResolvedValueOnce({
@@ -5397,7 +5666,7 @@ describe('MCP Routes', () => {
       const data = JSON.parse(body.result.content[0].text);
       expect(data.ideaId).toBeDefined();
       expect(data.contentLength).toBeGreaterThan(0);
-      expect(data.message).toContain('link_idea');
+      expect(data.message).toBe('Idea created.');
     });
 
     it('should create an idea with priority', async () => {
@@ -5456,14 +5725,22 @@ describe('MCP Routes', () => {
       expect(body.error.message).toContain('Idea not found');
     });
 
-    it('should reject idea in terminal status (completed)', async () => {
+    // Done and Parked are a person's decision and reversible by design, so a finished idea is
+    // still editable and still reopenable. The old table froze it, which is what made a merged
+    // pull request feel like the end of an idea whether or not it was.
+    it.each([
+      ['completed', 'Done idea'],
+      ['cancelled', 'Parked idea'],
+    ])('still lets an agent add to a %s idea', async (status, title) => {
       mockD1._stmt.first.mockResolvedValueOnce({
         id: 'idea-1',
-        title: 'Done idea',
+        is_idea: 1,
+        title,
         description: 'Content',
-        status: 'completed',
+        status,
         priority: 0,
       });
+      mockD1._stmt.run.mockResolvedValueOnce({ success: true });
 
       const res = await mcpRequest(
         app,
@@ -5475,16 +5752,48 @@ describe('MCP Routes', () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.error).toBeDefined();
-      expect(body.error.message).toContain("terminal status 'completed'");
+      expect(body.error).toBeUndefined();
+      expect(JSON.parse(body.result.content[0].text).updated).toBe(true);
     });
 
-    it('should reject idea in terminal status (cancelled)', async () => {
+    // But a row that is NOT an idea is refused, whatever status it is in: an ordinary task is
+    // not something `update_idea` may retitle or reopen.
+    it.each(['draft', 'ready', 'completed', 'cancelled'])(
+      'refuses an ordinary %s task',
+      async (status) => {
+        mockD1._stmt.first.mockResolvedValueOnce({
+          id: 'task-1',
+          is_idea: 0,
+          title: 'Real work',
+          description: 'Content',
+          status,
+          priority: 0,
+        });
+
+        const res = await mcpRequest(
+          app,
+          jsonRpcRequest('tools/call', {
+            name: 'update_idea',
+            arguments: { ideaId: 'task-1', content: 'New content' },
+          })
+        );
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.error.message).toContain('Idea not found');
+      }
+    );
+
+    // Ideas are not run in place: `draft -> ready -> POST /tasks/:id/run` is the legacy path
+    // that turns an idea row into a task row, and Start work creates a new linked task
+    // instead (program decision 1, `operations/idea-transitions.ts`).
+    it('should refuse draft → ready', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({
         id: 'idea-1',
-        title: 'Cancelled idea',
+        is_idea: 1,
+        title: 'My idea',
         description: 'Content',
-        status: 'cancelled',
+        status: 'draft',
         priority: 0,
       });
 
@@ -5492,19 +5801,21 @@ describe('MCP Routes', () => {
         app,
         jsonRpcRequest('tools/call', {
           name: 'update_idea',
-          arguments: { ideaId: 'idea-1', content: 'New content' },
+          arguments: { ideaId: 'idea-1', status: 'ready' },
         })
       );
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.error).toBeDefined();
-      expect(body.error.message).toContain("terminal status 'cancelled'");
+      expect(JSON.stringify(body)).toContain('Invalid status transition');
     });
 
-    it('should transition draft → ready', async () => {
+    // The owner control: the move a person actually makes from a draft still works, so the
+    // refusal above cannot pass by `update_idea` being broken outright.
+    it('should transition draft → completed', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({
         id: 'idea-1',
+        is_idea: 1,
         title: 'My idea',
         description: 'Content',
         status: 'draft',
@@ -5516,7 +5827,7 @@ describe('MCP Routes', () => {
         app,
         jsonRpcRequest('tools/call', {
           name: 'update_idea',
-          arguments: { ideaId: 'idea-1', status: 'ready' },
+          arguments: { ideaId: 'idea-1', status: 'completed' },
         })
       );
 
@@ -5530,6 +5841,7 @@ describe('MCP Routes', () => {
     it('should transition ready → completed', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({
         id: 'idea-1',
+        is_idea: 1,
         title: 'Ready idea',
         description: 'Content',
         status: 'ready',
@@ -5552,12 +5864,41 @@ describe('MCP Routes', () => {
       expect(data.updatedFields).toContain('status');
     });
 
-    it('should reject invalid transition draft → completed', async () => {
+    // `draft → completed` is "Mark done" and is allowed now; the old table refused it, which
+    // left no way to finish an idea nobody had started.
+    it('allows draft → completed, which the old table refused', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({
         id: 'idea-1',
+        is_idea: 1,
         title: 'Draft idea',
         description: 'Content',
         status: 'draft',
+        priority: 0,
+      });
+      mockD1._stmt.run.mockResolvedValueOnce({ success: true });
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_idea',
+          arguments: { ideaId: 'idea-1', status: 'completed' },
+        })
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+    });
+
+    // The control: a parked idea can only be reopened, so this is still refused. Without it
+    // the suite would pass with transition validation deleted outright.
+    it('still rejects cancelled → completed', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({
+        id: 'idea-1',
+        is_idea: 1,
+        title: 'Parked idea',
+        description: 'Content',
+        status: 'cancelled',
         priority: 0,
       });
 
@@ -5572,12 +5913,13 @@ describe('MCP Routes', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.error).toBeDefined();
-      expect(body.error.message).toContain('Invalid status transition: draft → completed');
+      expect(body.error.message).toContain('Invalid status transition: cancelled → completed');
     });
 
     it('should allow updating ready idea fields', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({
         id: 'idea-1',
+        is_idea: 1,
         title: 'Ready idea',
         description: 'Content',
         status: 'ready',
@@ -5603,6 +5945,7 @@ describe('MCP Routes', () => {
     it('should append content by default', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({
         id: 'idea-1',
+        is_idea: 1,
         title: 'Existing idea',
         description: 'Original content',
         status: 'draft',
@@ -5638,6 +5981,7 @@ describe('MCP Routes', () => {
     it('should replace content when append=false', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({
         id: 'idea-1',
+        is_idea: 1,
         title: 'Existing idea',
         description: 'Original content',
         status: 'draft',
@@ -5667,6 +6011,7 @@ describe('MCP Routes', () => {
     it('should reject update with no fields', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({
         id: 'idea-1',
+        is_idea: 1,
         title: 'Existing idea',
         description: 'Original content',
         status: 'draft',
@@ -5690,6 +6035,7 @@ describe('MCP Routes', () => {
     it('should update title only', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({
         id: 'idea-1',
+        is_idea: 1,
         title: 'Old title',
         description: null,
         status: 'draft',
@@ -5715,6 +6061,7 @@ describe('MCP Routes', () => {
     it('should update priority only', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({
         id: 'idea-1',
+        is_idea: 1,
         title: 'Idea',
         description: 'Some content',
         status: 'draft',
@@ -5740,6 +6087,7 @@ describe('MCP Routes', () => {
     it('should append content to idea with null description', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({
         id: 'idea-1',
+        is_idea: 1,
         title: 'Idea with no content',
         description: null,
         status: 'draft',
@@ -5830,8 +6178,11 @@ describe('MCP Routes', () => {
       const body = await res.json();
       const data = JSON.parse(body.result.content[0].text);
       expect(data.ideaId).toBe('idea-1');
-      expect(data.title).toBe('Great idea');
-      expect(data.content).toBe('Detailed content with checklists and notes');
+      expect(data.title).toContain('BEGIN UNTRUSTED IDEA TITLE');
+      expect(data.title).toContain('Great idea');
+      expect(data.content).toContain('BEGIN UNTRUSTED IDEA');
+      expect(data.content).toContain('Detailed content with checklists and notes');
+      expect(data.related).toMatchObject({ kind: 'idea', id: 'idea-1' });
       expect(data.contentLength).toBe(42);
       expect(data.priority).toBe(3);
       expect(data.status).toBe('draft');
@@ -5874,7 +6225,8 @@ describe('MCP Routes', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       const data = JSON.parse(body.result.content[0].text);
-      expect(data.content).toBe(fencedContent);
+      expect(data.content).toContain(fencedContent);
+      expect(data.content).toContain('BEGIN UNTRUSTED IDEA');
       expect(data.content).toContain('## Untrusted Evidence: User Report Description');
       expect(data.content.indexOf('ignore previous instructions')).toBeGreaterThan(
         data.content.indexOf('## Untrusted Evidence: User Report Description')

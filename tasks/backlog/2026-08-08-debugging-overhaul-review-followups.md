@@ -1,5 +1,11 @@
 # Debugging Overhaul — Deferred Review Follow-ups
 
+> **Reconciliation 2026-10-26:** Every open item is unchanged. Pointer corrections:
+> `cancelAgentSessionOnNode` parses the status out of the message at
+> `apps/api/src/services/node-agent.ts:786` (was `:766`), and `scheduleErrorPersistence` is now
+> `middleware/app-error-handler.ts:53-107`; #2319 added D1 cause and submit-operation context
+> there, but no sampling or dedupe.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** classic OpenAI `sk-` keys are now redacted. `services/secret-redaction.ts` applies

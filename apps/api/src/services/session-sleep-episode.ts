@@ -1,27 +1,21 @@
 /**
  * The bounded sleep-failure episode.
  *
- * Sleep is a convenience. A session whose final snapshot keeps failing must not pin its
- * compute forever, but it also must not lose work without an honest, durable recovery
- * point. An episode starts when a sleep first claims the session
- * (`claimSessionSnapshotSleep`) and ends when the session sleeps, wakes, or a human sends
- * a follow-up (`cancelScheduledSessionSleep`). Inside it:
- *
- * - `full`: ordinary full-snapshot sleep attempts, while fewer than
- *   `SESSION_SLEEP_FAILURE_MAX_ATTEMPTS` attempts failed and less than
- *   `SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS` passed since the episode began.
- * - `fallback`: the sweep releases an idle VM session's compute while keeping its
- *   transcript and a restorable Git recovery point (`session-sleep-fallback.ts`). A
- *   transient failure to establish that minimum counts as another failed attempt.
- * - `blocked`: the minimum cannot be established, or failures reached the absolute ceiling
- *   (`SESSION_SLEEP_MAX_ATTEMPTS`). Automatic sleep stops retrying and says so in the chat;
- *   the runtime is left running.
- *
- * Both counters live on `session_snapshots` (migration 0179), so the budget survives
- * Worker restarts and duplicate sweeps. Neither a capture generation (prepare, complete,
- * or a degraded completion) nor a deferral touches them.
+ * Full snapshots are bounded by the existing attempt/time budgets. Once exhausted,
+ * release an idle runtime, retaining the transcript and any successful backups.
+ * An unavailable Git recovery point means a fresh transcript-based continuation,
+ * never authority to keep billing indefinitely. Runtime identity changes remain blocked.
  */
-import * as v from 'valibot';
+import {
+  parseSessionSleepFallbackRecord,
+  type SessionSleepFallbackRecord,
+} from './session-sleep-fallback-record';
+export {
+  parseSessionSleepFallbackRecord,
+  serializeSessionSleepFallbackRecord,
+  type SessionSleepFallbackRecord,
+  type SessionSleepRecoveryPoint,
+} from './session-sleep-fallback-record';
 
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
@@ -40,7 +34,7 @@ export interface SessionSleepEpisodeConfig {
   failureMaxAttempts: number;
   /** Elapsed time since the episode began before the fallback phase. */
   failureMaxElapsedMs: number;
-  /** Failed attempts (full and fallback) at which the episode ends blocked. */
+  /** Legacy attempt ceiling retained for diagnostic trigger classification. */
   ceilingFailures: number;
 }
 
@@ -62,13 +56,13 @@ export function sessionSleepEpisodeConfig(env: EpisodeEnv): SessionSleepEpisodeC
       env.SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS,
       DEFAULT_SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS
     ),
-    // The absolute ceiling also bounds fallback retries. It is clamped above the full
-    // budget so a misconfigured pair still gives the fallback at least one attempt.
+    // Retain the legacy ceiling as a diagnostic trigger; external cleanup remains
+    // retryable after exhaustion.
     ceilingFailures: Math.max(sessionSleepMaxAttempts(env), failureMaxAttempts + 1),
   };
 }
 
-export type SessionSleepEpisodePhase = 'full' | 'fallback' | 'blocked';
+export type SessionSleepEpisodePhase = 'full' | 'fallback';
 
 export interface SessionSleepEpisodeState {
   sleepEpisodeStartedAt: string | null;
@@ -83,11 +77,7 @@ export function sessionSleepEpisodePhase(
   now: Date,
   config: SessionSleepEpisodeConfig
 ): SessionSleepEpisodePhase {
-  return sessionSleepEpisodeTrigger(row, now, config) === null
-    ? 'full'
-    : (row.sleepEpisodeFailures ?? 0) >= config.ceilingFailures
-      ? 'blocked'
-      : 'fallback';
+  return sessionSleepEpisodeTrigger(row, now, config) === null ? 'full' : 'fallback';
 }
 
 /**
@@ -126,64 +116,6 @@ export type SessionSleepBlockedReason =
   /** Fallback attempts kept failing until the absolute ceiling. */
   | 'retry_ceiling';
 
-const RecoveryPointSchema = v.object({
-  generation: v.string(),
-  commit: v.string(),
-  branch: v.nullable(v.string()),
-  detached: v.boolean(),
-  upstream: v.nullable(v.string()),
-  capturedAt: v.nullable(v.string()),
-  snapshotStatus: v.string(),
-  degradation: v.string(),
-  workingTreeSaved: v.boolean(),
-  homeSaved: v.boolean(),
-});
-
-const FallbackRecordSchema = v.object({
-  version: v.literal(1),
-  outcome: v.picklist(['slept', 'blocked']),
-  trigger: v.picklist(['attempt_budget', 'elapsed_budget', 'retry_ceiling']),
-  blockedReason: v.nullable(
-    v.picklist([
-      'teardown_unconfirmed',
-      'runtime_changed',
-      'no_git_baseline',
-      'commit_objects_unavailable',
-      'recovery_point_expired',
-      'unsupported_runtime',
-      'retry_ceiling',
-    ])
-  ),
-  decidedAt: v.string(),
-  episodeStartedAt: v.nullable(v.string()),
-  failedAttempts: v.number(),
-  lastError: v.nullable(v.string()),
-  recoveryPoint: v.nullable(RecoveryPointSchema),
-});
-
-export type SessionSleepRecoveryPoint = v.InferOutput<typeof RecoveryPointSchema>;
-export type SessionSleepFallbackRecord = v.InferOutput<typeof FallbackRecordSchema>;
-
-/**
- * Read a stored fallback record. A malformed value is treated as absent rather than
- * thrown: it is diagnostic metadata, and a wake or a purge must not fail on it.
- */
-export function parseSessionSleepFallbackRecord(
-  value: string | null | undefined
-): SessionSleepFallbackRecord | null {
-  if (!value) return null;
-  try {
-    const parsed = v.safeParse(FallbackRecordSchema, JSON.parse(value) as unknown);
-    return parsed.success ? parsed.output : null;
-  } catch {
-    return null;
-  }
-}
-
-export function serializeSessionSleepFallbackRecord(record: SessionSleepFallbackRecord): string {
-  return JSON.stringify(v.parse(FallbackRecordSchema, record));
-}
-
 /**
  * The record of a session that slept through the fallback on the generation it still
  * holds, or null. Its agent context is older than its conversation, so a wake must start
@@ -197,11 +129,23 @@ export function sleptFallbackRecord(snapshot: {
   snapshotGeneration: string | null;
 }): SessionSleepFallbackRecord | null {
   const record = parseSessionSleepFallbackRecord(snapshot.sleepFallbackJson);
-  if (record?.outcome !== 'slept' || !record.recoveryPoint) return null;
+  if (record?.outcome !== 'slept') return null;
+  if (!record.recoveryPoint) return record;
   return record.recoveryPoint.generation === snapshot.snapshotGeneration ? record : null;
 }
 
 /** SQL predicate: the row's sleep episode ended blocked (`sleep_status='terminal_failed'`). */
+/** `blockedSleepEpisodeSql` on a row already read: the episode ended blocked. */
+export function isBlockedSleepEpisode(row: {
+  sleepStatus?: string | null;
+  sleepFallbackJson?: string | null;
+}): boolean {
+  return (
+    row.sleepStatus === 'terminal_failed' &&
+    parseSessionSleepFallbackRecord(row.sleepFallbackJson ?? null)?.outcome === 'blocked'
+  );
+}
+
 export function blockedSleepEpisodeSql(alias: string): string {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) {
     throw new Error('Invalid SQL alias for blocked sleep episode predicate');

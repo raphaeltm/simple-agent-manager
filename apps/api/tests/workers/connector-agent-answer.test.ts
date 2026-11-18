@@ -1,11 +1,12 @@
+import type { OperationContext } from '@simple-agent-manager/operations';
+import { samAgentAnswer } from '@simple-agent-manager/operations';
+import { samChatRead } from '@simple-agent-manager/operations';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { InteractionStore } from '../../src/durable-objects/interaction-store';
 import type { Env } from '../../src/env';
-import { samAgentAnswer } from '../../src/operations/connector-operations';
-import { samChatRead } from '../../src/operations/platform-operations';
-import type { OperationContext } from '../../src/operations/types';
+import { createOperationPorts } from '../../src/operation-ports';
 import { getInteractionStore } from '../../src/services/acp-interaction-store';
 import * as projectData from '../../src/services/project-data';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
@@ -74,6 +75,7 @@ async function fixture(kind: 'permission' | 'form' | 'url') {
   expect(created.status).toBe('created');
   const ctx: OperationContext = {
     env: envWithFeatures,
+    ports: createOperationPorts(envWithFeatures),
     actor: {
       userId,
       via: 'connector',

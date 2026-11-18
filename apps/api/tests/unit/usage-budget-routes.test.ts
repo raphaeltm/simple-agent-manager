@@ -4,7 +4,7 @@
  * Tests the route handlers' behavior: response shapes, error handling,
  * utilization calculation, and validation error forwarding.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Mock KV
@@ -43,6 +43,13 @@ vi.mock('../../src/middleware/auth', () => ({
   getUserId: () => 'user-budget-1',
 }));
 
+// Installation ceiling (admin setting), read only on installations without a gateway.
+const mockResolveAdminSettingDetails = vi.fn();
+vi.mock('../../src/services/admin-settings-resolution', () => ({
+  resolveAdminSetting: vi.fn(),
+  resolveAdminSettingDetails: (...args: unknown[]) => mockResolveAdminSettingDetails(...args),
+}));
+
 // Mock logger
 vi.mock('../../src/lib/logger', () => ({
   log: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
@@ -60,6 +67,8 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
     KV: mockKV as unknown as KVNamespace,
     AI_GATEWAY_ID: 'test-gw',
+    CF_ACCOUNT_ID: 'test-account',
+    CF_API_TOKEN: 'test-api-token',
     AI_PROXY_DAILY_INPUT_TOKEN_LIMIT: undefined,
     AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT: undefined,
     ...overrides,
@@ -71,6 +80,7 @@ describe('GET /api/usage/ai/budget', () => {
     kvStore.clear();
     mockIterateGatewayLogs.mockReset();
     vi.clearAllMocks();
+    mockResolveAdminSettingDetails.mockResolvedValue({ value: 0 });
   });
 
   it('returns platform defaults when user has no custom settings', async () => {
@@ -160,6 +170,7 @@ describe('GET /api/usage/ai/budget', () => {
 
   it('returns zero month cost when gateway is not configured', async () => {
     const resp = await testApp.request('/api/usage/ai/budget', {}, makeEnv({ AI_GATEWAY_ID: '' }));
+    expect(resp.status).toBe(200);
     const data = await resp.json();
 
     expect(data.monthCostUsd).toBe(0);
@@ -309,5 +320,69 @@ describe('DELETE /api/usage/ai/budget', () => {
     expect(resp.status).toBe(200);
     const data = await resp.json();
     expect(data.success).toBe(true);
+  });
+});
+
+describe('installation monthly ceiling (no AI Gateway)', () => {
+  // No addressable gateway and no counter binding: SAM prices spend itself (KV fallback).
+  const noGateway = () => makeEnv({ AI_GATEWAY_ID: '', CF_ACCOUNT_ID: '' } as Partial<Env>);
+
+  beforeEach(() => {
+    kvStore.clear();
+    vi.clearAllMocks();
+    mockResolveAdminSettingDetails.mockResolvedValue({ value: 25 });
+  });
+
+  it('GET reports the ceiling as the enforced cap when the user set none', async () => {
+    const resp = await testApp.request('/api/usage/ai/budget', {}, noGateway());
+    expect(resp.status).toBe(200);
+    const data = await resp.json();
+    expect(data.monthlyCostCap).toEqual({ available: true, ceilingUsd: 25, effectiveCapUsd: 25 });
+    expect(data.utilization.monthlyCostPercent).toBe(0);
+  });
+
+  it('GET keeps a lower user cap', async () => {
+    kvStore.set('ai-budget-settings:user-budget-1', JSON.stringify({ monthlyCostCapUsd: 10 }));
+    const data = await (await testApp.request('/api/usage/ai/budget', {}, noGateway())).json();
+    expect(data.monthlyCostCap.effectiveCapUsd).toBe(10);
+  });
+
+  it('PUT refuses a cap above the ceiling and stores nothing', async () => {
+    const resp = await testApp.request(
+      '/api/usage/ai/budget',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ monthlyCostCapUsd: 60 }),
+      },
+      noGateway()
+    );
+    expect(resp.status).toBe(400);
+    expect((await resp.json()).message).toMatch(/between 0\.01 and 25/);
+    expect(kvStore.has('ai-budget-settings:user-budget-1')).toBe(false);
+  });
+
+  it('PUT accepts a cap at the ceiling (owner control)', async () => {
+    const resp = await testApp.request(
+      '/api/usage/ai/budget',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ monthlyCostCapUsd: 25 }),
+      },
+      noGateway()
+    );
+    expect(resp.status).toBe(200);
+  });
+
+  it('a gateway installation never reads the ceiling', async () => {
+    mockIterateGatewayLogs.mockResolvedValue(undefined);
+    const data = await (await testApp.request('/api/usage/ai/budget', {}, makeEnv())).json();
+    expect(data.monthlyCostCap).toEqual({
+      available: true,
+      ceilingUsd: null,
+      effectiveCapUsd: null,
+    });
+    expect(mockResolveAdminSettingDetails).not.toHaveBeenCalled();
   });
 });

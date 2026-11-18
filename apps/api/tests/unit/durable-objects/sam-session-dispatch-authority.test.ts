@@ -7,7 +7,10 @@ import { dispatchTask } from '../../../src/durable-objects/sam-session/tools/dis
 import { retrySubtask } from '../../../src/durable-objects/sam-session/tools/retry-subtask';
 import type { ToolContext } from '../../../src/durable-objects/sam-session/types';
 import type { Env } from '../../../src/env';
+import { samAssistantAttribution } from '../../../src/services/agent-authorship';
+import { getProfilePickerState } from '../../../src/services/agent-profile-picker';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
+import { pickStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import {
   seedCloudCredential,
@@ -91,6 +94,7 @@ describe('SAM session dispatch_task current project authority', () => {
       projectId: 'project-1',
       includeInstallation: false,
     });
+    await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
     return env;
   }
 
@@ -368,6 +372,49 @@ describe('SAM session dispatch_task current project authority', () => {
     }
   });
 
+  it('retry_subtask marks its replacement as agent-started, so it is not the person’s own pick', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      const env = await seedRunnableProject(sqlite);
+      sqlite
+        .prepare(
+          `INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type, effort)
+           VALUES ('prof-sol', 'project-1', 'owner-1', 'Sol', 'openai-codex', 'auto')`
+        )
+        .run();
+      const now = new Date().toISOString();
+      // The person's own chat, as the chat routes write it: counts once in their picker usage.
+      sqlite
+        .prepare(
+          `INSERT INTO tasks
+             (id, project_id, user_id, title, description, status, triggered_by, dispatch_depth,
+              agent_profile_hint, created_at, updated_at)
+           VALUES ('original-task', 'project-1', 'owner-1', 'Original', 'Retry me', 'failed', 'user', 0,
+              'prof-sol', ?, ?)`
+        )
+        .run(now, now);
+
+      await retrySubtask({ taskId: 'original-task' }, makeContext(env, 'owner-1'));
+
+      expect(
+        sqlite
+          .prepare("SELECT triggered_by, agent_profile_hint FROM tasks WHERE id != 'original-task'")
+          .get()
+      ).toEqual({ triggered_by: 'mcp', agent_profile_hint: 'prof-sol' });
+      const picker = await getProfilePickerState(
+        drizzle(env.DATABASE, { schema }),
+        'project-1',
+        'owner-1',
+        30
+      );
+      expect(picker.usage).toEqual([
+        expect.objectContaining({ profileId: 'prof-sol', chatCount: 1 }),
+      ]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('retry_subtask keeps the original feature coordination channel on the replacement', async () => {
     const sqlite = new Database(':memory:');
     try {
@@ -394,8 +441,12 @@ describe('SAM session dispatch_task current project authority', () => {
           )
           .all()
       ).toEqual([
-        { description: 'Retry me', coordination_channel: 'feature.retry' },
-        { description: 'Retry me', coordination_channel: null },
+        // The replacement is model-written, so it names the SAM assistant (constitution XV).
+        {
+          description: `Retry me${samAssistantAttribution()}`,
+          coordination_channel: 'feature.retry',
+        },
+        { description: `Retry me${samAssistantAttribution()}`, coordination_channel: null },
       ]);
     } finally {
       sqlite.close();
@@ -458,6 +509,7 @@ describe('SAM session dispatch_task current project authority', () => {
         projectId: 'project-1',
         includeInstallation: false,
       });
+      await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
 
       const result = await dispatchTask(
         { projectId: 'project-1', description: 'Active member dispatch' },
@@ -532,6 +584,7 @@ describe('SAM session dispatch_task current project authority', () => {
         projectId: 'project-1',
         includeInstallation: false,
       });
+      await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
 
       const result = await dispatchTask(
         {

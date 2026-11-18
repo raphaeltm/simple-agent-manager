@@ -8,7 +8,12 @@
 
 import { validateManifest } from '../deployment-manifest/validate';
 import { isDigestReference } from './parse';
-import type { ComposeParseError, ComposeResolveResult, ImageResolver, UnresolvedManifest } from './types';
+import type {
+  ComposeParseError,
+  ComposeResolveResult,
+  ImageResolver,
+  UnresolvedManifest,
+} from './types';
 
 /**
  * Resolve all image references in an UnresolvedManifest from tags to digests,
@@ -16,7 +21,7 @@ import type { ComposeParseError, ComposeResolveResult, ImageResolver, Unresolved
  */
 export async function resolveManifest(
   unresolved: UnresolvedManifest,
-  resolver: ImageResolver,
+  resolver: ImageResolver
 ): Promise<ComposeResolveResult> {
   const errors: ComposeParseError[] = [];
 

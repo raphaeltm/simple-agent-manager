@@ -1,4 +1,18 @@
+> **Update 2026-11-06 (task `01M6QZBHRCQGW8W36W894Q3XDP`, idea `01M5R2BTGXBWVN8D51CT9GM7HD`):**
+> the vm-agent's own listener is no longer reachable through the port proxy. The vm-agent port
+> proxy and local forward refuse (403) a loopback target on the vm-agent's listen port
+> (`packages/vm-agent/internal/server/proxy_guard.go` `isOwnListenerTarget`), and the API refuses
+> cf-container port routes whose target is the container's vm-agent port (`apps/api/src/index.ts`).
+> The configurable `PORT_EXPOSURE_MIN/MAX` system-port guard and the other open items below are
+> still open.
+
 # Port Exposure Security Hardening
+
+> **Reconciliation 2026-10-26:** Nothing in scope shipped; pointers moved, logic unchanged. New
+> imports shifted `apps/api/src/index.ts`: the boot-log exemption is now `:436`, the pathname
+> copies `:477,604`, the per-request D1 lookup `:404-433` and the lines in the carried-over JWT
+> item `:485,621`. The Go CORS wildcard check is now
+> `packages/vm-agent/internal/server/server.go:1230-1241`.
 
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >

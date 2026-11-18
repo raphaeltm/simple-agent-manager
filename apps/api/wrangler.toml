@@ -1,7 +1,8 @@
 name = "workspaces-api"
 main = "src/index.ts"
 compatibility_date = "2026-01-01"
-compatibility_flags = ["nodejs_compat"]
+# Report handled multi-tick stream failures after the microtask checkpoint.
+compatibility_flags = ["nodejs_compat", "unhandled_rejection_after_microtask_checkpoint"]
 port = 8787
 
 # Paid Workers and sub-hour Cron Triggers default to 30s CPU. Declaring that
@@ -73,15 +74,14 @@ PROJECT_DATA_GROUPED_FTS_CLEANUP_RECHECK_MS = "300000"
 PROJECT_DATA_ARCHIVE_SHARDING_ENABLED = "true"
 # Compact format stays off until the staged rollout and production mutation approval.
 PROJECT_DATA_ARCHIVE_COMPACT_ENABLED = "false"
-# Tripled with the sweep cadence on 2026-09-27 (was 800000): the same ~33k estimate units per
-# tick at 3x the ticks. Real candidates reserve ~21.5k units (six production samples, 17.8k-27.1k),
-# so 72 ticks/day use ~1.55M; 800000 would have stopped the drain at ~37/day. Cost
-# (`pnpm quality:cloudflare-cost`, rule 76): DO rows written were projected at 32.8M of the 50M/month
-# included allowance, and the extra ticks add ~0.4-0.6M billed rows/day, so the expected cost is
-# $0; spending the whole allowance at the worst measured ratio would be ~$13/month over it.
-# The GitHub `production` Environment pins this var and must be changed in lockstep; the deploy
-# log prints any override that differs (.claude/rules/70).
-PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET = "2400000"
+# Raised with the 9-minute cadence on 2026-11-14: 72k raw rows/hour needs ~5.33M
+# reservations/day at the measured fixture shape; 6M leaves ~12.6% headroom.
+# Reservation units are not billed rows. At 1.38-2.57 measured writes/raw row,
+# expected writes are ~2.4M-4.4M/day for ~2.75 days, excluding inflow.
+# If billed writes equalled reserved units, 6M would cost ~$6/day at $1/M,
+# $3.60/day above 2.4M. This comparison is not a measured billed-write cap.
+# The GitHub production Environment pins this var and must change in lockstep (rule 70).
+PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET = "6000000"
 # Safety multiplier applied to the row inventory `estimateArchiveWrites` already counts, NOT
 # an independent amplification factor. MEASURED 2026-09-14 in production two ways:
 #   - `project_data_archive_write_budget` sampled an hour apart: 726,408 reserved across 11
@@ -95,75 +95,54 @@ PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET = "2400000"
 #
 # 2 exceeds the worst observed ratio of 1.23 by ~63%. Under the 800000 allowance and hourly
 # cadence of 2026-09-14 that moved the budget's ceiling to ~47/day, so the one-candidate-per-tick
-# limit (~4,849 messages each) was the binding constraint at 24/day. Since 2026-09-27 the same factor
-# against ~10,250-unit candidates and the 2400000 allowance gives ~111/day, above the 72 ticks the
-# cadence claims, so the cadence still binds. Two caveats before trusting this number further: n
-# is small (2 budget samples, 4 telemetry buckets), and largest-first selection keeps pulling
-# differently-shaped candidates as the backlog drains, so the ratio can move. Re-measure before
-# changing this again — the condition it stands for is "rows this migration will actually
-# write", and only telemetry says what that is (.claude/rules/74).
+# limit (~4,849 messages each) was the binding constraint at 24/day. The 2026-11-14
+# full fixture needs 6476 reservations per 2100 raw rows at factor 2; the 6M allowance
+# supports the targeted 72k rows/hour. Inventory shape can change as the backlog drains;
+# re-measure before changing the factor (.claude/rules/74).
 PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR = "2"
 PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS = "604800000"
 PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT = "100"
 PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED = "true"
-# This interval IS the drain rate: a tick archives exactly one session, because
-# PROJECT_DATA_ARCHIVE_WALL_TIME_MS is checked only between candidates and a real candidate takes
-# 43-83 s. 18 min (was one hour until 2026-09-27) triples it to one claim every 20 minutes. It is
-# deliberately short of 20: the */5 cron reaches the archive step 1m15s-3m30s into each invocation,
-# and at a whole-hour interval claims kept missing their tick by seconds (37 claims averaged 62.7 min
-# apart). 18 is never due on the third five-minute tick and is due on the fourth unless the archive
-# step starts over two minutes earlier than at the previous claim (the observed spread is 2m15s),
-# which pushes that one claim to 25 minutes. Per-tick copy work
-# stays bounded by _WALL_TIME_MS, _SWEEP_SESSIONS and _SWEEP_MESSAGE_BUDGET; daily volume by
-# _DAILY_WRITE_BUDGET. Load review: tasks/archive/2026-09-27-triple-archive-drain-speed.md and the
+# A 9-minute cadence rounds to about 10 minutes on the */5 cron (144 claims/day),
+# versus about 20 minutes at the previous 18-minute interval. Archive-step timing
+# jitter can defer a claim. At ~12k copied rows/tick this targets ~72k rows/hour,
+# draining 4.75M in ~66 hours instead of ~132, excluding inflow.
+# The per-tick wall bound remains 60 s; the cadence doubles opportunities, not tick work.
+# Per-tick work is bounded by _WALL_TIME_MS and _SWEEP_SESSIONS; daily volume by
+# _DAILY_WRITE_BUDGET. Load review: tasks/active/2026-11-12-projectdata-archive-drain.md and the
 # archive-sharding notes in apps/www/src/content/docs/docs/reference/configuration.md.
 # 2026-10-03: a billing firebreak (#2216) set this back to one hour and was reverted the same day.
 # The cost spike it reacted to came from Containers, Workers AI and R2 snapshot uploads, not from
 # this sweep, while the SAM root ProjectData DO sat ~550 MB under Cloudflare's hard 10 GiB cap
 # (it hit the cap on 2026-10-02). This drain is storage protection, not a cost lever: do not slow
 # it to save money.
-PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "1080000"
-# Only `migrating` fences per tick; the real throughput bound is _DAILY_WRITE_BUDGET. Each
-# fenced session costs ~3 D1 writes plus an unbounded chunk copy, and the tick's wall-time
-# gate is only checked BETWEEN candidates. A refused candidate opens no fence and consumes
-# no slot.
-#
-# This is NOT a throughput lever while _WALL_TIME_MS is below one candidate's real duration:
-# largest-first selection under a cumulative message budget fences ONE candidate that consumes
-# nearly the whole budget, the wall gate is only checked BETWEEN candidates, and a single
-# candidate already exceeds it. What this value does bind is the reclaimable-migration limit
-# and the candidate over-fetch LIMIT (min(limit, _SWEEP_PROJECTS * this) + _FALLTHROUGH_DEPTH),
-# i.e. how much in-flight work one tick can resume. Code default is 10. Do not raise it
-# expecting more drain without first raising _WALL_TIME_MS past a candidate's real duration.
-PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "8"
-# Cumulative message_count of NEW candidates one tick may journal. This is a selector
-# ceiling, not an exact throughput promise: reserveArchiveWrites reserves the
-# estimateArchiveWrites result, computed as 1000 + factor * inventory units per session.
-# Inventory units include raw messages, tool-payload rows, grouped rows, and grouped FTS bytes.
-# This budget is ALSO the per-candidate ceiling (`sweepMessageCeiling` = min(this, the ceiling
-# derived from _DAILY_WRITE_BUDGET)), and when _COMPACT_ENABLED is true selectCandidates binds
-# it into `AND ss.message_count <= ?`. A session larger than this is therefore not deferred —
-# it is INVISIBLE to every tick until the budget is raised. Treat a change here as a change to
-# WHICH sessions can ever be archived, not only to how fast.
-#
-# 2026-09-20: 10000 (was 5000). Step 1 of a staged raise toward the code default of 20000;
-# promote only on staged evidence, never as a routine bump. MAX is 5_000_000.
-# Two constraints to keep in mind when changing it:
-#   - Bigger candidates are the better buy per write (the fixed 1000-unit per-session
-#     reservation amortises further), but the allowance then admits fewer sessions per UTC
-#     window than the cadence has ticks, so _DAILY_WRITE_BUDGET becomes the binding
-#     constraint and later ticks report `window_exhausted` — normal backpressure, not an alert.
-#   - Per-candidate risk scales with the candidate: chunk count, seal read-back, lease headroom
-#     against _LEASE_MS, and the cost of a failed attempt (copySourceChunks restarts at ordinal
-#     0 and re-reserves the full estimate; _POISON_AFTER_ATTEMPTS failures strand the session).
-# Sizing evidence, rollout stages and the production measurements behind this value live in
-# tasks/archive/2026-09-20-archive-sweep-throughput-step3.md and PR #2109. Behaviour is pinned by
-# tests/unit/project-data-archive/sweep-message-budget-shipped.test.ts and
-# tests/workers/project-data-archive-sweep-throughput.test.ts.
+PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "540000"
+# Most sessions one tick may copy. A candidate refused by the write budget or by the root object
+# takes no slot, so this caps work done, not candidates looked at. It also sets the
+# reclaimable-migration limit and the candidate over-fetch LIMIT
+# (min(limit, _SWEEP_PROJECTS * this) + _FALLTHROUGH_DEPTH). At _WALL_TIME_MS = 60 s a tick
+# publishes ~6 small sessions (8-14 s each, measured 2026-11-12), so 50 is a safety cap that
+# wall time reaches first; it binds only for a run of near-empty sessions. Code default is 10.
+PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "50"
+# Cumulative message_count the operator-scoped canary packs into one run (largest first), and its
+# SQL ceiling for unnamed sessions. Since 2026-11-13 the UNSCOPED sweep no longer uses it: a
+# migration is a resumable cursor that copies, verifies and reclaims across ticks, so the only
+# per-session limit there is the ceiling derived from _DAILY_WRITE_BUDGET (`sweepMessageCeiling`).
+# Until then this was a per-candidate selection ceiling, and every session above it (77% of
+# eligible messages on 2026-11-11) was invisible to every tick.
+# History: 5000 until 2026-09-20, then 10000 (tasks/archive/2026-09-20-archive-sweep-throughput-step3.md,
+# PR #2109). Code default 20000, MAX 5_000_000. Pinned by
+# tests/unit/project-data-archive/sweep-message-budget-shipped.test.ts.
 PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET = "10000"
-# Soft budget checked between candidates; 10 s allows one ordinary candidate while limiting
-# tail draining in a single cron tick (code fallback stays 5 s).
-PROJECT_DATA_ARCHIVE_WALL_TIME_MS = "10000"
+# Tick deadline. Checked between candidates and, since 2026-11-13, inside a migration too: a
+# migration that has advanced pauses at the deadline (copy chunk, R2 verification page or phase
+# boundary) and the next tick resumes it, so a tick runs up to this plus one in-flight RPC. The
+# longest are an R2 verification page (bounded by _R2_TIMEOUT_MS per call) and the prepare's
+# terminal-version hash, which yields between 500-row pages (100k messages: 1.8 s locally in
+# slices of at most 70 ms); the flip is an O(1) write-generation check. Production after the
+# 60 s tick shipped (2026-11-13, first ~5 ticks): 68,352 messages in 9 sessions, ~13.7k per tick;
+# 10 s fit exactly one small session before 2026-11-12. Code fallback stays 5 s.
+PROJECT_DATA_ARCHIVE_WALL_TIME_MS = "60000"
 PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS = "4"
 PROJECT_DATA_ARCHIVE_SEARCH_CONCURRENCY = "4"
 PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_SESSIONS = "1"
@@ -187,30 +166,6 @@ OBSERVABILITY_ERROR_STACK_MAX_LENGTH = "4096"
 OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH = "512"
 VM_INCIDENT_R2_PREFIX = "diagnostic-incidents"
 VM_INCIDENT_RETENTION_DAYS = "7"
-ERROR_REPORT_FLUSH_INTERVAL = "30s"
-ERROR_REPORT_MAX_BATCH_SIZE = "10"
-ERROR_REPORT_MAX_BATCH_BYTES = "32768"
-ERROR_REPORT_MAX_QUEUE_SIZE = "1000"
-ERROR_REPORT_HTTP_TIMEOUT = "10s"
-ERROR_REPORT_RETRY_INITIAL = "1s"
-ERROR_REPORT_RETRY_MAX = "5m"
-ERROR_REPORT_MAX_ATTEMPTS = "20"
-ERROR_REPORT_DB_PATH = "/var/lib/vm-agent/error-reports.db"
-ERROR_REPORT_DB_BUSY_TIMEOUT = "5s"
-ERROR_REPORT_SPOOL_DIR = "/var/lib/vm-agent/diagnostic-incidents"
-ERROR_REPORT_ARTIFACT_MAX_BYTES = "2097152"
-ERROR_REPORT_SPOOL_MAX_BYTES = "20971520"
-ERROR_REPORT_RETENTION = "24h"
-ERROR_REPORT_COLLECTOR_TIMEOUT = "10s"
-ERROR_REPORT_MAX_COLLECTOR_DOCS = "8"
-ERROR_REPORT_MAX_DOCUMENT_BYTES = "131072"
-ERROR_REPORT_MAX_VALUE_DEPTH = "8"
-ERROR_REPORT_MAX_VALUE_ITEMS = "256"
-ERROR_REPORT_MAX_STRING_BYTES = "4096"
-ERROR_REPORT_EVENT_LIMIT = "100"
-ERROR_REPORT_RESPONSE_MAX_BYTES = "4096"
-ERROR_REPORT_STORED_ERROR_MAX_BYTES = "512"
-ERROR_REPORT_COLLECTOR_CONCURRENCY = "1"
 VM_AGENT_PROTOCOL = "https"
 VM_AGENT_PORT = "8443"
 DEVCONTAINER_CACHE_ENABLED = "true"
@@ -223,13 +178,11 @@ HETZNER_BASE_IMAGE = "docker-ce"
 TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS = "30000"
 NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS = "86400000"
 NODE_WORKSPACE_IDLE_TIMEOUT_MS = "1800000"
-# AI Inference Proxy (Cloudflare AI Gateway for trial/zero-config users)
+# AI Inference Proxy (Cloudflare AI Gateway for platform/zero-config users)
 AI_PROXY_ENABLED = "true"
 AI_PROXY_DEFAULT_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
 AI_PROXY_REQUEST_BODY_MAX_BYTES = "1048576"
 AI_GATEWAY_ID = "sam"
-# SAM Agent — set model to Workers AI for zero-config usage (no API key needed)
-SAM_MODEL = "@cf/google/gemma-4-26b-a4b-it"
 # Triggers (Event-Driven Agent Triggers)
 MAX_TRIGGERS_PER_PROJECT = "10"
 CRON_MIN_INTERVAL_MINUTES = "15"
@@ -240,14 +193,6 @@ TRIGGER_NAME_MAX_LENGTH = "100"
 # set it to "false" via GitHub environment variable or Worker var to force VM runtime.
 # CF_CONTAINER_ENABLED = "false"
 # CF_CONTAINER_PORT_READY_TIMEOUT_MS = "180000"
-# Trial Onboarding (zero-friction URL-to-workspace)
-# See docs/guides/trial-configuration.md for the full tunable list.
-TRIAL_ANONYMOUS_USER_ID = "system_anonymous_trials"
-TRIAL_EXPIRE_BATCH_SIZE = "1000"
-TRIAL_CLEANUP_BATCH_SIZE = "25"
-TRIAL_CLEANUP_DEADLINE_MS = "45000"
-TRIAL_NODE_DELETION_LOCK_STALE_MS = "600000"
-TRIAL_DEFAULT_WORKSPACE_PROFILE = "lightweight"
 
 # Cloudflare Artifacts for SAM-native Git repos (GitHub-optional projects)
 # NOTE: [[artifacts]] binding requires Cloudflare account-level access to Artifacts.
@@ -338,21 +283,6 @@ class_name = "GitHubUserAccessTokenLock"
 name = "GITLAB_USER_ACCESS_TOKEN_LOCK"
 class_name = "GitLabUserAccessTokenLock"
 
-# Durable Object for trial-onboarding monthly cap counter (singleton; keyed by YYYY-MM)
-[[durable_objects.bindings]]
-name = "TRIAL_COUNTER"
-class_name = "TrialCounter"
-
-# Durable Object for per-trial SSE event buffering (keyed by trialId)
-[[durable_objects.bindings]]
-name = "TRIAL_EVENT_BUS"
-class_name = "TrialEventBus"
-
-# Durable Object for alarm-driven trial provisioning (one DO per trialId)
-[[durable_objects.bindings]]
-name = "TRIAL_ORCHESTRATOR"
-class_name = "TrialOrchestrator"
-
 # Durable Object for per-project orchestration (one DO per projectId)
 [[durable_objects.bindings]]
 name = "PROJECT_ORCHESTRATOR"
@@ -412,6 +342,9 @@ new_sqlite_classes = ["NotificationService"]
 tag = "v6"
 new_classes = ["CodexRefreshLock"]  # Intentionally stateless: uses D1 for credential storage, no per-instance SQLite needed
 
+# v7-v9 created the classes of the retired anonymous-trial product. Applied migration tags are
+# immutable history, so they stay. The classes are still exported as inert tombstones and are
+# intentionally unbound (apps/api/src/durable-objects/retired-trial.ts).
 [[migrations]]
 tag = "v7"
 new_sqlite_classes = ["TrialCounter"]
@@ -525,22 +458,17 @@ binding = "AI"
 # because they break Vitest — Cloudflare issue #9343).
 
 # Cron triggers:
-# - Every 5 minutes: provisioning timeout checks, warm node cleanup, stuck task recovery,
-#   trial expiry sweep
+# - Every minute: lightweight durable compute-catalog continuation only
+# - Every 5 minutes: provisioning timeout checks, warm node cleanup, stuck task recovery
 # - Hourly at :30: monthly AI cost aggregation per user (Gateway logs → KV cache)
 # - Daily at 03:00 UTC: analytics event forwarding to external platforms (Phase 4)
-# - Daily at 04:00 UTC: trial waitlist purge (rows with notified_at older than
-#   TRIAL_WAITLIST_PURGE_DAYS). Configurable via TRIAL_CRON_WAITLIST_CLEANUP.
-# - Monthly on the 1st at 05:00 UTC: trial counter rollover audit (prune DO rows beyond
-#   TRIAL_COUNTER_KEEP_MONTHS). Configurable via TRIAL_CRON_ROLLOVER_CRON.
-#   NOTE: Intentionally offset from the 03:00 daily job to avoid collision on the 1st.
-# NOTE: Cron strings are matched exactly in index.ts:scheduled() to dispatch between
-# the different jobs. If you change them here, update the comparisons in the scheduled
-# handler (or the corresponding TRIAL_CRON_* env vars).
+# NOTE: Cron strings are matched exactly in scheduled/handler.ts:scheduled() to dispatch
+# between the different jobs. If you change them here, update the comparisons there.
 [triggers]
-crons = ["*/5 * * * *", "30 * * * *", "0 3 * * *", "0 4 * * *", "0 5 1 * *"]
+crons = ["* * * * *", "*/5 * * * *", "30 * * * *", "0 3 * * *"]
 
 # Secrets (set via wrangler secret bulk):
+# - BOOTSTRAP_OWNER_EMAIL (optional — immutable verified first-owner identity for installer deployments)
 # - GITHUB_CLIENT_ID
 # - GITHUB_CLIENT_SECRET
 # - GITHUB_APP_ID
@@ -575,7 +503,21 @@ crons = ["*/5 * * * *", "30 * * * *", "0 3 * * *", "0 4 * * *", "0 5 1 * *"]
 # - GA4_MEASUREMENT_ID (optional — Google Analytics 4 measurement ID, paired with GA4_API_SECRET)
 # - R2_ACCESS_KEY_ID (optional — R2 S3-compatible API token key ID, enables task attachment presigned uploads)
 # - R2_SECRET_ACCESS_KEY (optional — R2 S3-compatible API token secret, enables task attachment presigned uploads)
-# - TRIAL_CLAIM_TOKEN_SECRET (required when trials are enabled — HMAC secret for sam_trial_claim / sam_trial_fingerprint cookies. 32+ bytes base64.)
 # - CF_AIG_TOKEN (optional — Cloudflare AI Gateway Unified Billing token; enables OpenAI/Anthropic models without separate API keys)
-# - ANTHROPIC_API_KEY_TRIAL (optional — Anthropic API key for trial traffic when not using Workers AI)
 # - SMOKE_TEST_AUTH_ENABLED (optional — enables smoke-test token auth for test environments)
+# - AGENT_SIGN_IN_TRUST (optional — test instances only: JSON trust configuration for agent sign-in through workload identity; see services/agent-sign-in/config.ts)
+
+# Dedicated per-publish-job DinD build executor (instance sizing resolved at deploy time).
+[[containers]]
+class_name = "ComposeBuilderContainer"
+image = "./Dockerfile.compose-builder"
+instance_type = "standard-4"
+max_instances = 6
+
+[[durable_objects.bindings]]
+name = "COMPOSE_BUILDER"
+class_name = "ComposeBuilderContainer"
+
+[[migrations]]
+tag = "v23"
+new_sqlite_classes = ["ComposeBuilderContainer"]

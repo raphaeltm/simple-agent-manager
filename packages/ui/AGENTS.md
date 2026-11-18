@@ -14,9 +14,20 @@ Design system tokens and shared UI components for the control plane app. Provide
 | `src/primitives/` | Layout primitives (Container, PageLayout, Typography) |
 | `src/hooks/` | Shared UI hooks |
 | `src/styles.css` | Base styles imported by consumers |
-| `src/glass/glass.css` | Glass v2 material (`.sam-glass`, `--chrome`, `-rim`, `-sheen`, `-live`), shared by the app and the marketing site; follows `[data-ui-theme]` and `html[data-theme]` |
+| `src/glass/glass.css` | Glass v2 material (`.sam-glass`, `--chrome`, `--slab`, `--quiet`, `-rim`, `-sheen`, `-live`), plus `.sam-void`, `.sam-well`, `.sam-raised`, shared by the app and the marketing site; follows `[data-ui-theme]` and `html[data-theme]` |
+| `src/tokens/sam-glass.css` | SAM Glass app tokens: people colours, counts, nav glow, pane radii and gutter (both themes) |
 | `src/glass/node-field.ts` | Framework-agnostic canvas renderer of SAM's node/workspace network as lit glass tiles (`createGlassNodeField`); `field-model.ts` holds its pure geometry and lifecycle |
 | `src/components/GlassNodeField.tsx` | React wrapper for the node field (decorative background) |
+
+## SAM Glass
+
+The app's visual language: glass panes over a dark green void. Guide: `docs/guides/sam-glass-design-system.md`. Rule: `.claude/rules/80-sam-glass.md`. Build recipe: the `sam-glass` skill.
+
+- Surfaces are glass (`.sam-glass .sam-glass-rim`, `--slab`, `--quiet`); elements on them (buttons, avatars, chips, counts, inputs) are solid or wells.
+- One live blur at a time (`.sam-glass-live` on a single overlay).
+- People colours (`--sam-person-*`) mean who; amber means waiting on you.
+- New components go in `src/components/` with a story; the table of components to build is in the guide.
+- Built: `Pane` (`paneClassName()`), `IconButton`, `Count`, `Chip` (`chipClassName()`), `PersonAvatar`/`AvatarStack` (`personSlotFor()`), `SegmentedControl`, `NavItem`/`NavLabel`, `SearchField`, and the `accent`/`raised` `Button` variants. Stories live under "SAM Glass/" in Storybook.
 
 ## Commands
 
@@ -47,3 +58,20 @@ pnpm --filter @simple-agent-manager/ui lint        # ESLint
 - Tailwind v4 uses `@tailwindcss/vite` plugin — config is in the consumer's vite config, not a `tailwind.config.js`
 - This is a peer-dependency package — consumers must provide React 19+, lucide-react, react-router, tailwindcss
 - Token values drive the entire app's visual appearance — changes here cascade everywhere
+
+<!-- BEGIN GENERATED RULE INDEX (pnpm quality:agent-context-budget --write) -->
+
+## Rules for this directory
+
+Read the rules whose scope covers the files you will change before editing. Claude Code
+loads them by itself on file access; other harnesses must open them.
+
+- `.claude/rules/04-ui-standards.md`: UI Standards
+- `.claude/rules/17-ui-visual-testing.md`: Mandatory Playwright Visual Testing for UI Changes
+- `.claude/rules/37-prototype-development.md`: Prototype Development
+- `.claude/rules/56-clipped-overflow-is-invisible-to-document-checks.md`: Horizontal Overflow Inside `overflow-x-hidden` Is Invisible to Document-Level Checks
+- `.claude/rules/64-unstable-prop-identity-remounts-subtrees.md`: An Object Literal in a Render Body Can Remount an Entire Subtree
+- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
+- `.claude/rules/80-sam-glass.md`: SAM Glass
+
+<!-- END GENERATED RULE INDEX -->

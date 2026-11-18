@@ -1,5 +1,6 @@
 import { Button, Popover } from '@simple-agent-manager/ui';
 import { useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { COMMENT_STATUS_LABELS, type UiMessageCommentThread } from './comment-utils';
 
@@ -146,28 +147,36 @@ export function SelectionActionBar({
       setPlaceTop(false);
       return;
     }
-    const barTopIfBottomPinned = window.innerHeight - bar.offsetHeight;
+    const barTopIfBottomPinned = window.innerHeight - bar.offsetHeight - SELECTION_BAR_GUTTER_PX;
     setPlaceTop(selectionBottom + SELECTION_BAR_GUTTER_PX > barTopIfBottomPinned);
   }, [quote, selectionBottom]);
 
-  return (
+  // Portalled to <body>: rendered in place, the bar sits inside the conversation pane's
+  // stacking context, so the session footer slab painted over it and swallowed its taps.
+  return createPortal(
     <div
       ref={barRef}
       role="dialog"
       aria-label="Comment on selection"
       data-placement={placeTop ? 'top' : 'bottom'}
-      className={`fixed inset-x-0 z-panel border-border-default bg-surface px-3 shadow-lg ${
+      className={`fixed inset-x-2 z-panel rounded-2xl border border-border-default bg-surface p-3 shadow-2xl ${
         placeTop
-          ? 'top-0 border-b pt-[calc(0.625rem+env(safe-area-inset-top))] pb-2.5'
-          : 'bottom-0 border-t pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))]'
+          ? 'top-[calc(0.5rem+env(safe-area-inset-top))]'
+          : 'bottom-[calc(0.5rem+env(safe-area-inset-bottom))]'
       }`}
     >
-      <p className="m-0 mb-2 line-clamp-2 border-l-2 border-tn-blue pl-2 text-xs italic text-fg-muted [overflow-wrap:anywhere]">
-        {quote}
-      </p>
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="mb-3 flex min-w-0 items-start gap-2">
+        <span className="mt-0.5 shrink-0 text-tn-blue">
+          <CommentGlyph size={14} />
+        </span>
+        <p className="m-0 min-w-0 flex-1 line-clamp-2 text-xs italic text-fg-muted [overflow-wrap:anywhere]">
+          {quote}
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
         <Button
           size="sm"
+          className="flex-1"
           onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
           onClick={onComment}
         >
@@ -182,6 +191,7 @@ export function SelectionActionBar({
           Dismiss
         </Button>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

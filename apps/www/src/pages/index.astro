@@ -1,34 +1,13 @@
 ---
-import Base from '../layouts/Base.astro';
 import Header from '../components/Header.astro';
-import Hero from '../components/Hero.astro';
-import SocialProof from '../components/SocialProof.astro';
-import FeatureShowcase from '../components/FeatureShowcase.astro';
-import HowItWorks from '../components/HowItWorks.astro';
-import Comparison from '../components/Comparison.astro';
-import Roadmap from '../components/Roadmap.astro';
-import CtaFooter from '../components/CtaFooter.astro';
+import FactoryHome from '../components/factory/FactoryHome.astro';
+import Base from '../layouts/Base.astro';
 ---
 
 <Base
-  title="SAM: Run AI coding agents in parallel on your own cloud"
-  description="Simple Agent Manager (SAM) is open source and runs Claude Code, Codex, and other coding agents in parallel, each in its own workspace on your own cloud."
+  title="SAM: the open-source operating system for scalable software factories"
+  description="Simple Agent Manager (SAM) is where your team plans, builds, reviews and ships with AI coding agents, on machines in your own cloud. Open source under AGPL-3.0."
 >
   <Header />
-  <main>
-    <Hero />
-    <SocialProof />
-    <hr class="divider" />
-    <div id="features">
-      <FeatureShowcase />
-    </div>
-    <hr class="divider" />
-    <HowItWorks />
-    <hr class="divider" />
-    <Comparison />
-    <hr class="divider" />
-    <Roadmap />
-    <hr class="divider" />
-    <CtaFooter />
-  </main>
+  <FactoryHome />
 </Base>

@@ -1,3 +1,5 @@
+import { MIN_WAKE_INTERVAL_SECONDS_PROPERTY } from './wake-interval-param';
+
 const string = { type: 'string' } as const;
 const limit = { type: 'integer', minimum: 1 } as const;
 
@@ -6,7 +8,7 @@ export const PROJECT_EVENT_CHANNEL_TOOLS = [
     name: 'publish_channel_event',
     description:
       'Publish bounded untrusted evidence in a same-project agent channel. Actor and provenance are verified by SAM. Reusing a key replays the retained event; changing its message returns conflict. Idempotency ends when canonical retention removes the event. ' +
-      'Use it for findings, interface decisions, blockers, dependency readiness and completion evidence, not routine progress. Followers who requested prompt delivery are woken; you are never woken by your own publication. ' +
+      'Use it for findings, interface decisions, blockers, dependency readiness and completion evidence, not routine progress. Followers who requested prompt delivery are woken, no more often than the interval each follower chose; you are never woken by your own publication. ' +
       'Names starting with agent-dm. are reserved for SAM agent messaging (send_durable_message).',
     inputSchema: {
       type: 'object',
@@ -58,16 +60,25 @@ export const PROJECT_EVENT_CHANNEL_TOOLS = [
   {
     name: 'follow_event_channel',
     description:
-      'Atomically follow future channel events and capture a catch-up watermark after an optional consumed history cursor. Call catch_up_event_channel until hasMore is false, then use canonical list_subscription_events/read/ack. Omit cursor for future events only.',
+      'Atomically follow future channel events and capture a catch-up watermark after an optional consumed history cursor. Call catch_up_event_channel until hasMore is false, then use canonical list_subscription_events/read/ack. Omit cursor for future events only. ' +
+      'On a busy channel, set minWakeIntervalSeconds so its messages wake you at most that often instead of on every message.',
     inputSchema: {
       type: 'object',
       properties: {
         channel: string,
         cursor: string,
         idempotencyKey: string,
-        requestedDelivery: { type: 'string', enum: ['record_only', 'existing_session_prompt'] },
+        requestedDelivery: {
+          type: 'string',
+          enum: ['record_only', 'runtime_steer', 'existing_session_prompt'],
+          description:
+            'Omit (record_only) for a history feed you read on demand. runtime_steer wakes you on new messages: ' +
+            'added to your running turn when steering is supported, otherwise as a wake prompt. ' +
+            'existing_session_prompt always waits for your turn to end.',
+        },
         reason: string,
         expiresAt: limit,
+        minWakeIntervalSeconds: MIN_WAKE_INTERVAL_SECONDS_PROPERTY,
       },
       required: ['channel', 'idempotencyKey'],
       additionalProperties: false,

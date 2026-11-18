@@ -231,3 +231,40 @@ func TestEvictionOwnershipMigrationPreservesLegacyIntent(t *testing.T) {
 		t.Fatalf("legacy intent changed: %#v %v", got, err)
 	}
 }
+
+func TestEvictionRetryUpgradesIdleIntentToInterruptedWork(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "eviction.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.UpsertWorkspaceMetadata(WorkspaceMetadata{WorkspaceID: "workspace-1", EvictionGeneration: "run-1"}); err != nil {
+		t.Fatal(err)
+	}
+	d := evictionDeliveryFixture()
+	idle, active := false, true
+	d.InterruptedWork = &idle
+	if applied, err := store.RecordWorkspaceEviction(context.Background(), d); err != nil || !applied {
+		t.Fatalf("intent=%v %v", applied, err)
+	}
+	old, err := store.ClaimEvictionDelivery(context.Background(), "", time.Now(), time.Hour, time.Hour, time.Hour)
+	if err != nil || old == nil {
+		t.Fatalf("claim=%v %v", old, err)
+	}
+	d.InterruptedWork = &active
+	if applied, err := store.RecordWorkspaceEviction(context.Background(), d); err != nil || !applied {
+		t.Fatalf("update=%v %v", applied, err)
+	}
+	// A response for the old idle payload must not delete the updated evidence.
+	if err := store.CompleteEvictionDelivery(context.Background(), old.ID, old.Attempts, old.PayloadRevision); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := store.ClaimEvictionDelivery(context.Background(), "", time.Now(), time.Second, time.Minute, time.Second)
+	if err != nil || updated == nil {
+		t.Fatalf("new work was not immediately due: %v %v", updated, err)
+	}
+	assertInterruptedWork(t, updated.InterruptedWork, &active)
+	if updated.PayloadRevision <= old.PayloadRevision {
+		t.Fatal("new work did not advance payload revision")
+	}
+}

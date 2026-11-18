@@ -31,6 +31,7 @@ import {
 import { useCancelAgentPrompt } from '../../components/project-message-view/useCancelAgentPrompt';
 import { useCompletionDockWorking } from '../../components/project-message-view/useCompletionDockWorking';
 import { useToolCallGroupRowState } from '../../components/project-message-view/useToolCallGroupRowState';
+import { usePlatformCapabilities } from '../../hooks/usePlatformCapabilities';
 import {
   getChatSession,
   getTranscribeApiUrl,
@@ -84,7 +85,6 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
 
   const {
     connectionState,
-    wsRef,
     agentActivity,
     setAgentActivity,
     hydrateActivity,
@@ -93,6 +93,8 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     projectId,
     sessionId,
     sessionStatus: session?.status,
+    access: session?.access,
+    messages,
     setMessages,
     setSession,
   });
@@ -129,9 +131,10 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
   // Consecutive tool calls fold into one collapsed activity row, with the same
   // parent-held expansion state and the same live signal as project chat, so the
   // two surfaces cannot drift (`.claude/rules/24`).
+  const undeliveredList = session?.access?.undelivered;
   const conversationItems = useMemo<DisplayItem[]>(() => {
-    return groupToolCallItems(chatMessagesToConversationItems(messages));
-  }, [messages]);
+    return groupToolCallItems(chatMessagesToConversationItems(messages, undeliveredList));
+  }, [messages, undeliveredList]);
 
   /*
    * Expansion lives here, not in the card: Virtuoso unmounts rows outside its
@@ -146,6 +149,8 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
   // Stable identity: an inline arrow gives Virtuoso a new `itemContent` on every
   // parent render, re-rendering every windowed row and defeating
   // `AcpConversationItemView`'s memo (`.claude/rules/64`).
+  // One capabilities read for the whole list; rows get the primitive (AcpConversationItemView).
+  const { textToSpeech } = usePlatformCapabilities();
   const renderConversationItem = useCallback(
     (_index: number, item: DisplayItem) => (
       <div className="px-4 py-1">
@@ -157,10 +162,11 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
           }
           onToggleGroup={groupRowState.onToggleGroup}
           groupLive={groupRowState.groupLiveFor(item.id)}
+          serverTextToSpeech={textToSpeech}
         />
       </div>
     ),
-    [projectId, groupRowState]
+    [projectId, groupRowState, textToSpeech]
   );
 
   // ── Cancel the current in-flight prompt ──
@@ -221,23 +227,11 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
         },
       ]);
 
-      // Persist via DO WebSocket
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(
-          JSON.stringify({
-            type: 'message.send',
-            sessionId,
-            content: trimmed,
-            role: 'user',
-          })
-        );
-      }
-
-      // Forward prompt to the running agent via REST API
+      // Deliver through the REST API, which persists the attributed transcript row; the
+      // project socket is read-only.
       try {
         await sendFollowUpPrompt(projectId, sessionId, trimmed);
       } catch {
-        // Agent may be offline — message is still persisted via DO.
         // Reset to idle so the input isn't stuck in "Agent is working..." forever.
         setAgentActivity('idle');
       }
@@ -252,7 +246,6 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     sessionState,
     projectId,
     sessionId,
-    wsRef,
     clearCancelError,
     setAgentActivity,
   ]);

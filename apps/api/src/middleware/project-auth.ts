@@ -31,6 +31,13 @@ export const PROJECT_CAPABILITIES = [
 ] as const;
 export type ProjectCapability = (typeof PROJECT_CAPABILITIES)[number];
 
+/**
+ * Choosing which of YOUR OWN agent accounts runs your work in a project (pinning,
+ * unpinning, or connecting one there) changes only your runs, never another
+ * member's, so it needs the permission to run tasks rather than `secret:write`.
+ */
+export const OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY: ProjectCapability = 'task:write';
+
 const ROLE_CAPABILITIES: Record<ProjectMemberRole, ReadonlySet<ProjectCapability>> = {
   owner: new Set(PROJECT_CAPABILITIES),
   admin: new Set(
@@ -137,28 +144,28 @@ export function projectMemberRolesWithCapability(
  * as `notFound('Project')`. Order matters for the error a caller sees — the project assertion
  * is evaluated first, exactly as when these ran sequentially.
  */
-async function requireActiveProjectMembership(
+export async function requireActiveProjectMembership(
   db: AppDb,
   projectId: string,
   userId: string
 ): Promise<{ project: schema.Project; membership: schema.ProjectMember }> {
-  const [projectRows, memberRows] = await Promise.all([
-    db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).limit(1),
-    db
-      .select()
-      .from(schema.projectMembers)
-      .where(
-        and(
-          eq(schema.projectMembers.projectId, projectId),
-          eq(schema.projectMembers.userId, userId),
-          eq(schema.projectMembers.status, 'active')
-        )
+  // One read keeps project-scoped readers within their cold-request I/O budget.
+  const [row] = await db
+    .select({ project: schema.projects, membership: schema.projectMembers })
+    .from(schema.projects)
+    .innerJoin(schema.projectMembers, eq(schema.projectMembers.projectId, schema.projects.id))
+    .where(
+      and(
+        eq(schema.projects.id, projectId),
+        eq(schema.projectMembers.projectId, projectId),
+        eq(schema.projectMembers.userId, userId),
+        eq(schema.projectMembers.status, 'active')
       )
-      .limit(1),
-  ]);
+    )
+    .limit(1);
 
-  const project = assertProject(projectRows[0], projectId, 'Project');
-  const membership = assertActiveMembership(memberRows[0], projectId, userId);
+  const project = assertProject(row?.project, projectId, 'Project');
+  const membership = assertActiveMembership(row?.membership, projectId, userId);
 
   return { project, membership };
 }

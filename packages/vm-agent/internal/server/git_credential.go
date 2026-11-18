@@ -3,7 +3,6 @@ package server
 import (
 	"bytes"
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/workspace/vm-agent/internal/bootstrap"
 	"github.com/workspace/vm-agent/internal/gitrepo"
 )
 
@@ -37,12 +37,12 @@ func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
 		workspaceID = strings.TrimSpace(s.routedWorkspaceID(r))
 	}
 
-	if !isAuthorizedGitCredentialRequest(s, r, workspaceID) {
+	callbackToken, authorized := gitCredentialCallbackToken(s, r, workspaceID)
+	if !authorized {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
-	bearerToken := bearerTokenFromHeader(r.Header.Get("Authorization"))
 	requestedHost := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("host")))
 	requestedPath := strings.TrimSpace(r.URL.Query().Get("path"))
 	// GitLab-bound workspaces vend a broad user OAuth token, so the exchange is
@@ -50,6 +50,13 @@ func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
 	// it is requesting credentials for. GitHub/Artifacts keep the empty-allow
 	// behavior because the gh wrapper flow sends host=github.com with no path.
 	boundProvider, _ := s.credentialPathBinding(workspaceID)
+	// Hosted repository write credentials are never valid for a cleartext Git
+	// request. Require the helper's explicit protocol before fetching a token.
+	requestedProtocol := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("protocol")))
+	if strings.EqualFold(boundProvider, "artifacts") && requestedProtocol != "https" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if strings.EqualFold(boundProvider, "gitlab") && (requestedHost == "" || requestedPath == "") {
 		slog.Warn("Git credential request refused: gitlab-bound workspace requires host and path",
 			"workspaceID", workspaceID,
@@ -68,7 +75,7 @@ func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := s.fetchGitTokenResponseForWorkspace(r.Context(), workspaceID, bearerToken)
+	resp, err := s.fetchGitTokenResponseForWorkspace(r.Context(), workspaceID, callbackToken)
 	if err != nil {
 		slog.Error("Failed to fetch git token", "error", err)
 		writeError(w, http.StatusBadGateway, "failed to fetch git token")
@@ -104,6 +111,15 @@ func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
 	// the control plane resolved. An empty resolved repositoryPath means we
 	// cannot verify the binding — refuse rather than vend a broad OAuth token.
 	gitlabResponse := strings.EqualFold(strings.TrimSpace(resp.Provider), "gitlab")
+	// The Artifacts callback predates provider tags: it returns cloneUrl while
+	// GitHub omits it and GitLab identifies itself explicitly. Preserve this
+	// legacy response contract when local provider metadata is unavailable.
+	artifactsResponse := strings.EqualFold(strings.TrimSpace(resp.Provider), "artifacts") ||
+		(strings.TrimSpace(resp.Provider) == "" && strings.TrimSpace(resp.CloneURL) != "")
+	if artifactsResponse && requestedProtocol != "https" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if gitlabResponse && (requestedHost == "" || requestedPath == "" || repositoryPath == "") {
 		slog.Warn("Git credential response withheld: gitlab credential requires verified host and path",
 			"workspaceID", workspaceID,
@@ -114,7 +130,11 @@ func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	if requestedHost != "" && !credentialHostMatchesRequest(host, requestedHost) {
+	hostMatches := credentialHostMatchesRequest(host, requestedHost)
+	if strings.EqualFold(boundProvider, "artifacts") && (resp.Provider == "" || strings.EqualFold(resp.Provider, "artifacts")) {
+		hostMatches = requestedHost == "" || gitrepo.HTTPSAuthoritiesEqual(host, requestedHost)
+	}
+	if requestedHost != "" && !hostMatches {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -149,7 +169,13 @@ func (s *Server) isAllowedCredentialHostForWorkspace(workspaceID, requestedHost 
 		return true
 	}
 	if runtime, ok := s.getWorkspaceRuntime(workspaceID); ok {
+		if strings.EqualFold(runtime.RepoProvider, "artifacts") {
+			return gitrepo.HTTPSAuthoritiesEqual(runtime.RepositoryHost, requestedHost)
+		}
 		return strings.EqualFold(strings.TrimSpace(runtime.RepositoryHost), requestedHost)
+	}
+	if strings.EqualFold(s.config.RepoProvider, "artifacts") {
+		return gitrepo.HTTPSAuthoritiesEqual(s.config.RepositoryHost, requestedHost)
 	}
 	return strings.EqualFold(strings.TrimSpace(s.config.RepositoryHost), requestedHost)
 }
@@ -275,9 +301,6 @@ func (s *Server) fetchGitTokenResponseForWorkspace(ctx context.Context, workspac
 func (s *Server) gitTokenRequestCredentials(workspaceID, callbackToken string) (string, string, error) {
 	targetWorkspaceID := strings.TrimSpace(workspaceID)
 	if targetWorkspaceID == "" {
-		targetWorkspaceID = strings.TrimSpace(s.config.WorkspaceID)
-	}
-	if targetWorkspaceID == "" {
 		return "", "", fmt.Errorf("workspace id is required for git-token request")
 	}
 
@@ -376,40 +399,53 @@ func bearerTokenFromHeader(authHeader string) string {
 	return strings.TrimSpace(strings.TrimPrefix(authHeader, gitCredentialBearerPrefix))
 }
 
-func isLocalGitCredentialExchange(r *http.Request) bool {
+// gitCredentialCallbackToken authenticates the local exchange and returns the
+// callback token that may be forwarded to the control plane. A workspace's
+// dedicated helper bearer authenticates only this node-local endpoint, so it is
+// never forwarded; the agent substitutes its in-memory callback token instead.
+func gitCredentialCallbackToken(s *Server, r *http.Request, workspaceID string) (string, bool) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return "", false
+	}
+	presented := bearerTokenFromHeader(r.Header.Get("Authorization"))
+	if presented == "" {
+		return "", false
+	}
+	if isDirectLocalGitCredentialExchange(r) &&
+		isKnownWorkspaceGitCredentialRequest(s, workspaceID) &&
+		bootstrap.ValidateGitCredentialExchange(workspaceID, presented) {
+		return "", true
+	}
+	if s.isValidCallbackAuth(r, workspaceID) {
+		return presented, true
+	}
+	return "", false
+}
+
+// isDirectLocalGitCredentialExchange reports whether the request can have come
+// straight from a helper on this node: a loopback or private peer, not relayed
+// by a proxy or the tunnel listener. The helper bearer is a node-local secret,
+// so a relayed request carrying it is refused even though the bearer itself
+// would validate (defence in depth; the callback bearer is unaffected).
+func isDirectLocalGitCredentialExchange(r *http.Request) bool {
+	if isRelayedRequest(r) {
+		return false
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
 	}
 	ip := net.ParseIP(strings.TrimSpace(host))
-	if ip == nil {
-		return false
-	}
-	return ip.IsLoopback() || ip.IsPrivate()
+	return ip != nil && (ip.IsLoopback() || ip.IsPrivate())
 }
 
-func isAuthorizedGitCredentialRequest(s *Server, r *http.Request, workspaceID string) bool {
-	if bearerTokenFromHeader(r.Header.Get("Authorization")) != "" {
-		return s.isValidCallbackAuth(r, workspaceID)
-	}
-	return isLocalGitCredentialExchange(r) && isKnownWorkspaceGitCredentialRequest(s, workspaceID)
-}
-
-// isKnownWorkspaceGitCredentialRequest authorizes a bearerless loopback credential
-// exchange for ANY workspace currently running on this node — the node's primary
-// workspace and every secondary workspace registered in the runtime map are treated
-// equally. The control-plane exchange still returns a tightly scoped (per-workspace,
-// ~1h, owner-scoped) token covering only the project's primary repository plus any
-// explicitly granted additional repositories, so equal treatment here does not widen
-// the blast radius: it only lets each running workspace refresh its own token over the
-// loopback interface. An empty workspace id defaults to the node's primary so the
-// single-workspace host path is unchanged.
+// isKnownWorkspaceGitCredentialRequest limits dedicated helper bearers to a
+// workspace currently registered on this node. Callback JWT callers are checked
+// independently by isValidCallbackAuth.
 func isKnownWorkspaceGitCredentialRequest(s *Server, workspaceID string) bool {
 	requestedWorkspaceID := strings.TrimSpace(workspaceID)
 	primaryWorkspaceID := strings.TrimSpace(s.config.WorkspaceID)
-	if requestedWorkspaceID == "" {
-		requestedWorkspaceID = primaryWorkspaceID
-	}
 	if requestedWorkspaceID == "" {
 		return false
 	}
@@ -418,85 +454,4 @@ func isKnownWorkspaceGitCredentialRequest(s *Server, workspaceID string) bool {
 	}
 	_, ok := s.getWorkspaceRuntime(requestedWorkspaceID)
 	return ok
-}
-
-func (s *Server) isValidCallbackAuth(r *http.Request, workspaceID string) bool {
-	given := bearerTokenFromHeader(r.Header.Get("Authorization"))
-	if given == "" {
-		slog.Warn("Git credential auth rejected: missing bearer token", "workspaceID", workspaceID)
-		return false
-	}
-
-	candidates := s.callbackAuthCandidates(workspaceID)
-	for _, candidate := range candidates {
-		if constantTimeTokenEqual(given, candidate.token) {
-			return true
-		}
-	}
-
-	jwtErr := "not_checked"
-	if workspaceID != "" {
-		if s.jwtValidator == nil {
-			jwtErr = "validator_unavailable"
-		} else if _, err := s.jwtValidator.ValidateWorkspaceCallbackToken(given, workspaceID); err != nil {
-			jwtErr = err.Error()
-		} else {
-			return true
-		}
-	}
-
-	s.logGitCredentialAuthRejected(workspaceID, len(given), candidates, jwtErr)
-	return false
-}
-
-type callbackAuthCandidate struct {
-	source string
-	token  string
-}
-
-func (s *Server) callbackAuthCandidates(workspaceID string) []callbackAuthCandidate {
-	candidates := []callbackAuthCandidate{{
-		source: "config",
-		token:  strings.TrimSpace(s.config.CallbackToken),
-	}}
-	if workspaceID == "" {
-		return candidates
-	}
-	if token, ok := s.lookupWorkspaceCallbackToken(workspaceID); ok {
-		candidates = append(candidates, callbackAuthCandidate{
-			source: "workspace",
-			token:  token,
-		})
-	}
-	return candidates
-}
-
-func constantTimeTokenEqual(given, expected string) bool {
-	if expected == "" || len(given) != len(expected) {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(given), []byte(expected)) == 1
-}
-
-func (s *Server) logGitCredentialAuthRejected(
-	workspaceID string,
-	givenLen int,
-	candidates []callbackAuthCandidate,
-	jwtErr string,
-) {
-	sources := make([]string, 0, len(candidates))
-	lengths := make([]int, 0, len(candidates))
-	for _, candidate := range candidates {
-		sources = append(sources, candidate.source)
-		lengths = append(lengths, len(candidate.token))
-	}
-	_, runtimeExists := s.getWorkspaceRuntime(workspaceID)
-	slog.Warn("Git credential auth rejected",
-		"workspaceID", workspaceID,
-		"runtimeExists", runtimeExists,
-		"givenLen", givenLen,
-		"candidateSources", sources,
-		"candidateLens", lengths,
-		"jwtValidation", jwtErr,
-	)
 }

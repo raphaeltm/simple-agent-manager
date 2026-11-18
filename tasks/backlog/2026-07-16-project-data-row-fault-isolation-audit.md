@@ -1,5 +1,13 @@
 # Audit project-data DO list reads for single-bad-row fault isolation
 
+> **Reconciliation 2026-10-26:** #2443 (`a3a802caa`) gave `listActiveAttentionMarkers` per-row
+> isolation (`attention.ts:331-354`, was `:343`), and #2435 (`45c7490fd`) deleted
+> `project-data/ideas.ts`, so `ideas.ts:51,74` are gone. The attention expiry reads are now
+> `attention.ts:427,447`, and the project-events `mapRows` is now
+> `project-events-storage-helpers.ts:612`. Still open: the other listed reads, plus bare parses the
+> list misses at `knowledge.ts:188`, `acp-sessions.ts:120,458,475,523` and
+> `missions.ts:71,79,210,228`.
+
 > **Reconciliation 2026-10-05:** A second tolerant row mapper already exists: `mapRows` in `apps/api/src/durable-objects/project-data/project-events-storage-helpers.ts:594`, used by five project-events modules since #1962, duplicates `apps/api/src/durable-objects/row-validation.ts:50`. The fault-isolation fix should consolidate onto one helper rather than add a third.
 
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**

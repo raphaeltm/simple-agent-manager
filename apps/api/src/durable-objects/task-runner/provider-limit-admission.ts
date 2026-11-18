@@ -1,14 +1,18 @@
-import { drizzle } from 'drizzle-orm/d1';
-
-import { getCredentialEncryptionKey } from '../../lib/secrets';
-import { getSelectedAgentCredentialReference } from '../../routes/credentials';
-import { credentialLimitReferenceKey } from '../../services/credential-limit-events/values';
-import * as projectData from '../../services/project-data';
 import {
   newProviderLimitWait,
   parseProviderLimitWait,
   PROVIDER_LIMIT_POLICY,
-} from '../../services/provider-limit-policy';
+} from '@simple-agent-manager/scheduler-core';
+import { drizzle } from 'drizzle-orm/d1';
+
+import * as schema from '../../db/schema';
+import { getCredentialEncryptionKey } from '../../lib/secrets';
+import { getSelectedAgentCredentialReference } from '../../routes/credentials';
+import { resolveProfileCredentialContext } from '../../services/composable-credentials/profile-context';
+import { credentialLimitReferenceKey } from '../../services/credential-limit-events/values';
+import * as projectData from '../../services/project-data';
+import { presentBlockedProviderLimitWait } from '../../services/provider-limit-recovery';
+import { resolveProviderLimitResetWindowTolerance } from '../../services/provider-limit-settings';
 import { rejectedProviderWindow } from '../../services/provider-limit-window';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
@@ -24,12 +28,20 @@ export async function holdTaskForProviderLimit(
   )
     return false;
   const row = await rc.env.DATABASE.prepare(
-    'SELECT provider_limit_wait_json FROM tasks WHERE id = ?'
+    'SELECT provider_limit_wait_json, agent_profile_hint, skill_id, agent_configuration_id FROM tasks WHERE id = ?'
   )
     .bind(state.taskId)
-    .first<{ provider_limit_wait_json: string | null }>();
+    .first<{
+      provider_limit_wait_json: string | null;
+      agent_profile_hint: string | null;
+      skill_id: string | null;
+      agent_configuration_id: string | null;
+    }>();
   const previous = parseProviderLimitWait(row?.provider_limit_wait_json);
   const now = Date.now();
+  const ownerResumed =
+    previous?.phase === 'released' &&
+    previous.scheduleKey.startsWith(`provider-limit:${state.taskId}:resume:`);
   if (row?.provider_limit_wait_json && !previous) {
     await rc.assertRecoveryAuthority(state);
     await rc.env.DATABASE.prepare(
@@ -74,23 +86,74 @@ export async function holdTaskForProviderLimit(
     if (!intent) return false;
   }
 
+  // Same credential context as the agent-key callback, so admission checks the limit
+  // of the account the run will actually start on (a run account or profile pin included).
+  const db = drizzle(rc.env.DATABASE, { schema });
+  const profile = await resolveProfileCredentialContext(db, {
+    userId: state.userId,
+    projectId: state.projectId,
+    profileId: row?.agent_profile_hint ?? state.config.agentProfileHint,
+    skillId: row?.skill_id ?? null,
+    runConfigurationId: row?.agent_configuration_id ?? null,
+  });
   const reference = await getSelectedAgentCredentialReference(
-    drizzle(rc.env.DATABASE),
+    db,
     state.userId,
     state.config.agentType || rc.env.DEFAULT_TASK_AGENT_TYPE || 'opencode',
     getCredentialEncryptionKey(rc.env),
-    state.projectId
+    state.projectId,
+    profile
   );
   const key = reference ? await credentialLimitReferenceKey(reference) : null;
+  // The owner chose to start despite the hold (startProviderLimitTaskAnyway), typically to
+  // spend extra credits the subscription window doesn't show (automatic fix tracked in idea
+  // 01M73WJGGD2TZP6XDFHJJWHD33). It covers only the exact, non-null credential it was granted
+  // for: any other selection falls through to the checks below and blocks for review. A real
+  // provider rejection later builds a fresh wait without the override and parks as usual.
+  const approval = previous?.ownerOverride;
+  const approvalScopeChanged =
+    approval?.expiresAt !== undefined &&
+    (approval.expiresAt <= now ||
+      approval.profileId !== (row?.agent_profile_hint ?? null) ||
+      approval.skillId !== (row?.skill_id ?? null) ||
+      (approval.runConfigurationId ?? null) !== (row?.agent_configuration_id ?? null) ||
+      approval.agentType !==
+        (state.config.agentType || rc.env.DEFAULT_TASK_AGENT_TYPE || 'opencode') ||
+      (approval.profileId !== null && profile?.profileId !== approval.profileId) ||
+      (profile !== null && profile.agentType !== null && profile.agentType !== approval.agentType));
+  if (
+    key !== null &&
+    previous?.phase === 'released' &&
+    approval?.credentialKey === key &&
+    !approvalScopeChanged
+  )
+    return false;
   const window = await rejectedProviderWindow(rc.env, reference, now);
   let wait = previous;
-  if (previous?.credentialKey && previous.credentialKey !== key) {
+  if (
+    previous &&
+    (approvalScopeChanged ||
+      (!ownerResumed && previous.credentialKey && previous.credentialKey !== key))
+  ) {
     wait = {
       ...previous,
       phase: 'blocked',
-      reason: 'Blocked: selected provider credential changed; review before resuming.',
+      reason: approvalScopeChanged
+        ? 'Blocked: provider resume approval expired or the selected profile changed; review before resuming.'
+        : 'Blocked: selected provider credential changed; review before resuming.', // A blocked wait needs fresh review; an earlier start-anyway must not carry over.
+      ownerOverride: undefined,
     };
   } else if (previous?.phase === 'blocked') {
+    await presentBlockedProviderLimitWait(
+      rc.env,
+      {
+        id: state.taskId,
+        projectId: state.projectId,
+        chatSessionId: state.config.chatSessionId ?? null,
+        workspaceId: state.stepResults.workspaceId,
+      },
+      previous
+    );
     await rc.ctx.storage.deleteAlarm();
     return true; // no automatic retries once blocked
   } else if (previous?.phase === 'waiting' && previous.deadlineAt < now) {
@@ -98,20 +161,48 @@ export async function holdTaskForProviderLimit(
       ...previous,
       phase: 'blocked',
       reason:
-        'Blocked: provider limit wake deadline expired. Review retained work before resuming.',
+        'Blocked: provider limit wake deadline expired. Review retained work before resuming.', // A blocked wait needs fresh review; an earlier start-anyway must not carry over.
+      ownerOverride: undefined,
     };
   } else if (previous?.phase === 'waiting' && previous.nextRetryAt > now) {
+    // Every other branch writes through a compare-and-set; this one only re-arms. Re-read
+    // first: an owner start-anyway or resume that landed during the awaits above has already
+    // nudged this runner, and re-arming the old far-future retry would overwrite that nudge.
+    const current = await rc.env.DATABASE.prepare(
+      'SELECT provider_limit_wait_json FROM tasks WHERE id = ?'
+    )
+      .bind(state.taskId)
+      .first<{ provider_limit_wait_json: string | null }>();
+    if ((current?.provider_limit_wait_json ?? null) !== (row?.provider_limit_wait_json ?? null)) {
+      await rc.ctx.storage.setAlarm(now);
+      return true;
+    }
     await rc.ctx.storage.setAlarm(previous.nextRetryAt);
     return true;
   } else if (!window) {
-    if (previous && previous.phase !== 'released') {
+    if (previous && (previous.phase !== 'released' || ownerResumed)) {
       await rc.assertRecoveryAuthority(state);
+      // The queued watchdog measures runnable orchestration time. A deliberate
+      // provider wait is outside that interval; release starts a fresh clock.
+      // Its terminal CAS also checks this timestamp, fencing an earlier scan.
       const released = await rc.env.DATABASE.prepare(
-        `UPDATE tasks SET provider_limit_wait_json = ?, admission_state = NULL, admission_reason = NULL, admission_next_retry_at = NULL
+        `UPDATE tasks SET provider_limit_wait_json = ?, admission_state = NULL, admission_reason = NULL, admission_next_retry_at = NULL, updated_at = ?
          WHERE id = ? AND provider_limit_wait_json IS ?`
       )
         .bind(
-          JSON.stringify({ ...previous, phase: 'released' }),
+          ownerResumed && key === null
+            ? null
+            : JSON.stringify({
+                ...previous,
+                phase: 'released',
+                ...(ownerResumed
+                  ? {
+                      credentialKey: key,
+                      scheduleKey: `provider-limit:${state.taskId}:${crypto.randomUUID()}`,
+                    }
+                  : {}),
+              }),
+          new Date(now).toISOString(),
           state.taskId,
           row?.provider_limit_wait_json ?? null
         )
@@ -126,9 +217,10 @@ export async function holdTaskForProviderLimit(
     wait = newProviderLimitWait({
       taskId: state.taskId,
       origin: 'admission',
+      resetWindowToleranceMs: await resolveProviderLimitResetWindowTolerance(rc.env),
       incidentId: `admission:${state.taskId}:${window.observedAt}`,
       credentialKey: key,
-      previous,
+      previous: ownerResumed ? null : previous,
       now,
       resetsAt: window.resetsAt,
     });
@@ -170,6 +262,18 @@ export async function holdTaskForProviderLimit(
       `${wait.scheduleKey}:notice`
     );
   if (wait.phase === 'waiting') await rc.ctx.storage.setAlarm(wait.nextRetryAt);
-  else await rc.ctx.storage.deleteAlarm();
+  else {
+    await presentBlockedProviderLimitWait(
+      rc.env,
+      {
+        id: state.taskId,
+        projectId: state.projectId,
+        chatSessionId: state.config.chatSessionId ?? null,
+        workspaceId: state.stepResults.workspaceId,
+      },
+      wait
+    );
+    await rc.ctx.storage.deleteAlarm();
+  }
   return true;
 }

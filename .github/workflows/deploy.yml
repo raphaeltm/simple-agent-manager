@@ -62,7 +62,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup pnpm
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -88,7 +88,16 @@ jobs:
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
+    # deployments: read lets the gate read the production deployment markers written by
+    # mark-production-deployment, so a tip that is already deployed is not deployed twice.
+    permissions:
+      contents: read
+      actions: read
+      deployments: read
     outputs:
+      # Empty when the gate decides not to deploy (tip CI not green yet, or tip already
+      # deployed). The deploy job must then be skipped: deploy-reusable.yml would
+      # otherwise fall back to github.sha.
       deploy_sha: ${{ steps.gate.outputs.deploy_sha }}
     steps:
       - name: Checkout trusted current main
@@ -96,7 +105,7 @@ jobs:
         with:
           ref: refs/heads/main
       - name: Setup pnpm
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -104,12 +113,16 @@ jobs:
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
-      - name: Re-verify current main after deployment queue
+      # Overlapping main CI runs finish out of order and GitHub keeps one pending run per
+      # concurrency group, so this run may have been triggered by an older commit. The
+      # gate therefore selects the current main tip (read now, after the queue) and
+      # deploys it only when the tip has its own successful CI push run on main.
+      - name: Select current main tip after deployment queue
         id: gate
         run: pnpm tsx scripts/deploy/validate-production-dispatch.ts
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          TARGET_COMMIT_SHA: ${{ github.event.workflow_run.head_sha }}
+          TRIGGERING_COMMIT_SHA: ${{ github.event.workflow_run.head_sha }}
 
   # Gate only on the GitHub Actions CI workflow result. SonarCloud is a
   # separate GitHub App check and must not suppress production deploys.
@@ -124,7 +137,8 @@ jobs:
         ) ||
         (
           github.event_name == 'workflow_run' &&
-          needs.validate-automatic-dispatch.result == 'success'
+          needs.validate-automatic-dispatch.result == 'success' &&
+          needs.validate-automatic-dispatch.outputs.deploy_sha != ''
         )
       )
     uses: ./.github/workflows/deploy-reusable.yml

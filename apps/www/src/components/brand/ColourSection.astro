@@ -1,0 +1,320 @@
+---
+/**
+ * 03 Colour. On wide screens with motion, the palette is a horizontal track pinned while
+ * the page scrolls past it; otherwise it is a plain grid. Then the signal colours, the
+ * proportion bar and the rules.
+ */
+import { bestText, grade, rgbTriplet, SWATCHES } from '../../data/brand';
+import SectionHead from './SectionHead.astro';
+
+const trackGroups = new Set(['brand', 'mascot', 'ground']);
+const track = SWATCHES.filter((swatch) => trackGroups.has(swatch.group));
+const signals = SWATCHES.filter((swatch) => swatch.group === 'signal');
+const groupLabel = { brand: 'Brand', mascot: 'Mascot', ground: 'Ground', signal: 'Signal' } as const;
+
+const proportions = [
+  { label: 'Void and panes', share: 72, color: '#0b1110' },
+  { label: 'Text', share: 16, color: '#e6f2ee' },
+  { label: 'SAM Green', share: 8, color: '#16a34a' },
+  { label: 'Lime and amber', share: 4, color: '#86cc00' },
+];
+---
+
+<section id="colour" class="bg-section bg-colour" aria-labelledby="colour-title">
+  <div class="container">
+    <SectionHead id="colour" title="One green, deep ground">
+      SAM Green, #16a34a, is the brand colour everywhere: the site, the app, social profiles and
+      the mascot's backgrounds. Everything else is a dark green void and the light that falls on
+      it. Select a value to copy it.
+    </SectionHead>
+  </div>
+
+  <div class="container">
+    <a class="bg-skip" href="#colour-signals">Skip the palette</a>
+  </div>
+  <div class="bg-pin" data-pin data-progress="pin">
+    <div class="bg-pin-sticky">
+      <ol class="bg-track" data-pin-track>
+        {track.map((swatch, index) => {
+          const text = bestText(swatch.hex);
+          return (
+            <li class="bg-swatch" data-pin-card style={`--sw:${swatch.hex};--ink:${text.ink};--anti:${text.ink === '#ffffff' ? '#000000' : '#ffffff'};--i:${index % 4}`} data-reveal>
+              <div class="bg-swatch-top">
+                <span class="bg-swatch-group">{groupLabel[swatch.group]}</span>
+                <span class="bg-swatch-ratio" title="Contrast with the text colour shown">{text.ratio.toFixed(1)}:1 · {grade(text.ratio)}</span>
+              </div>
+              <div class="bg-swatch-bottom">
+                <h3>{swatch.name}</h3>
+                <p>{swatch.role}</p>
+                <div class="bg-swatch-values">
+                  <button class="bg-copy" type="button" data-copy={swatch.hex} aria-label={`Copy ${swatch.name} hex ${swatch.hex}`}>{swatch.hex}</button>
+                  <button class="bg-copy" type="button" data-copy={`rgb(${rgbTriplet(swatch.hex)})`} aria-label={`Copy ${swatch.name} rgb ${rgbTriplet(swatch.hex)}`}>rgb {rgbTriplet(swatch.hex)}</button>
+                  {swatch.token && <button class="bg-copy" type="button" data-copy={`var(${swatch.token.name})`} aria-label={`Copy ${swatch.name} token ${swatch.token.name}${swatch.token.theme === 'light' ? ' (light)' : ''}`}>{swatch.token.name}{swatch.token.theme === 'light' ? ' (light)' : ''}</button>}
+                </div>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  </div>
+
+  <div class="container">
+    <h3 class="bg-sub" id="colour-signals" tabindex="-1">Colours that mean something</h3>
+    <ul class="bg-signals">
+      {signals.map((swatch, index) => (
+        <li class="sam-glass sam-glass-rim" data-reveal style={`--i:${index}`}>
+          <span class="dot" style={`--sw:${swatch.hex}`} aria-hidden="true"></span>
+          <div>
+            <h4>{swatch.name}</h4>
+            <p>{swatch.role}</p>
+            <button class="bg-copy" type="button" data-copy={swatch.hex} aria-label={`Copy ${swatch.name} hex ${swatch.hex}`}>{swatch.hex}</button>
+          </div>
+        </li>
+      ))}
+    </ul>
+
+    <h3 class="bg-sub">How much of each</h3>
+    <div class="bg-share" data-reveal="wipe" role="img" aria-label={proportions.map((p) => `${p.label} ${p.share}%`).join(', ')}>
+      {proportions.map((part) => (
+        <span style={`--share:${part.share};--sw:${part.color}`}>
+          <b>{part.share}%</b>
+          <em>{part.label}</em>
+        </span>
+      ))}
+    </div>
+
+    <ul class="bg-rules">
+      <li class="sam-glass sam-glass-rim"><strong>One green.</strong> Use #16a34a for brand moments. The brighter #23c65f from old social art is retired.</li>
+      <li class="sam-glass sam-glass-rim"><strong>Green means working.</strong> Running, success, primary actions. Amber means it is waiting on you. Neither is decoration.</li>
+      <li class="sam-glass sam-glass-rim"><strong>People colours say who.</strong> Cyan, violet and rose are teammates in the order they joined. They never show a status.</li>
+      <li class="sam-glass sam-glass-rim"><strong>Keep glows faint.</strong> Ambient green glows stay at 20% opacity or less. Richness comes from rims and layers, not neon.</li>
+    </ul>
+  </div>
+  <p class="sr-only" aria-live="polite" data-copy-status></p>
+</section>
+
+<style>
+  /* Shown only when focused, so keyboard users can pass the palette's many copy buttons. */
+  .bg-skip {
+    position: absolute;
+    left: -9999px;
+    padding: 8px 14px;
+    border-radius: var(--radius-md);
+    background: var(--color-bg-surface);
+  }
+
+  .bg-skip:focus-visible {
+    position: static;
+    display: inline-block;
+    margin-bottom: 16px;
+  }
+
+  /* --- Track: a grid by default, a pinned horizontal strip on wide screens with motion --- */
+  .bg-pin {
+    position: relative;
+  }
+
+  .bg-track {
+    display: grid;
+    gap: 14px;
+    list-style: none;
+    padding: 0 24px;
+    max-width: var(--max-width);
+    margin: 0 auto;
+  }
+
+  @media (min-width: 560px) {
+    .bg-track {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 900px) {
+    .bg-track {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      padding: 0 40px;
+    }
+  }
+
+  .bg-pin[data-pinned] .bg-pin-sticky {
+    position: sticky;
+    top: 0;
+    display: grid;
+    align-items: center;
+    height: 100vh;
+    /* clip, not hidden: a hidden box is still scrollable, so focusing a card would scroll it
+       sideways on top of the track's own transform. */
+    overflow: clip;
+  }
+
+  .bg-pin[data-pinned] .bg-track {
+    display: flex;
+    width: max-content;
+    max-width: none;
+    padding: 0 max(40px, calc((100vw - var(--max-width)) / 2 + 40px));
+    transform: translate3d(calc(var(--p, 0) * var(--shift, 0) * -1px), 0, 0);
+    will-change: transform;
+  }
+
+  .bg-pin[data-pinned] .bg-swatch {
+    flex: none;
+    width: 320px;
+    height: min(66vh, 500px);
+  }
+
+  .bg-swatch {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    min-height: 300px;
+    padding: 20px;
+    border-radius: 24px;
+    color: var(--ink);
+    background: var(--sw);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.14),
+      inset 0 0 0 1px rgb(255 255 255 / 0.06),
+      0 0 0 1px var(--color-border-subtle),
+      0 30px 60px -30px rgb(0 0 0 / 0.6);
+  }
+
+  .bg-swatch-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+  }
+
+  .bg-swatch-group {
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+
+  .bg-swatch-bottom {
+    align-self: end;
+    display: grid;
+    gap: 8px;
+  }
+
+  .bg-swatch h3 {
+    font-family: var(--font-display);
+    font-size: 1.75rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+
+  .bg-swatch p {
+    font-size: 0.9375rem;
+    line-height: 1.5;
+  }
+
+  .bg-swatch-values {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+  }
+
+  /* Value chips push away from the ink (darker under white text, lighter under dark text),
+     so they keep at least the swatch's own contrast. */
+  .bg-swatch .bg-copy {
+    background: color-mix(in srgb, var(--anti) 16%, transparent);
+  }
+
+  .bg-swatch .bg-copy:hover {
+    background: color-mix(in srgb, var(--anti) 28%, transparent);
+  }
+
+  /* --- Signals --- */
+  .bg-signals {
+    display: grid;
+    gap: 14px;
+    list-style: none;
+  }
+
+  @media (min-width: 640px) {
+    .bg-signals {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .bg-signals {
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+  }
+
+  .bg-signals li {
+    display: grid;
+    gap: 16px;
+    padding: 20px;
+    border-radius: var(--radius-xl);
+  }
+
+  .bg-signals .dot {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--sw);
+    box-shadow:
+      0 0 0 3px var(--color-bg-body),
+      0 10px 30px -8px var(--sw);
+  }
+
+  .bg-signals h4 {
+    font-family: var(--font-display);
+    font-size: 1.125rem;
+    font-weight: 600;
+  }
+
+  .bg-signals p {
+    margin: 4px 0 10px;
+    font-size: 0.875rem;
+    color: var(--color-fg-muted);
+  }
+
+  /* --- Proportion bar --- */
+  .bg-share {
+    display: flex;
+    height: 120px;
+    margin-bottom: 40px;
+    border-radius: var(--radius-xl);
+    overflow: hidden;
+    box-shadow: inset 0 0 0 1px var(--color-border-subtle);
+  }
+
+  .bg-share span {
+    position: relative;
+    flex: var(--share) 1 0;
+    min-width: 60px;
+    padding: 14px 12px;
+    background: var(--sw);
+    color: #070d0b;
+  }
+
+  .bg-share span:first-child {
+    color: #e6f2ee;
+  }
+
+  .bg-share b {
+    display: block;
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    font-weight: 600;
+  }
+
+  .bg-share em {
+    display: none;
+    font-style: normal;
+    font-size: 0.8125rem;
+  }
+
+  @media (min-width: 768px) {
+    .bg-share em {
+      display: block;
+    }
+  }
+</style>

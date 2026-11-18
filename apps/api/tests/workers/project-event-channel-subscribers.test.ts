@@ -1,3 +1,4 @@
+import { listChannelSubscribers } from '@simple-agent-manager/project-data/internal/do/project-event-channel-subscribers';
 import type {
   ProjectEventChannelSubscriberList,
   ProjectEventFilterV1,
@@ -5,7 +6,6 @@ import type {
 import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import { listChannelSubscribers } from '../../src/durable-objects/project-data/project-event-channel-subscribers';
 import type { Env } from '../../src/env';
 import { storeMcpToken } from '../../src/services/mcp-token';
 import * as service from '../../src/services/project-data';
@@ -283,6 +283,24 @@ describe('read-only channel subscriber roster through MCP', () => {
         )
           .bind(condition, f.projectId, f.userId)
           .run();
+      }
+      if (
+        condition === 'foreign-workspace' ||
+        condition === 'suspended' ||
+        condition === 'removed' ||
+        condition === 'missing-membership'
+      ) {
+        // The token's workspace no longer belongs to its project, or its user is no longer
+        // an active member, so MCP authentication refuses the token before any tool runs
+        // (`validateActiveWorkspaceMcpToken`).
+        const refused = await f.toolRequest('list_channel_subscribers', { channel: 'builds' });
+        expect(refused.status).toBe(401);
+        expect(await refused.text()).not.toContain('other-agent');
+        // Only a suspended membership can be reinstated, so only it keeps the token.
+        expect(await env.KV.get(`mcp:${f.token}`)).toEqual(
+          condition === 'suspended' ? expect.anything() : null
+        );
+        continue;
       }
       const reply = await f.tool('list_channel_subscribers', { channel: 'builds' });
       expect(reply.error).toBeDefined();

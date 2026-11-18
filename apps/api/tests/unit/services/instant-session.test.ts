@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   jwt: {
     signCallbackToken: vi.fn(),
+    signCurrentWorkspaceCallbackToken: vi.fn(),
     signNodeCallbackToken: vi.fn(),
+    signCurrentNodeCallbackToken: vi.fn(),
     signTerminalToken: vi.fn(),
   },
   mcp: {
@@ -41,7 +43,11 @@ const mocks = vi.hoisted(() => ({
   transitionTaskToTerminal: vi.fn(),
 }));
 
-vi.mock('../../../src/services/jwt', () => mocks.jwt);
+vi.mock('../../../src/services/jwt', () => ({
+  ...mocks.jwt,
+  signCurrentWorkspaceCallbackToken: mocks.jwt.signCallbackToken,
+  signCurrentNodeCallbackToken: mocks.jwt.signNodeCallbackToken,
+}));
 vi.mock('../../../src/services/mcp-token', () => mocks.mcp);
 vi.mock('../../../src/services/node-agent', () => mocks.nodeAgent);
 vi.mock('../../../src/services/nodes', () => mocks.nodes);
@@ -53,7 +59,12 @@ vi.mock('../../../src/services/task-terminal-transition', () => ({
   transitionTaskToTerminal: mocks.transitionTaskToTerminal,
 }));
 
-import { launchInstantSession } from '../../../src/services/instant-session';
+import {
+  acceptInstantSession,
+  continueInstantSessionLaunch,
+  launchInstantSession,
+  type LaunchInstantSessionInput,
+} from '../../../src/services/instant-session';
 
 function makeDb(selectResults: unknown[][] = []) {
   const inserts: unknown[] = [];
@@ -152,6 +163,66 @@ describe('launchInstantSession', () => {
     mocks.container.runContainerPhase.mockImplementation((_phase, _detail, fn) => fn());
   });
 
+  it('checks the server effect fence before Instant node allocation', async () => {
+    const { db } = makeDb();
+    const fence = vi.fn().mockRejectedValue(new Error('SAM disabled'));
+    await expect(
+      acceptInstantSession(db as never, env, {
+        ...(baseLaunchInput() as LaunchInstantSessionInput),
+        assertLaunchAllowed: fence,
+      })
+    ).rejects.toThrow('SAM disabled');
+    expect(fence).toHaveBeenCalledTimes(1);
+    expect(mocks.nodes.createNodeRecord).not.toHaveBeenCalled();
+    expect(mocks.container.launchVmAgentContainer).not.toHaveBeenCalled();
+  });
+
+  it('checks the server effect fence again before physical Instant launch', async () => {
+    const { db } = makeDb();
+    const fence = vi.fn().mockRejectedValue(new Error('SAM disabled'));
+    await expect(
+      continueInstantSessionLaunch(
+        db as never,
+        env,
+        {
+          ...(baseLaunchInput() as LaunchInstantSessionInput),
+          assertLaunchAllowed: fence,
+        },
+        {} as never
+      )
+    ).rejects.toThrow('SAM disabled');
+    expect(fence).toHaveBeenCalledTimes(1);
+    expect(mocks.container.launchVmAgentContainer).not.toHaveBeenCalled();
+    expect(mocks.nodeAgent.createWorkspaceOnNode).not.toHaveBeenCalled();
+  });
+
+  it('preserves SAM reserved session and message identities on Instant admission', async () => {
+    const { db } = makeDb();
+    await acceptInstantSession(db as never, env, {
+      ...(baseLaunchInput() as LaunchInstantSessionInput),
+      chatSessionId: 'reserved-session',
+      initialMessageId: 'reserved-message',
+    });
+    expect(mocks.projectData.createSession).toHaveBeenCalledWith(
+      env,
+      'project-1',
+      'workspace-1',
+      expect.any(String),
+      'task-1',
+      'user-1',
+      'reserved-session'
+    );
+    expect(mocks.projectData.persistMessage).toHaveBeenCalledWith(
+      env,
+      'project-1',
+      'chat-session-1',
+      'user',
+      'prompt',
+      null,
+      'reserved-message'
+    );
+  });
+
   it('creates a linked cf-container workspace, ACP session, and running agent session', async () => {
     const { db, inserts, updates } = makeDb();
 
@@ -231,7 +302,8 @@ describe('launchInstantSession', () => {
       'chat-session-1',
       'system',
       'fork context',
-      null
+      // Tagged so the chat quotes the caller's words instead of showing them as SAM's.
+      { source: 'context_summary' }
     );
     expect(mocks.projectData.persistMessage).toHaveBeenNthCalledWith(
       2,

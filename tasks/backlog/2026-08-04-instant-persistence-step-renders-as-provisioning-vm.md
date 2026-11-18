@@ -1,5 +1,11 @@
 # Instant chat start renders as "Provisioning VM (1/4)"
 
+> **Reconciliation 2026-10-26:** Still open; `instant_persistence` is still absent from
+> `packages/shared/src/types/task.ts`. Pointers moved: the provisioning gate is now
+> `apps/web/src/pages/project-chat/types.ts:108-115` (#2426, #2430), and the step is written at
+> `apps/api/src/routes/chat-start.ts:206` and also by `services/submit-instant-task.ts:83`. The
+> mapper (`mappers.ts:230`) and indicator (`ProvisioningIndicator.tsx:30-35`) are unchanged.
+
 > **Reconciliation 2026-10-12:** Still open; pointer correction. #2231 (`1c7f8dd90`) moved the
 > provisioning restore cited below out of `useProjectChatState.ts` into
 > `apps/web/src/pages/project-chat/useProvisioningTracker.ts:143-198`, now gated on `queued` /

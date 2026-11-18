@@ -1,8 +1,8 @@
 import { OAuthAuthorizationServer, OAuthError } from '@cloudflare/workers-oauth-provider';
+import type { Actor, OperationScope } from '@simple-agent-manager/operations';
 
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
-import type { Actor, OperationScope } from '../operations/types';
 import {
   DEFAULT_CONNECTOR_CLIENT_IDLE_TTL_SECONDS,
   DEFAULT_CONNECTOR_CLIENT_NAME_MAX_LENGTH,

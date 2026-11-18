@@ -72,3 +72,18 @@ export function buildVmPromptDeliveryReceiptPath(
 ): string {
   return `/workspaces/${encodeURIComponent(workspaceId)}/agent-sessions/${encodeURIComponent(acpSessionId)}/prompt-receipts/${encodeURIComponent(deliveryId)}`;
 }
+
+/** Version of the VM live-steering contract (`POST .../steer`, `GET .../steer-receipts/:id`). */
+export const VM_STEER_DELIVERY_PROTOCOL_VERSION = 1;
+
+export function buildVmSteerDeliveryPath(workspaceId: string, acpSessionId: string): string {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/agent-sessions/${encodeURIComponent(acpSessionId)}/steer`;
+}
+
+export function buildVmSteerReceiptPath(
+  workspaceId: string,
+  acpSessionId: string,
+  deliveryId: string
+): string {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/agent-sessions/${encodeURIComponent(acpSessionId)}/steer-receipts/${encodeURIComponent(deliveryId)}`;
+}

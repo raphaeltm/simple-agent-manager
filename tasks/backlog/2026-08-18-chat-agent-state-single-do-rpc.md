@@ -1,5 +1,11 @@
 # Collapse chat agent state into a single ProjectData DO RPC
 
+> **Reconciliation 2026-10-26:** Still open; `resolveChatAgentState` still makes 2 DO hops. Its
+> consumers changed: #2381 (`110730c2a`) moved the session-detail route to
+> `routes/chat-session-detail.ts:196` (was `chat.ts:345`), and #2387 (`14aee2827`) added a third,
+> `operations/operational-status.ts:76`, which passes `includePlan: false` to skip the plan read.
+> The "both consumers" criterion now covers three.
+
 **Created**: 2026-08-18
 **Source**: performance review finding on PR for `tasks/archive/2026-08-18-do-roundtrip-ensure-project-id-and-chat-agent-state.md`
 

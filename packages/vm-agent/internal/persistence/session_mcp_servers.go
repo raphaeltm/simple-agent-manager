@@ -148,6 +148,47 @@ func (s *Store) GetSessionMcpServers(workspaceID, sessionID string) ([]McpServer
 	return servers, nil
 }
 
+// ListWorkspaceSessionMcpServers returns the persisted MCP servers of every
+// session of a workspace, keyed by session ID and ordered by sort_order. A
+// workspace with no rows returns an empty (non-nil) map.
+//
+// It applies GetSessionMcpServers's bad-row rule: a row whose headers cannot be
+// decoded is skipped with a warning, so one bad row cannot hide the rest of the
+// workspace's servers from a caller that must visit every sam-mcp entry.
+func (s *Store) ListWorkspaceSessionMcpServers(workspaceID string) (map[string][]McpServer, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(
+		"SELECT session_id, sort_order, url, token, name, headers FROM session_mcp_servers WHERE workspace_id = ? ORDER BY session_id ASC, sort_order ASC",
+		workspaceID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list workspace session mcp servers: %w", err)
+	}
+	defer rows.Close()
+
+	sessions := map[string][]McpServer{}
+	for rows.Next() {
+		var srv McpServer
+		var sessionID, headers string
+		var sortOrder int
+		if err := rows.Scan(&sessionID, &sortOrder, &srv.URL, &srv.Token, &srv.Name, &headers); err != nil {
+			return nil, fmt.Errorf("list workspace session mcp servers: scan: %w", err)
+		}
+		if srv.Headers, err = decodeMcpServerHeaders(headers); err != nil {
+			slog.Warn("Skipping persisted MCP server whose headers cannot be read",
+				"workspace", workspaceID, "session", sessionID, "sortOrder", sortOrder, "error", err)
+			continue
+		}
+		sessions[sessionID] = append(sessions[sessionID], srv)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list workspace session mcp servers: iterate: %w", err)
+	}
+	return sessions, nil
+}
+
 // DeleteSessionMcpServers removes all MCP server entries for a specific
 // session. It is a no-op when no entries exist.
 func (s *Store) DeleteSessionMcpServers(workspaceID, sessionID string) error {

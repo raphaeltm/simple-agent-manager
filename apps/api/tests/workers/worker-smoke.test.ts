@@ -175,6 +175,7 @@ describe('Worker smoke tests (workerd runtime)', () => {
     // with credentials: true — see src/lib/cache-headers.ts).
     const PUBLIC_CONFIG_PATHS = [
       '/api/config/artifacts-enabled',
+      '/api/config/instant-runtime',
       '/api/config/vapid-public-key',
       '/api/config/login-providers',
     ];

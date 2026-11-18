@@ -10,8 +10,20 @@ vi.mock('../../../src/auth', () => ({
   createAuth: mocks.createAuth,
 }));
 
-vi.mock('../../../src/lib/logger', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
+// The token lookup only runs with a GitLab provider configured, and selects the rows that
+// provider's host issued (gitlab.com: raw account ids).
+vi.mock('../../../src/services/platform-config-oauth', () => ({
+  getGitLabOAuthConfig: async () => ({
+    host: 'https://gitlab.com',
+    apiBaseUrl: 'https://gitlab.com/api/v4',
+    clientId: 'gitlab-client-id',
+    clientSecret: 'gitlab-client-secret',
+    identityTrusted: true,
+  }),
+}));
+
+vi.mock('@simple-agent-manager/worker-core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@simple-agent-manager/worker-core')>()),
   log: {
     warn: mocks.logWarn,
     info: mocks.logInfo,

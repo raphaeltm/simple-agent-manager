@@ -59,9 +59,14 @@ build-linux-amd64:
 prepare-codex-runtime:
 	@bash ../../scripts/deploy/prepare-codex-runtime-artifact.sh "$(CONTAINER_ARTIFACT_DIR)"
 
-prepare-container: prepare-codex-runtime build-linux-amd64
+prepare-builder:
+	@mkdir -p $(CONTAINER_ARTIFACT_DIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(CONTAINER_ARTIFACT_DIR)/sam-builder-linux-amd64 ./cmd/sam-builder
+
+prepare-container: prepare-codex-runtime build-linux-amd64 prepare-builder
 	@mkdir -p $(CONTAINER_ARTIFACT_DIR)
 	@cp bin/$(BINARY_NAME)-linux-amd64 $(CONTAINER_ARTIFACT_DIR)/vm-agent-linux-amd64
+	@cp internal/acp/opencode_install.sh $(CONTAINER_ARTIFACT_DIR)/install-opencode.sh
 	@chmod 0755 $(CONTAINER_ARTIFACT_DIR)/vm-agent-linux-amd64
 	@if command -v sha256sum >/dev/null 2>&1; then \
 		SHA256=$$(sha256sum $(CONTAINER_ARTIFACT_DIR)/vm-agent-linux-amd64 | cut -d' ' -f1); \

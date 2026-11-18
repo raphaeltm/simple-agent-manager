@@ -1,3 +1,6 @@
+import {
+  buildPlacementDecisionDiagnostics,
+} from '@simple-agent-manager/scheduler-core';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -7,7 +10,6 @@ import type {
   TaskRunnerContext,
   TaskRunnerState,
 } from '../../../src/durable-objects/task-runner/types';
-import { buildPlacementDecisionDiagnostics } from '../../../src/services/placement-diagnostics';
 import { publicPlacementExplanationJson } from '../../../src/services/public-placement-explanation';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -151,7 +153,10 @@ describe('placement diagnostics through persisted task state', () => {
       } as never,
     });
     expect(JSON.stringify(result)).not.toContain(canary);
-    expect(result.authority.strategyOrdering).toBe('highest projected utilization first');
+    // The startup queue ranks existing hosts before the strategy, so the panel names both.
+    expect(result.authority.strategyOrdering).toBe(
+      'explicitly requested location first, then shortest startup queue, then default location, then highest projected utilization first'
+    );
     expect(result.authority.revalidatedAgainstCurrentAuthority).toBe(false);
   });
 });

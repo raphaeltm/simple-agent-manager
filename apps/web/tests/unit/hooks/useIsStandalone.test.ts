@@ -1,5 +1,5 @@
-import { act,renderHook } from '@testing-library/react';
-import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, renderHook } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useIsStandalone } from '../../../src/hooks/useIsStandalone';
 
@@ -73,6 +73,8 @@ describe('useIsStandalone', () => {
     expect(result.current).toBe(false);
 
     act(() => {
+      // A real MediaQueryList already reports the new state when it fires `change`.
+      matchesValue = true;
       const handler = listeners.get('(display-mode: standalone)');
       handler?.({ matches: true } as MediaQueryListEvent);
     });

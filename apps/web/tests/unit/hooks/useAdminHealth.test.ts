@@ -1,7 +1,8 @@
-import { act, renderHook, waitFor } from '@testing-library/react';
-import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, renderHook as baseRenderHook, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAdminHealth } from '../../../src/hooks/useAdminHealth';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 // Mock the API
 const mockFetchAdminHealth = vi.fn();
@@ -157,3 +158,8 @@ describe('useAdminHealth', () => {
     });
   });
 });
+
+vi.mock('../../../src/hooks/useQueryScope', () => ({ useQueryScope: () => 'admin-1' }));
+function renderHook<T>(callback: () => T) {
+  return baseRenderHook(callback, { wrapper: QueryTestWrapper });
+}

@@ -55,6 +55,34 @@ describe('infra config parsing', () => {
     expect(parsed.prefix).toBe(configModule.derivePrefix('example.com'));
   });
 
+  it('defaults DNS inputs compatibly and supports nested installation domains', () => {
+    const defaults = configModule.parseInfraConfig(makeConfig(), 'prod');
+    expect(defaults.zoneName).toBe('example.com');
+    expect(defaults.workersDevSubdomain).toBe(defaults.prefix);
+    const nested = configModule.parseInfraConfig(
+      makeConfig({
+        baseDomain: 'sam.team.example.com',
+        zoneName: 'example.com',
+        workersDevSubdomain: 'existing-account',
+      }),
+      'prod'
+    );
+    expect(nested.workersDevSubdomain).toBe('existing-account');
+    expect(configModule.zoneRelativeDnsName('api', nested.baseDomain, nested.zoneName)).toBe(
+      'api.sam.team'
+    );
+    expect(configModule.zoneRelativeDnsName('*', nested.baseDomain, nested.zoneName)).toBe(
+      '*.sam.team'
+    );
+    expect(configModule.zoneRelativeDnsName('app', 'example.com', 'example.com')).toBe('app');
+    expect(() =>
+      configModule.parseInfraConfig(makeConfig({ zoneName: 'other.example.com' }), 'prod')
+    ).toThrow('belong');
+    expect(() =>
+      configModule.parseInfraConfig(makeConfig({ workersDevSubdomain: 'bad.subdomain' }), 'prod')
+    ).toThrow('DNS label');
+  });
+
   it('honors explicit resource prefix, R2 location, and Pages branch overrides', () => {
     const parsed = configModule.parseInfraConfig(
       makeConfig({

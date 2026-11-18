@@ -4,6 +4,7 @@ import type {
   NodeContainerListResponse,
   NodeLogFilter,
   NodeLogResponse,
+  NodeResourceUsageResponse,
   NodeResponse,
   NodeSystemInfo,
 } from '@simple-agent-manager/shared';
@@ -12,6 +13,11 @@ import { API_URL, request } from './client';
 
 export async function listNodes(): Promise<NodeResponse[]> {
   return request<NodeResponse[]>('/api/nodes');
+}
+
+/** Per-session CPU and memory history for the caller's nodes (the Nodes page). */
+export async function getNodeResourceUsage(): Promise<NodeResourceUsageResponse> {
+  return request<NodeResourceUsageResponse>('/api/nodes/resource-usage');
 }
 
 export async function getNode(id: string): Promise<NodeResponse> {
@@ -34,6 +40,14 @@ export async function stopNode(id: string): Promise<{ status: string }> {
 export async function deleteNode(id: string): Promise<{ success: boolean }> {
   return request<{ success: boolean }>(`/api/nodes/${id}`, {
     method: 'DELETE',
+  });
+}
+
+/** Removes a node SAM failed to delete, once the owner confirms they deleted its server. */
+export async function confirmNodeManualDeletion(id: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/api/nodes/${id}/manual-deletion`, {
+    method: 'POST',
+    body: JSON.stringify({ confirmed: true }),
   });
 }
 
@@ -63,9 +77,7 @@ export async function getNodeLogs(
   if (filter?.limit) params.set('limit', String(filter.limit));
 
   const qs = params.toString();
-  return request<NodeLogResponse>(
-    `/api/nodes/${nodeId}/logs${qs ? `?${qs}` : ''}`
-  );
+  return request<NodeLogResponse>(`/api/nodes/${nodeId}/logs${qs ? `?${qs}` : ''}`);
 }
 
 export async function listNodeContainers(nodeId: string): Promise<NodeContainerListResponse> {

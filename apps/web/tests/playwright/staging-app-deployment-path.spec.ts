@@ -40,10 +40,12 @@ const SCREENSHOT_DIR = '../../.codex/tmp/playwright-screenshots';
 
 /** Provisioning a real Hetzner VM, booting it, and pulling an image is minutes, not seconds. */
 const APPLY_TIMEOUT_MS = 14 * 60_000;
+/** Pausing tears the app down on its node and detaches its provider volume. */
+const PAUSE_TIMEOUT_MS = 3 * 60_000;
 const POLL_INTERVAL_MS = 10_000;
 
 test.describe.configure({ mode: 'serial' });
-test.setTimeout(APPLY_TIMEOUT_MS + 3 * 60_000);
+test.setTimeout(APPLY_TIMEOUT_MS + PAUSE_TIMEOUT_MS + 3 * 60_000);
 
 const ENV_NAME = `pw-deploy-${Date.now().toString(36)}`;
 /**
@@ -223,14 +225,73 @@ test('a real release applies end to end, exercising both DNS create paths and th
       : [];
   expect(publicRoutes.length, `no public routes returned: ${routesBody}`).toBeGreaterThan(0);
 
+  // --- The release history and its recorded apply steps read back, as the page reads them. ---
+  const releasesResp = await api.get(
+    `${STAGING_API}/api/projects/${projectId}/environments/${envId}/releases`
+  );
+  const releasesBody = await releasesResp.text();
+  expect(releasesResp.status(), `release list failed: ${releasesBody}`).toBe(200);
+  const { releases } = JSON.parse(releasesBody) as {
+    releases: Array<{ id: string; version: number; status: string }>;
+  };
+  const applied = releases[0];
+  expect(applied, `no release listed: ${releasesBody}`).toMatchObject({
+    version: 1,
+    status: 'applied',
+  });
+  expect(applied).toHaveProperty('submittedBy');
+  const eventsResp = await api.get(
+    `${STAGING_API}/api/projects/${projectId}/environments/${envId}/releases/${applied?.id}/events`
+  );
+  const eventsBody = await eventsResp.text();
+  expect(eventsResp.status(), `release events failed: ${eventsBody}`).toBe(200);
+  const { events } = JSON.parse(eventsBody) as { events: Array<{ eventType: string }> };
+  expect(events.map((event) => event.eventType)).toContain('deployment.apply.succeeded');
+
   // --- And the UI shows the applied environment, as a user would see it. ---
+  // The page has its own browser context. Give it the session `api` signed in with rather
+  // than signing in again: token-login is rate limited.
+  await page.context().addCookies((await api.storageState()).cookies);
+  // A fresh context opens the first-run account setup, a modal over the whole page.
+  const session = (await (await api.get(`${STAGING_API}/api/auth/get-session`)).json()) as {
+    user?: { id?: string };
+  };
+  await page.addInitScript((uid) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${uid}`, 'true');
+  }, session.user?.id ?? '');
   await page.goto(`${STAGING_APP}/projects/${projectId}/deployments/${envId}`, {
     waitUntil: 'domcontentloaded',
   });
-  await expect(page.getByRole('heading', { name: ENV_NAME })).toBeVisible();
-  await expect(page.getByText('Public Routes')).toBeVisible();
+  // A cold first load on staging fetches the session, project and environment in turn.
+  await expect(page.getByRole('heading', { name: ENV_NAME })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('Running version 1.')).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Recent deploys' }).getByText('v1', { exact: true })
+  ).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Addresses' })).toBeVisible();
   await page.screenshot({
     path: `${SCREENSHOT_DIR}/staging-app-deployment-applied.png`,
+    fullPage: true,
+  });
+
+  // --- Pause from the page: the app stops, its disk is detached and its server let go. ---
+  await page
+    .getByRole('region', { name: 'Pause or delete' })
+    .getByRole('button', { name: 'Pause', exact: true })
+    .click();
+  await page
+    .getByRole('dialog', { name: `Pause ${ENV_NAME}` })
+    .getByRole('button', { name: 'Pause', exact: true })
+    .click();
+  await expect(
+    page.getByText('Not running. Starting brings version 1 back with its saved data.')
+  ).toBeVisible({ timeout: PAUSE_TIMEOUT_MS });
+  const pausedResp = await api.get(
+    `${STAGING_API}/api/projects/${projectId}/environments/${envId}`
+  );
+  expect(await pausedResp.json()).toMatchObject({ status: 'stopped', nodeId: null });
+  await page.screenshot({
+    path: `${SCREENSHOT_DIR}/staging-app-deployment-paused.png`,
     fullPage: true,
   });
 });

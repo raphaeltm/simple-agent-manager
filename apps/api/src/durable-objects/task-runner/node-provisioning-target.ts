@@ -27,5 +27,9 @@ export function applyCapacityCandidateProvisioningTarget(
       ? (candidate.capacityPoolProjectId ?? state.projectId)
       : null;
   state.config.credentialAttributionSource = candidate.credentialAttributionSource;
+  // `credentialAttributionUserId` is deliberately left alone: it is the task's own user, not a
+  // property of the candidate, so it holds across provider tiers. If candidates ever carry a
+  // per-source owning user, it must be re-derived here like the two fields above.
+
   state.stepResults.capacityPlacementSnapshot = snapshot;
 }

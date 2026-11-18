@@ -1,5 +1,13 @@
 # Fix stuck-task sweep pattern complexity failures
 
+> **Reconciliation 2026-10-26:** The 2026-10-05 recurrence is fixed. #2317 (`11d4cc80b`) replaced
+> the LIKE in `hasDurableRecord` with `instr(context, ?) > 0`
+> (`apps/api/src/scheduled/stuck-task-live-runtime.ts:228-244`) and added a real-D1 test
+> (`apps/api/tests/workers/stuck-task-dedupe.test.ts`). Still open: a general guard that bound LIKE
+> patterns stay at or under 50 bytes (the TaskRunner-mismatch dedupe, whose mock test is now
+> `stuck-tasks.test.ts:1969`, and `trigger-execution-sync.ts:58` still use LIKE), and a production
+> check that `stuck_tasks` sweeps run clean.
+
 > **Reconciliation 2026-10-12:** Still open, and the 2026-10-05 recurrence is still live. No merge
 > this week changed `hasDurableRecord` (`apps/api/src/scheduled/stuck-task-live-runtime.ts:230-236`).
 > Production observability D1 on 2026-10-12 holds 148 rows with the same `preservationKey`

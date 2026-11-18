@@ -24,15 +24,15 @@ You are a documentation synchronization validator for the Simple Agent Manager p
 | `apps/www/src/content/docs/docs/reference/configuration.md`  | Public configuration and secrets reference                    |
 | `apps/www/src/content/docs/docs/architecture/security.md`    | Public security architecture                                  |
 | `AGENTS.md`                                                  | Agent task patterns (non-Claude agents)                       |
-| `.claude/rules/*.md`                                         | Compact root behavioral rules and routing stubs (Claude Code) |
-| `apps/*/.claude/rules/*.md`, `packages/*/.claude/rules/*.md` | Path-scoped full behavioral rules (Claude Code)               |
+| `.claude/rules/*.md`                                         | Behavioral rules; `paths` frontmatter scopes a rule to files |
+| `AGENTS.md` beside code (generated "Rules for this directory") | Index of the path-scoped rules for that directory             |
 
 ### Code Sources (documentation must match)
 
 | File                                  | Content                            |
 | ------------------------------------- | ---------------------------------- |
 | `apps/api/src/env.ts`                 | Env interface                      |
-| `apps/api/src/db/schema.ts`           | Database schema                    |
+| `packages/worker-core/src/schema.ts`           | Database schema                    |
 | `apps/api/src/routes/*.ts`            | API endpoints                      |
 | `scripts/deploy/types.ts`             | Deployment types, REQUIRED_SECRETS |
 | `scripts/deploy/configure-secrets.sh` | Secret configuration               |
@@ -105,14 +105,14 @@ grep -n "POST\|GET\|DELETE\|PUT\|PATCH" CLAUDE.md | grep "/api"
 
 **Compare These Sources**:
 
-- `apps/api/src/db/schema.ts` → Table definitions
+- `packages/worker-core/src/schema.ts` → Table definitions
 - `specs/*/data-model.md` → Specifications
 
 **Detection Commands**:
 
 ```bash
 # Extract table definitions from schema
-grep -n "export const.*Table\|sqliteTable" apps/api/src/db/schema.ts
+grep -n "export const.*Table\|sqliteTable" packages/worker-core/src/schema.ts
 
 # Find documented tables in specs
 grep -rn "CREATE TABLE\|sqliteTable" specs/
@@ -266,5 +266,5 @@ Actual code
 - Version numbers should match (constitution version, package.json, etc.)
 - Consider semantic meaning - minor wording differences may be acceptable
 - AGENTS.md is for implementation patterns (non-Claude agents), CLAUDE.md is for project overview
-- Root `.claude/rules/*.md` contains compact auto-loaded rules and routing stubs; full domain rules may live under app/package `.claude/rules/` directories
+- `.claude/rules/*.md` holds every rule once; rules without `paths` frontmatter load at launch, rules with it load on access to matching files
 ```

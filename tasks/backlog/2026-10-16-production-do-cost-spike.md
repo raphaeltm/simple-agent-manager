@@ -1,5 +1,13 @@
 # Production Durable Object read/write cost incident
 
+> **Reconciliation 2026-10-26:** The incident fix shipped: #2368 (`761fe414d`) replaced the
+> mailbox COUNT with an indexed existence check (`mailbox.ts:459-472`), scoped the event-wake lease
+> lookup (`project-events-wake-delivery.ts:17-57`) and returned early for empty task waits
+> (`task-wait-supervisor.ts:177`), with query-cost tests; production reads fell 92.6% (PR body,
+> 2026-10-16 19:55 UTC). The two delivery boxes are now ticked. Still open, and tracked only here:
+> the deferred `nextSequence` `MAX(sequence)` index (`messages-persist-helpers.ts:33-36`) and the
+> proposal-only deterministic DO-usage anomaly alert (see the last section).
+
 ## Objective
 Understand October15 monitored usage spike, ship the smallest safe causal fix through normal gates, and verify actual production metrics after reporting lag. Preserve data, active sessions, security and monitoring.
 
@@ -22,8 +30,8 @@ Understand October15 monitored usage spike, ship the smallest safe causal fix th
 - [x] Validate lint/typecheck/relevant suites/build and migration/security checks as applicable.
 - [x] Independent specialist/completion reviews; all findings resolved.
 - [x] Coordinate active owners2304/2305/reliability; staging on pinned SHA, verify behavior.
-- [ ] PR CI/Sonar/security and CodeRabbit request/wait; normal merge/deploy.
-- [ ] Verify deployed SHA/version, health, native per-call evidence and lagged comparable production usage; quantify remaining uncertainty.
+- [x] PR CI/Sonar/security and CodeRabbit request/wait; normal merge/deploy. (reconciled 2026-10-26: #2368 merged as `761fe414d`; CodeRabbit APPROVED `33f56e4`; production run 38948978780)
+- [x] Verify deployed SHA/version, health, native per-call evidence and lagged comparable production usage; quantify remaining uncertainty. (reconciled 2026-10-26: #2368 "Production verification — 2026-10-16 19:55 UTC": Worker `0aab451b` at 100%, health 200, reads −92.6% in equal 15-min windows; sustained effect stated as uncertain)
 
 ## Coordination
 Old coordinator01M50044HCHRVR12B4337721G5 failed; message rejected. Active owners01M52KPD9FDR724Z371666KAHE,01M4ZVWEGJ8WMFK69JNE7W7M5Y,2304owner01M52PEXV56VPD7H8541HP8EFJ,2305owner01M52PF30AYFJN0YM8KPQ8ME45 notified of owner incident priority. Accepted delivery is not acknowledgment.

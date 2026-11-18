@@ -232,6 +232,49 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
       await route.fulfill({ json: messages });
       return;
     }
+    /*
+     * Linked work, with real data rather than the catch-all's `{}`.
+     *
+     * The header's "Working on" chip and the rail's Related badge both read this, so without a
+     * fixture here this file would only ever exercise the degrades-to-empty path — and its
+     * overflow assertions, which are the point of the file, would never see the chip the header
+     * grows when a chat is linked to an idea with a long title.
+     */
+    if (pathname === `/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/links`) {
+      await route.fulfill({
+        json: {
+          ideas: {
+            items: [
+              {
+                ideaId: 'idea-rail-1',
+                title: options.long ? LONG_TOPIC : 'Layered resource management',
+                status: 'draft',
+                relations: ['works_on'],
+              },
+            ],
+            total: 1,
+            truncated: false,
+            totalIsLowerBound: false,
+          },
+          files: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+          pullRequests: {
+            items: [
+              {
+                url: 'https://github.com/testuser/test-repo/pull/1974',
+                number: 1974,
+                source: 'task_output',
+                bySessionId: SESSION_ID,
+                state: null,
+              },
+            ],
+            total: 1,
+            truncated: false,
+            totalIsLowerBound: false,
+          },
+        },
+      });
+      return;
+    }
 
     if (pathname === resourceTimelinePath) {
       await route.fulfill({ json: resources.index });
@@ -372,7 +415,8 @@ async function assertDetailsInfrastructure(page: Page, viewport: MatrixViewport)
   await expect(page.getByText('References')).toBeVisible();
   await expect(page.getByText('Loading infrastructure details...')).toHaveCount(0);
 
-  const header = page.getByTestId('session-header');
+  // The details render inline in the desktop header and in the session-info sheet on a phone.
+  const header = page.getByTestId('session-header-details');
   await expect(header.getByText('Workspace:')).toBeVisible();
   await expect(header.getByText('tool-rail')).toBeVisible();
   await expect(header.locator('a[href*="/workspaces/"]')).toHaveCount(0);
@@ -395,7 +439,7 @@ test.describe('Session tool rail — discoverability', () => {
       'git',
       'timeline',
       'resources',
-      'events',
+      'automation',
       'comments',
       'retry',
       'fork',
@@ -422,7 +466,7 @@ test.describe('Session tool rail — discoverability', () => {
       ['git', 'Review uncommitted changes'],
       ['timeline', 'Jump through session history'],
       ['resources', 'Inspect session CPU, memory, I/O and tool-window correlation'],
-      ['events', 'Session events and schedules'],
+      ['automation', 'What this chat waits for, and reminders'],
       ['comments', 'Open comment threads on this session'],
       ['retry', 'Retry — re-run this task'],
       ['fork', 'Fork — start a new task from this session'],
@@ -559,15 +603,14 @@ test.describe('Session tool rail — layout', () => {
     await page.getByTestId('session-tool-details').click();
     await expect(page.getByText('References')).toBeVisible();
 
-    // The details panel makes the floating header taller than the viewport. The rail is
-    // anchored to the messages container rather than to the header, so it must stay on
-    // screen. Assert coordinates, not `toBeVisible()` — an element parked below the fold
-    // still counts as "visible" to Playwright.
+    // The details panel makes the header slab tall (it scrolls itself past 45vh). The rail
+    // must stay on screen with usable height. Assert coordinates, not `toBeVisible()` — an
+    // element parked below the fold still counts as "visible" to Playwright.
     const box = await page.getByTestId('session-tool-rail').boundingBox();
     const viewportHeight = page.viewportSize()?.height ?? 0;
     expect(box).not.toBeNull();
-    expect(box!.y).toBeLessThan(viewportHeight * 0.5);
-    expect(box!.height).toBeGreaterThan(100);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(viewportHeight);
+    expect(box!.height).toBeGreaterThan(80);
 
     // The header (and its details panel) must stop where the rail starts. The header is
     // absolutely positioned inside the chat column, so if the gutter spacer ever stops
@@ -576,10 +619,13 @@ test.describe('Session tool rail — layout', () => {
     // absolutely positioned inside the chat column; if that column ever stops being
     // narrowed by the rail's slot, the panel silently slides under the rail. Screenshots
     // do not reveal this — only measuring the two edges does.
-    const railLeft = box!.x;
+    // SAM Glass: the header slab and the rail never overlap — beside it on desktop (separate
+    // panes), above it on a phone (the rail lives in the conversation pane below).
     const headerBox = await page.getByTestId('session-header').boundingBox();
     expect(headerBox).not.toBeNull();
-    expect(headerBox!.x + headerBox!.width).toBeLessThanOrEqual(railLeft + 1);
+    const beside = headerBox!.x + headerBox!.width <= box!.x + 1;
+    const above = headerBox!.y + headerBox!.height <= box!.y + 1;
+    expect(beside || above).toBe(true);
 
     await capture(page, 'tool-rail-details-open');
   });
@@ -627,7 +673,7 @@ test.describe('Session tool rail — layout', () => {
     if (metrics.scrollHeight <= metrics.clientHeight) {
       // Everything fits: nothing to scroll to, so assert the strong property instead —
       // every tool is already on screen.
-      for (const id of ['files', 'git', 'timeline', 'events']) {
+      for (const id of ['files', 'git', 'timeline', 'automation']) {
         await expect(page.getByTestId(`session-tool-${id}`)).toBeInViewport();
       }
       return;
@@ -635,7 +681,7 @@ test.describe('Session tool rail — layout', () => {
 
     // Report/Complete/Details are pinned outside this scroller — covered separately by
     // 'Report, Complete and Details stay pinned above the fold'.
-    for (const id of ['files', 'git', 'timeline', 'events']) {
+    for (const id of ['files', 'git', 'timeline', 'automation']) {
       const tool = page.getByTestId(`session-tool-${id}`);
       await tool.scrollIntoViewIfNeeded();
       await expect(tool).toBeInViewport();
@@ -792,15 +838,24 @@ function registerSharedMatrixCases(theme: MatrixTheme, viewport: MatrixViewport)
     await capture(page, `variant-tab-hidden-${suffix}`);
   });
 
-  test('icons bar — tab flows into the bar, and does not float', async ({ page }) => {
+  test('icons bar — a pane of its own on desktop, flat inside the conversation on a phone', async ({
+    page,
+  }) => {
     await openMatrixCase(page, theme, 'icons');
-    await expectRailElevation(page, 'flat');
+    // SAM Glass: on desktop the rail is its own pane beside the conversation column, and
+    // every pane floats over the void with depth. On a phone it lives inside the
+    // conversation pane, so it is flat there and a hairline sets it apart.
+    await expectRailElevation(page, viewport === 'desktop' ? 'raised' : 'flat');
     await capture(page, `variant-bar-icons-${suffix}`);
   });
 }
 
 for (const theme of ['dark', 'light'] as const) {
   test.describe(`Tab placement matrix — mobile / ${theme}`, () => {
+    // Pinned like the desktop matrix below, so the mobile cases stay mobile when the spec
+    // runs under a desktop project (labels mode only overlays on a phone).
+    test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
+
     registerSharedMatrixCases(theme, 'mobile');
 
     test(`hidden tab clears a TALL header`, async ({ page }) => {
@@ -810,27 +865,27 @@ for (const theme of ['dark', 'light'] as const) {
     });
 
     /*
-     * The header must butt FLUSH against the rail.
-     *
-     * The card's bottom corners are rounded so it reads as a panel hanging from the top.
-     * Beside the rail that curve leaves a lens-shaped gap between the card's rounded
-     * corner and the rail's straight edge. Squaring the right side closes it — the two
-     * edges must be at the same x, and the radius on that corner must be 0.
+     * SAM Glass keeps the session header and the rail as separate surfaces: on a phone the
+     * header slab sits above the conversation pane that holds the rail, so the two must never
+     * overlap, and the slab keeps its rounded corners (no flush, squared seam any more).
      */
-    test(`header meets the rail with no gap and no curve`, async ({ page }) => {
+    test(`header slab and rail never overlap, and the slab keeps its corners`, async ({ page }) => {
       await openMatrixCase(page, theme, 'icons');
 
       const header = (await page.getByTestId('session-header').boundingBox())!;
       const rail = (await page.getByTestId('session-tool-rail').boundingBox())!;
-      // Flush: header's right edge meets the rail's left edge.
-      expect(Math.abs(header.x + header.width - rail.x)).toBeLessThanOrEqual(1);
+      const horizontal =
+        Math.min(header.x + header.width, rail.x + rail.width) - Math.max(header.x, rail.x);
+      const vertical =
+        Math.min(header.y + header.height, rail.y + rail.height) - Math.max(header.y, rail.y);
+      expect(horizontal <= 0 || vertical <= 0).toBe(true);
+      // The rail starts below the header slab, inside the conversation pane.
+      expect(rail.y).toBeGreaterThanOrEqual(header.y + header.height);
 
-      // And square: a rounded corner would still be "flush" by bounding box while
-      // leaving a visible curve, so measure the radius itself.
       const radius = await page
         .getByTestId('session-header')
         .evaluate((el) => getComputedStyle(el).borderBottomRightRadius);
-      expect(radius).toBe('0px');
+      expect(radius).not.toBe('0px');
 
       await capture(page, `variant-header-flush-mobile-${theme}`);
     });
@@ -845,19 +900,23 @@ for (const theme of ['dark', 'light'] as const) {
      */
     test(`hidden returns the full width to the conversation`, async ({ page }) => {
       await openMatrixCase(page, theme, 'icons');
-      const narrowed = (await page.getByTestId('session-header').boundingBox())!;
+      // On a phone the rail sits inside the conversation pane, beside the message log, so the
+      // log is what it narrows (the header slab above is full width either way).
+      const log = page.getByRole('log', { name: 'Conversation' });
+      const pane = log.locator('xpath=ancestor::*[contains(@class, "sam-glass--quiet")][1]');
+      const narrowed = (await log.boundingBox())!;
 
       await page.getByTestId('session-tool-rail-cycle').click();
       await expect(page.getByTestId('session-tool-rail')).toHaveAttribute('data-mode', 'labels');
       await page.getByTestId('session-tool-rail-cycle').click();
       await expect(page.getByTestId('session-tool-rail-tab')).toBeVisible();
 
-      const collapsed = (await page.getByTestId('session-header').boundingBox())!;
-      const viewport = page.viewportSize()!.width;
-      // Reaches the edge (allowing a sub-pixel rounding margin)...
-      expect(collapsed.x + collapsed.width).toBeGreaterThanOrEqual(viewport - 1);
+      const collapsed = (await log.boundingBox())!;
+      const paneBox = (await pane.boundingBox())!;
+      // Reaches the conversation pane's edge (allowing a sub-pixel rounding margin)...
+      expect(collapsed.x + collapsed.width).toBeGreaterThanOrEqual(paneBox.x + paneBox.width - 1);
       // ...and is genuinely wider than it was with the bar out, so this cannot pass by
-      // the header having been full-width all along.
+      // the log having been full-width all along.
       expect(collapsed.width).toBeGreaterThan(narrowed.width);
       await capture(page, `variant-hidden-fullwidth-mobile-${theme}`);
     });
@@ -900,9 +959,9 @@ for (const theme of ['dark', 'light'] as const) {
 
     registerSharedMatrixCases(theme, 'desktop');
 
-    test('labels bar — elevated only where it actually overlays', async ({ page }) => {
+    test('labels bar — still its own pane on desktop', async ({ page }) => {
       await openMatrixCase(page, theme, 'labels');
-      await expectRailElevation(page, 'flat');
+      await expectRailElevation(page, 'raised');
       await capture(page, `variant-bar-labels-desktop-${theme}`);
     });
   });
@@ -953,6 +1012,105 @@ test.describe('Session resource history drawer', () => {
       el.scrollTop = el.scrollHeight;
     });
     await capture(page, `resource-history-detail-${page.viewportSize()?.width ?? 'viewport'}`);
+  });
+});
+
+test.describe('Session automation panel', () => {
+  test('opens from the rail and shows what this chat waits for and what is coming', async ({
+    page,
+  }) => {
+    await openChat(page, { state: 'active' });
+    // Registered after openChat's catch-all, so these win for the panel's three reads.
+    await page.route('**/api/projects/*/event-subscriptions**', (route) =>
+      route.fulfill({
+        json: {
+          subscriptions: [
+            {
+              id: 'sub-rail-ci',
+              projectId: PROJECT_ID,
+              contractVersion: 1,
+              owner: { type: 'agent', id: `${PROJECT_ID}:${SESSION_ID}`, name: 'agent' },
+              idempotencyKey: 'k',
+              filter: {
+                version: 1,
+                source: 'github',
+                eventType: 'check_suite.completed',
+                subjectType: 'commit',
+                subjectId: 'abcdef1234567',
+              },
+              filterFingerprint: 'f',
+              matchKeyCount: 1,
+              deliveryPreference: {
+                requested: 'existing_session_prompt',
+                resolved: 'queued_for_prompt_delivery',
+                target: { sessionId: SESSION_ID, taskId: null, runtimeId: null, agentId: null },
+              },
+              state: 'active',
+              reason: null,
+              createdAt: NOW - 3_600_000,
+              updatedAt: NOW - 3_600_000,
+              expiresAt: NOW + 86_400_000,
+              cancelledAt: null,
+              cancelledBy: null,
+              cancelReason: null,
+              lastMatchedAt: null,
+            },
+          ],
+          hasMore: false,
+        },
+      })
+    );
+    await page.route('**/api/projects/*/schedules**', (route) =>
+      route.fulfill({
+        json: {
+          schedules: [
+            {
+              id: 'sch-rail-1',
+              projectId: PROJECT_ID,
+              creatorUserId: 'user-rail-1',
+              creatorChatSessionId: SESSION_ID,
+              reason: 'Check whether the canary held overnight',
+              action: {
+                kind: 'message_session',
+                sessionId: SESSION_ID,
+                prompt: 'Is the canary still healthy?',
+              },
+              state: 'pending',
+              dueAt: NOW + 2 * 3_600_000,
+              displayTimezone: 'UTC',
+              expiresAt: NOW + 26 * 3_600_000,
+              version: 1,
+              idempotencyKey: 'k',
+              createdAt: NOW - 600_000,
+              updatedAt: NOW - 600_000,
+              nextAttemptAt: null,
+              attemptCount: 0,
+              lastError: null,
+              eventId: null,
+              deliveryId: null,
+              resultTaskId: null,
+              resultSessionId: null,
+              watchId: null,
+              sourceEventId: null,
+            },
+          ],
+          nextCursor: null,
+        },
+      })
+    );
+    await page.route('**/api/projects/*/standing-watches**', (route) =>
+      route.fulfill({ json: { watches: [], nextCursor: null } })
+    );
+
+    await page.getByTestId('session-tool-automation').click();
+    const panel = page.getByRole('dialog', { name: 'Automation for this chat' });
+    await expect(panel).toBeVisible();
+    await expect(
+      panel.getByText('This chat is waiting for CI to finish', { exact: false })
+    ).toBeVisible();
+    await expect(panel.getByText('Check whether the canary held overnight')).toBeVisible();
+    await expect(panel.getByRole('link', { name: 'All automation' })).toBeVisible();
+    await capture(page, `automation-panel-${page.viewportSize()?.width ?? 'viewport'}`);
   });
 });
 
@@ -1108,7 +1266,7 @@ test.describe('Session resource timeline touch interaction', () => {
     await touch('touchEnd', []);
     const clear = dialog.getByRole('button', { name: 'Clear the selected instant' });
     await expect(clear).toBeVisible();
-    await clear.click();
+    await clear.tap();
     await expect(dialog.getByText('Whole session', { exact: true })).toBeVisible();
 
     await touch('touchStart', [

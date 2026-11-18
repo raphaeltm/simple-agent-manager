@@ -45,6 +45,7 @@ const SESSION = {
   isIdle: false,
   agentCompletedAt: null,
   agentSessionId: 'acp-stream-perf',
+  viewerAccess: 'owner',
   agentType: 'claude-code',
 };
 

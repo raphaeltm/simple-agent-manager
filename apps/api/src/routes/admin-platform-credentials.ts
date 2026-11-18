@@ -24,6 +24,7 @@ import {
 } from '../schemas';
 import { reconcileCapacityPoolsForCredentialMutation } from '../services/capacity-pool-credential-lifecycle';
 import { decrypt, encrypt } from '../services/encryption';
+import { deleteGcpApiHealthSafely } from '../services/gcp-api-health';
 import { buildProviderConfig } from '../services/provider-credentials';
 import { CredentialValidator } from '../services/validation';
 
@@ -37,7 +38,19 @@ adminPlatformCredentialRoutes.use('/*', requireAuth(), requireApproved(), requir
 adminPlatformCredentialRoutes.get('/', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const rows = await db.select().from(schema.platformCredentials);
+  const rows = await db
+    .select({
+      id: schema.platformCredentials.id,
+      credentialType: schema.platformCredentials.credentialType,
+      provider: schema.platformCredentials.provider,
+      agentType: schema.platformCredentials.agentType,
+      credentialKind: schema.platformCredentials.credentialKind,
+      label: schema.platformCredentials.label,
+      isEnabled: schema.platformCredentials.isEnabled,
+      createdAt: schema.platformCredentials.createdAt,
+      updatedAt: schema.platformCredentials.updatedAt,
+    })
+    .from(schema.platformCredentials);
 
   const credentials: PlatformCredentialResponse[] = rows.map((row) => ({
     id: row.id,
@@ -232,6 +245,9 @@ adminPlatformCredentialRoutes.delete('/:id', async (c) => {
   }
   if (deletedCredential.credentialType === 'cloud-provider') {
     await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'installation' });
+    if (deletedCredential.provider === 'gcp') {
+      await deleteGcpApiHealthSafely(c.env, deletedCredential.id);
+    }
   }
 
   return c.json({ success: true });

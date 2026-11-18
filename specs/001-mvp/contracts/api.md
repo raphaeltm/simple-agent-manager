@@ -689,7 +689,7 @@ For older agents, `agent_prompt_failed` only receives this treatment with a just
 
 `promptSucceeded: true` on an error-free `executionStep: "awaiting_followup"` callback ends the consecutive wait episode and retires its scheduled continuation only when its immutable session, credential generation and prompt attempt identify the sole current running session and matching credential. `promptStartedAt` (UTC epoch milliseconds captured at acceptance) must be later than the rejection's observation, and the wait must not be blocked. Cancellation, checkpoint preemption and crash recovery do not send that success signal. Pending or admitted provider schedules are checked against the task's active wait identity before delivery; an obsolete continuation is not replayed.
 
-Admission reads the existing credential-limit windows and holds before VM placement using the TaskRunner alarm. Credential selection is never changed; a retained recovery pin is checked at the authenticated agent-key injection boundary. A mismatched, absent or malformed recovery pin cannot return a substitute credential and blocks for review. No new Worker environment bindings or production fault-injection controls are added. `pnpm test:e2e:provider-limits` uses only test processes and transport fixtures.
+Admission reads the existing credential-limit windows and holds before VM placement using the TaskRunner alarm. Credential selection is never changed; a retained recovery pin is checked at the authenticated agent-key injection boundary. A mismatched, absent or malformed recovery pin cannot return a substitute credential and blocks for review. No new service bindings or production fault-injection controls are added. The admin setting `operations.providerLimitResetWindowToleranceMs` controls the tolerance for rounded timestamps in one credential limit window (default 60,000 ms, integer range 0–300,000 ms). `pnpm test:e2e:provider-limits` uses only test processes and transport fixtures.
 
 Admission rechecks immediately before the initial agent start. A rejection observed after provisioning uses a visible bounded in-place hold, retrying the same unstarted step after reset; its allocated runtime remains subject to the normal absolute compute ceiling. The existing VM start protocol requires a nonempty prompt and cannot create a snapshot-ready idle harness without delivering it. This late-admission fallback is an explicit verification/rollout gap; no new no-prompt VM protocol is implied. Durable indexed task wait intents close the admission gap while a credential observation write is pending or capacity-bound.
 
@@ -729,3 +729,132 @@ Staged objects remain available for delivery retries until the configured R2
 `PATCH /api/admin/settings` accepts `{expectedRevision, changes: [{name, value}]}`. Null removes an override and reveals compatibility/default resolution. Validate the complete proposed configuration, including OAuth pairs, before an atomic D1 revision/CAS, settings/credential mutation and audit batch. Reject stale revisions with 409, invalid configuration with 400, unauthorized roles/statuses with 401/403, and unavailable authoritative storage with a sanitized service error. Successful saves return a fresh snapshot and invalidate local settings/OAuth caches. Token-authorized initial setup remains separate; legacy writers share revision/audit/invalidation.
 
 Operational safety: cron/alarm legacy KV false or disabled vetoes enabled D1 settings. Explicit successful D1 enable clears that KV brake afterward; failure returns503 SETTINGS_PROPAGATION_UNCERTAIN, never a false rollback claim. Concurrent newer D1 disable remains effective. The D1 mutation/audit batch is atomic; subsequent KV propagation is not. Fresh admin snapshots read revision, values and history from the primary consistently or fail with503.
+
+## External operational MCP controls
+
+The user-level `/connect/mcp` registry exposes `sam_chat_status`,
+`sam_chat_delivery_get`, `sam_chat_interactions`, `sam_work_changes`,
+`sam_chat_jobs_list`, `sam_operation_get`, and non-destructive `sam_chat_interrupt`.
+Session operational reads require current session-writer authority; they read only
+persisted evidence and never contact/wake runtimes. Changes are coalesced snapshots;
+job coverage is retained internal secret-execution response metadata, not generic
+harness history. Unknown/stale/unsupported evidence is not completion proof.
+
+`sam_chat_interrupt` requires `projectId`, `sessionId`, `requestKey`,
+`expectedAgentSessionId`, and positive integer `expectedPromptStartedAt` from status.
+It preserves the task/workspace and never falls back to unfenced cancellation.
+Every `sam_agent_answer` still requires explicit user confirmation.
+
+Private node-management transport:
+`POST /workspaces/:workspaceId/agent-sessions/:sessionId/cancel-guarded`
+accepts only `{ expectedPromptStartedAt: integer > 0 }`, within a bounded JSON body.
+Management auth must bind the target workspace. It atomically matches the immutable
+prompt epoch, cancels that attempt and stops only its captured process while holding
+new-turn admission. Process-monitor recovery owns runtime status publication.
+Responses: 200 `{status:"cancelled"|"idle"}`, 412 `{status:"turn_changed"}`, or 503
+`{status:"unconfirmed"}` when termination cannot be confirmed. Invalid input is 400;
+missing/invalid management authorization is 401/403. Older agents return 404 and
+remain unsupported. No raw runtime error body is returned through the Connector.
+
+## Workload identity
+
+`GET /api/projects/:projectId/sessions/:sessionId/workload-identity` requires authenticated project membership and returns `{ issuer, jwks_uri, subject, ttl_seconds, claims }` for the current chat runtime, without signing a token. Missing chat is 404; missing workspace/runtime is 409. Claims are documented in the workload identity guide. Public discovery/JWKS live under `/oidc/.well-known/`. `exec_with_secrets` optionally accepts `oidc: { audience }` and injects `SAM_OIDC_TOKEN` only into its command.
+
+## GitHub Trigger Queue and Routing
+
+`POST` and `PATCH /api/projects/:projectId/triggers[/:triggerId]` accept the following optional
+fields inside `githubConfig`, alongside `eventType` and `filters`:
+
+| Field             | Type             | Default | Meaning                                                                     |
+| ----------------- | ---------------- | ------- | --------------------------------------------------------------------------- |
+| `subjectAffinity` | boolean          | `false` | Deliver same-repository, same-issue/PR events to this trigger's active run. |
+| `queueMaxPending` | positive integer | `50`    | Maximum pending events waiting for capacity or prompt delivery.             |
+| `queueTtlSeconds` | positive integer | `86400` | Absolute event lifetime before task creation or follow-up delivery.         |
+
+Trigger detail/list responses include `queueStats: { queued, routed, dropped, unconfirmed?, retentionDays? }` for GitHub
+triggers. `queued` counts current waiting/routing intents; other counts cover retained execution history. Execution responses can use `waiting`,
+`routing`, `routed`, and `dropped`, alongside existing statuses, and expose `subjectKey`,
+`queueExpiresAt`, `routedExecutionId`, `routedTaskId`, and `routedSessionId`.
+`queue_full`, `queue_expired`, and `target_unavailable` explain definite drops. Terminal `delivery_uncertain` preserves the target audit, counts as unconfirmed instead of dropped, and never retargets. A routed execution has a
+confirmed durable prompt receipt; a pending durable handoff stays `routing`. Audit state and
+recipient identities are derived from the canonical execution record.
+
+### GitHub draft filter preview
+
+`POST /api/projects/:projectId/triggers/github/filter-preview` requires authenticated project task-read access. Body is `{ eventType, filters? }` using the shared GitHub configuration schema. Returns `{ limit, warning, deliveries: [{ id, eventType, action, receivedAt, matched: boolean | null, reason }] }`. Results are bounded by the GitHub recovery batch limit, scoped to the project's installation and repository; null means retained payload unavailable/invalid. No raw external content, prompt rendering, admission or replay occurs.
+
+## Guided Agent Credential Setup
+
+`POST /api/agent-credential-setup-sessions` accepts optional `agentType` (Claude Code
+or Codex) for a personal default and rejects `projectId`.
+`POST /api/agent-credential-setup-sessions/project` shares the creation logic but
+requires a nonempty `projectId` plus optional `agentType`. Project selection requires
+`secret:write` at creation and again before capture is saved. The server persists
+scope through the setup session and saves through the shared encrypted
+legacy/composable credential writer. Project saves pin the project account without
+changing the user default. Invalid input is `400`; a different-scope active session
+for the same agent is `409`, never reused. The same-scope existing session is
+returned (`200`), newly created sessions are `201`, and exhausted setup capacity is
+`202` (`no_capacity`). `GET /config` advertises supported `scopes`; project UI requires
+explicit project support. A project request never falls back to the personal
+endpoint: older API versions return `404` for `/project`, preserving safety during
+deployment skew or rollback. See the public API reference for polling,
+verification-code submission, and cancellation endpoints.
+
+## Notification question reader
+
+`GET /api/projects/:projectId/sessions/:sessionId/attention/:markerId`
+
+Requires active project membership with `task:read` and an existing session. Returns only the
+`needs_input` request scoped to both session and marker IDs, including settled requests:
+`{ request: { id, reason, options, createdAt, resolvedAt, resolvedAnswer, expired, canAnswer },
+session: { id, topic }, messages }`. `reason` is the full canonical saved question, rather than
+the shortened notification body. No runtime is contacted and the GET never answers a question.
+`canAnswer` requires a supported human-input source, current session-writer/project authority,
+and an unexpired, unresolved request without an in-flight answer.
+
+`context=true` adds preceding user/assistant messages assembled from their streaming rows, bounded before the request's
+creation time. `limit` overrides the existing admin setting `collaboration.commentContextMessages` (default: 6),
+subject to the existing `CHAT_SESSION_MESSAGE_MAX` ceiling. Empty, invalid or nonpositive query limits use that context setting. The existing comment-context row cap and Connector transcript character/scan bounds also apply; limited excerpts carry `truncated: true`. Empty
+context is valid. Reads use existing archive-owner routing. Missing session/request returns
+404; absent project capability is rejected by the standard membership/capability guards.
+Answers continue through the existing `POST .../attention/:markerId/resolve`; fixed choices
+must match the saved options exactly, and a request without options accepts a typed answer.
+
+### Start or resume despite a recorded provider limit
+
+`POST /api/projects/:projectId/tasks/:taskId/provider-limit/start-anyway` requires an approved authenticated task owner with project `task:write`. No body is required. Existing waiting admission holds return `202 { status: "starting", taskId }`. Waiting callback-origin holds on sleeping VM sessions return `202 { status: "waking", taskId }` after recording a bounded override for the same credential, profile and skill. Saved recovery requires current session-owner authority, an unexpired restorable sleeping snapshot and matching source credential generation. An existing waking claim is retained and its runner nudged; an unclaimed snapshot uses normal recovery. The operation does not re-post the original prompt or change accounts. A fresh provider rejection removes the override and parks normally. Changed, terminal or already-approved waits return `409`; another member returns `403`. An uncertain runner response retains the accepted override and claim and returns `409` asking the owner to refresh. Chat task embeds expose `providerLimitCanResumeAnyway` for the owner-facing **Resume anyway** control; the endpoint revalidates authority and snapshot eligibility.
+
+### Resume a blocked provider-limit task
+
+`POST /api/projects/:projectId/tasks/:taskId/provider-limit/resume` requires an approved, authenticated task owner with project `task:write`. No body is required. Returns `202 { status: "waking", taskId }` after accepting the current credential selection and starting recovery from the retained sleeping snapshot (or nudging a first-dispatch admission wait). Returns `403` for another member and `409` when the wait is no longer blocked, sleep is incomplete, or a snapshot cannot be restored. Repeated approval is fenced against the current wait; retained WIP is never discarded.
+
+## Application build-context callbacks
+
+These internal callbacks use a live workspace callback JWT, not a browser session:
+
+- `POST /api/projects/:id/deployment-publish-jobs/:jobId/context/init`
+- `POST /api/projects/:id/deployment-publish-jobs/:jobId/context/complete`
+
+Both accept `{ attempt, sizeBytes, sha256, durationMs?, projectName? }`. Non-shadow Cloudflare jobs require the collected Compose project name; receipts bind it alongside size and SHA. Identity, environment and object key come from the authorized job; the job must use `executor=cloudflare`. Init conditionally changes `queued` to `collecting`, records the descriptor, and returns a short-lived presigned R2 PUT. Complete verifies HEAD size plus recorded digest metadata and conditionally changes `collecting` to `context_ready`, setting `queued_at`. Scope/attempt/descriptor mismatch or terminal state returns 409; invalid/missing objects return 400. Successful transitions and collection timing are recorded atomically in job history. SHA metadata is a source assertion; the builder verifies downloaded bytes before extraction. Non-shadow completion attempts Cloudflare admission, then cron drains queued jobs under atomic project/platform/class caps.
+
+The node-management endpoint `POST /workspaces/:workspaceId/mcp/build-and-publish-jobs/:jobId/collect` accepts a source-owned job with `202`, then collects, spools, uploads, and completes one context from the devcontainer volume (VM) or `/workspaces` (Instant). `attempt` is required; optional `workingDir`, `buildInterpolationEnv`, `secretInterpolationKeys`, `maxBytes`, and `collectTimeoutMs` are supplied by the control plane. Missing legacy routes return an explicit unsupported capability result to callers. Existing node build/start routes are unchanged.
+
+Shadow probes (`context_shadow=1`) are internal rows only. They cannot link a release, are excluded from publish status/cancel reads and public lifecycle events/counts, and terminalize through normal source callbacks or the existing sweep. The typed collection-mode setting defaults off; shadow kickoff is bounded and does not delay the normal node path or Cloudflare execution.
+
+## Cloudflare publish-job callback identity
+
+The existing publish-job events, artifact init/complete and compose release callbacks additionally accept a `publish-job` callback JWT bound to `{jobId,projectId,environmentId,agentProfileId,attempt}`. It expires at the persisted builder deadline and is valid only for the matching nonterminal, non-shadow Cloudflare job. Source-workspace/node liveness is not required. Other callback routes (including context uploads, registry credentials and token renewal) reject this scope.
+
+`GET /api/projects/:id/deployment-publish-jobs/:jobId/spec` uses this job identity to return the verified context's presigned GET, size, SHA, Compose project name, non-secret build variables and secret key names. Job tokens cannot request another job or environment. Artifact keys use the exact job-and-attempt upload namespace. Release submissions from job tokens must include matching job ID, attempt, environment, profile and task; the legacy unfenced path remains workspace-token-only. Event updates fence the current attempt atomically, and event release metadata must reference the already-linked release.
+
+
+### Explicit account linking
+
+`POST /api/auth/account-link/request` accepts `{provider: "github" | "gitlab"}` with a human browser session and same-app Origin. A verified stored email and working system email sender are required. It sends a one-time, session/provider-bound email sign-in check (default five minutes) and returns `{success:true}`. The confirmation URL uses a fragment so proof does not enter HTTP referrers or access logs. A new request replaces that session/provider's previous proof.
+
+`POST /api/auth/link-social` uses BetterAuth's existing static OAuth callback and accepts the confirmation proof as `additionalData.samLinkToken`. Linking refuses Google, missing/expired/replayed proof, another session, agent sign-in sessions and suspended users. The same live session, user, provider and proof deadline are rechecked before the OAuth callback mutates accounts (including existing-link token updates).
+
+`POST /api/auth/unlink-account` accepts BetterAuth `{accountId}`. Only the caller's GitHub/GitLab accounts can be removed; removing the last provider requires usable verified email sign-in. The affected account owner receives a linked-provider security notification at their preserved SAM email. Explicit links may have a different provider email; future sign-ins preserve an already-verified SAM email. A lookup failure aborts sign-in rather than replacing identity.
+
+GitHub repository errors distinguish `403 GITHUB_NOT_CONNECTED`, `401 GITHUB_REAUTH_REQUIRED`, `503 GITHUB_UNAVAILABLE`, `409 GITHUB_APP_NOT_CONFIGURED` and `404 FEATURE_UNAVAILABLE`. Only actual authorization failures request reauthentication; provider outages offer retry. Unverified provider-linked accounts receive a provider-sign-in note instead of an email code, and code redemption is refused without deleting links or sessions.

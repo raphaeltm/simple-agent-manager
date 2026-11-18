@@ -1,7 +1,9 @@
 /**
- * MCP request_human_input — records a user decision request as a durable
- * attention marker and notifies the user. The tool call itself is non-blocking.
+ * MCP request_human_input — an alias of a blocking `inbox_write` ask (inbox slice D, idea
+ * 01M7G03ZCQ6TM6CMEYDRKQ8ST9): one D1 `asks` row of kind `question` filed through the same
+ * operation (`fileAgentAsk`), which also notifies the person. The tool call is non-blocking.
  */
+import { OperationError } from '@simple-agent-manager/operations';
 import type { HumanInputCategory } from '@simple-agent-manager/shared';
 import {
   HUMAN_INPUT_CATEGORIES,
@@ -10,11 +12,10 @@ import {
   MAX_HUMAN_INPUT_OPTIONS_COUNT,
 } from '@simple-agent-manager/shared';
 
-import { computeHumanInputSchedule } from '../../durable-objects/project-data/attention';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { fileQuestionAsk } from '../../services/inbox/question-asks';
 import * as notificationService from '../../services/notification';
-import * as projectDataService from '../../services/project-data';
 import {
   INTERNAL_ERROR,
   INVALID_PARAMS,
@@ -49,7 +50,14 @@ export async function handleRequestHumanInput(
   }
 
   // Sanitize context: strip null bytes, Unicode bidi overrides, and C0/C1 control chars (except \n, \t)
-  const sanitizedContext = sanitizeUserInput(context.trim());
+  const sanitizedContext = sanitizeUserInput(context.trim()).trim();
+  if (!sanitizedContext) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'context is required and must be a non-empty string'
+    );
+  }
 
   // Validate category if provided
   let category: HumanInputCategory | null = null;
@@ -78,18 +86,19 @@ export async function handleRequestHumanInput(
     }
     options = (params.options as string[])
       .slice(0, MAX_HUMAN_INPUT_OPTIONS_COUNT)
-      .map((o) => sanitizeUserInput(o).slice(0, MAX_HUMAN_INPUT_OPTION_LENGTH));
+      .map((o) => sanitizeUserInput(o).trim().slice(0, MAX_HUMAN_INPUT_OPTION_LENGTH))
+      // An option that is empty once cleaned cannot be picked; leave it out.
+      .filter((o) => o.length > 0);
     if (options.length === 0) options = null;
   }
 
-  // Fetch task title (user_id verified against token below)
+  // The task (user_id verified against the token below) and its chat
   const taskRow = await env.DATABASE.prepare(
-    `SELECT user_id, title, chat_session_id FROM tasks WHERE id = ? AND project_id = ?`
+    `SELECT user_id, chat_session_id FROM tasks WHERE id = ? AND project_id = ?`
   )
     .bind(tokenData.taskId, tokenData.projectId)
     .first<{
       user_id: string;
-      title: string;
       chat_session_id: string | null;
     }>();
 
@@ -124,25 +133,31 @@ export async function handleRequestHumanInput(
     );
   }
 
-  const schedule = computeHumanInputSchedule(env);
-  let marker: Awaited<ReturnType<typeof projectDataService.createAttentionMarker>>;
+  let question: Awaited<ReturnType<typeof fileQuestionAsk>>;
   try {
-    marker = await projectDataService.createAttentionMarker(env, tokenData.projectId, {
+    question = await fileQuestionAsk(env, {
+      projectId: tokenData.projectId,
       sessionId,
       taskId: tokenData.taskId,
       workspaceId: tokenData.workspaceId,
-      kind: 'needs_input',
-      source: 'request_human_input',
-      notificationUserId: tokenData.userId,
-      reason: sanitizedContext,
-      metadata: category || options ? JSON.stringify({ category, options }) : null,
-      ...schedule,
+      userId: tokenData.userId,
+      context: sanitizedContext,
+      category,
+      options,
     });
   } catch (err) {
-    log.error('mcp.request_human_input.attention_marker_failed', {
+    log.error('mcp.request_human_input.ask_failed', {
       taskId: tokenData.taskId,
       error: err instanceof Error ? err.message : String(err),
     });
+    // The per-chat cap and length limits are the inbox's; say which one the agent hit.
+    if (err instanceof OperationError && ['rate_limited', 'invalid_input'].includes(err.code)) {
+      return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+    }
+    // A shape the inbox refuses: the agent can fix its call (the details stay in the log).
+    if (err instanceof Error && err.name === 'ValiError') {
+      return jsonRpcError(requestId, INVALID_PARAMS, 'Human input request is not valid');
+    }
     return jsonRpcError(
       requestId,
       INTERNAL_ERROR,
@@ -150,39 +165,7 @@ export async function handleRequestHumanInput(
     );
   }
 
-  let notificationScheduled = false;
-  if (env.NOTIFICATION) {
-    try {
-      const projectName = await notificationService.getProjectName(env, tokenData.projectId);
-      const notification = await notificationService.notifyNeedsInput(env, tokenData.userId, {
-        projectId: tokenData.projectId,
-        projectName,
-        taskId: tokenData.taskId,
-        taskTitle: taskRow.title,
-        context: sanitizedContext,
-        category,
-        options,
-        sessionId,
-        attentionMarkerId: marker.id,
-      });
-      notificationScheduled = notification.id !== 'suppressed';
-      if (notificationScheduled) {
-        await projectDataService.linkAttentionNotification(
-          env,
-          tokenData.projectId,
-          marker.id,
-          tokenData.userId,
-          notification.id
-        );
-      }
-    } catch (err) {
-      log.warn('mcp.request_human_input.notification_failed', {
-        taskId: tokenData.taskId,
-        markerId: marker.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
+  const notificationScheduled = question.notificationScheduled;
 
   log.info('mcp.request_human_input', {
     taskId: tokenData.taskId,
@@ -191,14 +174,17 @@ export async function handleRequestHumanInput(
     hasOptions: options !== null,
   });
 
+  // JSON so the chat can render this call as an answerable card: the card reads the question by
+  // ID through the attention route (see HumanInputCard in apps/web), never from chat text. The ID
+  // is the `asks` row's; the route reads it there (`routes/chat-attention.ts`).
+  const payload = {
+    message: notificationScheduled
+      ? 'Human input request recorded. Notification delivery has been scheduled. You may continue working or end your turn.'
+      : 'Human input request recorded, but notification delivery was not scheduled. SAM will keep the task alive while waiting for delivery. You may continue working.',
+    humanInputRequest: { id: question.id, sessionId },
+    notificationScheduled,
+  };
   return jsonRpcSuccess(requestId, {
-    content: [
-      {
-        type: 'text',
-        text: notificationScheduled
-          ? 'Human input request recorded. Notification delivery has been scheduled. You may continue working or end your turn.'
-          : 'Human input request recorded, but notification delivery was not scheduled. SAM will keep the task alive while waiting for delivery. You may continue working.',
-      },
-    ],
+    content: [{ type: 'text', text: JSON.stringify(payload) }],
   });
 }

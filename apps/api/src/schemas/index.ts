@@ -28,14 +28,23 @@ export {
 
 // Credential schemas
 export {
+  CreateCCAttachmentSchema,
+  CreateCCProfileAttachmentSchema,
   CreateCredentialSchema,
   CredentialKindBodySchema,
+  MakeCCDefaultSchema,
   SaveAgentCredentialSchema,
   SaveGcpServiceAccountCredentialSchema,
+  UpdateCCAttachmentSchema,
 } from './credentials';
 
 // Node schemas
-export { CreateNodeSchema, PatchNodeSchema, UpdateNodeLabelSchema } from './nodes';
+export {
+  ConfirmManualNodeDeletionSchema,
+  CreateNodeSchema,
+  PatchNodeSchema,
+  UpdateNodeLabelSchema,
+} from './nodes';
 
 // Workspace schemas
 export {
@@ -65,10 +74,14 @@ export {
   CreateAgentProfileSchema,
   SetProjectDefaultProfileSchema,
   UpdateAgentProfileSchema,
+  UpdateProfilePickerSchema,
 } from './agent-profiles';
 
 // Skill schemas
 export { CreateSkillSchema, UpdateSkillSchema } from './skills';
+
+// Agent model call schemas
+export { AgentModelSelectionSchema, UpdateProjectAgentModelsSchema } from './agent-models';
 
 // Bring-your-own MCP server schemas
 export { CreateMcpConnectionSchema, UpdateMcpConnectionSchema } from './mcp-connections';

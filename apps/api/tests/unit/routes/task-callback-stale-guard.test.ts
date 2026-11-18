@@ -111,7 +111,10 @@ vi.mock('../../../src/services/notification', () => ({
   notifyTaskFailed: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('../../../src/services/task-status', () => ({
+// Partial: `task-status` also exports the status SETS that other modules read at
+// import time, and a wholesale mock silently drops them.
+vi.mock('../../../src/services/task-status', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/task-status')>()),
   canTransitionTaskStatus: vi.fn().mockReturnValue(true),
   getAllowedTaskTransitions: vi.fn().mockReturnValue(['completed', 'failed', 'cancelled']),
   isTaskStatus: vi.fn().mockReturnValue(true),
@@ -141,7 +144,6 @@ const OLD_TOKEN = tokenWithIatSeconds(TOKEN_IAT_SECONDS);
 
 // Routes import during collection so cold compilation is outside the callback test deadline.
 function createTestApp(): Hono {
-
   const app = new Hono();
   app.route('/api/projects', taskCallbackRoute);
   app.onError((err, c) => {

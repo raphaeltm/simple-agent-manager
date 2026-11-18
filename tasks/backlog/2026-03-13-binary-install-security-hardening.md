@@ -1,5 +1,24 @@
 # Binary Install Security Hardening
 
+> **Reconciliation 2026-11-02:** #2484 (`30ae3a4e0`) reintroduced a raw GitHub-release binary
+> (OpenCode v2.2.5), and it meets this file's bar. `packages/vm-agent/internal/acp/opencode_install.sh`
+> does the following:
+>
+> - pins the version;
+> - allowlists `uname` values;
+> - pins a SHA-256 digest per target and checks it with `sha256sum -c` before extracting;
+> - stages the binary and checks its `--version` before replacing.
+>
+> VM installs (`gateway.go`) and the Instant image (`Dockerfile.vm-agent-container:13`) use the
+> same script. The 09-30 "no raw binary download remains" line is therefore out of date.
+>
+> Still open: the uv installer is fetched unpinned and unverified at `gateway.go:1065,1083` and
+> `Dockerfile.vm-agent-container:34`. Hash-pinning the `uv tool install` packages is optional.
+
+> **Reconciliation 2026-10-26:** Pointer correction only. The unpinned, unverified uv installer is
+> at `packages/vm-agent/internal/acp/gateway.go:1066,1085` (Mistral Vibe, Amp) and
+> `apps/api/Dockerfile.vm-agent-container:28`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**
@@ -55,3 +74,7 @@ Additionally, agent stderr is forwarded to the observability system without cred
 - Security audit output: `/tmp/claude-1000/-workspaces-simple-agent-manager/tasks/ac81a81d00ce092a6.output`
 - Install command: `packages/shared/src/agents.ts:111`, `packages/vm-agent/internal/acp/gateway.go:635`
 - Stderr forwarding: `packages/vm-agent/internal/acp/session_host.go:1100-1104`
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. #2770 pins the Instant image's uv install to 0.13.8 and checks its sha256 (`apps/api/Dockerfile.vm-agent-container:40-41`). Still open: the VM path still pipes an unpinned `curl … astral.sh/uv/install.sh | sh` (`packages/vm-agent/internal/acp/gateway.go:1078,1096`).

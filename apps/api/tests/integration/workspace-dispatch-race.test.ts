@@ -18,13 +18,13 @@ import type {
 import { handleWorkspaceReady } from '../../src/durable-objects/task-runner/workspace-ready-steps';
 import { createSqliteD1 } from '../helpers/sqlite-d1';
 
-const schemaSource = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
+const schemaSource = readFileSync(resolve(process.cwd(), '../../packages/worker-core/src/schema.ts'), 'utf8');
 const nodeLifecycleSource = readFileSync(
   resolve(process.cwd(), 'src/routes/node-lifecycle.ts'),
   'utf8'
 );
 const taskRunnerWorkspaceSource = readFileSync(
-  resolve(process.cwd(), 'src/durable-objects/task-runner/workspace-steps.ts'),
+  resolve(process.cwd(), 'src/durable-objects/task-runner/workspace-dispatch-step.ts'),
   'utf8'
 );
 const workspaceHelpersSource = readFileSync(
@@ -115,17 +115,23 @@ describe('workspace dispatch race prevention', () => {
     async (dispatchedAt) => {
       const sqlite = new Database(':memory:');
       try {
-        sqlite.exec('CREATE TABLE workspaces (id TEXT PRIMARY KEY, dispatched_at TEXT)');
+        sqlite.exec(
+          `CREATE TABLE workspaces (id TEXT PRIMARY KEY, dispatched_at TEXT, callback_generation TEXT,
+             status TEXT, error_message TEXT, created_at TEXT, creating_started_at TEXT,
+             build_started_at TEXT)`
+        );
         sqlite
-          .prepare('INSERT INTO workspaces (id, dispatched_at) VALUES (?, ?)')
-          .run('workspace-1', dispatchedAt);
+          .prepare(
+            `INSERT INTO workspaces (id, dispatched_at, status, created_at)
+             VALUES (?, ?, 'creating', ?)`
+          )
+          .run('workspace-1', dispatchedAt, new Date().toISOString());
         const state = {
           taskId: 'task-1',
           stepResults: { workspaceId: 'workspace-1' },
           config: { attachments: null },
           workspaceReadyReceived: true,
           workspaceReadyStatus: 'running',
-          workspaceReadyStartedAt: Date.now(),
         } as TaskRunnerState;
         const advanceToStep = vi.fn();
         const updateD1ExecutionStep = vi.fn();

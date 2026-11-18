@@ -3,8 +3,7 @@
  * (apps/api/src/durable-objects/credential-setup-session/index.ts).
  *
  * Harness notes (read before extending):
- *  - `vi.mock('cloudflare:workers', ...)` mirrors the established pattern in
- *    tests/unit/durable-objects/trial-counter.test.ts — it lets the DO module
+ *  - `vi.mock('cloudflare:workers', ...)` lets the DO module
  *    (which imports `DurableObject` from the Workers-runtime-only
  *    'cloudflare:workers' specifier) load under the plain Node test runner.
  *  - `services/sandbox` (getSandboxInstance/destroySandboxInstance) and
@@ -70,6 +69,13 @@ vi.mock('../../../src/services/setup-session-pool', async (importOriginal) => {
   return { ...actual, releaseSetupSlot: vi.fn() };
 });
 
+// The save-time membership re-check runs against D1; its predicate is covered by the
+// project-auth tests, so here only its decision is substituted.
+vi.mock('../../../src/middleware/project-auth', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/middleware/project-auth')>();
+  return { ...actual, requireProjectCapability: vi.fn() };
+});
+
 vi.mock('../../../src/services/agent-credential-save', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('../../../src/services/agent-credential-save')>();
@@ -82,6 +88,7 @@ const { getSandboxInstance, destroySandboxInstance } =
   await import('../../../src/services/sandbox');
 const { releaseSetupSlot } = await import('../../../src/services/setup-session-pool');
 const { saveAgentCredentialForUser } = await import('../../../src/services/agent-credential-save');
+const { requireProjectCapability } = await import('../../../src/middleware/project-auth');
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -129,6 +136,14 @@ interface FakeRow {
   error_code: string | null;
   error_message: string | null;
   completed_at: number | null;
+  cleanup_pending: number | null;
+  cleanup_from_status: string | null;
+  cleanup_attempts: number | null;
+  cleanup_recovery_max_attempts: number | null;
+  cleanup_settlement_credit: number | null;
+  cleanup_sandbox_destroyed: number | null;
+  cleanup_scrub_state: number | null;
+  cleanup_sandbox_io_pending: number | null;
 }
 
 function createFakeSql() {
@@ -175,6 +190,14 @@ function createFakeSql() {
         error_code: null,
         error_message: null,
         completed_at: null,
+        cleanup_pending: null,
+        cleanup_from_status: null,
+        cleanup_attempts: null,
+        cleanup_recovery_max_attempts: null,
+        cleanup_settlement_credit: null,
+        cleanup_sandbox_destroyed: null,
+        cleanup_scrub_state: null,
+        cleanup_sandbox_io_pending: 0,
       };
       return { toArray: () => [] };
     }
@@ -194,6 +217,82 @@ function createFakeSql() {
 
     if (q.includes('delete from device_auth_details')) {
       deviceAuthDetails = undefined;
+      return { toArray: () => [] };
+    }
+
+    // Teardown-cleanup bookkeeping (index.ts teardown/resumeCleanup/runCleanup).
+    if (q.includes('update setup_session') && q.includes('set cleanup_pending = 1')) {
+      const [fromStatus] = args;
+      if (row) {
+        row = { ...row, cleanup_pending: 1, cleanup_from_status: fromStatus, cleanup_attempts: 0 };
+      }
+      return { toArray: () => [] };
+    }
+    if (q.includes('update setup_session set cleanup_pending = 0')) {
+      if (row) row = { ...row, cleanup_pending: 0 };
+      return { toArray: () => [] };
+    }
+    if (q.includes('update setup_session set cleanup_sandbox_io_pending = coalesce')) {
+      if (row)
+        row = { ...row, cleanup_sandbox_io_pending: (row.cleanup_sandbox_io_pending ?? 0) + 1 };
+      return { toArray: () => [] };
+    }
+    if (q.includes('update setup_session set cleanup_sandbox_io_pending = max')) {
+      if (row)
+        row = {
+          ...row,
+          cleanup_sandbox_io_pending: Math.max(0, (row.cleanup_sandbox_io_pending ?? 0) - 1),
+        };
+      return { toArray: () => [] };
+    }
+    if (q.includes('update setup_session set cleanup_scrub_state = 1')) {
+      if (row) row = { ...row, cleanup_scrub_state: 1 };
+      return { toArray: () => [] };
+    }
+    if (q.includes('update setup_session set cleanup_scrub_state = ?')) {
+      if (row)
+        row = {
+          ...row,
+          cleanup_scrub_state: args[0],
+          cleanup_settlement_credit: args[1] === 1 ? 1 : row.cleanup_settlement_credit,
+        };
+      return { toArray: () => [] };
+    }
+    if (q.startsWith('select cleanup_scrub_state'))
+      return { toArray: () => (row ? [{ cleanup_scrub_state: row.cleanup_scrub_state }] : []) };
+    if (q.startsWith('select cleanup_pending, cleanup_attempts'))
+      return {
+        toArray: () =>
+          row
+            ? [
+                {
+                  cleanup_pending: row.cleanup_pending,
+                  cleanup_attempts: row.cleanup_attempts,
+                  cleanup_recovery_max_attempts: row.cleanup_recovery_max_attempts,
+                },
+              ]
+            : [],
+      };
+    if (q.includes('update setup_session set cleanup_sandbox_destroyed = 1')) {
+      if (row)
+        row = {
+          ...row,
+          cleanup_sandbox_destroyed: 1,
+          cleanup_settlement_credit: args[0] === 1 ? 1 : row.cleanup_settlement_credit,
+        };
+      return { toArray: () => [] };
+    }
+    if (q.includes('update setup_session set cleanup_settlement_credit = 0')) {
+      if (row) row = { ...row, cleanup_settlement_credit: 0 };
+      return { toArray: () => [] };
+    }
+    if (q.includes('update setup_session set cleanup_recovery_max_attempts = ?')) {
+      if (row && row.cleanup_recovery_max_attempts == null)
+        row = { ...row, cleanup_recovery_max_attempts: args[0] };
+      return { toArray: () => [] };
+    }
+    if (q.includes('update setup_session set cleanup_attempts = ?')) {
+      if (row) row = { ...row, cleanup_attempts: args[0] };
       return { toArray: () => [] };
     }
 
@@ -234,19 +333,26 @@ function createFakeDatabase() {
 
 function createFakeCtx() {
   const sql = createFakeSql();
-  const setAlarm = vi.fn(async () => undefined);
-  const deleteAlarm = vi.fn(async () => undefined);
+  let alarm: number | null = null;
+  const setAlarm = vi.fn(async (time: number | Date) => {
+    alarm = Number(time);
+  });
+  const deleteAlarm = vi.fn(async () => {
+    alarm = null;
+  });
+  const getAlarm = vi.fn(async () => alarm);
   const blockConcurrencyWhile = vi.fn(async <T>(fn: () => Promise<T>): Promise<T> => fn());
   return {
-    storage: { sql, setAlarm, deleteAlarm },
+    storage: { sql, setAlarm, deleteAlarm, getAlarm },
     blockConcurrencyWhile,
+    waitUntil: vi.fn(),
     _sql: sql,
   };
 }
 
 function createFakeSandbox() {
   return {
-    exec: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
+    exec: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0, success: true }),
     writeFile: vi.fn().mockResolvedValue(undefined),
     readFile: vi.fn().mockImplementation(async (path: string) => ({
       content: path.endsWith('device-auth-state.json')
@@ -294,6 +400,9 @@ beforeEach(() => {
   vi.mocked(destroySandboxInstance).mockReset().mockResolvedValue(undefined);
   vi.mocked(releaseSetupSlot).mockReset().mockResolvedValue(undefined);
   vi.mocked(saveAgentCredentialForUser).mockReset();
+  vi.mocked(requireProjectCapability)
+    .mockReset()
+    .mockResolvedValue({} as never);
 });
 
 // ---------------------------------------------------------------------------
@@ -392,6 +501,62 @@ describe('CredentialSetupSession — alarm() provisioning step', () => {
 
     expect((await instance.getState())?.status).toBe('completed');
     expect(saveAgentCredentialForUser).toHaveBeenCalledOnce();
+  });
+
+  async function captureProjectScoped() {
+    const { instance } = createDO();
+    await Promise.resolve();
+    const fakeSandbox = createFakeSandbox();
+    vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
+    await instance.create({
+      id: 'setup-project',
+      setupHome: '/tmp/codex-setup-project',
+      ttlMs: 900_000,
+      ...BASE_PARAMS,
+      projectId: 'proj-1',
+      scope: 'project',
+    });
+    await instance.alarm();
+    fakeSandbox.exists.mockResolvedValue({ exists: true });
+    fakeSandbox.readFile.mockImplementation(async (path: string) => ({
+      content: path.endsWith('device-auth-state.json')
+        ? JSON.stringify({ status: 'completed' })
+        : validAuthJson(),
+    }));
+    vi.mocked(saveAgentCredentialForUser).mockResolvedValue({
+      created: true,
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z',
+    });
+    await instance.alarm();
+    return instance;
+  }
+
+  it('re-checks task:write in the project before saving a project-scoped capture', async () => {
+    const instance = await captureProjectScoped();
+
+    expect(requireProjectCapability).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'user-1',
+      'task:write'
+    );
+    expect(saveAgentCredentialForUser).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: 'proj-1', userId: 'user-1' })
+    );
+    expect((await instance.getState())?.status).toBe('completed');
+  });
+
+  it('does not save when the member lost task:write during sign-in', async () => {
+    vi.mocked(requireProjectCapability).mockRejectedValue(
+      new Error('Project capability is required')
+    );
+    const instance = await captureProjectScoped();
+
+    expect(saveAgentCredentialForUser).not.toHaveBeenCalled();
+    const state = await instance.getState();
+    expect(state?.status).toBe('failed');
+    expect(state?.errorCode).toBe('capture_save_failed');
   });
 
   it('does not resurrect a session cancelled during device-state I/O', async () => {
@@ -494,7 +659,7 @@ describe('CredentialSetupSession — alarm() provisioning step', () => {
     const { instance, ctx, database } = createDO();
     await Promise.resolve();
     const fakeSandbox = createFakeSandbox();
-    fakeSandbox.exec.mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+    fakeSandbox.exec.mockResolvedValue({ stdout: '', stderr: '', exitCode: 0, success: true });
     fakeSandbox.exec.mockRejectedValueOnce(new Error('mkdir failed: no space left'));
     vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
 
@@ -512,9 +677,14 @@ describe('CredentialSetupSession — alarm() provisioning step', () => {
     expect(state?.errorCode).toBe('sandbox_provision_failed');
 
     // Teardown ran: scrub (best-effort), destroy, release, D1 marked terminal, alarm disarmed.
-    expect(destroySandboxInstance).toHaveBeenCalledWith(expect.anything(), 'setup-1', {
-      sandboxId: 'setup-1',
-    });
+    expect(destroySandboxInstance).toHaveBeenCalledWith(
+      expect.anything(),
+      'setup-1',
+      {
+        sandboxId: 'setup-1',
+      },
+      { timeoutMs: null }
+    );
     expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), 'lease-abc');
     expect(ctx.storage.deleteAlarm).toHaveBeenCalledTimes(1);
     expect(database._calls.some((c) => c.args.includes('failed'))).toBe(true);
@@ -709,9 +879,14 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
       expect.stringContaining('rm -rf'),
       expect.objectContaining({ timeout: expect.any(Number) })
     );
-    expect(destroySandboxInstance).toHaveBeenCalledWith(expect.anything(), 'setup-1', {
-      sandboxId: 'setup-1',
-    });
+    expect(destroySandboxInstance).toHaveBeenCalledWith(
+      expect.anything(),
+      'setup-1',
+      {
+        sandboxId: 'setup-1',
+      },
+      { timeoutMs: null }
+    );
     expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), 'lease-abc');
     expect(ctx.storage.deleteAlarm).toHaveBeenCalledTimes(1);
     expect(database._calls.some((c) => c.args.includes('completed'))).toBe(true);
@@ -877,7 +1052,59 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
     });
   });
 
-  it('fails fast with a sanitized error when Claude rejects the submitted code', async () => {
+  it('persists the safe startup driver failure and cleans up before a sign-in URL is available', async () => {
+    const { instance, ctx, database } = createDO();
+    await Promise.resolve();
+    const fakeSandbox = createFakeSandbox();
+    fakeSandbox.readFile.mockResolvedValue({
+      content: JSON.stringify({
+        status: 'failed',
+        code: 'process_exited',
+        error: 'private terminal output',
+        diagnostics: { exitCode: 0 },
+      }),
+    });
+    vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
+    await instance.create({
+      id: 'setup-startup-exit',
+      setupHome: '/tmp/setup-startup-exit',
+      ttlMs: 900_000,
+      ...BASE_PARAMS,
+      agentType: 'claude-code',
+      provider: 'anthropic',
+      agentName: 'Claude Code',
+    });
+    await instance.alarm();
+    expect((await instance.getState())?.status).toBe('admitting');
+    await instance.alarm();
+
+    const message =
+      'The Claude sign-in process stopped before returning a token. Please try again.';
+    expect(await instance.getState()).toMatchObject({
+      status: 'failed',
+      errorCode: 'process_exited',
+      errorMessage: message,
+    });
+    expect(
+      database._calls.some(
+        (call) => call.args.includes('process_exited') && call.args.includes(message)
+      )
+    ).toBe(true);
+    expect(JSON.stringify(database._calls)).not.toContain('private terminal output');
+    expect(destroySandboxInstance).toHaveBeenCalledWith(
+      expect.anything(),
+      'setup-startup-exit',
+      {
+        sandboxId: 'setup-startup-exit',
+      },
+      { timeoutMs: null }
+    );
+    expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), 'lease-abc');
+    expect(ctx.storage.deleteAlarm).toHaveBeenCalled();
+    expect(saveAgentCredentialForUser).not.toHaveBeenCalled();
+  });
+
+  it('does not label an unclassified driver failure as a rejected code', async () => {
     const created = createDO();
     await Promise.resolve();
     let driverStatus = 'waiting_for_user';
@@ -908,7 +1135,7 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
     await created.instance.alarm();
 
     const state = await created.instance.getState();
-    expect(state).toMatchObject({ status: 'failed', errorCode: 'code_rejected' });
+    expect(state).toMatchObject({ status: 'failed', errorCode: 'setup_failed' });
     expect(state?.errorMessage).not.toContain('secret provider detail');
     expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), 'lease-abc');
   });
@@ -962,7 +1189,7 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
         },
         expectCode: 'code_incomplete',
         expectMessage: 'entire code',
-        expectDetail: '[CLI: Invalidcode. Please makesure the fullcde wascopied]',
+        expectDetail: '',
       },
       {
         id: 'setup-network',
@@ -974,7 +1201,7 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
         },
         expectCode: 'exchange_network_error',
         expectMessage: 'network error',
-        expectDetail: '[CLI: connctECONNREFUSED 10.0.0.1:443 [redacted] junk]',
+        expectDetail: '',
       },
       {
         id: 'setup-network-openai-keys',
@@ -986,7 +1213,7 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
         },
         expectCode: 'exchange_network_error',
         expectMessage: 'network error',
-        expectDetail: '[CLI: retry with [redacted] or [redacted]]',
+        expectDetail: '',
       },
     ] as const;
 
@@ -1020,7 +1247,7 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
       const state = await created.instance.getState();
       expect(state).toMatchObject({ status: 'failed', errorCode: scenario.expectCode });
       expect(state?.errorMessage).toContain(scenario.expectMessage);
-      expect(state?.errorMessage).toContain(scenario.expectDetail);
+      expect(state?.errorMessage).not.toContain('[CLI:');
       expect(state?.errorMessage).not.toContain('sk-ant');
       expectCredentialTokensAbsent(state?.errorMessage ?? '');
     }

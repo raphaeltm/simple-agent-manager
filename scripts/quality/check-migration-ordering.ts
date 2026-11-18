@@ -10,7 +10,7 @@
  */
 
 import { readdirSync, statSync } from 'node:fs';
-import { join, resolve, relative } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 
 const DEFAULT_MIGRATION_DIRS = [
   resolve(import.meta.dirname, '../../apps/api/src/db/migrations'),
@@ -101,6 +101,45 @@ const LEGACY_ALLOWED_DUPLICATE_FILES = new Map<string, Map<string, Set<string>>>
           '0130_repair_running_agent_sessions_deleted_workspaces.sql',
           '0130_task_supersession_marker.sql',
         ]),
+      ],
+      // PR #2413's agent email migration was applied to staging on 2026-10-22 as
+      // d1_migrations id 233 (with 0205_agent_email_durable_intake.sql as id 234),
+      // before #2414 claimed prefix 0204 on main; staging applied that one as id 235.
+      // Wrangler keys applied migrations by exact filename, so renumbering this file
+      // would replay its CREATE TABLE statements against staging.
+      ['0204', new Set(['0204_agent_email_triggers.sql', '0204_agent_model_access.sql'])],
+      // PR "required sleep must not fail" applied its session_snapshots marker to staging on
+      // 2026-11-03 as d1_migrations id 247, right after #2501 applied
+      // 0217_operations_audit_log.sql as id 246 under the same prefix. Wrangler keys applied
+      // migrations by exact filename, so renumbering this file would replay
+      // ALTER TABLE session_snapshots ADD COLUMN sleep_required_episode_started_at against staging.
+      [
+        '0217',
+        new Set([
+          '0217_operations_audit_log.sql',
+          '0217_session_snapshot_sleep_required_episode.sql',
+        ]),
+      ],
+      // The compute pool editor PR's switched-off accounts column was applied to staging on
+      // 2026-11-09 as d1_migrations id 263, before #2615 claimed prefix 0230 on main; staging
+      // applied that one as id 264. Wrangler keys applied migrations by exact filename, so
+      // renumbering this file would replay ALTER TABLE capacity_pools ADD COLUMN
+      // excluded_source_ids_json against staging and abort its migration run.
+      [
+        '0230',
+        new Set([
+          '0230_capacity_pool_excluded_sources.sql',
+          '0230_node_cloudflare_tunnels.sql',
+          '0230_publish_job_build_context.sql',
+        ]),
+      ],
+      // PR #2605's context migrations were applied to staging on 2026-11-09 as
+      // d1_migrations ids 261/262, before main claimed prefixes 0230/0231.
+      // Keep their exact filenames (0230 is included above): renumbering would
+      // replay the ALTER TABLE deployment_publish_jobs ADD COLUMN statements.
+      [
+        '0231',
+        new Set(['0231_node_tunnel_pending_creates.sql', '0231_publish_job_context_shadow.sql']),
       ],
     ]),
   ],

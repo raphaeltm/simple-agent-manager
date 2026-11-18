@@ -26,13 +26,16 @@ func (s *Server) prepareSnapshot(ctx context.Context, workspaceID, sessionID, ch
 	return &out, err
 }
 
-func (s *Server) completeSnapshot(ctx context.Context, workspaceID, sessionID, chatSessionID, runtimeName, generation, token string, manifest snapshotManifest) error {
+func (s *Server) completeSnapshot(ctx context.Context, workspaceID, sessionID, chatSessionID, runtimeName, generation, token string, manifest snapshotManifest, quiesced bool) error {
 	var out map[string]interface{}
-	return s.doSnapshotJSON(ctx, http.MethodPost, workspaceID, "/session-snapshot/complete", token, snapshotCompletionPayload(sessionID, chatSessionID, runtimeName, generation, manifest), &out)
+	return s.doSnapshotJSON(ctx, http.MethodPost, workspaceID, "/session-snapshot/complete", token, snapshotCompletionPayload(sessionID, chatSessionID, runtimeName, generation, manifest, quiesced), &out)
 }
 
-// snapshotCompletionPayload is the /session-snapshot/complete request body.
-func snapshotCompletionPayload(sessionID, chatSessionID, runtimeName, generation string, manifest snapshotManifest) map[string]interface{} {
+// snapshotCompletionPayload is the /session-snapshot/complete request body. quiesced is
+// sent only when the capture was taken from a stopped source with no other writer, which
+// is what lets the control plane treat an eviction capture as final (older control planes
+// ignore the field).
+func snapshotCompletionPayload(sessionID, chatSessionID, runtimeName, generation string, manifest snapshotManifest, quiesced bool) map[string]interface{} {
 	artifactSizes := map[string]int64{}
 	if artifact, ok := manifest.Artifacts["home"]; ok {
 		artifactSizes["homeBytes"] = artifact.SizeBytes
@@ -40,7 +43,7 @@ func snapshotCompletionPayload(sessionID, chatSessionID, runtimeName, generation
 	if artifact, ok := manifest.Artifacts["wip"]; ok {
 		artifactSizes["wipBytes"] = artifact.SizeBytes
 	}
-	return map[string]interface{}{
+	payload := map[string]interface{}{
 		"chatSessionId":  chatSessionID,
 		"agentSessionId": sessionID,
 		"runtime":        runtimeName,
@@ -51,6 +54,10 @@ func snapshotCompletionPayload(sessionID, chatSessionID, runtimeName, generation
 		"manifest":       manifest,
 		"artifactSizes":  artifactSizes,
 	}
+	if quiesced {
+		payload["quiesced"] = true
+	}
+	return payload
 }
 
 func (s *Server) reportSnapshotProgress(ctx context.Context, workspaceID, chatSessionID, generation, step, token string) error {

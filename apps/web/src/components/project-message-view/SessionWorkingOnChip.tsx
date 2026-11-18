@@ -1,0 +1,55 @@
+import { chipClassName } from '@simple-agent-manager/ui';
+import { Lightbulb } from 'lucide-react';
+import { Link } from 'react-router';
+
+import { projectIdeaPath } from '../../lib/project-routes';
+import type { SessionWorkingOnIdea } from './useSessionLinkedWork';
+
+/**
+ * "Working on <idea>" in the chat header.
+ *
+ * Which idea a chat is for is the single most useful thing to know about it, and it was
+ * previously invisible: the link existed in the store and nowhere in the UI. The chip sits in
+ * the always-visible header row rather than in the Details disclosure: it is a discovery
+ * affordance, so it has to be visible before you know there is something to find.
+ *
+ * The chip shows ONE idea. A chat that works on several is unusual, and the Related panel lists
+ * all of them; putting a list in the header row would push the other chips off a 375px screen.
+ */
+export function SessionWorkingOnChip({
+  projectId,
+  workingOn,
+  size = 'md',
+}: Readonly<{ projectId: string; workingOn: SessionWorkingOnIdea; size?: 'sm' | 'md' }>) {
+  const { idea, verb } = workingOn;
+  return (
+    <Link
+      to={projectIdeaPath(projectId, idea.ideaId)}
+      // `max-w-full` + `truncate`, not `shrink-0`: a 200-character idea title must give way
+      // instead of pushing the chip row past the viewport. The row wraps, so on a phone the
+      // chip gets a line of its own and may use all of it. The full title stays available as
+      // the accessible name and the tooltip.
+      className={`${chipClassName({ tone: 'success', size })} !shrink transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring sm:max-w-[22rem]`}
+      /*
+       * Leads with the action, because that is what a link's accessible name is for, and reads
+       * as a sentence for both verbs — "Discussing the idea X — open it" did not.
+       */
+      aria-label={
+        verb === 'Working on'
+          ? `Open the idea this chat is working on: ${idea.title}`
+          : `Open the idea this chat discusses: ${idea.title}`
+      }
+      title={`${verb}: ${idea.title}`}
+      data-testid="session-working-on-chip"
+    >
+      <Lightbulb
+        size={size === 'sm' ? 13 : 14}
+        strokeWidth={1.75}
+        aria-hidden="true"
+        className="shrink-0"
+      />
+      <span className="shrink-0">{verb}</span>
+      <span className="min-w-0 truncate">{idea.title}</span>
+    </Link>
+  );
+}

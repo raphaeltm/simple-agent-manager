@@ -71,7 +71,7 @@ export async function revokeApiToken(id: string): Promise<void> {
 }
 
 // -------------------------------------------------------------------------
-// Platform Trial Status
+// Platform compute availability (path name predates the retired anonymous-trial product)
 // -------------------------------------------------------------------------
 
 export interface TrialStatusResponse {

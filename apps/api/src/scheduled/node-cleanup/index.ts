@@ -8,6 +8,11 @@
  *    everything the alarm missed
  * 3. Absolute lifetime ceiling — hard cap so no auto-provisioned node is immortal
  *
+ * Provider deletions the stopped/destroying handoff phases and stranded retirement start are
+ * two-phase: the DELETE is sent without waiting for the provider's operation, and the
+ * `provider_deletion_confirm` phase writes termination proof on a later tick once the provider's
+ * own record shows the deletion finished (`services/node-provider-deletion.ts`).
+ *
  * Layers 1 and 2 both depend on the node reaching a known idle state, so a node
  * that never transitions is invisible to both. Phase 5 (`sweepIdleOrphanNodes`)
  * is the independent backstop for that case when a task auto-provisioned the
@@ -24,16 +29,19 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { resolveAdminSetting } from '../../services/admin-settings';
 import { sweepEmptyNodeWarmHandoff } from './empty-node-warm-handoff';
 import {
   sweepDestroyingHandoffNodes,
   sweepIdleOrphanNodes,
   sweepIncompatibleVmAgentNodes,
   sweepMaxLifetimeNodes,
+  sweepProviderDeletionConfirmations,
   sweepStaleWarmNodes,
   sweepStoppedHandoffNodes,
 } from './node-phases';
 import { emptyResult, type NodeCleanupResult, resolveCleanupConfig } from './shared';
+import { sweepStrandedNodes } from './stranded-node-retirement';
 import { sweepTerminalCfContainers } from './terminal-cf-container-phase';
 import { sweepUnhealthyNodes, type UnhealthyNodeBoundaries } from './unhealthy-nodes';
 import { sweepOrphanedWorkspaces, sweepStaleStoppedWorkspaces } from './workspace-phases';
@@ -57,10 +65,28 @@ export async function runNodeCleanupSweep(
   const db = drizzle(env.DATABASE, { schema });
   const now = new Date();
   const config = resolveCleanupConfig(env);
+  const [retirementMs, warningMs, alertMs, deletionRequestMs, deletionConfirmMaxMs] =
+    await Promise.all([
+      resolveAdminSetting(env, 'operations.nodeCleanupBlockedRetirementMs'),
+      resolveAdminSetting(env, 'operations.nodeCleanupRefusalWarnAfterMs'),
+      resolveAdminSetting(env, 'operations.nodeCleanupOwnershipAlertIntervalMs'),
+      resolveAdminSetting(env, 'operations.nodeProviderDeletionRequestTimeoutMs'),
+      resolveAdminSetting(env, 'operations.nodeProviderDeletionConfirmMaxMs'),
+    ]);
+  config.blockedRetirementMs = Number(retirementMs);
+  config.refusalWarnAfterMs = Number(warningMs);
+  config.ownershipAlertIntervalMs = Number(alertMs);
+  config.providerDeletionRequestTimeoutMs = Number(deletionRequestMs);
+  config.providerDeletionConfirmMaxMs = Number(deletionConfirmMaxMs);
   const result = emptyResult();
 
   const phases: Array<[string, () => Promise<void>]> = [
     ['cf_container_terminal', () => sweepTerminalCfContainers(env, now, config, result)],
+    // First, so started deletions are confirmed before new ones compete for the budget.
+    [
+      'provider_deletion_confirm',
+      () => sweepProviderDeletionConfirmations(db, env, now, config, result),
+    ],
     ['stale_warm', () => sweepStaleWarmNodes(db, env, now, config, result)],
     [
       'unhealthy_nodes',
@@ -69,6 +95,7 @@ export async function runNodeCleanupSweep(
     ['max_lifetime', () => sweepMaxLifetimeNodes(db, env, now, config, result)],
     ['stopped_handoff', () => sweepStoppedHandoffNodes(db, env, now, config, result)],
     ['destroying_handoff', () => sweepDestroyingHandoffNodes(db, env, now, config, result)],
+    ['stranded_nodes', () => sweepStrandedNodes(db, env, now, config, result)],
     ['orphaned_workspaces', () => sweepOrphanedWorkspaces(db, env, now, config, result)],
     ['incompatible_vm_agent', () => sweepIncompatibleVmAgentNodes(db, env, now, config, result)],
     ['idle_orphan_nodes', () => sweepIdleOrphanNodes(db, env, now, config, result)],

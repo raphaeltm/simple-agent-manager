@@ -37,7 +37,10 @@ export const ImageSchema = z
     repository: z.string().min(1, 'Repository must not be empty'),
     digest: z
       .string()
-      .regex(SHA256_DIGEST_RE, 'Image digest must be a sha256 digest (sha256:<64 hex chars>). Mutable tags are not allowed.'),
+      .regex(
+        SHA256_DIGEST_RE,
+        'Image digest must be a sha256 digest (sha256:<64 hex chars>). Mutable tags are not allowed.'
+      ),
   })
   .strict();
 
@@ -51,7 +54,10 @@ export const SecretRefSchema = z
   .object({
     secret: z
       .string()
-      .regex(SECRET_NAME_RE, 'Secret name must be 1-128 alphanumeric, hyphen, or underscore characters'),
+      .regex(
+        SECRET_NAME_RE,
+        'Secret name must be 1-128 alphanumeric, hyphen, or underscore characters'
+      ),
   })
   .strict();
 
@@ -67,7 +73,12 @@ export type EnvValue = z.infer<typeof EnvValueSchema>;
 
 export const ServiceVolumeMountSchema = z
   .object({
-    name: z.string().regex(VOLUME_NAME_RE, 'Volume name must be lowercase alphanumeric with optional hyphens, 1-63 chars'),
+    name: z
+      .string()
+      .regex(
+        VOLUME_NAME_RE,
+        'Volume name must be lowercase alphanumeric with optional hyphens, 1-63 chars'
+      ),
     mountPath: z.string().min(1, 'Mount path must not be empty'),
   })
   .strict();
@@ -95,7 +106,11 @@ export const HealthCheckSchema = z
   .object({
     path: z.string().min(1, 'Health check path must not be empty'),
     port: z.number().int().min(1).max(65535, 'Port must be between 1 and 65535'),
-    expectedStatus: z.number().int().min(100).max(599, 'Expected status must be a valid HTTP status code (100-599)'),
+    expectedStatus: z
+      .number()
+      .int()
+      .min(100)
+      .max(599, 'Expected status must be a valid HTTP status code (100-599)'),
   })
   .strict();
 
@@ -124,7 +139,11 @@ export type Service = z.infer<typeof ServiceSchema>;
 
 export const VolumeDeclarationSchema = z
   .object({
-    sizeHintMb: z.number().int().positive('Volume size hint must be a positive integer (MB)').optional(),
+    sizeHintMb: z
+      .number()
+      .int()
+      .positive('Volume size hint must be a positive integer (MB)')
+      .optional(),
   })
   .strict();
 
@@ -184,14 +203,28 @@ export const DeploymentManifestSchema = z
     version: z.literal(1),
     services: z
       .record(
-        z.string().regex(SERVICE_NAME_RE, 'Service name must be lowercase alphanumeric with optional hyphens, 1-63 chars'),
-        ServiceSchema,
+        z
+          .string()
+          .regex(
+            SERVICE_NAME_RE,
+            'Service name must be lowercase alphanumeric with optional hyphens, 1-63 chars'
+          ),
+        ServiceSchema
       )
-      .refine((s) => Object.keys(s).length > 0, { message: 'At least one service must be defined' }),
-    volumes: z.record(
-      z.string().regex(VOLUME_NAME_RE, 'Volume name must be lowercase alphanumeric with optional hyphens, 1-63 chars'),
-      VolumeDeclarationSchema,
-    ).default({}),
+      .refine((s) => Object.keys(s).length > 0, {
+        message: 'At least one service must be defined',
+      }),
+    volumes: z
+      .record(
+        z
+          .string()
+          .regex(
+            VOLUME_NAME_RE,
+            'Volume name must be lowercase alphanumeric with optional hyphens, 1-63 chars'
+          ),
+        VolumeDeclarationSchema
+      )
+      .default({}),
     routes: z.array(RouteSchema).min(1, 'At least one route must be defined'),
     hooks: HooksSchema.optional(),
   })

@@ -27,6 +27,7 @@ import {
   jsonRpcSuccess,
   type McpTokenData,
 } from './_helpers';
+import { parseMinWakeIntervalSeconds } from './wake-interval-param';
 
 function textResult(requestId: string | number | null, payload: Record<string, unknown>) {
   return jsonRpcSuccess(requestId, {
@@ -161,13 +162,18 @@ export async function handleCreateProjectEventSubscription(
       {
         idempotencyKey: normalizeString(params.idempotencyKey, 'idempotencyKey'),
         filter: normalizeFilter(params.filter),
-        requestedDelivery: normalizeString(
-          params.requestedDelivery,
-          'requestedDelivery'
-        ) as ProjectEventSubscriptionCreateRequest['requestedDelivery'],
+        // Omitted means the service default (runtime_steer).
+        requestedDelivery:
+          params.requestedDelivery === undefined || params.requestedDelivery === null
+            ? undefined
+            : (normalizeString(
+                params.requestedDelivery,
+                'requestedDelivery'
+              ) as ProjectEventSubscriptionCreateRequest['requestedDelivery']),
         target: normalizeTarget(params.target),
         reason: normalizeOptionalString(params.reason, 'reason') ?? null,
         expiresAt: normalizeExpiresAt(params.expiresAt),
+        minWakeIntervalMs: parseMinWakeIntervalSeconds(params.minWakeIntervalSeconds),
       }
     );
     return textResult(requestId, {

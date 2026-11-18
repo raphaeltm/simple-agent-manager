@@ -29,6 +29,18 @@
  * the `projects/detail` case documented in `query-persist-config.ts` shows.
  */
 
+export { accountMapQueryKeys, accountMapQueryOptions } from './account-map';
+export {
+  accountQueryKeys,
+  ccAttachmentsQueryOptions,
+  ccConfigurationsQueryOptions,
+  ccCredentialsQueryOptions,
+  profilePinCandidatesQueryOptions,
+  profilePinsQueryOptions,
+  resolutionStatusQueryOptions,
+  sessionAgentCredentialQueryOptions,
+} from './accounts';
+export { adminHealthCostQueryKeys, adminHealthCostQueryOptions } from './admin-health-cost';
 export {
   adminProjectDataArchiveBreakersQueryOptions,
   adminProjectDataArchiveProblemMigrationsQueryOptions,
@@ -40,12 +52,44 @@ export {
   adminProjectEventQueryKeys,
 } from './admin-project-events';
 export {
+  adminAgentEmailQueryOptions,
+  adminAgentEmailSetupQueryOptions,
+  agentEmailConfigQueryOptions,
+  agentEmailQueryKeys,
+} from './agent-email';
+export {
+  AGENT_MODEL_CATALOG_STALE_TIME_MS,
+  agentModelCatalogQueryOptions,
+  agentModelQueryKeys,
+  projectAgentModelSettingsQueryOptions,
+} from './agent-models';
+export {
   agentCatalogQueryOptions,
   agentCredentialsQueryOptions,
   agentProfilesQueryOptions,
   agentQueryKeys,
+  agentSettingsQueryOptions,
+  profilePickerQueryOptions,
   projectSkillsQueryOptions,
 } from './agents';
+export {
+  automationQueryKeys,
+  type BoundedList,
+  type ChannelCatalog,
+  channelHistoryQueryOptions,
+  channelsQueryOptions,
+  isDirectChannel,
+  recentRunsQueryOptions,
+  runPagesQueryOptions,
+  scheduleDetailQueryOptions,
+  schedulesQueryOptions,
+  subscriptionDeliveriesQueryOptions,
+  subscriptionsQueryOptions,
+  triggerDetailQueryOptions,
+  watchDetailQueryOptions,
+  watchesQueryOptions,
+  webhookDeliveriesQueryOptions,
+} from './automation';
 export { capacityPoolQueryKeys, projectDefaultCapacityPoolsQueryOptions } from './capacity-pools';
 export {
   allChatsQueryOptions,
@@ -77,36 +121,74 @@ export {
   projectCredentialLimitsQueryOptions,
 } from './credential-limits';
 export { credentialQueryKeys, credentialsQueryOptions } from './credentials';
+export { deploymentQueryKeys } from './deployments';
 export { githubInstallationsQueryOptions, githubQueryKeys } from './github';
+export {
+  ideaDetailQueryOptions,
+  ideaQueryKeys,
+  ideasListQueryOptions,
+  ideaUpdatesQueryOptions,
+} from './ideas';
+export {
+  inboxCountQueryOptions,
+  inboxItemQueryOptions,
+  inboxListQueryOptions,
+  inboxQueryKeys,
+} from './inbox';
 export {
   nodeListQueryOptions,
   nodeQueryKeys,
+  nodeResourceUsageQueryOptions,
   providerCatalogQueryOptions,
   workspaceListQueryOptions,
   workspacePortsQueryOptions,
   workspaceQueryKeys,
 } from './infrastructure';
-export { type LibraryIndexQueryData, libraryIndexQueryOptions, libraryQueryKeys } from './library';
+export {
+  insightsQueryKeys,
+  projectAccountsQueryOptions,
+  projectFlowQueryOptions,
+  projectPeopleQueryOptions,
+  projectSetupsQueryOptions,
+} from './insights';
+export {
+  libraryFileQueryOptions,
+  type LibraryIndexQueryData,
+  libraryIndexQueryOptions,
+  libraryQueryKeys,
+} from './library';
+export {
+  ideaLinksQueryOptions,
+  libraryFileLinksQueryOptions,
+  linkedWorkQueryKeys,
+  sessionLinksQueryOptions,
+} from './links';
 export { mcpConnectionQueryKeys, mcpConnectionsQueryOptions } from './mcp-connections';
 export {
   notificationPreferencesQueryOptions,
   notificationQueryKeys,
   type NotificationsListQueryData,
   notificationsListQueryOptions,
-  notificationUnreadCountQueryOptions,
   timelineProgressNotificationsQueryOptions,
 } from './notifications';
 export {
+  platformCapabilitiesQueryKeys,
+  platformCapabilitiesQueryOptions,
+} from './platform-capabilities';
+export { projectOverviewQueryKeys, projectOverviewQueryOptions } from './project-overview';
+export {
+  instantRuntimeEnabledQueryOptions,
   projectArtifactsEnabledQueryOptions,
   projectCredentialHealthQueryOptions,
   projectDetailQueryOptions,
   projectListQueryOptions,
   projectQueryKeys,
+  projectRuntimeConfigQueryOptions,
 } from './projects';
 export { reportIssueConfigQueryOptions, reportIssueQueryKeys } from './report-issue';
+export { runReceiptQueryKeys, runReceiptQueryOptions } from './run-receipt';
 export {
   activeTasksQueryOptions,
-  draftIdeasQueryOptions,
   taskDetailQueryOptions,
   taskEventsQueryOptions,
   taskQueryKeys,
@@ -114,3 +196,9 @@ export {
 } from './tasks';
 export { trialQueryKeys, trialStatusQueryOptions } from './trial';
 export { triggerQueryKeys, triggersQueryOptions } from './triggers';
+export {
+  recentWorkflowRunsQueryOptions,
+  workflowQueryKeys,
+  workflowRunPagesQueryOptions,
+  workflowRunQueryOptions,
+} from './workflows';

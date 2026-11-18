@@ -34,6 +34,7 @@ function makeChatSession() {
     topic: 'Implement timeline feature',
     workspaceId: 'ws-test-1',
     agentSessionId: 'as-1',
+    viewerAccess: 'owner',
     isIdle: false,
     agentCompletedAt: null,
     task: {

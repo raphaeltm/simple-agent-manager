@@ -16,18 +16,25 @@ const sleepBoundaryMocks = vi.hoisted(() => ({
   cleanupTaskRun: vi.fn(),
   acceptPromptDelivery: vi.fn(),
   stopSession: vi.fn(),
+  cancelUnissuedSessionPrompts: vi.fn(),
   sendPrompt: vi.fn(),
   nodeAgentRequest: vi.fn(),
+  cancelAgentSession: vi.fn(),
   stopAgent: vi.fn(),
   getAcpSession: vi.fn(),
   getSession: vi.fn(),
   getSessionState: vi.fn(),
+  recordSessionTurnEnd: vi.fn(),
   hibernateAgentSessionOnNode: vi.fn(),
   sleepVmAgentContainer: vi.fn(),
   markIdle: vi.fn(),
   r2Head: vi.fn(),
   scheduleWorkspaceDeletion: vi.fn(),
   sleepSession: vi.fn(),
+  syncProviderLimitAttention: vi.fn(),
+  listActiveAttentionMarkers: vi.fn(),
+  createAttentionMarker: vi.fn(),
+  resolveSessionAttentionMarkers: vi.fn(),
   stopComputeTracking: vi.fn(),
   stopWorkspaceOnNode: vi.fn(),
   transitionAcpSession: vi.fn(),
@@ -38,12 +45,20 @@ vi.mock('../../src/services/node-agent', async (importOriginal) => ({
   nodeAgentRequest: (...args: unknown[]) => sleepBoundaryMocks.nodeAgentRequest(...args),
   sendPromptToAgentOnNode: (...args: unknown[]) => sleepBoundaryMocks.sendPrompt(...args),
   stopAgentSessionOnNode: (...args: unknown[]) => sleepBoundaryMocks.stopAgent(...args),
+  cancelAgentSessionOnNode: (...args: unknown[]) => sleepBoundaryMocks.cancelAgentSession(...args),
   hibernateAgentSessionOnNode: (...args: unknown[]) =>
     sleepBoundaryMocks.hibernateAgentSessionOnNode(...args),
   stopWorkspaceOnNode: (...args: unknown[]) => sleepBoundaryMocks.stopWorkspaceOnNode(...args),
 }));
 
 vi.mock('../../src/services/project-data', () => ({
+  syncProviderLimitAttention: (...args: unknown[]) =>
+    sleepBoundaryMocks.syncProviderLimitAttention(...args),
+  listActiveAttentionMarkers: (...args: unknown[]) =>
+    sleepBoundaryMocks.listActiveAttentionMarkers(...args),
+  createAttentionMarker: (...args: unknown[]) => sleepBoundaryMocks.createAttentionMarker(...args),
+  resolveSessionAttentionMarkers: (...args: unknown[]) =>
+    sleepBoundaryMocks.resolveSessionAttentionMarkers(...args),
   recordActivityEvent: (...args: unknown[]) => sleepBoundaryMocks.recordActivityEvent(...args),
   getProjectSchedule: (...args: unknown[]) => sleepBoundaryMocks.getProjectSchedule(...args),
   mutateProjectSchedule: (...args: unknown[]) => sleepBoundaryMocks.mutateProjectSchedule(...args),
@@ -55,8 +70,11 @@ vi.mock('../../src/services/project-data', () => ({
   getAcpSession: (...args: unknown[]) => sleepBoundaryMocks.getAcpSession(...args),
   getSession: (...args: unknown[]) => sleepBoundaryMocks.getSession(...args),
   getSessionState: (...args: unknown[]) => sleepBoundaryMocks.getSessionState(...args),
+  recordSessionTurnEnd: (...args: unknown[]) => sleepBoundaryMocks.recordSessionTurnEnd(...args),
   sleepSession: (...args: unknown[]) => sleepBoundaryMocks.sleepSession(...args),
   stopSession: (...args: unknown[]) => sleepBoundaryMocks.stopSession(...args),
+  cancelUnissuedSessionPrompts: (...args: unknown[]) =>
+    sleepBoundaryMocks.cancelUnissuedSessionPrompts(...args),
   acceptPromptDelivery: (...args: unknown[]) => sleepBoundaryMocks.acceptPromptDelivery(...args),
   transitionAcpSession: (...args: unknown[]) => sleepBoundaryMocks.transitionAcpSession(...args),
 }));
@@ -95,6 +113,7 @@ export function createSessionSleepFixture(taskStatus: string, getActivity: () =>
   vi.useFakeTimers();
   vi.setSystemTime(SLEEP_START);
   vi.resetAllMocks();
+  sleepBoundaryMocks.listActiveAttentionMarkers.mockResolvedValue([]);
   const mocks = sleepBoundaryMocks;
   const START = SLEEP_START;
   const sqlite = new Database(':memory:');
@@ -106,6 +125,8 @@ export function createSessionSleepFixture(taskStatus: string, getActivity: () =>
     schema.vmTaskAdmissions,
     schema.vmProvisioningLeases,
     schema.nodes,
+    schema.capacityPools,
+    schema.capacityPoolCandidates,
     schema.workspaces,
     schema.tasks,
     schema.sessionSummaries,
@@ -155,8 +176,8 @@ export function createSessionSleepFixture(taskStatus: string, getActivity: () =>
     .run(START.getTime(), START.getTime());
   sqlite
     .prepare(
-      `INSERT INTO agent_sessions (id, workspace_id, status, agent_type, created_at)
-         VALUES ('agent-1', 'workspace-1', 'running', 'openai-codex', ?)`
+      `INSERT INTO agent_sessions (id, workspace_id, user_id, status, agent_type, created_at)
+         VALUES ('agent-1', 'workspace-1', 'user-1', 'running', 'openai-codex', ?)`
     )
     .run(START.toISOString());
   // Recovery may replace workspace/node/runtime while retaining the same owner and project.
@@ -192,7 +213,19 @@ export function createSessionSleepFixture(taskStatus: string, getActivity: () =>
     sessionStatus = 'stopped';
     return Promise.resolve();
   });
+  mocks.cancelUnissuedSessionPrompts.mockImplementation(
+    async (_env, projectId, sessionId, taskId) => {
+      const task = sqlite
+        .prepare('SELECT project_id, chat_session_id FROM tasks WHERE id = ?')
+        .get(taskId) as { project_id: string; chat_session_id: string | null } | undefined;
+      return task?.project_id === projectId && task.chat_session_id === sessionId
+        ? { matched: true, cancelled: 0 }
+        : { matched: false, reason: 'task_mismatch', cancelled: 0 };
+    }
+  );
   mocks.getAcpSession.mockResolvedValue(null);
+  mocks.recordSessionTurnEnd.mockResolvedValue(true);
+  mocks.cancelAgentSession.mockResolvedValue({ success: true, status: 200 });
   mocks.stopWorkspaceOnNode.mockImplementation(() => {
     order.push('stop-workspace');
     return Promise.resolve();

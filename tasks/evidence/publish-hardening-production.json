@@ -1,0 +1,34 @@
+{
+  "prUrl": "https://github.com/raphaeltm/simple-agent-manager/pull/2582",
+  "mergeCommit": "cbea10ad6681fc45fbc49d73781c2ddb36ced15c",
+  "approvedHead": "315b3e9bc2dd43cde705024261270b9df7788d38",
+  "mainCiRun": "https://github.com/raphaeltm/simple-agent-manager/actions/runs/42536790626",
+  "productionRun": "https://github.com/raphaeltm/simple-agent-manager/actions/runs/42539170610",
+  "productionRunConclusion": "success",
+  "checkedAt": "2026-11-09T00:35:26.398Z",
+  "worker": "sam-api-prod",
+  "deploymentId": "ac5218dc-a160-4707-aba8-469eac4cd9d8",
+  "activeVersion": {
+    "id": "4d1e4532-3486-4ea3-b996-4080781b8ddb",
+    "percentage": 100,
+    "createdAt": "2026-11-09T00:24:03.353739Z",
+    "message": "commit:cbea10ad6681fc45fbc49d73781c2ddb36ced15c"
+  },
+  "health": {
+    "url": "https://api.simple-agent-manager.org/health",
+    "httpStatus": 200,
+    "status": "healthy"
+  },
+  "verificationScope": "Read-only active deployment/version metadata and public health only. No production fixtures or provisioning.",
+  "stagingEvidence": {
+    "libraryId": "01M6YQV47QHBCPEMJFVBWHR4AW",
+    "path": "/task-evidence/publish-hardening/publish-final-315b-evidence.json",
+    "prComment": "https://github.com/raphaeltm/simple-agent-manager/pull/2582#issuecomment-6728669414"
+  },
+  "priorHeartbeatSweepInstantEvidence": {
+    "libraryId": "01M6YJC9M7WN8SX1XP1GJJR4HK",
+    "path": "/task-evidence/publish-hardening/publish-final-32166a0ec-evidence.json",
+    "coordinatorReuseApproval": "1dd04225-0075-4eb9-a166-11edbb25f406"
+  },
+  "stagingCleanup": "All owned fixture tasks, workspace and environment absent; zero active VMs; source deletion finalized with explicit terminal proof, target runtime termination confirmed; no settings override; controllers exited0."
+}

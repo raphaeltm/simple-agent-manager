@@ -12,6 +12,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as projectDataService from '../../../src/services/project-data';
 import { createUnpublishedStorageSession } from '../../helpers/reliability-storage';
 
+// These tool tests run on a mock D1 that has no workspace/node rows. MCP authentication's
+// workspace-lifecycle gate is exercised against real SQL in
+// tests/unit/services/mcp-token-lifecycle.test.ts; here it reduces to KV token validation.
+vi.mock('../../../src/services/mcp-token-lifecycle', async () => {
+  const { validateMcpToken } = await import('../../../src/services/mcp-token');
+  return {
+    validateActiveWorkspaceMcpToken: (env: { KV: KVNamespace }, token: string) =>
+      validateMcpToken(env.KV, token, env),
+  };
+});
+
 vi.mock('../../../src/middleware/project-auth', () => ({
   requireProjectAccess: vi.fn().mockResolvedValue({ id: 'proj-456' }),
   requireProjectCapability: vi.fn().mockResolvedValue({ id: 'proj-456' }),
@@ -34,10 +45,6 @@ vi.mock('../../../src/services/project-data', () => ({
   searchKnowledgeObservations: vi.fn(),
   updatePolicy: vi.fn(),
   updateKnowledgeObservation: vi.fn(),
-}));
-
-vi.mock('../../../src/services/trial/bridge', () => ({
-  bridgeKnowledgeAdded: vi.fn(),
 }));
 
 const validTokenData = {
@@ -172,19 +179,19 @@ describe('MCP knowledge and policy route tools', () => {
     const body = await res.json();
     const tools = body.result.tools as Array<{ name: string; inputSchema: { properties: Record<string, { enum?: string[] }> } }>;
 
-    const addKnowledge = getTool(tools, 'add_knowledge');
-    expect(addKnowledge?.inputSchema.properties.entityType.enum).toEqual([...KNOWLEDGE_ENTITY_TYPES]);
-    expect(addKnowledge?.inputSchema.properties.sourceType.enum).toEqual([...KNOWLEDGE_SOURCE_TYPES]);
-    expect(getTool(tools, 'search_knowledge')?.inputSchema.properties.entityType.enum).toEqual([...KNOWLEDGE_ENTITY_TYPES]);
-    expect(getTool(tools, 'get_project_knowledge')?.inputSchema.properties.entityType.enum).toEqual([...KNOWLEDGE_ENTITY_TYPES]);
-    expect(getTool(tools, 'relate_knowledge')?.inputSchema.properties.relationType.enum).toEqual([...KNOWLEDGE_RELATION_TYPES]);
-    expect(getTool(tools, 'get_related')?.inputSchema.properties.relationType.enum).toEqual([...KNOWLEDGE_RELATION_TYPES]);
+    // Knowledge and policy tools are listed as domain groups (tool-groups.ts).
+    const knowledgeWrite = getTool(tools, 'knowledge_write');
+    expect(knowledgeWrite?.inputSchema.properties.entityType.enum).toEqual([...KNOWLEDGE_ENTITY_TYPES]);
+    expect(knowledgeWrite?.inputSchema.properties.sourceType.enum).toEqual([...KNOWLEDGE_SOURCE_TYPES]);
+    expect(knowledgeWrite?.inputSchema.properties.relationType.enum).toEqual([...KNOWLEDGE_RELATION_TYPES]);
+    const knowledgeRead = getTool(tools, 'knowledge_read');
+    expect(knowledgeRead?.inputSchema.properties.entityType.enum).toEqual([...KNOWLEDGE_ENTITY_TYPES]);
+    expect(knowledgeRead?.inputSchema.properties.relationType.enum).toEqual([...KNOWLEDGE_RELATION_TYPES]);
 
-    const addPolicy = getTool(tools, 'add_policy');
-    expect(addPolicy?.inputSchema.properties.category.enum).toEqual([...POLICY_CATEGORIES]);
-    expect(addPolicy?.inputSchema.properties.source.enum).toEqual([...POLICY_SOURCES]);
-    expect(getTool(tools, 'list_policies')?.inputSchema.properties.category.enum).toEqual([...POLICY_CATEGORIES]);
-    expect(getTool(tools, 'update_policy')?.inputSchema.properties.category.enum).toEqual([...POLICY_CATEGORIES]);
+    const policiesWrite = getTool(tools, 'policies_write');
+    expect(policiesWrite?.inputSchema.properties.category.enum).toEqual([...POLICY_CATEGORIES]);
+    expect(policiesWrite?.inputSchema.properties.source.enum).toEqual([...POLICY_SOURCES]);
+    expect(getTool(tools, 'policies_read')?.inputSchema.properties.category.enum).toEqual([...POLICY_CATEGORIES]);
   });
 
   it('advertises the lifecycle fields on add_policy and update_policy', async () => {
@@ -198,15 +205,14 @@ describe('MCP knowledge and policy route tools', () => {
       inputSchema: { properties: Record<string, { enum?: string[]; description?: string }> };
     }>;
 
-    for (const name of ['add_policy', 'update_policy']) {
-      const tool = getTool(tools, name);
-      expect(tool?.inputSchema.properties.scope?.enum).toEqual([...POLICY_SCOPES]);
-      expect(tool?.inputSchema.properties.expiresAt).toBeDefined();
-      expect(tool?.inputSchema.properties.scope?.description).toMatch(/REQUIRES expiresAt/);
-    }
+    const tool = getTool(tools, 'policies_write');
+    expect(tool?.inputSchema.properties.scope?.enum).toEqual([...POLICY_SCOPES]);
+    expect(tool?.inputSchema.properties.expiresAt).toBeDefined();
+    expect(tool?.inputSchema.properties.scope?.description).toMatch(/REQUIRES expiresAt/);
+    expect(tool?.inputSchema.properties.scope?.description).toMatch(/Methods: add, update/);
 
     // The description has to steer an agent toward expiring one-shot policies.
-    expect(getTool(tools, 'add_policy')?.description).toMatch(/scope to "task"/);
+    expect(tool?.description).toMatch(/scope "task" and expiresAt/);
   });
 
   it('returns INVALID_PARAMS for missing required knowledge and policy params', async () => {
@@ -336,6 +342,7 @@ describe('MCP knowledge and policy route tools', () => {
       // which is exactly what every policy created before this feature was.
       'always',
       null,
+      'pinned'
     );
   });
 
@@ -453,6 +460,31 @@ describe('MCP knowledge and policy route tools', () => {
     );
   });
 
+  describe('policy inject mode', () => {
+    it('add_policy forwards on_demand and rejects an unknown mode', async () => {
+      const ok = await mcpPost(app, 'add_policy', {
+        category: 'preference', title: 'T', content: 'C', injectMode: 'on_demand',
+      });
+      expect((await ok.json()).error).toBeUndefined();
+      expect(vi.mocked(projectDataService.createPolicy).mock.calls[0]?.at(-1)).toBe('on_demand');
+
+      await expectInvalidParams(await mcpPost(app, 'add_policy', {
+        category: 'preference', title: 'T', content: 'C', injectMode: 'maybe',
+      }), 'injectMode must be one of: pinned, on_demand');
+      expect(projectDataService.createPolicy).toHaveBeenCalledTimes(1);
+    });
+
+    it('update_policy sends injectMode only when it was supplied', async () => {
+      vi.mocked(projectDataService.updatePolicy).mockResolvedValue(true);
+      await mcpPost(app, 'update_policy', { policyId: 'pol-1', injectMode: 'on_demand' });
+      await mcpPost(app, 'update_policy', { policyId: 'pol-1', title: 'Renamed' });
+      expect(vi.mocked(projectDataService.updatePolicy).mock.calls.map((c) => c[3])).toEqual([
+        { injectMode: 'on_demand' },
+        { title: 'Renamed' },
+      ]);
+    });
+  });
+
   describe('policy lifecycle (expiry + scope)', () => {
     it('rejects a task-scoped policy with no expiry before touching ProjectData', async () => {
       // The failure this feature exists to prevent: capturing a one-shot workflow
@@ -524,6 +556,7 @@ describe('MCP knowledge and policy route tools', () => {
         expect.any(Number),
         'task',
         expiresAt,
+        'pinned'
       );
     });
 

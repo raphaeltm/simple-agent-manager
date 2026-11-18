@@ -26,6 +26,7 @@ vi.mock('../../../src/services/jwt', () => ({
     .fn()
     .mockResolvedValue({ workspace: 'ws-123', type: 'callback', scope: 'workspace' }),
   signCallbackToken: vi.fn(),
+  signCurrentWorkspaceCallbackToken: vi.fn(),
 }));
 vi.mock('../../../src/services/encryption', () => ({
   encrypt: vi.fn(),
@@ -33,6 +34,12 @@ vi.mock('../../../src/services/encryption', () => ({
 }));
 vi.mock('../../../src/services/composable-credentials/resolve', () => ({
   resolveForConsumer: vi.fn().mockResolvedValue(null),
+  explainForConsumer: vi.fn().mockResolvedValue({ resolved: null, halted: false, steps: [] }),
+}));
+// Profile pins are covered by tests/integration/profile-account-pins-capability.test.ts.
+vi.mock('../../../src/services/composable-credentials/profile-context', () => ({
+  resolveSessionProfileCredentialContext: vi.fn().mockResolvedValue(null),
+  resolveProfileCredentialContext: vi.fn().mockResolvedValue(null),
 }));
 vi.mock('../../../src/services/composable-credentials/lazy-backfill', () => ({
   lazyBackfillIfNeeded: vi.fn().mockResolvedValue(false),
@@ -85,7 +92,7 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
         ? [
             attribution.sqlite
               .prepare(
-                `SELECT w.id AS workspaceId,w.user_id AS userId,w.project_id AS projectId,w.chat_session_id AS chatSessionId,w.status,w.node_id AS nodeId,n.status AS nodeStatus FROM workspaces w JOIN nodes n ON n.id=w.node_id WHERE w.id='ws-123'`
+                `SELECT w.id AS workspaceId,w.user_id AS userId,w.project_id AS projectId,w.chat_session_id AS chatSessionId,w.status,w.node_id AS nodeId,n.status AS nodeStatus,w.callback_generation AS callbackGeneration FROM workspaces w JOIN nodes n ON n.id=w.node_id WHERE w.id='ws-123'`
               )
               .get(),
           ]
@@ -121,6 +128,7 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
       from: vi.fn().mockReturnThis(),
       leftJoin: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(),
+      orderBy: vi.fn().mockReturnThis(),
       limit: vi.fn(),
     };
     vi.mocked(drizzle).mockReturnValue(mockDB as ReturnType<typeof drizzle>);
@@ -129,7 +137,15 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
 
   it('returns 404 for default OpenCode Zen when no dedicated OpenCode key exists', async () => {
     queueLimitResponses(
-      [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }],
+      [
+        {
+          userId: 'user-1',
+          status: 'running',
+          nodeId: 'node-1',
+          nodeStatus: 'running',
+          callbackGeneration: null,
+        },
+      ],
       [],
       []
     );
@@ -142,9 +158,21 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
 
   it('returns the dedicated opencode key without any proxy fallback', async () => {
     queueLimitResponses(
-      [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }],
       [
         {
+          userId: 'user-1',
+          status: 'running',
+          nodeId: 'node-1',
+          nodeStatus: 'running',
+          callbackGeneration: null,
+        },
+      ],
+      [
+        {
+          // Production row shape: the legacy picker scopes by agent and project.
+          id: 'opencode-key-1',
+          agentType: 'opencode',
+          projectId: null,
           encryptedToken: 'encrypted-dedicated',
           iv: 'iv-dedicated',
           credentialKind: 'api-key',
@@ -152,8 +180,24 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
         },
       ],
       // Attribution persistence and response delivery each revalidate ownership.
-      [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }],
-      [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }]
+      [
+        {
+          userId: 'user-1',
+          status: 'running',
+          nodeId: 'node-1',
+          nodeStatus: 'running',
+          callbackGeneration: null,
+        },
+      ],
+      [
+        {
+          userId: 'user-1',
+          status: 'running',
+          nodeId: 'node-1',
+          nodeStatus: 'running',
+          callbackGeneration: null,
+        },
+      ]
     );
 
     mockDecrypt.mockResolvedValueOnce('dedicated-opencode-key');
@@ -170,16 +214,36 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
 
   it('does not return a decrypted key when deletion starts before delivery', async () => {
     queueLimitResponses(
-      [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }],
       [
         {
+          userId: 'user-1',
+          status: 'running',
+          nodeId: 'node-1',
+          nodeStatus: 'running',
+          callbackGeneration: null,
+        },
+      ],
+      [
+        {
+          // Production row shape: the legacy picker scopes by agent and project.
+          id: 'opencode-key-2',
+          agentType: 'opencode',
+          projectId: null,
           encryptedToken: 'encrypted-dedicated',
           iv: 'iv-dedicated',
           credentialKind: 'api-key',
           isActive: true,
         },
       ],
-      [{ userId: 'user-1', status: 'stopping', nodeId: 'node-1', nodeStatus: 'running' }]
+      [
+        {
+          userId: 'user-1',
+          status: 'stopping',
+          nodeId: 'node-1',
+          nodeStatus: 'running',
+          callbackGeneration: null,
+        },
+      ]
     );
     mockDecrypt.mockImplementationOnce(async () => {
       attribution.sqlite.exec("UPDATE workspaces SET status='stopping' WHERE id='ws-123'");
@@ -212,7 +276,13 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
 
   it('does not resolve a key for non-opencode agents without a credential', async () => {
     queueLimitResponses([
-      { userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' },
+      {
+        userId: 'user-1',
+        status: 'running',
+        nodeId: 'node-1',
+        nodeStatus: 'running',
+        callbackGeneration: null,
+      },
     ]);
 
     const resp = await postAgentKey({ agentType: 'google-gemini' });
@@ -226,17 +296,44 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
     'returns the dedicated key directly for %s instead of routing through any proxy',
     async (_label, encryptedToken, iv, decryptedKey) => {
       queueLimitResponses(
-        [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }],
         [
           {
+            userId: 'user-1',
+            status: 'running',
+            nodeId: 'node-1',
+            nodeStatus: 'running',
+            callbackGeneration: null,
+          },
+        ],
+        [
+          {
+            id: 'opencode-key',
+            agentType: 'opencode',
+            projectId: null,
             encryptedToken,
             iv,
             credentialKind: 'api-key',
             isActive: true,
           },
         ],
-        [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }],
-        [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }]
+        [
+          {
+            userId: 'user-1',
+            status: 'running',
+            nodeId: 'node-1',
+            nodeStatus: 'running',
+            callbackGeneration: null,
+          },
+        ],
+        [
+          {
+            userId: 'user-1',
+            status: 'running',
+            nodeId: 'node-1',
+            nodeStatus: 'running',
+            callbackGeneration: null,
+          },
+        ]
       );
       mockDecrypt.mockResolvedValueOnce(decryptedKey);
 
@@ -251,7 +348,15 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
 
   it('returns 404 and does not fall back to any platform/cloud credential when no key exists', async () => {
     queueLimitResponses(
-      [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }],
+      [
+        {
+          userId: 'user-1',
+          status: 'running',
+          nodeId: 'node-1',
+          nodeStatus: 'running',
+          callbackGeneration: null,
+        },
+      ],
       [],
       []
     );

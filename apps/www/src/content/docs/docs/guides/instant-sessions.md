@@ -44,7 +44,7 @@ The practical trade: an Instant session needs **no cloud provider credential**, 
 | Survives runtime teardown                           | Yes — via snapshot restore, see below              | Yes — via snapshot and replacement VM restore            |
 | [Resource history](/docs/guides/session-resources/) | No — the **Resources** panel stays empty           | Yes — CPU, memory, I/O and OOM events are retained       |
 
-Instant is the right choice for conversation, planning, code reading, and focused edits. Reach for a VM when the agent has to build your stack, run your test suite, start services, or use Docker.
+Instant is the right choice for conversation, planning, code reading, and focused edits. Reach for a VM when the agent needs to build or test locally, start services, or use Docker. Instant can [publish a Compose application](/docs/guides/app-deployments/) through a separate Cloudflare builder.
 
 `git` and `gh` in an Instant session are signed in to GitHub for your repository, and SAM
 renews that sign-in as it expires, so an agent can still push and open a pull request after the
@@ -62,18 +62,19 @@ Note that the **Full** workspace profile does not override this: workspace profi
 
 ## What happens to your work
 
-**SAM does not commit or push an Instant chat's work for you.** Nothing is auto-committed when the agent finishes, and no pull request is opened. A chat you send from the message box with no attachments or explicit resource overrides, and not with an idea's **Execute** button, gets no branch either: its workspace sits on your project's default branch, and anything the agent changed stays in that container.
+**SAM doesn't commit, push, or open a pull request for you**, on Instant or anywhere else. A Task's
+agent is told to push its branch before it finishes; otherwise, ask the agent when you want the work
+pushed or a pull request opened (see
+[Where the work lands](/docs/guides/idea-execution/#where-the-work-lands)). What differs is whether
+the work gets a branch of its own:
 
-How work starts determines its initial branch; publication is always agent-directed:
+| How you started it                                                                                                                                       | Branch                                           |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| A message-box chat on an **Instant** profile, with no attachments or resource overrides, not started from an idea                                        | None: the workspace stays on your default branch |
+| Anything else: an Instant chat with attachments or resource overrides or started from an idea, a submitted task, or `dispatch_task`, in either task mode | Its own `sam/…` output branch                    |
 
-| How you started it                                                                                       | Branch                        | Auto-commit and push |
-| -------------------------------------------------------------------------------------------------------- | ----------------------------- | -------------------- |
-| A message-box chat on an **Instant** profile, no attachments or resource overrides, not from **Execute** | None — your default branch    | No                   |
-| A submitted task or `dispatch_task`, in **task** mode                                                    | Its own `sam/…` output branch | No                   |
-| The same, in **conversation** mode                                                                       | Its own `sam/…` output branch | No                   |
-
-- **The branch depends on how the work was started.** Only a composer chat on an Instant profile skips branch creation, and only when it has no attachments or explicit resource overrides and was not started with an idea's **Execute** button. Otherwise it is submitted as a task and gets one. Anything submitted as a task — or dispatched with `dispatch_task`, on either runtime — gets an output branch, whichever mode it runs in.
-- **Commits, pushes and pull requests are agent-directed in every task mode.** Ending a turn or completing a task does not publish repository changes.
+A chat with no branch keeps whatever the agent changed in its container, until the agent pushes it
+somewhere.
 
 Instant clones the requested base branch before checking out a task's output branch. A new output branch starts at that base; an existing output branch keeps its remote commits.
 
@@ -83,15 +84,22 @@ See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands) fo
 
 ## Sleep and wake
 
-After an agent turn becomes idle, you can put a conversation-mode chat session with an attached workspace to sleep from the chat lifecycle control. Sleep writes a checkpoint, releases compute, and keeps the chat resumable. It is the reversible step before Archive: an awake idle conversation session shows **Sleep**, and an already sleeping session shows **Archive**. Task-mode sessions keep their task completion lifecycle; completed tasks sleep automatically.
+After an agent turn becomes idle, you can put a conversation-mode chat session with an attached workspace to sleep from the chat lifecycle control. Sleep writes a checkpoint, releases compute, and keeps the chat resumable. It is the reversible step before Archive: an awake idle conversation session shows **Sleep**, and an already sleeping session shows **Archive**. Task-mode sessions keep their task completion lifecycle; completed tasks sleep automatically. A requested sleep never waits on a stuck agent: if a turn is still running, SAM stops it first, then saves the checkpoint.
 
-SAM can also sleep sessions automatically. VM sessions write and verify a final checkpoint after 15 minutes of inactivity by default; Instant uses its separately configured one-hour `CF_CONTAINER_SLEEP_AFTER` window. Completed tasks queue sleep immediately and release compute on the first scheduled sweep after their final prompt reaches idle. The idle clock only counts genuine ProjectData work activity—not runtime heartbeats—so an active turn is not intentionally cut off.
+SAM can also sleep sessions automatically. VM sessions write and verify a final checkpoint after 15 minutes of inactivity by default; Instant uses its separately configured one-hour `CF_CONTAINER_SLEEP_AFTER` window. Completed tasks queue sleep immediately and release compute on the first scheduled sweep after their final prompt reaches idle, or once their final prompt has done no real work (no new messages or harness progress) for the idle interval. The idle clock only counts genuine ProjectData work activity—not runtime heartbeats—so an active turn is not intentionally cut off. Work the agent left running in the background (a long build or test run it is waiting on) keeps the session awake for up to two hours, by default, after its last real work or progress; new progress extends it, and heartbeats alone don't. A conversation that reaches SAM's 24-hour limit on running compute is put to sleep, so your next message wakes it, instead of being shut down.
 
 Sending a message in the same chat wakes it. The composer stays visible while the session is sleeping so the chat remains the wake affordance. Waking is not instant: SAM has to start runtime compute, restore the saved home directory, exact Git checkout, repository work in progress, and harness session, and only then deliver the queued message. Instant starts a fresh container; a VM session provisions a replacement workspace because the original workspace may already have been deleted.
 
-Sleeping Instant sessions retain their container identity throughout the snapshot retention window; the ordinary node lifetime limits do not remove their wake target. Archive permanently destroys a sleeping container without waking it first.
+Sleeping Instant sessions retain their container identity throughout the snapshot retention window; neither the ordinary node lifetime limits nor automatic workspace cleanup remove their wake target. The snapshot purge destroys the container when retention ends. Archive or deleting the workspace permanently destroys a sleeping container without waking it first.
 
-SAM tears VM compute down only after it has re-read and re-verified durable snapshot metadata. An ordinary sleep also requires the final checkpoint to be a **complete** snapshot: the full HOME and work-in-progress state (`verifyAndBeginSleepTeardown` in `apps/api/src/services/session-sleep-execution.ts`). If the final checkpoint comes back degraded (for example `home-skipped` or `transcript-only`) or stops making progress, that sleep attempt fails, the workspace stays awake, and the scheduler tries again on a later sweep, but not forever. After three failed attempts or 15 minutes by default, SAM either sleeps an idle VM session on the exact Git commit and uncommitted changes an earlier snapshot saved, keeping the conversation but not every file, or, when there is no such recovery point (always the case on Instant), stops trying and says so in the chat (`runSessionSleepFallback()` in `apps/api/src/services/session-sleep-fallback.ts`). [SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot) describes both outcomes. A sleeping session that holds an older degraded snapshot can still wake; the wake path reports the reduced restore state.
+An ordinary sleep requires a complete, verified final snapshot. If snapshots keep failing, SAM
+retries within the configured budget: three failed attempts or 15 minutes by default. After that,
+SAM terminates the idle runtime to avoid ongoing compute charges, even without verified exact
+Git or filesystem recovery. It keeps the conversation and successful backups and warns that
+unpublished files and saved agent state may be lost. When a verified Git recovery point exists,
+VM continuation can restore it with a fresh agent. Otherwise, including Instant fallback,
+continuation starts fresh from the transcript. Active work remains protected, and failed runtime
+cleanup keeps retrying until confirmed. See [SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot).
 
 If a sleeping session cannot wake, SAM says so rather than leaving your message queued out of sight: the chat gets a system message starting **Wake failed:** with the reason, and the session list marks the chat **Wake failed** in red. [Session Troubleshooting](/docs/guides/session-troubleshooting/#wake-failed) explains each reason and what to do about it. If SAM can start compute but only from a degraded snapshot, the chat also records a system notice that the agent is starting fresh and must read the persisted transcript before continuing. A chat that slept through the fallback always wakes this way, because its saved agent session is older than its conversation.
 
@@ -121,7 +129,7 @@ A snapshot deliberately **excludes**:
 :::caution
 Four limits are worth planning around. None of them is shown in the UI ahead of time:
 
-- **Snapshots expire after 7 days of sleep** (`SESSION_SNAPSHOT_TTL_DAYS`). **The conversation ends as Expired.** Its transcript stays readable; choose **Fork conversation** to continue in a new session. SAM does not silently wake it without its saved workspace.
+- **Snapshots expire after 7 days of sleep** (`SESSION_SNAPSHOT_TTL_DAYS`). **The conversation ends as Expired.** Its transcript stays readable; type what's next in the **Fork** box where the message box was to continue in a new chat ([Fork an archived or expired chat](/docs/guides/chat-features/#fork-an-archived-or-expired-chat)). SAM does not silently wake it without its saved workspace.
 - **Size is capped** at 256 MiB, including a 256 MiB per-entry ceiling (`SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES`, `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES`). Snapshot artifacts use short-lived direct R2 uploads when configured (with exact checksum binding on current agents); busy legacy VM agents use a same-user current-agent relay, so this budget is not reduced by the Worker's request-body limit. The repository bundle is captured first. It holds the commits that are not on your default branch (including clean local-only commits) plus the worktree and index state. History already on the default branch (`origin/HEAD`) is left out and fetched from origin on wake (`snapshotWIPBundleBasis` in `packages/vm-agent/internal/server/session_snapshot_bundle.go`). Large local commits or changes can still crowd out the agent's HOME state. Skipped content is recorded server-side but you are not told about it. When many files are skipped, the record keeps diagnostics and the largest files, and summarizes the rest so the completion request stays under `SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES`.
 - **Final checkpoint waiting is progress-based** (`SESSION_SNAPSHOT_PROGRESS_IDLE_TIMEOUT_MS`). Large snapshots may run longer than the request-acceptance budget as long as the vm-agent keeps reporting durable progress. A capture that stops reporting progress is recorded as degraded, so that sleep attempt fails and counts toward the bounded retries described in [Sleep and wake](#sleep-and-wake).
 - **A repository mid-merge is skipped entirely.** If a merge, rebase, cherry-pick, or revert is in progress when the runtime goes away, none of the repository work in progress is captured.

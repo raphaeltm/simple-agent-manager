@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/workspace/vm-agent/internal/transferscratch"
 )
 
 const dockerSaveArchiveType = "docker-save"
@@ -20,11 +22,16 @@ func (e *Engine) loadImageArtifacts(ctx context.Context, artifacts []ImageArtifa
 	if len(artifacts) == 0 {
 		return nil
 	}
-	dir, err := os.MkdirTemp("", "sam-image-artifacts-*")
+	op, err := transferscratch.NewOperation("deploy")
 	if err != nil {
 		return fmt.Errorf("create artifact temp dir: %w", err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() {
+		if err := op.Close(); err != nil {
+			slog.Warn("deploy.artifact: scratch cleanup pending", "error", err)
+		}
+	}()
+	dir := op.Path
 
 	for _, artifact := range artifacts {
 		if err := e.loadImageArtifact(ctx, dir, artifact); err != nil {

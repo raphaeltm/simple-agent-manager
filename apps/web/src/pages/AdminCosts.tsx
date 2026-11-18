@@ -1,5 +1,7 @@
 import { Body, Button, Card, Spinner } from '@simple-agent-manager/ui';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { Link } from 'react-router';
 import {
   Area,
   AreaChart,
@@ -12,9 +14,15 @@ import {
   YAxis,
 } from 'recharts';
 
+import { useQueryScope } from '../hooks/useQueryScope';
 import type { CostByModel, CostSummaryResponse } from '../lib/api';
 import { fetchAdminCosts } from '../lib/api';
-import { adminChartSeries, chartGridStroke, chartTick, chartTooltipStyle } from './admin-analytics/chartTokens';
+import {
+  adminChartSeries,
+  chartGridStroke,
+  chartTick,
+  chartTooltipStyle,
+} from './admin-analytics/chartTokens';
 
 // ---------------------------------------------------------------------------
 // Formatters
@@ -34,9 +42,7 @@ function formatTokens(n: number): string {
 }
 
 function shortModel(model: string): string {
-  const cleaned = model
-    .replace(/^@cf\/[^/]+\//, '')
-    .replace(/^claude-/, 'claude ');
+  const cleaned = model.replace(/^@cf\/[^/]+\//, '').replace(/^claude-/, 'claude ');
   if (cleaned.length > 30) return `${cleaned.slice(0, 27)}...`;
   return cleaned;
 }
@@ -51,13 +57,7 @@ const PERIODS = [
   { value: '90d', label: '90 Days' },
 ] as const;
 
-function PeriodSelector({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-}) {
+function PeriodSelector({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <div className="flex gap-1" aria-label="Cost period">
       {PERIODS.map((p) => (
@@ -116,35 +116,25 @@ function KpiCard({
 // ---------------------------------------------------------------------------
 
 export function AdminCosts() {
-  const [data, setData] = useState<CostSummaryResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const scope = useQueryScope();
   const [period, setPeriod] = useState('current-month');
-  const hasLoadedRef = useRef(false);
+  const queryKey = ['auth', scope, 'admin', 'AdminCosts', period] as const;
+  const query = useQuery({
+    queryKey,
+    queryFn: ({ signal }) => fetchAdminCosts(period, signal),
+    enabled: Boolean(scope),
+  });
+  const data = query.data ?? null;
+  const loading = query.isPending;
+  const refreshing = query.isFetching && query.data !== undefined;
+  const [actionError, setError] = useState<string | null>(null);
+  const error = actionError ?? query.error?.message;
 
-  const loadData = useCallback(
-    async () => {
-      try {
-        if (!hasLoadedRef.current) setLoading(true);
-        else setRefreshing(true);
-        setError(null);
-        const res = await fetchAdminCosts(period);
-        setData(res);
-        hasLoadedRef.current = true;
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load cost data');
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    },
-    [period],
-  );
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  const loadData = async () => {
+    setError(null);
+    const result = await query.refetch();
+    if (result.error) setError(result.error.message);
+  };
 
   if (loading && !data) {
     return (
@@ -169,10 +159,8 @@ export function AdminCosts() {
 
   if (!data) return null;
 
-  const { llm, projection, compute } = data;
-  const combinedCost = llm.totalCostUsd + compute.estimatedCostUsd;
+  const { llm, projection } = data;
   const hasLlmData = llm.totalRequests > 0;
-  const hasComputeData = compute.totalNodeHours > 0;
 
   return (
     <div className="flex flex-col gap-4 min-w-0 overflow-hidden">
@@ -196,27 +184,30 @@ export function AdminCosts() {
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <KpiCard
-          label="LLM Cost"
-          value={formatCost(llm.totalCostUsd)}
-          subtitle={llm.trialCostUsd > 0 ? `${formatCost(llm.trialCostUsd)} trials` : undefined}
-          accent
-        />
+        <KpiCard label="LLM Cost" value={formatCost(llm.totalCostUsd)} accent />
         <KpiCard
           label="Monthly Projection"
           value={formatCost(projection.projectedMonthlyCostUsd)}
           subtitle={`${formatCost(projection.dailyAverageCostUsd)}/day avg`}
         />
         <KpiCard
-          label="Compute Est."
-          value={formatCost(compute.estimatedCostUsd)}
-          subtitle={`${compute.totalVcpuHours.toFixed(1)} vCPU-hrs @ ${formatCost(compute.vcpuHourCostUsd)}/hr`}
+          label="LLM Requests"
+          value={llm.totalRequests.toLocaleString()}
+          subtitle={`${formatTokens(llm.totalInputTokens + llm.totalOutputTokens)} tokens`}
         />
-        <KpiCard
-          label="Combined"
-          value={formatCost(combinedCost)}
-          subtitle={`${llm.totalRequests.toLocaleString()} LLM reqs, ${compute.activeNodes} active nodes`}
-        />
+        <Link
+          to="/admin/health-cost"
+          className="block rounded-md border border-border-default bg-surface-secondary p-3 no-underline hover:bg-surface-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring"
+          data-testid="costs-compute-link"
+        >
+          <div className="text-xs text-fg-muted uppercase tracking-wide">Compute</div>
+          <div className="mt-1 text-sm font-semibold text-accent-fg">
+            View on Health &amp; cost →
+          </div>
+          <div className="text-xs text-fg-muted mt-0.5">
+            Priced per machine at its recorded provider price
+          </div>
+        </Link>
       </div>
 
       {/* Daily cost trend */}
@@ -226,10 +217,7 @@ export function AdminCosts() {
             <h3 className="text-sm font-semibold text-fg-primary mb-3">Daily LLM Cost</h3>
             <div className="w-full" style={{ height: 200 }}>
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart
-                  data={llm.byDay}
-                  margin={{ top: 4, right: 4, left: -10, bottom: 0 }}
-                >
+                <AreaChart data={llm.byDay} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
                   <CartesianGrid
                     strokeDasharray="3 3"
                     stroke={chartGridStroke}
@@ -240,10 +228,7 @@ export function AdminCosts() {
                     tick={chartTick}
                     tickFormatter={(d: string) => d.slice(5)}
                   />
-                  <YAxis
-                    tick={chartTick}
-                    tickFormatter={(v: number) => formatCost(v)}
-                  />
+                  <YAxis tick={chartTick} tickFormatter={(v: number) => formatCost(v)} />
                   <Tooltip
                     formatter={(value) => [formatCost(Number(value)), 'Cost']}
                     labelFormatter={(label) => String(label)}
@@ -273,10 +258,16 @@ export function AdminCosts() {
             <div className="p-4">
               <h3 className="text-sm font-semibold text-fg-primary mb-3">Cost by Model</h3>
               {/* Bar chart */}
-              <div className="w-full mb-3" style={{ height: Math.max(100, llm.byModel.length * 40) }}>
+              <div
+                className="w-full mb-3"
+                style={{ height: Math.max(100, llm.byModel.length * 40) }}
+              >
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
-                    data={llm.byModel.map((m: CostByModel) => ({ ...m, label: shortModel(m.model) }))}
+                    data={llm.byModel.map((m: CostByModel) => ({
+                      ...m,
+                      label: shortModel(m.model),
+                    }))}
                     layout="vertical"
                     margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
                   >
@@ -308,7 +299,10 @@ export function AdminCosts() {
               </div>
               {/* Table */}
               <div className="overflow-x-auto -mx-4 px-4">
-                <table className="w-full text-sm min-w-[320px]" aria-label="Cost breakdown by model">
+                <table
+                  className="w-full text-sm min-w-[320px]"
+                  aria-label="Cost breakdown by model"
+                >
                   <thead>
                     <tr className="border-b border-border-default text-fg-muted text-xs">
                       <th className="text-left py-2 pr-3">Model</th>
@@ -323,7 +317,9 @@ export function AdminCosts() {
                         <td className="py-2 pr-3">
                           <span
                             className="inline-block w-2 h-2 rounded-full mr-2"
-                            style={{ backgroundColor: adminChartSeries[i % adminChartSeries.length] }}
+                            style={{
+                              backgroundColor: adminChartSeries[i % adminChartSeries.length],
+                            }}
                             aria-hidden="true"
                           />
                           <span className="text-fg-primary text-xs" title={m.model}>
@@ -355,7 +351,10 @@ export function AdminCosts() {
             <div className="p-4">
               <h3 className="text-sm font-semibold text-fg-primary mb-3">LLM Cost by User</h3>
               <div className="overflow-x-auto -mx-4 px-4">
-                <table className="w-full text-sm min-w-[320px]" aria-label="LLM cost breakdown by user">
+                <table
+                  className="w-full text-sm min-w-[320px]"
+                  aria-label="LLM cost breakdown by user"
+                >
                   <thead>
                     <tr className="border-b border-border-default text-fg-muted text-xs">
                       <th className="text-left py-2 pr-3">User</th>
@@ -366,30 +365,32 @@ export function AdminCosts() {
                     </tr>
                   </thead>
                   <tbody>
-                    {llm.byUser.slice(0, 20).map((u: CostSummaryResponse['llm']['byUser'][number]) => (
-                      <tr key={u.userId} className="border-b border-border-default last:border-0">
-                        <td className="py-2 pr-3">
-                          <span
-                            className="text-fg-primary font-mono text-xs truncate inline-block max-w-[120px]"
-                            title={u.userId}
-                          >
-                            {u.userId.length > 12 ? `${u.userId.slice(0, 12)}...` : u.userId}
-                          </span>
-                        </td>
-                        <td className="text-right py-2 px-2 text-fg-secondary tabular-nums">
-                          {u.requests}
-                        </td>
-                        <td className="text-right py-2 px-2 text-fg-secondary tabular-nums">
-                          {formatTokens(u.inputTokens)}
-                        </td>
-                        <td className="text-right py-2 px-2 text-fg-secondary tabular-nums">
-                          {formatTokens(u.outputTokens)}
-                        </td>
-                        <td className="text-right py-2 pl-2 text-fg-primary font-medium tabular-nums">
-                          {formatCost(u.costUsd)}
-                        </td>
-                      </tr>
-                    ))}
+                    {llm.byUser
+                      .slice(0, 20)
+                      .map((u: CostSummaryResponse['llm']['byUser'][number]) => (
+                        <tr key={u.userId} className="border-b border-border-default last:border-0">
+                          <td className="py-2 pr-3">
+                            <span
+                              className="text-fg-primary font-mono text-xs truncate inline-block max-w-[120px]"
+                              title={u.userId}
+                            >
+                              {u.userId.length > 12 ? `${u.userId.slice(0, 12)}...` : u.userId}
+                            </span>
+                          </td>
+                          <td className="text-right py-2 px-2 text-fg-secondary tabular-nums">
+                            {u.requests}
+                          </td>
+                          <td className="text-right py-2 px-2 text-fg-secondary tabular-nums">
+                            {formatTokens(u.inputTokens)}
+                          </td>
+                          <td className="text-right py-2 px-2 text-fg-secondary tabular-nums">
+                            {formatTokens(u.outputTokens)}
+                          </td>
+                          <td className="text-right py-2 pl-2 text-fg-primary font-medium tabular-nums">
+                            {formatCost(u.costUsd)}
+                          </td>
+                        </tr>
+                      ))}
                   </tbody>
                 </table>
               </div>
@@ -399,11 +400,11 @@ export function AdminCosts() {
       </div>
 
       {/* Empty state */}
-      {!hasLlmData && !hasComputeData && (
+      {!hasLlmData && (
         <Card>
           <div className="p-6 text-center">
             <Body className="text-fg-muted">
-              No cost data available yet. AI Gateway logs and node usage will appear here once activity begins.
+              No LLM cost data yet. AI Gateway logs will appear here once activity begins.
             </Body>
           </div>
         </Card>

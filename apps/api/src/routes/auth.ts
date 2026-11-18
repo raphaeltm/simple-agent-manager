@@ -1,14 +1,27 @@
+import type { Context } from 'hono';
 import { Hono } from 'hono';
 
 import { createAuth } from '../auth';
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
-import { expectJsonRecord } from '../lib/runtime-validation';
+import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
+import { isAgentSignInSession, isPastHardExpiry } from '../services/agent-sign-in/session-cap';
+import {
+  assertCodeAttemptBudget,
+  EMAIL_CODE_SIGN_IN_PATH,
+  emailCodeRedemptionAllowed,
+  isClosedEmailOtpPath,
+  rateLimitSignInCodes,
+  SEND_CODE_PATH,
+  withinEmailBudget,
+} from '../services/email-sign-in';
+import { readAuthSession } from '../services/read-auth-session';
 import { assertUserNotSuspended } from '../services/signup-approval';
-import { maybeAttachTrialClaimCookie } from '../services/trial/oauth-hook';
+import { accountLinkingRoutes } from './account-linking';
 
 const authRoutes = new Hono<{ Bindings: Env }>();
+authRoutes.route('/', accountLinkingRoutes);
 
 /**
  * GET /api/auth/me - Get current authenticated user
@@ -21,7 +34,7 @@ authRoutes.get('/me', async (c) => {
     query: { disableCookieCache: true },
   });
 
-  if (!session?.user) {
+  if (!session?.user || isPastHardExpiry(session.session)) {
     throw errors.unauthorized('Not authenticated');
   }
 
@@ -45,10 +58,86 @@ authRoutes.get('/me', async (c) => {
  * - POST /api/auth/sign-out - Sign out
  * - GET /api/auth/session - Get current session
  */
+authRoutes.get('/get-session', (c) => readAuthSession(c.env, c.req.raw));
+
+// Email sign-in codes cost an email each, and each redemption is a guess: limit both per IP
+// before BetterAuth sees them, and guesses also per address.
+authRoutes.post(SEND_CODE_PATH, rateLimitSignInCodes('email-sign-in-ip'));
+authRoutes.post(SEND_CODE_PATH, async (c, next) => {
+  const body: unknown = await c.req.raw
+    .clone()
+    .json()
+    .catch(() => null);
+  const email = maybeJsonRecord(body)?.email;
+  // Past the address's hourly budget, answer as usual without letting BetterAuth mint a new
+  // code: that would invalidate the last one the owner was actually emailed.
+  if (typeof email === 'string' && !(await withinEmailBudget(c.env, email))) {
+    log.warn('email_sign_in.code_not_sent', { reason: 'email_rate_limited' });
+    return c.json({ success: true });
+  }
+  return next();
+});
+authRoutes.post(EMAIL_CODE_SIGN_IN_PATH, rateLimitSignInCodes('email-sign-in-redeem-ip'));
+authRoutes.post(EMAIL_CODE_SIGN_IN_PATH, async (c, next) => {
+  const body: unknown = await c.req.raw
+    .clone()
+    .json()
+    .catch(() => null);
+  const email = maybeJsonRecord(body)?.email;
+  // Guesses for one address are capped across all IPs, for every address alike.
+  if (typeof email === 'string') await assertCodeAttemptBudget(c.env, email);
+  // Same answer as a wrong code, so this reveals nothing the code check would not.
+  if (typeof email !== 'string' || !(await emailCodeRedemptionAllowed(c.env, email))) {
+    return c.json({ code: 'INVALID_OTP', message: 'Invalid OTP' }, 400);
+  }
+  await next();
+  // BetterAuth answers 403 TOO_MANY_ATTEMPTS once a code has taken its guesses, which only an
+  // eligible address can reach. Answer exactly like a wrong code so the lockout cannot be used
+  // to tell which addresses have accounts; the lockout itself still holds.
+  if (c.res.status === 403) {
+    c.res = c.json({ code: 'INVALID_OTP', message: 'Invalid OTP' }, 400);
+  }
+});
+
+/**
+ * better-auth endpoints that hand out, refresh or use a stored provider token. SAM reads tokens
+ * server-side through `getBetterAuthAccessTokenForProvider`, which only uses an account the
+ * configured identity host issued; over HTTP these would refresh any of the caller's accounts
+ * against, or send its token to, whatever host is configured now. No SAM client calls them.
+ */
+const CLOSED_PROVIDER_TOKEN_PATHS = new Set([
+  '/api/auth/get-access-token',
+  '/api/auth/refresh-token',
+  '/api/auth/account-info',
+]);
+
+function isClosedProviderTokenPath(pathname: string): boolean {
+  const path = pathname
+    .toLowerCase()
+    .replace(/\/{2,}/g, '/')
+    .replace(/(.)\/$/, '$1');
+  return CLOSED_PROVIDER_TOKEN_PATHS.has(path);
+}
+
 authRoutes.on(['GET', 'POST'], '/*', async (c) => {
+  const pathname = new URL(c.req.url).pathname;
+  // SAM has no passwords: the plugin's reset, verification and email-change routes stay closed.
+  if (isClosedEmailOtpPath(pathname) || isClosedProviderTokenPath(pathname)) {
+    throw errors.notFound('Route');
+  }
   try {
-    const auth = await createAuth(c.env);
-    const response = await auth.handler(c.req.raw);
+    const auth = await createAuth(c.env, { waitUntil: executionWaitUntil(c) });
+    if (await isAgentSessionChangingAccount(auth, c.req.raw)) {
+      log.warn('agent_sign_in.auth_action_refused', {
+        path: new URL(c.req.url).pathname,
+        action: 'rejected',
+      });
+      return c.json(
+        { error: 'FORBIDDEN', message: 'Agent sign-in sessions can only sign out here' },
+        403
+      );
+    }
+    const response = await auth.handler(withoutSessionCookieCache(c.req.raw));
 
     // Log auth error metadata only. BetterAuth response bodies may include
     // upstream OAuth data or request-specific values that do not belong in
@@ -59,14 +148,75 @@ authRoutes.on(['GET', 'POST'], '/*', async (c) => {
         statusText: response.statusText || undefined,
       });
     }
-    // Trial claim hook: if this is a successful OAuth callback and the user
-    // has an active trial fingerprint cookie, attach a claim cookie + redirect
-    // to the trial landing page. No-op when no fingerprint is present.
-    return await maybeAttachTrialClaimCookie(c.env, c.req.raw, response);
+    return response;
   } catch (err) {
     log.error('auth.better_auth_exception', serializeError(err));
     return c.json({ error: 'AUTH_ERROR', message: 'Internal auth error' }, 500);
   }
 });
+
+/**
+ * BetterAuth endpoints an agent sign-in session may use: read its own session, sign out. The
+ * reads are answered before this check (GET /get-session has its own route above).
+ */
+const AGENT_SESSION_AUTH_ENDPOINTS = new Set(['/api/auth/get-session', '/api/auth/sign-out']);
+
+/**
+ * Whether this BetterAuth request is made with an agent sign-in session and is not one of the
+ * endpoints above. Linking a social account, for one, would give the agent's operator a lasting
+ * way into the target account, and listing sessions would expose the account's other sessions.
+ *
+ * The session is resolved by BetterAuth itself, never by inspecting the Cookie header: BetterAuth's
+ * cookie parser accepts forms a substring check would miss (whitespace before `=`, for one), so
+ * any shortcut here would be a second, looser parser in front of the real one. A request without
+ * a session cookie costs nothing extra (BetterAuth returns before touching the database); the app
+ * polls GET /get-session, which has its own route above.
+ */
+async function isAgentSessionChangingAccount(
+  auth: Awaited<ReturnType<typeof createAuth>>,
+  request: Request
+): Promise<boolean> {
+  if (AGENT_SESSION_AUTH_ENDPOINTS.has(new URL(request.url).pathname)) return false;
+  const current = await auth.api.getSession({
+    headers: request.headers,
+    query: { disableCookieCache: true, disableRefresh: true },
+  });
+  return isAgentSignInSession(current?.session);
+}
+
+/** BetterAuth's signed session cache cookie (`session_data`, possibly chunked as `.0`, `.1`). */
+const SESSION_CACHE_COOKIE = /(^|\.)session_data(\.\d+)?$/;
+
+/**
+ * The request without BetterAuth's session cache cookie, so the handler reads the session from
+ * the database, as `isAgentSessionChangingAccount` does. Otherwise the gate and the handler could
+ * disagree: a session deleted by sign-out or the documented revocation is absent for the gate
+ * (so it is not refused as an agent session) while the handler still accepts its cached copy for
+ * up to the cache's maxAge, long enough to link a social account. These endpoints are rare (the
+ * app polls GET /get-session, which has its own route), so the extra read costs little.
+ */
+function withoutSessionCookieCache(request: Request): Request {
+  const cookie = request.headers.get('cookie');
+  if (!cookie) return request;
+  const pairs = cookie.split(';');
+  const kept = pairs.filter(
+    (pair) => !SESSION_CACHE_COOKIE.test((pair.split('=', 1)[0] ?? '').trim())
+  );
+  if (kept.length === pairs.length) return request;
+  const headers = new Headers(request.headers);
+  if (kept.length) headers.set('cookie', kept.join(';'));
+  else headers.delete('cookie');
+  return new Request(request, { headers });
+}
+
+/** The request's waitUntil, when the runtime provides one (Workers do; unit-test apps do not). */
+function executionWaitUntil(c: Context): ((promise: Promise<unknown>) => void) | undefined {
+  try {
+    const ctx = c.executionCtx;
+    return (promise) => ctx.waitUntil(promise);
+  } catch {
+    return undefined;
+  }
+}
 
 export { authRoutes };

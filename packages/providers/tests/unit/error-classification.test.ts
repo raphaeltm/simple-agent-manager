@@ -8,21 +8,27 @@ import { ProviderError } from '../../src/types';
 describe('classifyHetznerError', () => {
   describe('structured error code (primary signal)', () => {
     it('resource_unavailable → transient_capacity', () => {
-      expect(classifyHetznerError(422, 'resource_unavailable', 'unsupported location for server type')).toBe(
-        'transient_capacity',
-      );
+      expect(
+        classifyHetznerError(422, 'resource_unavailable', 'unsupported location for server type')
+      ).toBe('transient_capacity');
     });
 
     it('server_limit_exceeded → quota_exceeded', () => {
-      expect(classifyHetznerError(403, 'server_limit_exceeded', 'server limit exceeded')).toBe('quota_exceeded');
+      expect(classifyHetznerError(403, 'server_limit_exceeded', 'server limit exceeded')).toBe(
+        'quota_exceeded'
+      );
     });
 
     it('uniqueness_error → invalid_config', () => {
-      expect(classifyHetznerError(409, 'uniqueness_error', 'server name already used')).toBe('invalid_config');
+      expect(classifyHetznerError(409, 'uniqueness_error', 'server name already used')).toBe(
+        'invalid_config'
+      );
     });
 
     it('invalid_input → invalid_config', () => {
-      expect(classifyHetznerError(422, 'invalid_input', 'invalid server_type')).toBe('invalid_config');
+      expect(classifyHetznerError(422, 'invalid_input', 'invalid server_type')).toBe(
+        'invalid_config'
+      );
     });
 
     it('forbidden → auth_error', () => {
@@ -34,7 +40,9 @@ describe('classifyHetznerError', () => {
     });
 
     it('rate_limit_exceeded → rate_limited', () => {
-      expect(classifyHetznerError(429, 'rate_limit_exceeded', 'too many requests')).toBe('rate_limited');
+      expect(classifyHetznerError(429, 'rate_limit_exceeded', 'too many requests')).toBe(
+        'rate_limited'
+      );
     });
 
     it('conflict → invalid_config', () => {
@@ -68,22 +76,26 @@ describe('classifyHetznerError', () => {
   describe('message fallback for 422 without recognized code', () => {
     it('"unavailable" in message → transient_capacity', () => {
       expect(classifyHetznerError(422, undefined, 'Server type cx33 unavailable in fsn1')).toBe(
-        'transient_capacity',
+        'transient_capacity'
       );
     });
 
     it('"unsupported location for server type" → transient_capacity (the root-cause bug)', () => {
-      expect(
-        classifyHetznerError(422, undefined, 'unsupported location for server type'),
-      ).toBe('transient_capacity');
+      expect(classifyHetznerError(422, undefined, 'unsupported location for server type')).toBe(
+        'transient_capacity'
+      );
     });
 
     it('"no capacity" → transient_capacity', () => {
-      expect(classifyHetznerError(422, undefined, 'no capacity for this server type')).toBe('transient_capacity');
+      expect(classifyHetznerError(422, undefined, 'no capacity for this server type')).toBe(
+        'transient_capacity'
+      );
     });
 
     it('"not enough resources" → transient_capacity', () => {
-      expect(classifyHetznerError(422, undefined, 'not enough resources available')).toBe('transient_capacity');
+      expect(classifyHetznerError(422, undefined, 'not enough resources available')).toBe(
+        'transient_capacity'
+      );
     });
 
     it('non-capacity 422 message → unknown', () => {
@@ -121,7 +133,11 @@ describe('isTransientCapacityError (updated)', () => {
   });
 
   it('returns true for 422 with "unsupported location" message (no code)', () => {
-    const err = new ProviderError('hetzner', 422, 'hetzner API error (422): unsupported location for server type');
+    const err = new ProviderError(
+      'hetzner',
+      422,
+      'hetzner API error (422): unsupported location for server type'
+    );
     expect(isTransientCapacityError(err)).toBe(true);
   });
 
@@ -148,7 +164,9 @@ describe('isTransientCapacityError (updated)', () => {
 
 describe('classifyScalewayError', () => {
   it('transient type → transient_capacity', () => {
-    expect(classifyScalewayError(503, 'transient', 'service temporarily unavailable')).toBe('transient_capacity');
+    expect(classifyScalewayError(503, 'transient', 'service temporarily unavailable')).toBe(
+      'transient_capacity'
+    );
   });
 
   it('quota_exceeded type → quota_exceeded', () => {
@@ -156,7 +174,9 @@ describe('classifyScalewayError', () => {
   });
 
   it('invalid_request_error type → invalid_config', () => {
-    expect(classifyScalewayError(400, 'invalid_request_error', 'bad request')).toBe('invalid_config');
+    expect(classifyScalewayError(400, 'invalid_request_error', 'bad request')).toBe(
+      'invalid_config'
+    );
   });
 
   it('permission_denied type → auth_error', () => {
@@ -188,24 +208,41 @@ describe('classifyScalewayError', () => {
   });
 
   it('message fallback for capacity-related 400', () => {
-    expect(classifyScalewayError(400, undefined, 'insufficient capacity in zone')).toBe('transient_capacity');
+    expect(classifyScalewayError(400, undefined, 'insufficient capacity in zone')).toBe(
+      'transient_capacity'
+    );
   });
 });
 
 describe('classifyGcpError', () => {
-  it('UNAVAILABLE → transient_capacity', () => {
-    expect(classifyGcpError(503, 'UNAVAILABLE', 'zone unavailable')).toBe('transient_capacity');
+  // A bare UNAVAILABLE / 503 says GCP's front end failed, not that the zone is out of stock, and
+  // on the create POST it does not prove that nothing was created. `transient_capacity` would let
+  // the TaskRunner drop the node row and create a second VM (TLA+ path P2), so it stays `unknown`.
+  it('UNAVAILABLE without stockout evidence → unknown (ambiguous outcome never descends)', () => {
+    expect(classifyGcpError(503, 'UNAVAILABLE', 'The service is currently unavailable.')).toBe(
+      'unknown'
+    );
+  });
+
+  it('UNAVAILABLE carrying the stockout message → transient_capacity', () => {
+    expect(
+      classifyGcpError(
+        503,
+        'UNAVAILABLE',
+        "The zone 'projects/p/zones/us-central1-a' does not have enough resources available to fulfill the request.  Try a different zone, or try again later."
+      )
+    ).toBe('transient_capacity');
   });
 
   it('ZONE_RESOURCE_POOL_EXHAUSTED → transient_capacity', () => {
     expect(
-      classifyGcpError(429, 'ZONE_RESOURCE_POOL_EXHAUSTED', 'zone resource pool exhausted'),
+      classifyGcpError(429, 'ZONE_RESOURCE_POOL_EXHAUSTED', 'zone resource pool exhausted')
     ).toBe('transient_capacity');
   });
 
   it('ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS → transient_capacity', () => {
     expect(
-      classifyGcpError(429, 'ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS', 'exhausted with details'),
+      classifyGcpError(429, 'ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS', 'exhausted with details')
     ).toBe('transient_capacity');
   });
 
@@ -234,15 +271,41 @@ describe('classifyGcpError', () => {
   });
 
   it('ALREADY_EXISTS → invalid_config', () => {
-    expect(classifyGcpError(409, 'ALREADY_EXISTS', 'resource already exists')).toBe('invalid_config');
+    expect(classifyGcpError(409, 'ALREADY_EXISTS', 'resource already exists')).toBe(
+      'invalid_config'
+    );
   });
 
   it('RATE_LIMIT_EXCEEDED → rate_limited', () => {
-    expect(classifyGcpError(429, 'RATE_LIMIT_EXCEEDED', 'rate limit exceeded')).toBe('rate_limited');
+    expect(classifyGcpError(429, 'RATE_LIMIT_EXCEEDED', 'rate limit exceeded')).toBe(
+      'rate_limited'
+    );
   });
 
-  it('503 without code → transient_capacity', () => {
-    expect(classifyGcpError(503, undefined, 'service unavailable')).toBe('transient_capacity');
+  it('503 without code → unknown', () => {
+    expect(classifyGcpError(503, undefined, 'service unavailable')).toBe('unknown');
+  });
+
+  // GCP reports quota and rate limits as HTTP 403. Read as `auth_error` they would be
+  // indistinguishable from a revoked credential.
+  it('403 quota without a structured status → quota_exceeded, not auth_error', () => {
+    expect(
+      classifyGcpError(403, undefined, "Quota 'CPUS' exceeded.  Limit: 8.0 in region us-central1.")
+    ).toBe('quota_exceeded');
+  });
+
+  it('403 rate limit without a structured status → rate_limited, not auth_error', () => {
+    expect(classifyGcpError(403, undefined, 'Rate Limit Exceeded')).toBe('rate_limited');
+  });
+
+  it('403 permission denial without a structured status → auth_error (control)', () => {
+    expect(
+      classifyGcpError(
+        403,
+        undefined,
+        "Required 'compute.instances.create' permission for 'projects/p/zones/us-central1-a/instances/node-x'"
+      )
+    ).toBe('auth_error');
   });
 
   it('401 without code → auth_error', () => {
@@ -254,13 +317,21 @@ describe('classifyGcpError', () => {
   });
 
   it('message fallback: zone resource pool exhausted → transient_capacity', () => {
-    expect(classifyGcpError(200, undefined, 'zone resource pool exhausted for type e2-standard-4')).toBe(
-      'transient_capacity',
-    );
+    expect(
+      classifyGcpError(200, undefined, 'zone resource pool exhausted for type e2-standard-4')
+    ).toBe('transient_capacity');
+  });
+
+  it('message fallback does not join distant words into a quota (negative counterexample)', () => {
+    expect(
+      classifyGcpError(500, undefined, 'Resource projects/p/disks/d is busy; retries exhausted')
+    ).toBe('unknown');
   });
 
   it('message fallback: resource exhausted → quota_exceeded', () => {
-    expect(classifyGcpError(200, undefined, 'Resource exhausted: CPU quota')).toBe('quota_exceeded');
+    expect(classifyGcpError(200, undefined, 'Resource exhausted: CPU quota')).toBe(
+      'quota_exceeded'
+    );
   });
 
   it('unknown code and status → unknown', () => {

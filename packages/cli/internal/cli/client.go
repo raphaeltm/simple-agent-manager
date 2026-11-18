@@ -146,7 +146,7 @@ func (c APIClient) ListProjects(ctx context.Context) (ProjectListResponse, error
 func (c APIClient) GetProjectDetail(ctx context.Context, projectID string) (ProjectDetail, error) {
 	var response ProjectDetail
 	var raw map[string]json.RawMessage
-	err := c.request(ctx, http.MethodGet, projectAPIPath(projectID), nil, &raw)
+	err := c.request(ctx, http.MethodGet, projectAPIPath(projectID)+"?include=recent", nil, &raw)
 	if err == nil {
 		b, _ := json.Marshal(raw)
 		err = json.Unmarshal(b, &response)

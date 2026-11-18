@@ -19,7 +19,7 @@ provision/manage VMs without coupling to a specific cloud vendor.
 | `src/hetzner-server-create.ts` | `createVM`'s capacity-retry loop and placement fallback, delegated to by `HetznerProvider` |
 | `src/hetzner-volumes.ts` | Hetzner block-volume operations, delegated to by `HetznerProvider` |
 | `src/scaleway.ts` | Scaleway provider implementation |
-| `src/gcp.ts` | GCP provider (partial/placeholder) |
+| `src/gcp.ts` | GCP provider: VMs over workload identity or a service-account key; live catalog via `gcp-catalog.ts` and `gcp-pricing.ts` |
 | `src/provider-fetch.ts` | Shared HTTP fetch utilities for provider APIs |
 
 ## Commands
@@ -39,7 +39,7 @@ pnpm --filter @simple-agent-manager/providers lint        # ESLint
   caller cancellation reason and begin no follow-up request or resource mutation after cancellation.
 - Provider methods accept explicit credentials supplied by the caller. They do not read
   environment variables or decide whether a credential is user, project, or platform scoped.
-- Location validation uses `PROVIDER_LOCATIONS` registry from `@simple-agent-manager/shared`
+- Location validation uses `PROVIDER_LOCATIONS` registry from `@simple-agent-manager/shared` (except GCP, which validates by zone-name shape with `GCP_ZONE_PATTERN`; its list is suggestions only)
 - New providers: create `src/<provider-name>.ts`, implement `Provider` interface, export from `src/index.ts`
 - VM create paths use `VMConfig.native.instanceType` as the provider-native authority. Legacy
   `size` remains optional and is translated only through `resolveVMConfigWithLegacySizeAdapter()`.
@@ -59,3 +59,18 @@ pnpm --filter @simple-agent-manager/providers lint        # ESLint
 - Provider API tokens come from user credentials (encrypted in D1), NOT from environment variables
 - Tests mock HTTP responses — real API calls are only made on staging with user-supplied tokens
 - Hetzner labels are used as metadata storage (workspace ID, node ID) — label format matters
+
+<!-- BEGIN GENERATED RULE INDEX (pnpm quality:agent-context-budget --write) -->
+
+## Rules for this directory
+
+Read the rules whose scope covers the files you will change before editing. Claude Code
+loads them by itself on file access; other harnesses must open them.
+
+- `.claude/rules/56-destructive-provider-ownership-proof.md`: Destructive Provider Ownership Proof
+- `.claude/rules/69-aggregate-capacity-at-final-reservation.md`: Enforce Aggregate Capacity at the Final Atomic Reservation
+- `.claude/rules/71-request-context-must-not-outlive-its-request.md`: A Goroutine That Outlives Its Request Must Not Capture That Request's Context
+- `.claude/rules/72-error-categories-must-match-the-recovery-action.md`: An Error Category Must Name the Recovery Action, Not the Provider's Vocabulary
+- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
+
+<!-- END GENERATED RULE INDEX -->

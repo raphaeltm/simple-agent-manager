@@ -1,5 +1,12 @@
 # Volume status presentation and create-time provider snapshot
 
+> **Reconciliation 2026-10-26:** Item 1 has lost its consumer. #2426 (`833ebc366`) deleted
+> `DeploymentVolumesPanel.tsx`; the new Saved data section shows "in use by the app" / "stored, not
+> attached" from `attachedServerId` (`apps/web/src/pages/deployments/sections/saved-data.tsx:144`),
+> and no web surface renders `volume.status` now, so the `StatusBadge` and visual-audit items are
+> moot. Still open: item 2, the create-time snapshot at `services/deployment-volumes.ts:254`. The
+> overlap item in `2026-08-04-sleeping-status-renders-as-unknown.md` is now at `:61`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** a `StatusBadge` entry for `attached` (success palette) at
@@ -55,7 +62,7 @@ settled `attached`. It becomes one for any volume that is created and never atta
 - [ ] `StatusBadge`'s `statusConfig` covers every `VolumeStatus` member, with in-progress states
       visually distinct from settled ones
 - [ ] `DeploymentVolumesPanel` renders each state with the intended palette; Playwright visual
-      audit at 375px and 1280px per `apps/web/.claude/rules/17-ui-visual-testing.md`, since this
+      audit at 375px and 1280px per `.claude/rules/17-ui-visual-testing.md`, since this
       touches `packages/ui/` and `apps/web/`
 - [ ] `createEnvironmentVolume` persists a settled SAM-side status, or documents in a comment why
       the provider snapshot is authoritative on the create path
@@ -63,8 +70,8 @@ settled `attached`. It becomes one for any volume that is created and never atta
 
 ## References
 
-- `apps/api/.claude/rules/57-write-only-cross-boundary-state.md` — remote-owned state must be
+- `.claude/rules/57-write-only-cross-boundary-state.md` — remote-owned state must be
   reconciled, not just reported
-- `apps/api/.claude/rules/75-external-api-check-then-act.md` — the sibling-asymmetry requirement
+- `.claude/rules/75-external-api-check-then-act.md` — the sibling-asymmetry requirement
   that surfaced item 2
-- `packages/ui/.claude/rules/17-ui-visual-testing.md`
+- `.claude/rules/17-ui-visual-testing.md`

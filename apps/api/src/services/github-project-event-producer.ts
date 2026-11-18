@@ -5,13 +5,12 @@ import type {
   ProjectEventSeverity,
 } from '@simple-agent-manager/shared';
 import { DEFAULT_PROJECT_EVENT_LIMITS } from '@simple-agent-manager/shared';
-import { eq, or, type SQL } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
 
-import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { canonicalJson } from '../lib/canonical-json';
 import { log } from '../lib/logger';
+import { buildGitHubProjectEventDisplay } from './github-project-event-display';
+import { findProjectsForGitHubRepository } from './github-project-repositories';
 import { type GitHubWebhookEvent, parseWebhookPayload } from './github-trigger-filter';
 import * as projectDataService from './project-data';
 
@@ -29,17 +28,12 @@ const SUPPORTED_GITHUB_PROJECT_EVENT_TYPES = new Set([
   'workflow_run',
 ]);
 
-type ProjectCandidate = {
-  id: string;
-  name: string;
-};
-
 export type GitHubProjectEventAdmission = {
   projectId: string;
   eventType: string;
   outcome: ProjectEventAdmissionOutcome;
-  eventId: string;
-  state: string;
+  eventId: string | null;
+  state: string | null;
 };
 
 export type AdmitGitHubWebhookProjectEventsResult = {
@@ -60,7 +54,7 @@ export interface AdmitGitHubWebhookProjectEventsInput {
 /**
  * Admit bounded ProjectData events for verified GitHub webhooks that already
  * flow through SAM. This is intentionally independent from GitHub trigger task
- * routing: admission records the project-scoped fact, while delivery matching
+ * routing: admission retains subscribed CI facts and other project facts, while delivery matching
  * and prompt/runtime injection remain owned by the B4 subscription layer.
  */
 export async function admitGitHubWebhookProjectEvents(
@@ -90,6 +84,7 @@ export async function admitGitHubWebhookProjectEvents(
     return { processed: false, deliveryId, eventType, admittedEvents: [], reason: 'no_repository' };
   }
 
+  // System-owned leftover projects are excluded by the lookup itself.
   const projects = await findProjectsForGitHubRepository(env, {
     repositoryFullName,
     repositoryId,
@@ -115,8 +110,8 @@ export async function admitGitHubWebhookProjectEvents(
       projectId: project.id,
       eventType: eventInput.eventType,
       outcome: result.outcome,
-      eventId: result.event.id,
-      state: result.event.state,
+      eventId: result.event?.id ?? null,
+      state: result.event?.state ?? null,
     });
   }
 
@@ -126,30 +121,6 @@ export async function admitGitHubWebhookProjectEvents(
     eventType,
     admittedEvents,
   };
-}
-
-async function findProjectsForGitHubRepository(
-  env: Env,
-  input: { repositoryFullName: string | null; repositoryId: number | null }
-): Promise<ProjectCandidate[]> {
-  const predicates: SQL[] = [];
-  if (input.repositoryFullName) {
-    predicates.push(eq(schema.projects.repository, input.repositoryFullName));
-  }
-  if (input.repositoryId !== null) {
-    predicates.push(eq(schema.projects.githubRepoId, input.repositoryId));
-  }
-  if (predicates.length === 0) return [];
-
-  const db = drizzle(env.DATABASE, { schema });
-  const where = predicates.length === 1 ? predicates[0] : or(...predicates);
-  return db
-    .select({
-      id: schema.projects.id,
-      name: schema.projects.name,
-    })
-    .from(schema.projects)
-    .where(where);
 }
 
 function buildGitHubProjectEventInput(input: {
@@ -163,7 +134,7 @@ function buildGitHubProjectEventInput(input: {
   const subject = resolveSubject(event, payload);
   const eventType = projectDataEventType(event);
   const metadata = buildMetadata(event, payload, deliveryId, subject);
-  const display = buildDisplay(event, payload, subject, eventType);
+  const display = buildGitHubProjectEventDisplay(event, payload, subject, eventType);
 
   return {
     source: GITHUB_EVENT_SOURCE,
@@ -382,82 +353,6 @@ function buildMetadata(
   }
 
   return metadata;
-}
-
-function buildDisplay(
-  event: GitHubWebhookEvent,
-  payload: Record<string, unknown>,
-  subject: AdmitProjectEventInput['subject'],
-  eventType: string
-): AdmitProjectEventInput['display'] {
-  const repository = recordValue(payload.repository);
-  const repo = stringValue(repository?.full_name)?.toLowerCase() ?? 'repository';
-  const action = event.action ? ` ${event.action.replaceAll('_', ' ')}` : '';
-  const url = displayUrlForEvent(event, payload);
-  return {
-    title: `${displaySubject(subject)}${action}`,
-    summary: `${event.sender?.login ?? 'GitHub'} emitted ${eventType} on ${repo}`,
-    url: url ?? undefined,
-    labels: event.action ? ['github', event.event, event.action] : ['github', event.event],
-  };
-}
-
-function displaySubject(subject: AdmitProjectEventInput['subject']): string {
-  switch (subject.type) {
-    case 'commit':
-      return `Commit ${subject.id.slice(0, 12)}`;
-    case 'check_run':
-      return `Check run ${subject.id}`;
-    case 'check_suite':
-      return `Check suite ${subject.id}`;
-    case 'workflow_run':
-      return `Workflow run ${subject.id}`;
-    case 'pull_request':
-      return `Pull request #${subject.id}`;
-    case 'issue':
-      return `Issue #${subject.id}`;
-    case 'repository':
-      return `Repository ${subject.id}`;
-    default:
-      return `${subject.type} ${subject.id}`;
-  }
-}
-
-function displayUrlForEvent(
-  event: GitHubWebhookEvent,
-  payload: Record<string, unknown>
-): string | null {
-  if (event.event === 'issue_comment') {
-    const commentUrl = stringValue(recordValue(payload.comment)?.html_url);
-    if (commentUrl) return commentUrl;
-  }
-  if (event.event === 'issues') {
-    const issueUrl = stringValue(recordValue(payload.issue)?.html_url);
-    if (issueUrl) return issueUrl;
-  }
-  if (event.event === 'pull_request') {
-    const pullRequestUrl = stringValue(recordValue(payload.pull_request)?.html_url);
-    if (pullRequestUrl) return pullRequestUrl;
-  }
-  if (event.event === 'pull_request_review') {
-    const reviewUrl = stringValue(recordValue(payload.review)?.html_url);
-    if (reviewUrl) return reviewUrl;
-  }
-  if (event.event === 'pull_request_review_comment') {
-    const reviewCommentUrl = stringValue(recordValue(payload.comment)?.html_url);
-    if (reviewCommentUrl) return reviewCommentUrl;
-  }
-  if (event.event === 'check_run') {
-    const checkRunUrl =
-      stringValue(recordValue(payload.check_run)?.html_url) ??
-      stringValue(recordValue(payload.check_run)?.details_url);
-    if (checkRunUrl) return checkRunUrl;
-  }
-  if (event.event === 'workflow_run') {
-    const workflowRunUrl = stringValue(recordValue(payload.workflow_run)?.html_url);
-    if (workflowRunUrl) return workflowRunUrl;
-  }
-  return stringValue(recordValue(payload.repository)?.html_url) ?? null;
 }
 
 function resolveOccurredAt(payload: Record<string, unknown>, fallback: number): number {

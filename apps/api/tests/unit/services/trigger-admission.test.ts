@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   githubTriggerInbox,
   tasks,
+  triggerEmailMessages,
   triggerExecutions,
   type TriggerRow,
   triggers,
@@ -54,7 +55,13 @@ function makeTriggerRow(overrides: Partial<TriggerRow> = {}): TriggerRow {
 
 function setup(overrides: Partial<TriggerRow> = {}) {
   const sqlite = new Database(':memory:');
-  createSchemaTables(sqlite, [tasks, triggers, triggerExecutions, githubTriggerInbox]);
+  createSchemaTables(sqlite, [
+    tasks,
+    triggers,
+    triggerExecutions,
+    githubTriggerInbox,
+    triggerEmailMessages,
+  ]);
   const trigger = makeTriggerRow(overrides);
   sqlite
     .prepare(

@@ -1,0 +1,19 @@
+{
+  "description": "Unmodified Claude Code 2.1.281 setup-token with CLAUDE_AX_SCREEN_READER=1, script PTY cols 512 rows 0. Loopback TLS proxy supplied synthetic token/profile responses; no real account credentials. Original stdout chunks retained.",
+  "token": "sk-ant-oat01-gdjY1Kcwm5SWTIEgTl9-xVY5O0Pcj9u1WW3luGDbTR06OGMLuY_BiI2YPl3AO5aG78bMBvxvsWSkyegY09R90ZQril-_thKE",
+  "chunks": [
+    "\u001b7\u001b[r\u001b8\u001b[?25h",
+    "\u001b[?2004h\u001b[?2031h\u001b[?1004h",
+    "\u001b[G",
+    "\u001b[>0q\u001b[?u\u001b[c",
+    "Welcome to Claude Code v2.1.281\r\nThis will guide you through long-lived (1-year) auth token setup for your Claude account. Claude subscription required.\r\nOpening browser to sign in\u2026\u001b[28G",
+    "\u001b[G",
+    "\u001b[2K\u001b[GBrowser didn't open? Use the url below to sign in  (c to copy)\r\nhttps://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=user%3Ainference&code_challenge=DuZ5VWXdxHtWO6XB9IMEynSntrGYiZjeItk3IAAlkdc&code_challenge_method=S256&state=KKiTtl_5X8jhAdL4t7s-KtVJb47eU__gqOw9J86oI9c\r\nPaste code here if prompted >\u001b[30G",
+    "\u001b[30G  ****************************************************************************************************************************86oI9c\u001b[162G",
+    "\u001b[G",
+    "\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[G\u2713 Long-lived authentication token created successfully!\r\nYour OAuth token (valid for 1 year):\r\nsk-ant-oat01-gdjY1Kcwm5SWTIEgTl9-xVY5O0Pcj9u1WW3luGDbTR06OGMLuY_BiI2YPl3AO5aG78bMBvxvsWSkyegY09R90ZQril-_thKE\r\nStore this token securely. You won't be able to see it again.\r\nUse this token by setting: export CLAUDE_CODE_OAUTH_TOKEN=<token>\u001b[66G",
+    "\u001b[?1004l\u001b[>4m\u001b[<u\u001b[?2031l\u001b[?2004l\u001b(B\u000f\u001b[?1016l\u001b[?1006l\u001b[?1003l\u001b[?1002l\u001b[?1000l\u001b[?25h\u001b7\u001b[r\u001b8",
+    "\u001b[?25h",
+    "\u001b[?25h"
+  ]
+}

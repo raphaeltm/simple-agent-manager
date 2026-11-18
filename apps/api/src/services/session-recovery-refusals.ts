@@ -11,6 +11,11 @@ export interface SessionRecoveryRefusalClassification {
  * on reason strings.
  */
 const SESSION_RECOVERY_REFUSALS: Record<string, SessionRecoveryRefusalClassification> = {
+  session_recovery_start_failed_retryable: {
+    action: 'retry',
+    description:
+      'SAM could not start the replacement runtime. The saved conversation is retained and SAM will retry within its wake budget.',
+  },
   workspace_deletion_unconfirmed: {
     action: 'retry',
     description: 'The previous workspace is still being deleted. SAM will retry the wake shortly.',
@@ -31,6 +36,14 @@ const SESSION_RECOVERY_REFUSALS: Record<string, SessionRecoveryRefusalClassifica
     action: 'retry',
     description: 'This conversation is moving storage locations. SAM will retry the wake shortly.',
   },
+  // A blocked provider-limit hold has no automatic wake: only the owner's Resume (which records
+  // the wait as released first) may start one. Retry-class so nothing is reported as a failed
+  // wake and no claim spends the wake budget; the chat shows the hold and its actions.
+  provider_limit_blocked: {
+    action: 'retry',
+    description:
+      'This conversation is paused by an AI provider usage limit and needs review before it can wake.',
+  },
   stale_eviction_generation: {
     action: 'drop',
     description: 'This wake belongs to an older runtime generation and was dropped.',
@@ -41,7 +54,10 @@ const SESSION_RECOVERY_REFUSALS: Record<string, SessionRecoveryRefusalClassifica
   },
   container_runtime_unavailable: {
     action: 'report',
-    description: 'The sleeping container runtime is gone and cannot wake in place.',
+    // Snapshot restore into a fresh Instant runtime is not built (`ensureSessionRecovery`
+    // refuses cf-container), so tell the person how to continue rather than only what broke.
+    description:
+      'The sleeping container runtime is gone and cannot wake in place. Your message and this conversation are saved: fork this chat or start a new one to continue.',
   },
   sleeping_snapshot_missing: {
     action: 'report',
@@ -86,6 +102,21 @@ const SESSION_RECOVERY_REFUSALS: Record<string, SessionRecoveryRefusalClassifica
   placement_credentials_missing: {
     action: 'report',
     description: 'Cloud provider credentials are missing for this wake.',
+  },
+  placement_catalog_refresh_unavailable: {
+    action: 'report',
+    description:
+      'The selected compute catalog offerings are unavailable and no refresh is pending within its budget. Check the selected account and use Infrastructure Refresh before retrying.',
+  },
+  placement_sources_disabled: {
+    action: 'report',
+    description:
+      'The compute accounts selected for this wake are disabled. Enable an account in infrastructure settings before retrying.',
+  },
+  placement_pool_empty: {
+    action: 'report',
+    description:
+      'The compute pool for this wake has no selected machines. Add machines in infrastructure settings before retrying.',
   },
 };
 

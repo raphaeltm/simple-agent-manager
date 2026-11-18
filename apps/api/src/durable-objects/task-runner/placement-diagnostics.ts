@@ -1,11 +1,11 @@
 /** Persist the runtime's decision evidence without exposing its credential snapshot. */
-import { resolveResourceReservation } from '@simple-agent-manager/shared';
-
 import {
   buildPlacementDecisionDiagnostics,
   type BuildPlacementDiagnosticsInput,
-} from '../../services/placement-diagnostics';
-import { isResolvedResourceReservation } from '../../services/workspace-resource-capacity';
+  isResolvedResourceReservation,
+} from '@simple-agent-manager/scheduler-core';
+import { resolveResourceReservation } from '@simple-agent-manager/shared';
+
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 type DecisionUpdate = Omit<

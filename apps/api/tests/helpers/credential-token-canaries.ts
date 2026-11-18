@@ -11,8 +11,7 @@ function fixtureCanary(name: string): string {
 /**
  * Realistic credential tokens that every API redactor must strip
  * (`src/lib/credential-token-redaction.ts`), assembled from fragments so the repository never holds
- * a literal key. The provider and GitHub shapes come from the canary fixture the VM agent's Go
- * redactor also consumes; SAM's own PAT is API-only because the Go redactor has no SAM token shape.
+ * a literal key. Every shape comes from the canary fixture the VM agent's Go redactors also consume.
  * The SAM PAT carries a `-` on purpose: the logger's old `sam_[A-Za-z0-9_]*` stopped there.
  */
 export const credentialTokenCanaries = {
@@ -20,7 +19,8 @@ export const credentialTokenCanaries = {
   openaiProjectKey: fixtureCanary('openai-project-key'),
   anthropicApiKey: fixtureCanary('anthropic-api-key'),
   githubFineGrainedPat: fixtureCanary('github-fine-grained-pat'),
-  samPersonalAccessToken: ['sam_', 'pat_', 'q7Hk2Zx9Lm4P-w8Rt6Vb3Nc1Yd5_Fg0JuE2rT'].join(''),
+  opencodeApiKey: fixtureCanary('opencode-api-key'),
+  samPersonalAccessToken: fixtureCanary('sam-personal-access-token'),
 } as const;
 
 export const allCredentialTokenCanaries: readonly string[] = Object.values(credentialTokenCanaries);

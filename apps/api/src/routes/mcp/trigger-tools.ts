@@ -3,6 +3,16 @@
  * Create/delete live in focused modules and are re-exported for compatibility.
  */
 import {
+  cronToHumanReadable,
+  cronToNextFire,
+  validateCronExpression,
+} from '@simple-agent-manager/cron';
+import {
+  ResourceRequirementsValidationError,
+  serializeModernResourceRequirementsInput,
+  serializeResourceRequirementsInput,
+} from '@simple-agent-manager/scheduler-core';
+import {
   DEFAULT_CRON_MIN_INTERVAL_MINUTES,
   DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
   DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
@@ -16,22 +26,15 @@ import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { AppError } from '../../middleware/error';
 import {
-  cronToHumanReadable,
-  cronToNextFire,
-  validateCronExpression,
-} from '../../services/cron-utils';
-import {
   assertGitHubTriggerConfigExists,
-  parseGitHubTriggerConfig,
   readGitHubTriggerConfig,
+  validateGitHubTriggerQueueConfig,
 } from '../../services/github-trigger-config';
-import {
-  ResourceRequirementsValidationError,
-  serializeModernResourceRequirementsInput,
-  serializeResourceRequirementsInput,
-} from '../../services/resource-requirements-input';
 import { clearTriggerPageCaches } from '../../services/trigger-cache';
-import { validateTriggerSourceFields } from '../../services/trigger-create';
+import {
+  assertKeepsAgentProfile,
+  validateTriggerSourceFields,
+} from '../../services/trigger-create';
 import {
   INVALID_PARAMS,
   jsonRpcError,
@@ -55,12 +58,14 @@ export async function handleUpdateTrigger(
   const ownedTrigger = await resolveOwnedTrigger(requestId, params, tokenData, env, 'update');
   if (!ownedTrigger.ok) return ownedTrigger.response;
   const { triggerId, trigger: existingTrigger } = ownedTrigger;
+  let githubConfig: Awaited<ReturnType<typeof validateGitHubTriggerQueueConfig>> | undefined;
   try {
     validateTriggerSourceFields(existingTrigger.source_type, params);
+    assertKeepsAgentProfile(existingTrigger.source_type, params.agentProfileId);
     if (params.sourceType !== undefined)
       return jsonRpcError(requestId, INVALID_PARAMS, 'sourceType cannot be changed');
     if (params.githubConfig !== undefined) {
-      parseGitHubTriggerConfig(params.githubConfig);
+      githubConfig = await validateGitHubTriggerQueueConfig(env, params.githubConfig);
       await assertGitHubTriggerConfigExists(drizzle(env.DATABASE, { schema }), triggerId);
     }
   } catch (error) {
@@ -340,14 +345,22 @@ export async function handleUpdateTrigger(
   const triggerUpdate = env.DATABASE.prepare(
     `UPDATE triggers SET ${updates.join(', ')} WHERE id = ? AND project_id = ?`
   ).bind(...values, triggerId, tokenData.projectId);
-  if (params.githubConfig !== undefined) {
+  if (githubConfig !== undefined) {
     // D1 batch is atomic: metadata and source configuration cannot diverge.
-    const config = parseGitHubTriggerConfig(params.githubConfig);
+    const config = githubConfig;
     await env.DATABASE.batch([
       triggerUpdate,
       env.DATABASE.prepare(
-        'UPDATE github_trigger_configs SET event_type = ?, filters_json = ?, updated_at = ? WHERE trigger_id = ?'
-      ).bind(config.eventType, JSON.stringify(config.filters), values[0], triggerId),
+        'UPDATE github_trigger_configs SET event_type = ?, filters_json = ?, subject_affinity = COALESCE(?, subject_affinity), queue_max_pending = COALESCE(?, queue_max_pending), queue_ttl_seconds = COALESCE(?, queue_ttl_seconds), updated_at = ? WHERE trigger_id = ?'
+      ).bind(
+        config.eventType,
+        JSON.stringify(config.filters),
+        config.subjectAffinity === undefined ? null : Number(config.subjectAffinity),
+        config.queueMaxPending ?? null,
+        config.queueTtlSeconds ?? null,
+        values[0],
+        triggerId
+      ),
     ]);
   } else {
     await triggerUpdate.run();
@@ -400,4 +413,5 @@ export async function handleUpdateTrigger(
 
 export { handleCreateTrigger } from './trigger-create-tool';
 export { handleDeleteTrigger } from './trigger-delete-tool';
+export { handleGetTrigger } from './trigger-get-tool';
 export { handleListTriggers } from './trigger-list-tool';

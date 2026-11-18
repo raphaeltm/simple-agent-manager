@@ -11,8 +11,8 @@ const releases = [
   { name: 'current', release: CODEX_RUNTIME_RELEASE, bytes: CODEX_RUNTIME_ARCHIVE_BYTES },
   {
     name: 'previous (existing VM agents)',
-    release: 'e85e7bfee875bb0bc0397a546073b324258d4cba2c0e54cb3808c3596825b292',
-    bytes: 132578703,
+    release: '1fd3c07846581888284ed9c9d02bc1f51e3673610c3688d8da98db47030bfb95',
+    bytes: 136245837,
   },
 ];
 

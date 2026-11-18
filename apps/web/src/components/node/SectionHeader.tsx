@@ -8,7 +8,13 @@ interface SectionHeaderProps {
   actions?: ReactNode;
 }
 
-export const SectionHeader: FC<SectionHeaderProps> = ({ icon, iconBg, title, description, actions }) => (
+export const SectionHeader: FC<SectionHeaderProps> = ({
+  icon,
+  iconBg,
+  title,
+  description,
+  actions,
+}) => (
   <div className="flex flex-wrap items-center gap-3 mb-4">
     <div className="flex items-center gap-3 min-w-0 flex-1">
       <div
@@ -18,7 +24,13 @@ export const SectionHeader: FC<SectionHeaderProps> = ({ icon, iconBg, title, des
         {icon}
       </div>
       <div className="flex-1 min-w-0">
-        <div className="text-fg-primary" style={{ fontSize: 'var(--sam-type-section-heading-size)', fontWeight: 'var(--sam-type-section-heading-weight)' as unknown as number }}>
+        <div
+          className="text-fg-primary [overflow-wrap:anywhere]"
+          style={{
+            fontSize: 'var(--sam-type-section-heading-size)',
+            fontWeight: 'var(--sam-type-section-heading-weight)' as unknown as number,
+          }}
+        >
           {title}
         </div>
         {description && (

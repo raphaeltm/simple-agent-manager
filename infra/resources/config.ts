@@ -30,6 +30,8 @@ export interface InfraConfig {
   accountId: string;
   zoneId: string;
   baseDomain: string;
+  zoneName: string;
+  workersDevSubdomain: string;
   stack: string;
   prefix: string;
   r2Location: R2Location;
@@ -46,11 +48,22 @@ const pulumiConfig = new pulumi.Config();
 export function parseInfraConfig(config: ConfigReader, currentStack: string): InfraConfig {
   const baseDomain = requireNonEmptyConfig(config, 'baseDomain');
   const resourcePrefix = optionalNonEmptyConfig(config, 'resourcePrefix');
+  const zoneName = optionalNonEmptyConfig(config, 'zoneName') ?? baseDomain;
+  const workersDevSubdomain =
+    optionalNonEmptyConfig(config, 'workersDevSubdomain') ??
+    resourcePrefix ??
+    derivePrefix(baseDomain);
+  zoneRelativeDnsName('api', baseDomain, zoneName);
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(workersDevSubdomain)) {
+    throw new Error('Pulumi config "workersDevSubdomain" must be a DNS label');
+  }
 
   return {
     accountId: requireNonEmptyConfig(config, 'cloudflareAccountId'),
     zoneId: requireNonEmptyConfig(config, 'cloudflareZoneId'),
     baseDomain,
+    zoneName,
+    workersDevSubdomain,
     stack: currentStack,
     prefix: resourcePrefix ?? derivePrefix(baseDomain),
     r2Location: parseR2Location(optionalNonEmptyConfig(config, 'r2Location')),
@@ -98,6 +111,8 @@ const infraConfig = parseInfraConfig(pulumiConfig, pulumi.getStack());
 export const accountId = infraConfig.accountId;
 export const zoneId = infraConfig.zoneId;
 export const baseDomain = infraConfig.baseDomain;
+export const zoneName = infraConfig.zoneName;
+export const workersDevSubdomain = infraConfig.workersDevSubdomain;
 export const stack = infraConfig.stack;
 export const prefix = infraConfig.prefix;
 export const r2Location = infraConfig.r2Location;
@@ -181,4 +196,19 @@ function parseR2Location(value: string | undefined): R2Location {
   throw new Error(
     `Pulumi config "r2Location" must be one of: ${SUPPORTED_R2_LOCATIONS.join(', ')}`
   );
+}
+
+/** Zone-relative names keep installations on delegated subdomains in their selected zone. */
+export function zoneRelativeDnsName(label: string, domain: string, zone: string): string {
+  const validDomain = (value: string) =>
+    value.length <= 253 &&
+    value.split('.').every((part) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(part));
+  if (!validDomain(domain) || !validDomain(zone))
+    throw new Error('Installation and zone names must be DNS names');
+  const normalizedDomain = domain.toLowerCase();
+  const normalizedZone = zone.toLowerCase();
+  if (normalizedDomain === normalizedZone) return label;
+  if (!normalizedDomain.endsWith(`.${normalizedZone}`))
+    throw new Error('Installation domain must belong to selected zone');
+  return `${label}.${normalizedDomain.slice(0, -(normalizedZone.length + 1))}`;
 }

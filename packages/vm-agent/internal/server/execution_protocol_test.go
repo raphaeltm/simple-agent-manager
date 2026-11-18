@@ -102,6 +102,8 @@ func TestExecutionProtocolRoutesRequireNodeManagementBearerToken(t *testing.T) {
 	}{
 		{name: "capabilities", method: http.MethodGet, target: "/workspaces/ws-existing/agent-capabilities", handler: s.handleAgentCapabilities},
 		{name: "receipt", method: http.MethodGet, target: "/workspaces/ws-existing/agent-sessions/session/prompt-receipts/delivery", handler: s.handleGetPromptReceipt},
+		{name: "steer", method: http.MethodPost, target: "/workspaces/ws-existing/agent-sessions/session/steer", handler: s.handleSteerPrompt},
+		{name: "steer receipt", method: http.MethodGet, target: "/workspaces/ws-existing/agent-sessions/session/steer-receipts/delivery", handler: s.handleGetSteerReceipt},
 		{name: "interaction answer", method: http.MethodPost, target: "/workspaces/ws-existing/agent-sessions/session/interactions/11111111-1111-4111-8111-111111111111/answer", handler: s.handleAcpInteractionAnswer},
 		{name: "rollover submit", method: http.MethodPost, target: "/workspaces/ws-existing/agent-sessions/session/checkpoint-rollovers", handler: s.handleCheckpointRollover},
 		{name: "rollover lookup", method: http.MethodGet, target: "/workspaces/ws-existing/agent-sessions/session/checkpoint-rollovers/op", handler: s.handleGetCheckpointRollover},
@@ -399,6 +401,9 @@ type durableExecutionProtocolFixture struct {
 	ConflictPrompt   json.RawMessage `json:"conflictPrompt"`
 	AmbiguousReceipt json.RawMessage `json:"ambiguousReceipt"`
 	NotFoundReceipt  json.RawMessage `json:"notFoundReceipt"`
+	InjectedSteer    json.RawMessage `json:"injectedSteer"`
+	NotConsumedSteer json.RawMessage `json:"notConsumedSteer"`
+	AmbiguousSteer   json.RawMessage `json:"ambiguousSteer"`
 }
 
 func loadDurableExecutionProtocolFixture(t *testing.T) durableExecutionProtocolFixture {

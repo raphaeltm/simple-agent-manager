@@ -1,255 +1,297 @@
 /**
- * Choose-Your-Path Onboarding Wizard — Full-Screen Overlay
+ * First-run onboarding: SAM introduces itself, asks only what this installation leaves open,
+ * walks the user through the steps that remain, and hands off to their first chat.
  *
- * Renders as a fixed overlay with a green-glow vignette background.
- * The standard app UI is hidden behind it. Users dismiss via X button.
+ * A full-screen SAM Glass overlay: the void, one frosted pane, SAM's head as the host.
  */
-import { ArrowLeft, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Button, Pane } from '@simple-agent-manager/ui';
+import { useQuery } from '@tanstack/react-query';
+import { ArrowLeft, ArrowRight, Loader2, X } from 'lucide-react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { useQueryScope } from '../../../hooks/useQueryScope';
 import { useSetupStatus } from '../../../hooks/useSetupStatus';
+import { useTrialStatus } from '../../../hooks/useTrialStatus';
+import {
+  projectArtifactsEnabledQueryOptions,
+  projectListQueryOptions,
+} from '../../../lib/query-options';
+import { SamHero } from '../../SamHero';
 import { useOnboarding } from '../OnboardingContext';
 import { CompletionScreen } from './CompletionScreen';
 import { type GeneratedStep, generatePath } from './path-generator';
-import { PathPreview } from './PathPreview';
 import { QuestionCard } from './QuestionCard';
-import { type PathOption, QUESTIONS } from './questions';
+import {
+  type Answers,
+  openQuestions,
+  presetAnswers,
+  type Question,
+  type SetupContext,
+} from './questions';
 import { StepExecution } from './StepExecution';
+import { useWizardKeyboard } from './useWizardKeyboard';
 
-type Phase = 'questions' | 'path-preview' | 'executing' | 'complete';
+type Phase = 'hello' | 'questions' | 'steps' | 'done';
 
 export function ChoosePathWizard() {
   const { showOverlay, dismissOnboarding } = useOnboarding();
+  const queryScope = useQueryScope();
+  const setup = useSetupStatus(queryScope);
+  const trial = useTrialStatus(showOverlay ? queryScope : '');
+  // SAM-hosted repositories (Cloudflare Artifacts) are offered only where this installation has
+  // them; everywhere else the repository question is about GitHub.
+  const artifactsQuery = useQuery({
+    ...projectArtifactsEnabledQueryOptions(queryScope),
+    enabled: Boolean(queryScope) && showOverlay,
+  });
 
-  const [phase, setPhase] = useState<Phase>('questions');
-  const [currentQuestionId, setCurrentQuestionId] = useState('cloud-account');
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [tags, setTags] = useState<string[]>([]);
-  const [generatedSteps, setGeneratedSteps] = useState<GeneratedStep[]>([]);
+  // Setup status reads projects only when GitHub is not connected; the wizard needs to know
+  // either way, so it does not create a second first project.
+  const projectsQuery = useQuery({
+    ...projectListQueryOptions(queryScope, 1),
+    enabled: Boolean(queryScope) && showOverlay,
+  });
+  const hasProject = setup.hasProject || (projectsQuery.data ?? []).length > 0;
+
+  const [phase, setPhase] = useState<Phase>('hello');
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [questionIndex, setQuestionIndex] = useState(0);
+  const [answers, setAnswers] = useState<Answers>({});
+  const [steps, setSteps] = useState<GeneratedStep[]>([]);
+  const [stepIndex, setStepIndex] = useState(0);
+  const [projectId, setProjectId] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const tagsRef = useRef(tags);
-  tagsRef.current = tags;
 
-  const focusContent = useCallback(
-    () => requestAnimationFrame(() => contentRef.current?.focus()),
-    []
+  useWizardKeyboard({
+    active: showOverlay,
+    dialogRef,
+    contentRef,
+    onEscape: dismissOnboarding,
+  });
+
+  // Focus the screen's heading whenever the screen changes, so keyboard and screen-reader users
+  // start inside the overlay and stay there as screens swap out under them.
+  const headingRef = useCallback(
+    (el: HTMLHeadingElement | null) => el?.focus(),
+    [phase, questionIndex, stepIndex] // eslint-disable-line react-hooks/exhaustive-deps -- re-created per screen so React re-focuses
   );
 
-  // H2: move focus into the dialog when it opens — and again on every step
-  // change — so keyboard/screen-reader users start inside the overlay and stay
-  // there. Clicking an option unmounts the focused button; without re-focusing
-  // the content region, focus falls back to <body> and the Escape-close and
-  // Tab focus-trap (handleKeyDown) stop firing for the rest of the wizard.
-  useEffect(() => {
-    if (showOverlay) focusContent();
-  }, [showOverlay, phase, currentQuestionId, focusContent]);
+  const context: SetupContext = useMemo(
+    () => ({
+      instantEnabled: setup.instantEnabled,
+      platformCompute: setup.platformCompute,
+      artifactsEnabled: artifactsQuery.data === true,
+      hasCloud: setup.hasCloud,
+      hasGitHub: setup.hasGitHub,
+      hasProject,
+    }),
+    [
+      setup.instantEnabled,
+      setup.platformCompute,
+      setup.hasCloud,
+      setup.hasGitHub,
+      hasProject,
+      artifactsQuery.data,
+    ]
+  );
+  // The questions depend on what the installation offers; wait for those reads to settle.
+  const contextReady = !setup.loading && !artifactsQuery.isLoading && !projectsQuery.isLoading;
 
-  // H1 + H3: Escape closes the dialog; Tab is trapped within the overlay so
-  // focus cannot escape to the hidden app UI behind it (WCAG 2.1.2 / 2.4.3).
-  // Attached at the document level (not a JSX onKeyDown prop) because this
-  // element's ARIA role is "dialog" — a non-interactive "window" role per
-  // aria-query — so jsx-a11y/no-noninteractive-element-interactions
-  // correctly rejects a keyboard handler on the element itself. Keydown
-  // events bubble to document from wherever the focus trap keeps focus (i.e.
-  // anywhere inside the overlay), so this is behaviorally identical to the
-  // previous onKeyDown prop. Same technique as ConfirmDialog's escape/tab-trap
-  // handler.
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        dismissOnboarding();
-        return;
-      }
-      if (e.key !== 'Tab' || !dialogRef.current) return;
-
-      const focusable = Array.from(
-        dialogRef.current.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        )
-      ).filter((el) => el.offsetParent !== null);
-      if (focusable.length === 0) return;
-
-      const first = focusable.at(0);
-      const last = focusable.at(-1);
-      if (!first || !last) return;
-      const active = document.activeElement;
-
-      if (e.shiftKey) {
-        if (active === first || active === contentRef.current) {
-          e.preventDefault();
-          last.focus();
-        }
-      } else if (active === last) {
-        e.preventDefault();
-        first.focus();
-      }
+  const startSteps = useCallback(
+    (finalAnswers: Answers) => {
+      setAnswers(finalAnswers);
+      setSteps(
+        generatePath(finalAnswers, {
+          hasAgent: setup.hasAgent,
+          hasCloud: setup.hasCloud,
+          hasGitHub: setup.hasGitHub,
+          hasProject,
+        })
+      );
+      setStepIndex(0);
+      setPhase('steps');
     },
-    [dismissOnboarding]
+    [setup.hasAgent, setup.hasCloud, setup.hasGitHub, hasProject]
   );
 
-  useEffect(() => {
-    if (!showOverlay) return;
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [showOverlay, handleKeyDown]);
+  const begin = useCallback(() => {
+    const open = openQuestions(context);
+    const preset = presetAnswers(context);
+    setQuestions(open);
+    setQuestionIndex(0);
+    setAnswers(preset);
+    if (open.length > 0) setPhase('questions');
+    else startSteps(preset);
+  }, [context, startSteps]);
 
-  // Pre-populate tags from existing setup state.
-  //
-  // Reads the shared setup-status queries rather than issuing its own three
-  // requests: `AppShell` mounts this component next to `OnboardingProvider` on every
-  // authenticated page, and both derive the same answer from the same endpoints.
-  //
-  // Pre-mark a step as already-done only when the user has configured their OWN
-  // credential. Platform availability (SAM-managed AI / infra) is a choice the user
-  // still makes inside the flow — it must not skip the question.
-  const queryScope = useQueryScope();
-  const { hasCloud, hasGitHub, hasAgent, loading: setupLoading } = useSetupStatus(queryScope);
-
-  useEffect(() => {
-    if (setupLoading) return;
-    const existingTags: string[] = [];
-    if (hasAgent) existingTags.push('existing-agent');
-    if (hasCloud) existingTags.push('existing-cloud');
-    if (hasGitHub) existingTags.push('existing-github');
-    if (existingTags.length === 0) return;
-    setTags((prev) => [...new Set([...prev, ...existingTags])]);
-  }, [setupLoading, hasAgent, hasCloud, hasGitHub]);
-
-  const handleAnswer = useCallback(
-    (option: PathOption) => {
-      setAnswers((prev) => ({ ...prev, [currentQuestionId]: option.id }));
-      const newTags = [...tagsRef.current, ...option.tags];
-      setTags(newTags);
-
-      if (option.next) {
-        setCurrentQuestionId(option.next);
-      } else {
-        setGeneratedSteps(generatePath(newTags));
-        setPhase('path-preview');
-        focusContent();
-      }
+  const answer = useCallback(
+    (choiceId: string) => {
+      const question = questions[questionIndex];
+      if (!question) return;
+      const next = { ...answers, [question.id]: choiceId } as Answers;
+      setAnswers(next);
+      if (questionIndex < questions.length - 1) setQuestionIndex((i) => i + 1);
+      else startSteps(next);
     },
-    [currentQuestionId, focusContent]
+    [answers, questions, questionIndex, startSteps]
   );
 
-  const handleReset = useCallback(() => {
-    setPhase('questions');
-    setCurrentQuestionId('cloud-account');
-    setAnswers({});
-    setTags((prev) => prev.filter((t) => t.startsWith('existing-')));
-    setGeneratedSteps([]);
-  }, []);
-
-  const questionHistory = Object.keys(answers);
-  const canGoBack = questionHistory.length > 0 && phase === 'questions';
-
-  const handleBack = useCallback(() => {
-    const lastAnsweredId = questionHistory.at(-1);
-    if (!lastAnsweredId) return;
-    const lastAnswer = answers[lastAnsweredId];
-    const lastOption = QUESTIONS.find((q) => q.id === lastAnsweredId)?.options.find(
-      (o) => o.id === lastAnswer
-    );
-
-    const newAnswers = { ...answers };
-    delete newAnswers[lastAnsweredId];
-    setAnswers(newAnswers);
-
-    if (lastOption) {
-      setTags((prev) => prev.filter((t) => !lastOption.tags.includes(t)));
+  const back = useCallback(() => {
+    if (phase === 'steps') {
+      if (stepIndex > 0) setStepIndex((i) => i - 1);
+      else if (questions.length === 0) setPhase('hello');
+      else {
+        setQuestionIndex(questions.length - 1);
+        setPhase('questions');
+      }
+    } else if (phase === 'questions') {
+      if (questionIndex === 0) setPhase('hello');
+      else setQuestionIndex((i) => i - 1);
     }
-    setCurrentQuestionId(lastAnsweredId);
-  }, [answers, questionHistory]);
+  }, [phase, stepIndex, questions.length, questionIndex]);
 
-  const handleExecutionComplete = useCallback(() => {
-    setPhase('complete');
-    focusContent();
-  }, [focusContent]);
-
-  const executableSteps = useMemo(
-    () => generatedSteps.filter((s) => !s.isOptional),
-    [generatedSteps]
-  );
+  const finish = useCallback((createdProjectId: string | null) => {
+    setProjectId(createdProjectId);
+    setPhase('done');
+  }, []);
 
   if (!showOverlay) return null;
 
-  const currentQuestion = QUESTIONS.find((q) => q.id === currentQuestionId);
+  const question = questions[questionIndex];
+  const canGoBack = phase === 'questions' || phase === 'steps';
 
   return (
     <div
       ref={dialogRef}
       data-testid="onboarding-wizard"
       role="dialog"
-      aria-label="Account setup"
+      aria-label="Set up SAM"
       aria-modal="true"
-      className="fixed inset-0 z-50 flex flex-col"
-      style={{ background: 'var(--sam-onboarding-overlay-bg)' }}
+      className="sam-void fixed inset-0 z-50 flex flex-col text-fg-primary"
     >
-      {/* Screen reader announcement */}
-      <div className="sr-only" aria-live="polite" aria-atomic="true">
-        {phase === 'questions' ? (currentQuestion?.question ?? '') : ''}
-      </div>
-
-      {/* Top bar — X dismiss + back nav */}
-      <div className="flex items-center justify-between px-4 py-3 sm:px-6">
-        <div className="flex items-center gap-3">
-          {canGoBack && (
-            <button
-              type="button"
-              onClick={handleBack}
-              className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer min-h-[44px] transition-colors"
-            >
-              <ArrowLeft size={16} /> Back
-            </button>
-          )}
-          {phase === 'questions' && (
-            <span className="text-xs text-fg-muted/60">
-              Question {Object.keys(answers).length + 1}
-            </span>
-          )}
-        </div>
+      <div className="flex items-center justify-between px-3 pt-[max(env(safe-area-inset-top),0.75rem)] sm:px-5">
+        {canGoBack ? (
+          <button
+            type="button"
+            onClick={back}
+            className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 border-0 bg-transparent px-2 text-sm text-fg-muted transition-colors hover:text-fg-primary"
+          >
+            <ArrowLeft size={16} aria-hidden="true" /> Back
+          </button>
+        ) : (
+          <span />
+        )}
         <button
           type="button"
           onClick={dismissOnboarding}
-          aria-label="Exit setup"
-          className="inline-flex items-center justify-center w-11 h-11 rounded-full text-fg-muted hover:text-fg-primary hover:bg-fg-primary/5 bg-transparent border-none cursor-pointer transition-colors"
+          aria-label="Close setup"
+          className="inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent text-fg-muted transition-colors hover:text-fg-primary"
         >
-          <X size={20} />
+          <X size={20} aria-hidden="true" />
         </button>
       </div>
 
-      {/* Scrollable content area — centered */}
       <div
         ref={contentRef}
         tabIndex={-1}
-        className="flex-1 overflow-y-auto overflow-x-hidden outline-none px-4 pb-8 sm:px-6"
+        className="relative flex-1 overflow-y-auto overflow-x-hidden px-4 pb-[max(env(safe-area-inset-bottom),2rem)] outline-none"
       >
-        <div className="max-w-lg mx-auto pt-4 sm:pt-12">
-          {phase === 'questions' && currentQuestion && (
-            <QuestionCard
-              question={currentQuestion}
-              selectedId={answers[currentQuestionId] ?? null}
-              onSelect={handleAnswer}
-            />
-          )}
-          {phase === 'path-preview' && (
-            <PathPreview
-              steps={generatedSteps}
-              onStart={() => {
-                setPhase('executing');
-                focusContent();
-              }}
-              onReset={handleReset}
-            />
-          )}
-          {phase === 'executing' && (
-            <StepExecution steps={executableSteps} onComplete={handleExecutionComplete} />
-          )}
-          {phase === 'complete' && <CompletionScreen onDismiss={dismissOnboarding} />}
+        <div className="mx-auto flex min-h-full w-full min-w-0 max-w-[36rem] flex-col justify-center py-4 sm:py-10">
+          <Pane className="w-full min-w-0 px-5 py-7 sm:px-9 sm:py-9">
+            {phase === 'hello' && (
+              <Hello
+                headingRef={headingRef}
+                ready={contextReady}
+                onBegin={begin}
+                onLater={dismissOnboarding}
+              />
+            )}
+            {phase === 'questions' && question && (
+              <QuestionCard
+                question={question}
+                selectedId={answers[question.id] ?? null}
+                onSelect={answer}
+                headingRef={headingRef}
+              />
+            )}
+            {phase === 'steps' && (
+              <StepExecution
+                steps={steps}
+                index={stepIndex}
+                onIndexChange={setStepIndex}
+                runtime={answers.runtime}
+                hostedRepo={answers.repo === 'hosted'}
+                samAvailable={trial.trial?.hasAgentCredential === true}
+                onComplete={finish}
+              />
+            )}
+            {phase === 'done' && (
+              <CompletionScreen
+                projectId={projectId}
+                onDismiss={dismissOnboarding}
+                headingRef={headingRef}
+              />
+            )}
+          </Pane>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function Hello({
+  headingRef,
+  ready,
+  onBegin,
+  onLater,
+}: {
+  headingRef: (el: HTMLHeadingElement | null) => void;
+  ready: boolean;
+  onBegin: () => void;
+  onLater: () => void;
+}) {
+  return (
+    <div className="text-center">
+      <SamHero />
+      <h2
+        ref={headingRef}
+        tabIndex={-1}
+        className="m-0 text-[1.6rem] font-bold leading-tight outline-none sm:text-[1.9rem]"
+      >
+        Hi, I&apos;m SAM.
+      </h2>
+      <p className="mx-auto mb-7 mt-2 max-w-sm text-[0.95rem] text-fg-muted">
+        I run coding agents for you, each in its own workspace. A couple of questions and
+        you&apos;ll be chatting with one in a few minutes.
+      </p>
+      <Button
+        variant="accent"
+        size="lg"
+        className="w-full sm:w-auto"
+        onClick={onBegin}
+        disabled={!ready}
+      >
+        {ready ? (
+          <>
+            Let&apos;s get you set up
+            <ArrowRight className="h-5 w-5" aria-hidden="true" />
+          </>
+        ) : (
+          <>
+            <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+            Checking what&apos;s here
+          </>
+        )}
+      </Button>
+      <div>
+        <button
+          type="button"
+          onClick={onLater}
+          className="mt-3 min-h-11 cursor-pointer border-0 bg-transparent px-2 text-sm text-fg-muted hover:text-fg-primary"
+        >
+          I&apos;ll look around first
+        </button>
       </div>
     </div>
   );

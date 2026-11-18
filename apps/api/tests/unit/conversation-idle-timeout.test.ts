@@ -14,33 +14,33 @@ const loggerMocks = vi.hoisted(() => ({
   error: vi.fn(),
   debug: vi.fn(),
 }));
-vi.mock('../../src/lib/logger', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../src/lib/logger')>()),
+// ProjectData modules (and the worker's lib/logger re-export) take the logger from worker-core.
+vi.mock('@simple-agent-manager/worker-core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@simple-agent-manager/worker-core')>()),
   createModuleLogger: () => loggerMocks,
 }));
 
-import { runMigrations } from '../../src/durable-objects/migrations';
-import { updateMessageActivity } from '../../src/durable-objects/project-data/activity';
+import { updateMessageActivity } from '@simple-agent-manager/project-data/internal/do/activity';
 import {
   computeProjectDataAlarmSectionTimes,
   computeProjectDataAlarmTime,
-} from '../../src/durable-objects/project-data/alarm-schedule';
-import { processExpiredCleanups } from '../../src/durable-objects/project-data/idle-cleanup';
-import { terminalizeIdleTaskInD1 } from '../../src/durable-objects/project-data/idle-cleanup-terminalization';
+} from '@simple-agent-manager/project-data/internal/do/alarm-schedule';
+import { processExpiredCleanups } from '@simple-agent-manager/project-data/internal/do/idle-cleanup';
+import { terminalizeIdleTaskInD1 } from '@simple-agent-manager/project-data/internal/do/idle-cleanup-terminalization';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   sleepSession,
   stopSessionInternal,
   updateSessionTopic,
   wakeSession,
-} from '../../src/durable-objects/project-data/sessions';
-import {
-  getLocalTaskRuntimeLiveness,
-  readTaskAcpLivenessSignals,
-} from '../../src/durable-objects/project-data/task-runtime-liveness';
-import type { Env as ProjectDataEnv } from '../../src/durable-objects/project-data/types';
-import { checkWorkspaceIdleTimeouts } from '../../src/durable-objects/project-data/workspace-idle-timeouts';
+} from '@simple-agent-manager/project-data/internal/do/sessions';
+import { readTaskAcpLivenessSignals } from '@simple-agent-manager/project-data/internal/do/task-acp-liveness-signals';
+import type { Env as ProjectDataEnv } from '@simple-agent-manager/project-data/internal/do/types';
+import { checkWorkspaceIdleTimeouts } from '@simple-agent-manager/project-data/internal/do/workspace-idle-timeouts';
+
 import type { Env } from '../../src/env';
 import { getTaskRuntimeLiveness } from '../../src/scheduled/stuck-tasks';
+import { getLocalTaskRuntimeLiveness } from '../../src/services/task-runtime-liveness-local';
 import { createSqliteD1 } from '../helpers/sqlite-d1';
 import { createSqlStorage } from './durable-objects/sql-storage-test-utils';
 
@@ -72,7 +72,8 @@ const D1_SCHEMA = `
     status TEXT NOT NULL,
     health_status TEXT,
     last_heartbeat_at TEXT,
-    runtime TEXT
+    runtime TEXT, callback_generation TEXT,
+    transport TEXT
   );
   CREATE TABLE workspaces (
     id TEXT PRIMARY KEY,
@@ -82,7 +83,7 @@ const D1_SCHEMA = `
     node_id TEXT,
     status TEXT NOT NULL,
     created_at TEXT,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL, callback_generation TEXT
   );
   -- Read by the terminal-verdict sleep guard in services/task-sleep-preservation.ts.
   -- Left empty by seed(): these fixtures are NOT sleeping, so the guard must find
@@ -175,10 +176,16 @@ describe('ProjectData idle cleanup runtime liveness contract', () => {
     d1Db = new Database(':memory:');
     sql = createSqlStorage(projectDb);
     runMigrations(sql);
-    hostListingMock.mockReset().mockImplementation(async (_nodeId: string, workspaceId: string) => ({
-      sessions: projectDb.prepare('SELECT id, workspace_id AS workspaceId, status FROM acp_sessions WHERE workspace_id = ?')
-        .all(workspaceId).map((session) => ({ ...(session as object), hostStatus: 'ready' })),
-    }));
+    hostListingMock
+      .mockReset()
+      .mockImplementation(async (_nodeId: string, workspaceId: string) => ({
+        sessions: projectDb
+          .prepare(
+            'SELECT id, workspace_id AS workspaceId, status FROM acp_sessions WHERE workspace_id = ?'
+          )
+          .all(workspaceId)
+          .map((session) => ({ ...(session as object), hostStatus: 'ready' })),
+      }));
     d1Db.exec(D1_SCHEMA);
     d1Db
       .prepare('INSERT INTO projects (id, workspace_idle_timeout_ms) VALUES (?, NULL)')

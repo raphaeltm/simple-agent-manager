@@ -17,7 +17,7 @@ import type {
   CCPlatformDefault,
 } from '@simple-agent-manager/shared';
 import { consumerKey, mapKind } from '@simple-agent-manager/shared';
-import { and, eq, isNull, or } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
 
@@ -25,8 +25,10 @@ import {
   ccAttachments,
   ccConfigurations,
   ccCredentials,
+  ccProfileAttachments,
   platformCredentials,
 } from '../../db/schema';
+import { chunk, D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
 import { maybeJsonRecord } from '../../lib/runtime-validation';
 import { decrypt } from '../encryption';
 
@@ -183,18 +185,61 @@ export function hydrateMissingCloudProviderSecretProviders(
   });
 }
 
+/** How `buildSnapshot` fills credential secrets. */
+export interface SnapshotOptions {
+  /**
+   * `decrypt` (default) materializes every secret for injection. `omit` reads row metadata only
+   * and gives each credential an empty secret of its stored kind: the resolver decides on ids,
+   * kinds and active flags, never on secret values, so a selection-only read (which account would
+   * a run use) needs no decryption. Undecryptable rows are not detected in `omit` mode.
+   */
+  secrets?: 'decrypt' | 'omit';
+  /** Load these profiles' pins (instead of `profileId`'s), for resolving many profiles at once. */
+  profileIds?: readonly string[];
+}
+
+/** One statement's bound parameters, less the user id. */
+const PROFILE_PIN_CHUNK = D1_MAX_BOUND_PARAMETERS - 1;
+
+async function loadProfilePins(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  profileIds: readonly string[]
+) {
+  const chunks = chunk([...new Set(profileIds)], PROFILE_PIN_CHUNK);
+  const results = await Promise.all(
+    chunks.map((ids) =>
+      db
+        .select()
+        .from(ccProfileAttachments)
+        .where(
+          and(
+            eq(ccProfileAttachments.userId, userId),
+            inArray(ccProfileAttachments.agentProfileId, ids)
+          )
+        )
+    )
+  );
+  return results.flat();
+}
+
 /**
- * Build a CompositionSnapshot for a user, optionally scoped to a project.
- * Decrypts all credential secrets.
+ * Build a CompositionSnapshot for a user, optionally scoped to a project and to
+ * the agent profile a run uses. Only that profile's pins of this user are
+ * loaded. Decrypts all credential secrets unless `options.secrets` is `omit`.
  */
 export async function buildSnapshot(
   db: ReturnType<typeof drizzle>,
   userId: string,
   encryptionKey: string,
-  projectId?: string | null
+  projectId?: string | null,
+  profileId?: string | null,
+  options: SnapshotOptions = {}
 ): Promise<CCCompositionSnapshot> {
+  const omitSecrets = options.secrets === 'omit';
+  const pinProfileIds = options.profileIds ?? (profileId ? [profileId] : []);
   // Query all three tables for this user
-  const [credRows, configRows, attachRows] = await Promise.all([
+  const [credRows, configRows, attachRows, profilePinRows] = await Promise.all([
     db.select().from(ccCredentials).where(eq(ccCredentials.ownerId, userId)),
     db.select().from(ccConfigurations).where(eq(ccConfigurations.ownerId, userId)),
     db
@@ -208,6 +253,7 @@ export async function buildSnapshot(
             )
           : eq(ccAttachments.userId, userId)
       ),
+    pinProfileIds.length > 0 ? loadProfilePins(db, userId, pinProfileIds) : Promise.resolve([]),
   ]);
 
   // Decrypt credentials. A single unparseable/undecryptable credential must
@@ -216,7 +262,9 @@ export async function buildSnapshot(
   const credentialResults = await Promise.all(
     credRows.map(async (row): Promise<CCCredential | null> => {
       try {
-        const decrypted = await decrypt(row.encryptedToken, row.iv, encryptionKey);
+        const decrypted = omitSecrets
+          ? ''
+          : await decrypt(row.encryptedToken, row.iv, encryptionKey);
         return {
           id: row.id,
           ownerId: row.ownerId,
@@ -263,9 +311,18 @@ export async function buildSnapshot(
       : { scope: 'user' as const, userId: row.userId },
     isActive: row.isActive,
   }));
+  for (const row of profilePinRows) {
+    attachments.push({
+      id: row.id,
+      configurationId: row.configurationId,
+      consumer: rowToConsumer(row),
+      target: { scope: 'profile', userId: row.userId, profileId: row.agentProfileId },
+      isActive: row.isActive,
+    });
+  }
 
   // Query platform defaults from the old platform_credentials table
-  const platform = await buildPlatformDefaults(db, encryptionKey);
+  const platform = await buildPlatformDefaults(db, encryptionKey, omitSecrets);
 
   return { credentials, configurations, attachments, platform };
 }
@@ -276,7 +333,8 @@ export async function buildSnapshot(
  */
 async function buildPlatformDefaults(
   db: ReturnType<typeof drizzle>,
-  encryptionKey: string
+  encryptionKey: string,
+  omitSecrets = false
 ): Promise<Record<string, CCPlatformDefault>> {
   const platRows = await db
     .select()
@@ -298,7 +356,7 @@ async function buildPlatformDefaults(
     // skip it and log. Otherwise one bad platform row (e.g. a raw cloud-provider
     // token) takes down agent resolution for every user and every consumer.
     try {
-      const decrypted = await decrypt(row.encryptedToken, row.iv, encryptionKey);
+      const decrypted = omitSecrets ? '' : await decrypt(row.encryptedToken, row.iv, encryptionKey);
       const kind = mapKind(
         row.credentialType as 'agent-api-key' | 'cloud-provider',
         (row.credentialKind ?? 'api-key') as 'api-key' | 'oauth-token'

@@ -24,9 +24,6 @@ async function setupAuthenticatedMocks(page: Page) {
     if (path === '/api/projects') {
       return respond(200, { projects: [], nextCursor: null });
     }
-    if (path === '/api/trial/status') {
-      return respond(200, { available: false });
-    }
 
     return respond(200, {});
   });

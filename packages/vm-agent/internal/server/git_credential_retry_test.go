@@ -35,6 +35,23 @@ func TestGitTokenFetchErrorStatusMessage(t *testing.T) {
 	}
 }
 
+// installTestGitCredentialExchange gives the server's workspace a unique ID and
+// installs a fresh exchange bearer for it, the way a provisioned helper has one.
+func installTestGitCredentialExchange(t *testing.T, s *Server) string {
+	t.Helper()
+	s.config.WorkspaceID = fmt.Sprintf("%s-%d", s.config.WorkspaceID, time.Now().UnixNano())
+	token, err := bootstrap.NewGitCredentialExchangeToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bootstrap.InstallGitCredentialExchange(s.config.WorkspaceID, token); err != nil {
+		t.Fatal(err)
+	}
+	workspaceID := s.config.WorkspaceID
+	t.Cleanup(func() { _ = bootstrap.RemoveCredentialHelperFromHost(workspaceID) })
+	return token
+}
+
 func retryTestServer(endpoint string) *Server {
 	return &Server{config: &config.Config{ControlPlaneURL: endpoint, WorkspaceID: "ws-retry", CallbackToken: "private-callback", GitTokenTimeout: time.Second, GitTokenAttemptTimeout: 200 * time.Millisecond, GitTokenMaxAttempts: 3, GitTokenRetryDelay: time.Millisecond}}
 }
@@ -109,14 +126,15 @@ func TestGitCredentialHelperScriptRetriesSlowResponse(t *testing.T) {
 	s := retryTestServer(upstream.URL)
 	s.config.GitTokenAttemptTimeout = 6 * time.Second
 	s.config.GitTokenTimeout = 10 * time.Second
+	exchangeToken := installTestGitCredentialExchange(t, s)
 	local := httptest.NewServer(http.HandlerFunc(s.handleGitCredential))
 	defer local.Close()
-	script, err := renderStandaloneGitCredentialHelperScript(config.DefaultGitCredentialTimeout)
+	script, err := renderStandaloneGitCredentialHelperScript(config.DefaultGitCredentialTimeout, exchangeToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command("sh", "-c", script)
-	cmd.Env = append(cmd.Environ(), "SAM_WORKSPACE_ID=ws-retry", "SAM_GIT_CREDENTIAL_ENDPOINT="+local.URL)
+	cmd.Env = append(cmd.Environ(), "SAM_WORKSPACE_ID="+s.config.WorkspaceID, "SAM_GIT_CREDENTIAL_ENDPOINT="+local.URL)
 	cmd.Stdin = strings.NewReader("protocol=https\nhost=github.com\n\n")
 	output, err := cmd.CombinedOutput()
 	if err != nil || !strings.Contains(string(output), "password=helper-result") || calls.Load() != 2 {
@@ -256,7 +274,7 @@ func TestGitTokenTransportRetryAndLogRedaction(t *testing.T) {
 	}
 }
 func TestStandaloneHelperDefaultBudget(t *testing.T) {
-	script, err := renderStandaloneGitCredentialHelperScript(config.DefaultGitCredentialTimeout)
+	script, err := renderStandaloneGitCredentialHelperScript(config.DefaultGitCredentialTimeout, testStandaloneGitCredentialExchangeToken)
 	if err != nil || !strings.Contains(script, "--max-time 30") || config.DefaultGitCredentialTimeout <= config.DefaultGitTokenTimeout {
 		t.Fatalf("helper budget: %v", err)
 	}
@@ -286,18 +304,19 @@ func runHelperFailureCase(t *testing.T, tc helperFailureCase) {
 	}))
 	defer upstream.Close()
 	s := retryTestServer(upstream.URL)
+	exchangeToken := installTestGitCredentialExchange(t, s)
 	local := httptest.NewServer(http.HandlerFunc(s.handleGitCredential))
 	defer local.Close()
 	helperTimeout := time.Second
 	if tc.cancel {
 		helperTimeout = 50 * time.Millisecond
 	}
-	script, err := renderStandaloneGitCredentialHelperScript(helperTimeout)
+	script, err := renderStandaloneGitCredentialHelperScript(helperTimeout, exchangeToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command("sh", "-c", script)
-	cmd.Env = append(cmd.Environ(), "SAM_WORKSPACE_ID=ws-retry", "SAM_GIT_CREDENTIAL_ENDPOINT="+local.URL)
+	cmd.Env = append(cmd.Environ(), "SAM_WORKSPACE_ID="+s.config.WorkspaceID, "SAM_GIT_CREDENTIAL_ENDPOINT="+local.URL)
 	cmd.Stdin = strings.NewReader("host=github.com\n\n")
 	output, err := cmd.CombinedOutput()
 	if err != nil || len(output) != 0 {
@@ -357,6 +376,11 @@ func TestGitTokenInterruptedBodyRecoveryAndAuthFailFast(t *testing.T) {
 func TestProvisioningGitTokenCancellation(t *testing.T) {
 	var calls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Cancellation still reports timing telemetry; it does not advance provisioning.
+		if r.URL.Path == "/api/workspaces/ws-retry/lifecycle-timings" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if !strings.HasSuffix(r.URL.Path, "/git-token") {
 			t.Error("provisioning advanced beyond cancelled credential exchange")
 			return

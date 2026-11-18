@@ -18,6 +18,7 @@ import { eq } from 'drizzle-orm';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { wakeableSleepingInstantSql } from '../../services/instant-sleeping-deletion-guard';
 import { stopWorkspaceOnNode } from '../../services/node-agent';
 import { persistError } from '../../services/observability';
 import { sessionSleepInFlightMaxAgeMs } from '../../services/session-snapshot-sleep-predicate';
@@ -26,6 +27,7 @@ import {
   sleepLifecycleOwnsTerminalTaskWorkspaceSql,
 } from '../../services/sleep-preserved-task-status';
 import { loadWorkspaceDeletionIdentity } from '../../services/workspace-deletion';
+import { evictionWakeCommittedSql } from '../../services/workspace-deletion-preservation';
 import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
 import type { CleanupConfig, CleanupDb, NodeCleanupResult } from './shared';
 
@@ -53,6 +55,13 @@ export async function sweepOrphanedWorkspaces(
   config: CleanupConfig,
   result: NodeCleanupResult
 ): Promise<void> {
+  // The grace runs from the later of workspace creation and the latest task's end. Measured
+  // from creation alone, a long-lived workspace was stopped on the first tick after its
+  // task turned terminal, which on 2026-11-08 cut off an in-flight eviction that would
+  // have resumed a falsely failed task (the eviction recovery re-queues it).
+  // Legacy terminal writers may omit completed_at. Prefer their latest genuine status
+  // transition over mutable updated_at; same-status metadata events do not reset grace.
+  const orphanGraceCutoff = new Date(now.getTime() - config.orphanGracePeriodMs).toISOString();
   const candidates = await env.DATABASE.prepare(
     `SELECT w.id, w.node_id, w.user_id, w.status, w.created_at, w.project_id, w.chat_session_id
      FROM workspaces w
@@ -66,6 +75,17 @@ export async function sweepOrphanedWorkspaces(
            AND NOT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w', sessionSleepMaxAttempts(env))}
        )
        AND NOT EXISTS (
+         SELECT 1 FROM tasks recent_terminal
+         WHERE recent_terminal.workspace_id = w.id
+           AND recent_terminal.status IN ('completed', 'failed', 'cancelled')
+           AND COALESCE(julianday(recent_terminal.completed_at),
+             (SELECT MAX(julianday(terminal_event.created_at)) FROM task_status_events terminal_event
+              WHERE terminal_event.task_id = recent_terminal.id
+                AND terminal_event.to_status = recent_terminal.status
+                AND terminal_event.from_status IS NOT terminal_event.to_status),
+             julianday(recent_terminal.updated_at)) >= julianday(?)
+       )
+       AND NOT EXISTS (
          SELECT 1 FROM tasks t
          WHERE t.workspace_id = w.id
            AND t.status IN ('queued', 'delegated', 'in_progress')
@@ -76,7 +96,8 @@ export async function sweepOrphanedWorkspaces(
   )
     .bind(
       new Date(now.getTime() - sessionSleepInFlightMaxAgeMs(env)).toISOString(),
-      new Date(now.getTime() - config.orphanGracePeriodMs).toISOString(),
+      orphanGraceCutoff,
+      orphanGraceCutoff,
       config.workspaceSweepLimit
     )
     .all<{
@@ -159,7 +180,22 @@ export async function sweepOrphanedWorkspaces(
 }
 
 /**
- * Phase 6 — safety net for stopped workspaces the DO alarm never deleted.
+ * The source's receipt records a committed restore of its generation, and still names this
+ * workspace's runtime. Only such a receipt grants deletion
+ * (`preservationReceiptExpiresAt`), so a stale or mismatched one is never selected to be
+ * refused, which would hold the head of this page.
+ */
+const RECEIPT_RESTORED_SQL = `(CASE WHEN json_valid(w.preservation_receipt_json)
+    THEN json_extract(w.preservation_receipt_json, '$.restoredAt') END IS NOT NULL
+  AND json_extract(w.preservation_receipt_json, '$.workspaceId') = w.id
+  AND json_extract(w.preservation_receipt_json, '$.nodeId') IS w.node_id
+  AND json_extract(w.preservation_receipt_json, '$.userId') = w.user_id
+  AND json_extract(w.preservation_receipt_json, '$.workspaceGeneration')
+    = COALESCE(w.eviction_generation, ''))`;
+
+/**
+ * Phase 6 — safety net for stopped workspaces the DO alarm never deleted. A sleeping VM is
+ * eligible (its VM must be released); a sleeping Instant container is not.
  */
 export async function sweepStaleStoppedWorkspaces(
   _db: CleanupDb,
@@ -175,7 +211,29 @@ export async function sweepStaleStoppedWorkspaces(
     `SELECT w.id, w.node_id, w.user_id, w.project_id, w.chat_session_id
      FROM workspaces w
      LEFT JOIN nodes n ON n.id = w.node_id
-     WHERE w.status = 'stopped'
+     WHERE w.status IN ('stopped', 'sleeping', 'stopping', 'evicted')
+       AND (EXISTS (
+         SELECT 1 FROM session_snapshots s
+         WHERE s.workspace_id = w.id AND s.node_id = w.node_id AND s.user_id = w.user_id
+           AND CASE WHEN json_valid(s.cleanup_identity_json)
+             THEN json_extract(s.cleanup_identity_json, '$.preserved') ELSE NULL END = 1
+       ) OR ${RECEIPT_RESTORED_SQL})
+       -- The receipt outlives the snapshot row's pointer at this workspace, but grants only
+       -- once a committed wake restored its generation; the queue re-verifies it
+       -- (workspace-preservation-receipt.ts) before any deletion.
+       -- An evicted source anchors its wake until that wake commits; the queue refuses it
+       -- before then, so selecting it would only pin the head of this page.
+       AND (w.status != 'evicted'
+         OR ${RECEIPT_RESTORED_SQL}
+         OR EXISTS (
+           SELECT 1 FROM session_snapshots r
+           WHERE r.workspace_id = w.id AND r.recovery_status = 'restored'
+             AND ${evictionWakeCommittedSql('r')}
+         ))
+       -- A sleeping Instant container is its chat's wake target, not leftover compute: the
+       -- sleep writer never queues it, and its teardown belongs to the snapshot purge
+       -- (instant-sleeping-deletion-guard.ts). The queue refuses it too.
+       AND NOT (w.status = 'sleeping' AND ${wakeableSleepingInstantSql('w')})
        AND (n.id IS NULL OR n.node_class != 'user-owned')
        AND w.updated_at < ?
      ORDER BY w.updated_at ASC
@@ -212,7 +270,8 @@ export async function sweepStaleStoppedWorkspaces(
         env.NODE_LIFECYCLE.idFromName(ws.node_id)
       ) as DurableObjectStub<import('../../durable-objects/node-lifecycle').NodeLifecycle>;
       // Rule 47: cron is a bounded durable-enqueue safety net. The DO alarm claims
-      // the exact incarnation and moves VM I/O behind waitUntil.
+      // the exact incarnation and moves VM I/O behind waitUntil. It only enqueues
+      // missing entries: an entry already retrying keeps its backoff and diagnostic.
       const scheduled = await lifecycleStub.scheduleWorkspaceDeletion(
         ws.node_id,
         ws.id,
@@ -221,6 +280,7 @@ export async function sweepStaleStoppedWorkspaces(
           retryAfterMs: deletionRetryBaseMs(env),
           lastError: 'scheduled by stopped-workspace cleanup safety net',
           expected,
+          onlyIfAbsent: true,
         }
       );
       if (!scheduled) {

@@ -7,6 +7,7 @@ import type { Env } from '../../../src/env';
 const mocks = vi.hoisted(() => ({
   createWorkspaceOnNode: vi.fn(),
   signCallbackToken: vi.fn(),
+  signCurrentWorkspaceCallbackToken: vi.fn(),
   verifyNodeCallbackAuth: vi.fn(),
 }));
 
@@ -16,7 +17,9 @@ vi.mock('../../../src/services/node-agent', () => ({
 vi.mock('../../../src/services/jwt', () => ({
   shouldRefreshCallbackToken: vi.fn().mockReturnValue(false),
   signCallbackToken: mocks.signCallbackToken,
+  signCurrentWorkspaceCallbackToken: mocks.signCallbackToken,
   signNodeCallbackToken: vi.fn(),
+  signCurrentNodeCallbackToken: vi.fn(),
   signNodeManagementToken: vi.fn(),
 }));
 vi.mock('../../../src/services/node-callback-auth', () => ({

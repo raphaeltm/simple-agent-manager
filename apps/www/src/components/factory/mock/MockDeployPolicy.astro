@@ -1,0 +1,116 @@
+---
+/** HTML version of an environment's "Who can deploy" settings: only two profiles may deploy. */
+import './mock.css';
+
+const profiles = [
+  { name: 'Claude Code — Opus 5', ini: 'CC', on: true },
+  { name: 'Codex 5.5 High', ini: 'CH', on: true },
+  { name: 'Gemini CLI Reviewer', ini: 'GC' },
+  { name: 'Brainstormer', ini: 'B' },
+  { name: 'Picky CTO', ini: 'PC' },
+];
+---
+
+<div class="mk pol">
+  <div class="pol-in">
+    <p class="pol-title">Who can deploy</p>
+    <div class="pol-card mk-card">
+      <p class="toggle-row">
+        <span><b>Agents can deploy here</b><span class="mk-meta">New versions go live as soon as an agent ships them.</span></span>
+        <span class="toggle" aria-hidden="true"></span>
+      </p>
+      <p class="seg"><span>Any agent in this project</span><span class="seg-on">Only these</span></p>
+      <p class="chips">
+        {profiles.map((p) => (
+          <span class:list={['chip', { 'chip--on': p.on }]}><span class="mk-avatar">{p.ini}</span>{p.name}</span>
+        ))}
+      </p>
+      <p class="mk-meta">2 profiles can deploy here.</p>
+    </div>
+  </div>
+</div>
+
+<style>
+  .pol {
+    font-size: 12px;
+  }
+
+  .pol-in {
+    display: grid;
+    gap: 8px;
+    padding: 14px;
+  }
+
+  .pol-title {
+    font-weight: 700;
+    font-size: 1.1em;
+  }
+
+  .pol-card {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .toggle-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .toggle-row > span:first-child {
+    display: grid;
+    gap: 2px;
+  }
+
+  .toggle {
+    width: 30px;
+    height: 17px;
+    flex: none;
+    border-radius: 999px;
+    background: radial-gradient(circle at 75% 50%, #fff 0 5px, transparent 6px), var(--mk-btn);
+  }
+
+  .seg {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .seg span {
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-weight: 600;
+    color: var(--mk-muted);
+    border: 1px solid var(--mk-line-strong);
+  }
+
+  .seg .seg-on {
+    color: var(--mk-ink);
+    border-color: var(--mk-green);
+    background: var(--mk-green-soft);
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px 3px 3px;
+    border-radius: 999px;
+    font-weight: 600;
+    color: var(--mk-muted);
+    border: 1px solid var(--mk-line-strong);
+  }
+
+  .chip--on {
+    color: var(--mk-ink);
+    border-color: var(--mk-green);
+    background: var(--mk-green-soft);
+  }
+</style>

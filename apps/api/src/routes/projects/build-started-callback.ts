@@ -12,6 +12,7 @@ import { jsonValidator } from '../../schemas';
 import { verifyCallbackToken } from '../../services/jwt';
 import { callbackTokenMatchesWorkspace } from '../../services/node-callback-auth';
 import { notifyTaskRunnerWorkspaceBuildStarted } from '../../services/task-runner-do';
+import { assertWorkspaceCallbackResourceById } from '../workspaces/_helpers';
 
 const BuildStartedCallbackSchema = v.object({
   workspaceId: v.string(),
@@ -71,6 +72,48 @@ buildStartedCallbackRoute.post(
       });
       throw errors.forbidden('Workspace is not bound to this task');
     }
+
+    // A stopped, deleted or errored workspace (or one whose node is ending) must not
+    // advance its task, even with a still-unexpired token from that workspace.
+    await assertWorkspaceCallbackResourceById(c.env, body.workspaceId, 'build_started');
+
+    // The durable start of this attempt's build (`workspace-creating-deadline.ts`). First write
+    // wins, so a retried or duplicated callback cannot push the deadline out. Every transition
+    // into 'creating' clears it for the new attempt, in the same write that rotates
+    // `callback_generation`. The write repeats the token's generation (`IS`, so a legacy
+    // token and row without one still match): a restart that lands between authentication
+    // above and this write leaves the previous attempt's callback unable to stamp the new one.
+    const recorded = await c.env.DATABASE.prepare(
+      `UPDATE workspaces SET build_started_at = ?
+        WHERE id = ? AND status = 'creating' AND build_started_at IS NULL
+          AND callback_generation IS ?`
+    )
+      .bind(new Date().toISOString(), body.workspaceId, payload.callbackGeneration)
+      .run();
+    if ((recorded.meta.changes ?? 0) !== 1) {
+      const current = await c.env.DATABASE.prepare(
+        'SELECT callback_generation AS generation FROM workspaces WHERE id = ?'
+      )
+        .bind(body.workspaceId)
+        .first<{ generation: string | null }>();
+      if (current && current.generation !== payload.callbackGeneration) {
+        log.info('build_started.generation_rotated_before_write', {
+          projectId,
+          taskId,
+          workspaceId: body.workspaceId,
+          tokenGeneration: payload.callbackGeneration,
+          currentGeneration: current.generation,
+          action: 'rejected',
+        });
+        throw errors.unauthorized('Callback token belongs to a retired runtime');
+      }
+    }
+    log.info('build_started.recorded', {
+      projectId,
+      taskId,
+      workspaceId: body.workspaceId,
+      recorded: (recorded.meta.changes ?? 0) === 1,
+    });
 
     await notifyTaskRunnerWorkspaceBuildStarted(c.env, taskId, body.workspaceId);
     return c.body(null, 204);

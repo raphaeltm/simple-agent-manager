@@ -44,6 +44,20 @@ describe('AGENT_CATALOG', () => {
     expect(gemini!.oauthSupport).toBeUndefined();
   });
 
+  it('includes Google Antigravity as a Gemini API-key ACP agent', () => {
+    const agent = AGENT_CATALOG.find((a) => a.id === 'google-antigravity');
+    expect(agent).toMatchObject({
+      name: 'Google Antigravity',
+      provider: 'google',
+      envVarName: 'GEMINI_API_KEY',
+      acpCommand: 'agy-acp',
+      acpArgs: ['--uid='],
+      supportsAcp: true,
+    });
+    expect(agent?.oauthSupport).toBeUndefined();
+    expect(isValidAgentType('google-antigravity')).toBe(true);
+  });
+
   it('uses the maintained Codex ACP wrapper for OpenAI Codex', () => {
     const codex = AGENT_CATALOG.find((a) => a.id === 'openai-codex');
     expect(codex).toMatchObject({

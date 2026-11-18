@@ -351,13 +351,13 @@ export function isTransientCapacityError(err: ProviderError): boolean {
   // The `providerName` guard matters as much as the status list. `node-provisioning-step.ts` and
   // `node-provisioning.ts` call this on ANY `ProviderError` without checking which provider
   // raised it, and `classifyHetznerError` is a Hetzner-specific heuristic. GCP is the concrete
-  // hazard: `classifyGcpError` has no call sites at all, so every GCP error also arrives here as
-  // 'unknown', and GCP uses 412 for ETag/precondition mismatches while using "placement policy"
-  // in its own vocabulary. Without this guard a GCP precondition failure whose message happened
-  // to say "placement" would be read as Hetzner capacity scarcity — deleting the node row and
-  // silently descending to another offering instead of surfacing a real conflict.
-  // `providerAllocationRejected` in node-provisioning.ts already guards this way; this matches it.
-  // Wiring up `classifyGcpError` is tracked in idea 01M236QPGGC6B150FG4QHT17MW.
+  // hazard: `GcpProvider.createVM` assigns its own category via `classifyGcpError`, but an
+  // unclassified GCP error still arrives here as 'unknown', and GCP uses 412 for
+  // ETag/precondition mismatches while using "placement policy" in its own vocabulary. Without
+  // this guard a GCP precondition failure whose message happened to say "placement" would be
+  // read as Hetzner capacity scarcity — deleting the node row and silently descending to another
+  // offering instead of surfacing a real conflict. `providerAllocationRejected` in
+  // node-provisioning.ts already guards this way; this matches it.
   if (
     err.providerName === 'hetzner' &&
     (err.statusCode === 422 || err.statusCode === HETZNER_PLACEMENT_STATUS_CODE) &&

@@ -1,0 +1,183 @@
+---
+/**
+ * HTML version of an idea's page: its plan, and beside it the status SAM works out from the work
+ * (In review, PR #482 open, checks passed) and the chats and pull request working on it.
+ */
+import './mock.css';
+
+const PR_ICON = '<svg class="mk-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M6 8.5v13" /><path d="M11 6h4a3 3 0 0 1 3 3v6.5" /></svg>';
+
+const work = [
+  { title: 'Wiring the retry schedule', meta: 'Careful Builder · Finished', ago: '15 minutes ago' },
+  { title: 'Comparing how payment providers retry webhooks', meta: 'Brainstormer · Finished', ago: '5 days ago' },
+  { title: 'Retry failed webhook deliveries with exponential backoff', meta: 'PR #482 · Open · Checks passed', pr: true },
+];
+---
+
+<div class="mk idea">
+  <div class="mk-pad idea-in">
+    <p class="mk-back">‹ Ideas</p>
+    <p class="mk-h">Retry failed webhook deliveries</p>
+    <div class="idea-cols">
+      <div class="idea-side">
+        <div class="status mk-card" data-ring>
+          <span class="tile" aria-hidden="true"><svg class="mk-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M6 8.5v13" /><path d="M11 6h4a3 3 0 0 1 3 3v6.5" /></svg></span>
+          <span class="status-text">
+            <b>In review</b>
+            <span>PR #482 is open, checks passed</span>
+            <span class="mk-meta">From GitHub, 2 minutes ago</span>
+            <span class="mk-btn">Review PR #482</span>
+          </span>
+        </div>
+        <p class="mk-section">Work <span class="mk-count">3</span></p>
+        <ul class="work mk-card">
+          {work.map((w) => (
+            <li>
+              <span class:list={['wi', { 'wi--pr': w.pr }]} aria-hidden="true">{w.pr ? <Fragment set:html={PR_ICON} /> : '▢'}</span>
+              <span class="wt"><b>{w.title}</b><span class="mk-meta">{w.meta}</span></span>
+              {w.ago && <span class="mk-meta ago">{w.ago}</span>}
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div class="plan">
+        <p class="plan-head"><span><b>The idea</b><span class="mk-meta">Always the current plan</span></span><span class="mk-btn mk-btn--ghost">Edit</span></p>
+        <div class="mk-card plan-body">
+          <p>When a merchant’s endpoint is down we drop the webhook after one failed attempt, so merchants miss <code>charge.succeeded</code> and ship orders late.</p>
+          <p><b>What we want</b></p>
+          <ul class="bullets">
+            <li>Retry failed deliveries with exponential backoff for up to 3 days.</li>
+            <li>Show every attempt in the dashboard’s delivery log.</li>
+            <li>After the last attempt, park the event so the merchant can replay it.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .idea-in {
+    display: grid;
+    gap: 10px;
+  }
+
+  .idea-cols {
+    display: grid;
+    gap: 14px;
+  }
+
+  @container (min-width: 600px) {
+    .idea-cols {
+      grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+    }
+
+    .plan {
+      grid-row: 1;
+    }
+  }
+
+  .idea-side {
+    display: grid;
+    align-content: start;
+    gap: 10px;
+  }
+
+  .status {
+    display: flex;
+    gap: 12px;
+    padding: 12px;
+    border-color: color-mix(in srgb, var(--mk-green) 40%, transparent);
+  }
+
+  .tile {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    flex: none;
+    border-radius: 9px;
+    color: var(--mk-violet);
+    background: color-mix(in srgb, var(--mk-violet) 16%, transparent);
+  }
+
+  .status-text {
+    display: grid;
+    justify-items: start;
+    gap: 3px;
+  }
+
+  .status-text b {
+    font-size: 1.1em;
+  }
+
+  .status-text .mk-btn {
+    margin-top: 4px;
+  }
+
+  .work li {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 9px 12px;
+    font-size: 0.92em;
+  }
+
+  .work li + li {
+    border-top: 1px solid var(--mk-line);
+  }
+
+  .wi {
+    color: var(--mk-blue);
+  }
+
+  .wi--pr {
+    color: var(--mk-violet);
+  }
+
+  .wt {
+    display: grid;
+    flex: 1;
+    gap: 2px;
+  }
+
+  .ago {
+    white-space: nowrap;
+  }
+
+  .plan {
+    display: grid;
+    align-content: start;
+    gap: 8px;
+  }
+
+  .plan-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .plan-head > span:first-child {
+    display: grid;
+  }
+
+  .plan-body {
+    display: grid;
+    gap: 8px;
+    padding: 12px 14px;
+  }
+
+  .plan-body code {
+    font-size: 0.9em;
+    padding: 0 4px;
+    border-radius: 4px;
+    background: var(--mk-line);
+  }
+
+  .bullets {
+    display: grid;
+    gap: 4px;
+    padding-left: 16px !important;
+    list-style: disc !important;
+  }
+</style>

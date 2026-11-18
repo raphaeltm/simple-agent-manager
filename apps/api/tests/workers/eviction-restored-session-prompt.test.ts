@@ -10,6 +10,12 @@
  * is fast-forwarded in the isolated prompt controls. The stitched workspace-linking cases below
  * instead drive snapshot completion, node selection, provisioning/readiness and TaskRunner linking.
  */
+import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
+import {
+  claimDuePromptDeliveries,
+  type PromptDeliveryResult,
+} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import { runPromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-runner';
 import { buildVmPromptDeliveryCapabilitiesPath } from '@simple-agent-manager/shared';
 import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { eq } from 'drizzle-orm';
@@ -17,12 +23,6 @@ import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { resolveDurableExecutionConfig } from '../../src/durable-objects/project-data/durable-execution-config';
-import {
-  claimDuePromptDeliveries,
-  type PromptDeliveryResult,
-} from '../../src/durable-objects/project-data/prompt-delivery';
-import { runPromptDeliveryClaim } from '../../src/durable-objects/project-data/prompt-delivery-runner';
 import type { TaskRunner, TaskRunnerState } from '../../src/durable-objects/task-runner';
 import { ensureSessionLinked } from '../../src/durable-objects/task-runner/session-linking';
 import type { TaskRunnerContext } from '../../src/durable-objects/task-runner/types';
@@ -43,6 +43,7 @@ import {
 } from '../../src/services/session-sleep-fallback-messages';
 import { buildSessionSnapshotR2Key } from '../../src/services/session-snapshots';
 import { DefaultVmPromptDeliveryAdapter } from '../../src/services/vm-prompt-delivery-adapter';
+import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
 import {
   acceptedPromptResponse,
   versionedPromptCapabilities,
@@ -88,27 +89,28 @@ function taskRunner(taskId: string): DurableObjectStub<TaskRunner> {
   return env.TASK_RUNNER.get(env.TASK_RUNNER.idFromName(taskId)) as DurableObjectStub<TaskRunner>;
 }
 
-/** Advance the real deletion queue to its own due timestamp and drain its external work. */
-async function deleteFailedReplacement(nodeId: string, taskId: string): Promise<void> {
-  const row = await env.DATABASE.prepare('SELECT workspace_id FROM tasks WHERE id = ?')
+/** A failed replacement has no verified snapshot of its own bytes. */
+async function assertFailedReplacementPreserved(nodeId: string, taskId: string): Promise<void> {
+  const row = await env.DATABASE.prepare('SELECT workspace_id, user_id FROM tasks WHERE id = ?')
     .bind(taskId)
-    .first<{ workspace_id: string }>();
+    .first<{ workspace_id: string; user_id: string }>();
+  expect(row).not.toBeNull();
   const stub = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(nodeId));
   await runInDurableObject(stub, async (instance, ctx) => {
-    const entry = await ctx.storage.get<{ deleteAt: number }>(`ws-delete:${row!.workspace_id}`);
-    expect(entry).toBeDefined();
-    const clock = vi.spyOn(Date, 'now').mockReturnValue(entry!.deleteAt + 1);
-    const pending: Promise<unknown>[] = [];
-    const waitUntil = vi.spyOn(ctx, 'waitUntil').mockImplementation((promise) => {
-      pending.push(promise);
-    });
-    try {
-      await instance.alarm();
-      await Promise.all(pending);
-    } finally {
-      waitUntil.mockRestore();
-      clock.mockRestore();
-    }
+    expect(await instance.scheduleWorkspaceDeletion(nodeId, row!.workspace_id, row!.user_id)).toBe(
+      false
+    );
+    expect(await ctx.storage.get(`ws-delete:${row!.workspace_id}`)).toBeUndefined();
+  });
+  expect(
+    await env.DATABASE.prepare(
+      'SELECT runtime_deletion_confirmed_at, runtime_deletion_proof FROM workspaces WHERE id=?'
+    )
+      .bind(row!.workspace_id)
+      .first()
+  ).toEqual({
+    runtime_deletion_confirmed_at: null,
+    runtime_deletion_proof: null,
   });
 }
 
@@ -180,6 +182,13 @@ async function agentOnVm(taskMode: TaskMode) {
       now
     ),
   ]);
+  // The wake places onto the user's pool, and a new pool picks nothing by itself.
+  await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
+    userId,
+    projectId,
+    includeInstallation: false,
+    owner: { userId, projectId },
+  });
   await runInDurableObject(stub, async (_instance, state) => {
     pauseAlarms(state.storage);
     await state.storage.deleteAlarm();
@@ -193,7 +202,7 @@ async function agentOnVm(taskMode: TaskMode) {
 
 /** The VM agent's OOM eviction callback, through the real route and callback auth. */
 async function evict(f: Fixture, interruptedWork?: boolean): Promise<void> {
-  const token = await signNodeCallbackToken(f.nodeId, testEnv);
+  const token = await signNodeCallbackToken(f.nodeId, testEnv, { callbackGeneration: null });
   const response = await SELF.fetch(
     `https://api.test.example.com/api/projects/${f.projectId}/workspaces/${f.workspaceId}/eviction`,
     {
@@ -650,7 +659,7 @@ async function completeEvictionSnapshot(f: Fixture) {
   await env.R2.put(buildSessionSnapshotR2Key(testEnv, f.chatSessionId, generation, 'home'), home, {
     sha256: digest,
   });
-  const token = await signCallbackToken(f.workspaceId, testEnv);
+  const token = await signCallbackToken(f.workspaceId, testEnv, { callbackGeneration: null });
   const response = await SELF.fetch(
     `https://api.test.example.com/api/workspaces/${f.workspaceId}/session-snapshot/complete`,
     {
@@ -856,12 +865,12 @@ describe('eviction snapshot -> real TaskRunner workspace linking', () => {
   });
 
   it.each([false, true])(
-    'returns a failed replacement to sleep and releases claim/binding (stopped mirror=%s)',
+    'returns a failed replacement to sleep, protects its bytes and releases claim/binding (stopped mirror=%s)',
     async (stopMirror) => {
       const f = await agentOnVm('task');
       await completeEvictionSnapshot(f);
       const nodeId = await readyReplacementNode(f);
-      installMovingVm(f, nodeId, true);
+      const calls = installMovingVm(f, nodeId, true);
       await evict(f);
       if (stopMirror) {
         // Inject an explicitly eviction-attributed stopped mirror under the live wake claim.
@@ -888,13 +897,14 @@ describe('eviction snapshot -> real TaskRunner workspace linking', () => {
           f.chatSessionId
         )
       ).toEqual([]);
-      await deleteFailedReplacement(nodeId, f.taskId);
+      await assertFailedReplacementPreserved(nodeId, f.taskId);
+      expect(calls.some((path) => path.endsWith('/physical-deletion'))).toBe(false);
       const failedWorkspace = await env.DATABASE.prepare(
         'SELECT status, chat_session_id FROM workspaces WHERE id = (SELECT workspace_id FROM tasks WHERE id = ?)'
       )
         .bind(f.taskId)
         .first();
-      expect(failedWorkspace).toEqual({ status: 'deleted', chat_session_id: null });
+      expect(failedWorkspace).toEqual({ status: 'stopped', chat_session_id: null });
 
       expect(
         await env.DATABASE.prepare(
@@ -1071,7 +1081,7 @@ describe('eviction snapshot -> real TaskRunner workspace linking', () => {
     )
       .bind(f.chatSessionId)
       .first();
-    const token = await signNodeCallbackToken(f.nodeId, testEnv);
+    const token = await signNodeCallbackToken(f.nodeId, testEnv, { callbackGeneration: null });
     const response = await SELF.fetch(
       `https://api.test.example.com/api/projects/${f.projectId}/workspaces/${f.workspaceId}/eviction`,
       {

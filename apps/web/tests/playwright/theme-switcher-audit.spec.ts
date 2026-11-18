@@ -83,7 +83,6 @@ async function setupApiMocks(page: Page) {
     if (path === '/api/github/installations') return respond(200, []);
     if (path === '/api/agents') return respond(200, { agents: [] });
     if (path === '/api/projects') return respond(200, { projects: [PROJECT] });
-    if (path === '/api/trial/status') return respond(200, { available: false });
     return respond(200, {});
   });
 }

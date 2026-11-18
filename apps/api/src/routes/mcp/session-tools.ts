@@ -3,10 +3,15 @@
  *
  * Also exports TokenRow and groupTokensIntoMessages for use by tests and other modules.
  */
+import {
+  listSessionSummaries,
+  readArchivedToolPayloads,
+  readResourceHistory,
+} from '@simple-agent-manager/operations';
+
 import type { Env } from '../../env';
-import { runWorkspaceOperation } from '../../operations/workspace-adapter';
+import { operationDeps } from '../../operation-ports';
 import * as projectDataService from '../../services/project-data';
-import { getWorkspaceResourceHistory } from '../../services/workspace-resource-history';
 import {
   getMcpLimits,
   INVALID_PARAMS,
@@ -17,6 +22,7 @@ import {
   resolveSessionId,
   sanitizeUserInput,
 } from './_helpers';
+import { runWorkspaceOperation } from './workspace-operation-adapter';
 
 export async function handleListSessions(
   requestId: string | number | null,
@@ -29,26 +35,14 @@ export async function handleListSessions(
   const requestedLimit = typeof params.limit === 'number' ? params.limit : limits.sessionListLimit;
   const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.sessionListMax);
 
-  const { sessions, total } = await projectDataService.listSessions(
-    env,
-    tokenData.projectId,
+  const { sessions, total } = await listSessionSummaries(operationDeps(env), tokenData.projectId, {
     status,
-    limit
-  );
-
-  const result = sessions.map((s: Record<string, unknown>) => ({
-    id: s.id,
-    topic: s.topic,
-    status: s.status,
-    messageCount: s.messageCount,
-    taskId: s.taskId,
-    workspaceId: s.workspaceId,
-    startedAt: s.startedAt,
-    endedAt: s.endedAt,
-  }));
+    limit,
+    taskId: null,
+  });
 
   return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: JSON.stringify({ sessions: result, total }, null, 2) }],
+    content: [{ type: 'text', text: JSON.stringify({ sessions, total }, null, 2) }],
   });
 }
 
@@ -129,35 +123,16 @@ export async function handleGetResourceHistory(
     );
   }
 
-  const history = await getWorkspaceResourceHistory(env, {
+  const result = await readResourceHistory(operationDeps(env), {
     projectId: tokenData.projectId,
     sessionId,
     taskId,
     workspaceId,
-    detailChunkId,
+    chunkId: detailChunkId,
   });
 
   return jsonRpcSuccess(requestId, {
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify(
-          {
-            scope: { projectId: tokenData.projectId, sessionId, taskId, workspaceId },
-            ...history,
-            notes: [
-              'Samples are workspace-level cgroup observations, not per-process attribution.',
-              'memoryWorkingSetMeanBytes and memoryWorkingSetPeakBytes estimate memory needed by excluding reclaimable inactive file cache; null means the VM agent did not report them.',
-              'memoryMeanBytes, memoryPeakBytes, and memoryKernelPeakBytes include cache and remain available for historical comparison.',
-              'Tool spans are timestamp correlation windows and may include an ACP kind and metadata-provided tool name; titles and inputs are never returned.',
-              'Chunk detail is returned only when chunkId is supplied; summary reads stay bounded.',
-            ],
-          },
-          null,
-          2
-        ),
-      },
-    ],
+    content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
   });
 }
 
@@ -227,12 +202,6 @@ function parseArchivedToolPayloadRequest(params: Record<string, unknown>): {
   };
 }
 
-function resolveArchivedToolPayloadLimit(env: Env, requestedLimit: number | null): number {
-  const limits = getMcpLimits(env);
-  const rawLimit = requestedLimit ?? limits.archivedToolPayloadListLimit;
-  return Math.min(Math.max(1, Math.round(rawLimit)), limits.archivedToolPayloadListMax);
-}
-
 export async function handleGetArchivedToolPayloads(
   requestId: string | number | null,
   params: Record<string, unknown>,
@@ -248,29 +217,20 @@ export async function handleGetArchivedToolPayloads(
     );
   }
 
-  if (parsed.request.sessionId) {
-    const session = await projectDataService.getSession(
-      env,
-      tokenData.projectId,
-      parsed.request.sessionId
-    );
-    if (!session) {
-      return jsonRpcError(requestId, INVALID_PARAMS, 'Session not found in this project');
-    }
+  const read = await readArchivedToolPayloads(operationDeps(env), {
+    projectId: tokenData.projectId,
+    messageId: parsed.request.messageId || null,
+    sessionId: parsed.request.sessionId || null,
+    startTime: parsed.request.startTime,
+    endTime: parsed.request.endTime,
+    requestedLimit: parsed.request.requestedLimit,
+  });
+  if (!read.ok) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'Session not found in this project');
   }
 
-  const limit = resolveArchivedToolPayloadLimit(env, parsed.request.requestedLimit);
-
-  const result = await projectDataService.getArchivedToolPayloads(env, tokenData.projectId, {
-    ...(parsed.request.messageId ? { messageId: parsed.request.messageId } : {}),
-    ...(parsed.request.sessionId ? { sessionId: parsed.request.sessionId } : {}),
-    ...(parsed.request.startTime !== null ? { startTime: parsed.request.startTime } : {}),
-    ...(parsed.request.endTime !== null ? { endTime: parsed.request.endTime } : {}),
-    limit,
-  });
-
   return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+    content: [{ type: 'text', text: JSON.stringify(read.result, null, 2) }],
   });
 }
 

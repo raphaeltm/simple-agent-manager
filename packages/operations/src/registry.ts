@@ -1,0 +1,40 @@
+import { toJsonSchema } from '@valibot/to-json-schema';
+import * as v from 'valibot';
+
+import { channelOperations } from './channel-operations';
+import { connectorOperations } from './connector-operations';
+import { inboxOperations } from './inbox-operations';
+import { insightsOperations } from './insights-operations';
+import { operationalOperations } from './operational-operations';
+import { platformOperations } from './platform-operations';
+import { scheduleOperations } from './schedule-operations';
+import { teamOperations } from './team-operations';
+import type { Operation } from './types';
+import { usageOperations } from './usage-operations';
+
+/** One catalog shared by adapters. Names remain stable across surfaces. */
+export const operations = [
+  ...platformOperations,
+  ...connectorOperations,
+  ...inboxOperations,
+  ...operationalOperations,
+  ...teamOperations,
+  ...scheduleOperations,
+  ...channelOperations,
+  ...usageOperations,
+  ...insightsOperations,
+] as const;
+
+export function operationInputJsonSchema(
+  operation: Pick<Operation<unknown, unknown>, 'input'>
+): unknown {
+  return toJsonSchema(operation.input);
+}
+
+export function operationOutputJsonSchema(
+  operation: Pick<Operation<unknown, unknown>, 'output'>
+): unknown {
+  return operation.output ? toJsonSchema(operation.output) : undefined;
+}
+
+export const ProjectInputSchema = v.object({ projectId: v.string() });

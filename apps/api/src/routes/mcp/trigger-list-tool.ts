@@ -46,7 +46,7 @@ export async function handleListTriggers(
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      'sourceType must be "cron", "webhook", "github", or "incident"'
+      'sourceType must be "cron", "webhook", "github", "incident", or "email"'
     );
   }
   if (

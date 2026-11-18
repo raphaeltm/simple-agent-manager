@@ -78,7 +78,6 @@ function makeState(overrides: Partial<TaskRunnerState> = {}): TaskRunnerState {
     lastStepAt: Date.now(),
     provisioningStartedAt: null,
     agentReadyStartedAt: null,
-    workspaceReadyStartedAt: null,
     lastD1Step: null,
     completed: false,
     ...overrides,

@@ -9,11 +9,19 @@ import { projectMembersRoutes } from '../../../src/routes/projects/members';
 const mocks = vi.hoisted(() => ({
   currentUserId: 'owner-user',
   requireProjectCapability: vi.fn(),
+  revokeSessionAccessForDepartedMember: vi.fn(),
 }));
 
 vi.mock('drizzle-orm/d1');
 vi.mock('../../../src/middleware/auth', () => ({
+  // Agent sign-in session guards: inert for these ordinary-session route tests.
+  rejectAgentSignInSession: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  assertNotAgentSignInSession: () => undefined,
+
   getUserId: () => mocks.currentUserId,
+}));
+vi.mock('../../../src/services/session-access', () => ({
+  revokeSessionAccessForDepartedMember: mocks.revokeSessionAccessForDepartedMember,
 }));
 vi.mock('../../../src/middleware/project-auth', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../src/middleware/project-auth')>();
@@ -44,8 +52,6 @@ function makeProject(overrides: Partial<schema.Project> = {}): schema.Project {
     defaultAgentType: 'claude-code',
     defaultWorkspaceProfile: null,
     defaultDevcontainerConfigName: null,
-    defaultProvider: 'hetzner',
-    defaultLocation: null,
     agentDefaults: null,
     workspaceIdleTimeoutMs: null,
     nodeIdleTimeoutMs: null,
@@ -276,7 +282,8 @@ function triggerDetails(hasCoverage = false) {
     status: 'active',
     sourceType: 'cron',
     agentTarget: 'claude-code',
-    computeTarget: 'hetzner',
+    // Projects and profiles never pin a provider; the compute pool decides.
+    computeTarget: 'inherited-provider',
     // Creator and effective executor are recorded separately so a reviewer can
     // see which one is departing after a keep-active transfer.
     creatorUserId: 'departing-user',
@@ -360,6 +367,7 @@ describe('project member offboarding apply', () => {
   let selectResults: QueryResult[];
   let executionPrincipalMembers: QueryResult;
   let updatedRows: Array<{ table: unknown; values: Record<string, unknown> }>;
+  let deletedTables: unknown[];
   let updateReturningRows: unknown[][];
   let transactionCalls: number;
 
@@ -379,6 +387,7 @@ describe('project member offboarding apply', () => {
       { userId: 'departing-user', role: 'admin', status: 'active' },
     ];
     updatedRows = [];
+    deletedTables = [];
     updateReturningRows = [];
     transactionCalls = 0;
 
@@ -429,6 +438,18 @@ describe('project member offboarding apply', () => {
           return updateChain;
         }),
       })),
+      // Removal also deletes the leaver's profile pins on this project's profiles; the
+      // scope of that delete is proven on real SQL in offboarding-profile-pins.test.ts.
+      delete: vi.fn((table: unknown) => {
+        const deleteChain = {
+          where: vi.fn(() => deleteChain),
+          returning: vi.fn(() => {
+            deletedTables.push(table);
+            return Promise.resolve([]);
+          }),
+        };
+        return deleteChain;
+      }),
       transaction: vi.fn(async (callback: (tx: typeof mockDb) => Promise<unknown>) => {
         transactionCalls += 1;
         return callback(mockDb);
@@ -544,6 +565,7 @@ describe('project member offboarding apply', () => {
         }),
       ])
     );
+    expect(deletedTables).toEqual([schema.ccProfileAttachments]);
     const auditUpdates = updatedRows.filter(
       (row) => row.table === schema.projectMemberOffboardingResourceActions
     );
@@ -555,6 +577,12 @@ describe('project member offboarding apply', () => {
         values: expect.objectContaining({ selectedAction: 'break_and_flag', status: 'applied' }),
       }),
     ]);
+    // Removal also deletes the shared session access they held or granted on their sessions.
+    expect(mocks.revokeSessionAccessForDepartedMember).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'departing-user'
+    );
   });
 
   it('keeps a trigger active when reattaching to existing project credential coverage', async () => {
@@ -669,6 +697,8 @@ describe('project member offboarding apply', () => {
       ],
     });
     expect(updatedRows.some((row) => row.table === schema.projectMembers)).toBe(false);
+    // Still a member, so their shared session access stays.
+    expect(mocks.revokeSessionAccessForDepartedMember).not.toHaveBeenCalled();
   });
 
   it('breaks deployment environments and disables departing project attachments', async () => {
@@ -898,8 +928,12 @@ describe('project member offboarding apply', () => {
   });
 
   it('keeps project-scoped write predicates in the apply service', async () => {
-    const source = await import('node:fs/promises').then((fs) =>
-      fs.readFile('src/services/project-offboarding-apply.ts', 'utf8')
+    // The per-resource actions live beside the apply service.
+    const source = await import('node:fs/promises').then(async (fs) =>
+      [
+        await fs.readFile('src/services/project-offboarding-apply.ts', 'utf8'),
+        await fs.readFile('src/services/project-offboarding-resource-actions.ts', 'utf8'),
+      ].join('\n')
     );
 
     expect(source).toContain('eq(schema.triggers.projectId, input.projectId)');

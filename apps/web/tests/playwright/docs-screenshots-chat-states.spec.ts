@@ -1,7 +1,8 @@
 /**
  * Documentation screenshots for chat states the docs teach a reader to recognise: a sleeping
  * chat whose wake failed, an agent reply containing a Mermaid diagram, and a chat whose saved
- * workspace expired, with the fork it offers.
+ * workspace expired (with its Fork box), plus the new-chat screen that Fork in the tool rail
+ * opens.
  *
  * Every capture drives the REAL production components with mocked API data, and asserts
  * on what rendered rather than on the fixture, so a component that stops rendering fails
@@ -12,8 +13,8 @@
  *   DOCS_SHOTS=1 npx playwright test docs-screenshots-chat-states \
  *     --project="Desktop (1280x800)" --project="iPhone SE (375x667)"
  *
- * The committed PNGs were then palette-compressed (about 5x smaller, no visible change), from
- * apps/www: sharp(file).png({ palette: true, quality: 90, effort: 10, dither: 0.6 }).
+ * The committed PNGs were then palette-compressed (about 5x smaller, no visible change) with
+ * `pnpm --filter @simple-agent-manager/www compress:screenshots public/images/docs`.
  */
 import { expect, type Page, type Route, test } from '@playwright/test';
 
@@ -294,6 +295,12 @@ async function setupMocks(page: Page, fixtures: SessionFixture[], overrides: Rou
     if (pathname === `/api/projects/${PROJECT_ID}/agent-profiles`) {
       return route.fulfill({ status: 200, json: AGENT_PROFILES });
     }
+    if (pathname === `/api/projects/${PROJECT_ID}/agent-profiles/picker`) {
+      return route.fulfill({
+        status: 200,
+        json: { usage: [], hiddenProfileIds: [], usageWindowDays: 30 },
+      });
+    }
     if (pathname in overrides) return route.fulfill({ status: 200, json: overrides[pathname] });
 
     return fulfillDocsChatRoute(route, {
@@ -422,9 +429,15 @@ const EXPIRED_LIST = [EXPIRED, ...OTHER_SESSIONS];
 
 async function openExpiredChat(page: Page, overrides: RouteOverrides = {}) {
   await openChat(page, EXPIRED.id, EXPIRED_LIST, overrides);
-  const footer = page.getByText(/The saved workspace has expired/);
-  await expect(footer).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Fork conversation' })).toBeVisible();
+  // The archived-chat Fork box (`ArchivedForkComposer`) replaces the message box, with the
+  // expiry explained above it.
+  await expect(
+    page.getByText(/The saved workspace has expired\. Your transcript is still available\./)
+  ).toBeVisible();
+  await expect(page.getByPlaceholder('Write a prompt to fork this archived chat...')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Fork', exact: true })).toBeVisible();
+  // The removed "Fork conversation" button must not come back alongside it.
+  await expect(page.getByRole('button', { name: 'Fork conversation' })).toHaveCount(0);
   // Liveness for the absence below: the transcript itself rendered.
   await expect(page.getByText(/ExportOrdersButton/)).toBeVisible();
   // The message box is replaced, not merely disabled.
@@ -474,7 +487,8 @@ async function forkExpiredChat(page: Page) {
       agents: [{ id: 'claude-code', name: 'Claude Code', configured: true, supportsAcp: true }],
     },
   });
-  await page.getByRole('button', { name: 'Fork conversation' }).click();
+  // Fork in the session tool rail opens the new-chat screen pre-filled with the IDs.
+  await page.getByTestId('session-tool-fork').click();
   await expect(page.getByText(`Forking from: ${EXPIRED.topic}`)).toBeVisible();
   const composer = page
     .getByRole('combobox')
@@ -528,4 +542,23 @@ test('docs: fork composer', async ({ page }) => {
 test('docs: fork composer, narrow', async ({ page }) => {
   test.skip(isMobile(page), 'desktop capture');
   await captureForkComposer(page, 1060, 'chat-fork-composer-mobile');
+});
+
+// ---------------------------------------------------------------------------
+// 4. The one-row chat header on a phone, and the info sheet its title opens
+// ---------------------------------------------------------------------------
+
+test('docs: chat header and info sheet on a phone', async ({ page }) => {
+  test.skip(!isMobile(page), 'phone capture');
+  await openChat(page, DIAGRAM.id);
+
+  const title = page.getByRole('button', {
+    name: new RegExp(`^${DIAGRAM.topic}\\. .*Show session info$`),
+  });
+  await expect(title).toBeVisible();
+  await title.click();
+  const sheet = page.getByRole('dialog').filter({ hasText: DIAGRAM.topic }).last();
+  await expect(sheet).toBeVisible();
+  await page.waitForTimeout(400);
+  await docsShot(page, 'chat-session-info-sheet-mobile');
 });

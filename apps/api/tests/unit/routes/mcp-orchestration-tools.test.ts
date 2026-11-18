@@ -3,6 +3,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createUnpublishedStorageSession } from '../../helpers/reliability-storage';
 
+// These tool tests run on a mock D1 that has no workspace/node rows. MCP authentication's
+// workspace-lifecycle gate is exercised against real SQL in
+// tests/unit/services/mcp-token-lifecycle.test.ts; here it reduces to KV token validation.
+vi.mock('../../../src/services/mcp-token-lifecycle', async () => {
+  const { validateMcpToken } = await import('../../../src/services/mcp-token');
+  return {
+    validateActiveWorkspaceMcpToken: (env: { KV: KVNamespace }, token: string) =>
+      validateMcpToken(env.KV, token, env),
+  };
+});
+
 const MCP_ORCHESTRATION_SETUP_TIMEOUT_MS = 30_000;
 
 const mockStopAgentSessionOnNode = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
@@ -271,10 +282,6 @@ const mockDoStub = {
   getMessages: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
   searchMessages: vi.fn().mockReturnValue([]),
   persistMessage: vi.fn().mockResolvedValue('msg-1'),
-  linkSessionIdea: vi.fn(),
-  unlinkSessionIdea: vi.fn(),
-  getIdeasForSession: vi.fn().mockReturnValue([]),
-  getSessionsForIdea: vi.fn().mockReturnValue([]),
   updateSessionTopic: vi.fn().mockResolvedValue(true),
 };
 const mockProjectData = {
@@ -531,6 +538,62 @@ describe('MCP Orchestration Tools', () => {
       expect(content.newTaskId).toBeDefined();
       expect(content.newSessionId).toBeDefined();
       expect(content.newBranch).toBeDefined();
+    });
+
+    // Constitution XV: the replacement's description is agent-written, so it names the
+    // retrying parent exactly once, at the end, through the real handler.
+    describe('parent attribution', () => {
+      const ATTRIBUTION =
+        /\n\n---\nSent by parent agent task parent-task-1, chat session chat-parent-1\. An agent wrote this task description; it was not typed by a human\.$/;
+
+      function callerChatSession() {
+        // The token carries no chat session, so the handler resolves it from the caller's workspace.
+        mockD1._handlers.unshift({
+          match: '"chat_session_id" from "workspaces"',
+          method: 'raw',
+          result: [['chat-parent-1']],
+          once: true,
+        });
+      }
+
+      async function retry(args: Record<string, unknown>) {
+        const res = await mcpRequest(
+          app,
+          jsonRpcRequest('tools/call', { name: 'retry_subtask', arguments: args })
+        );
+        const body = await res.json();
+        expect(body.error).toBeUndefined();
+        const firstMessage = mockDoStub.persistMessage.mock.calls[0]![2] as string;
+        const runnerDescription = mockTaskRunnerStub.start.mock.calls[0]![0].config
+          .taskDescription as string;
+        expect(runnerDescription).toBe(firstMessage);
+        return firstMessage;
+      }
+
+      it('replaces the predecessor attribution instead of stacking a second one', async () => {
+        setupRetryHappyPath({
+          description:
+            'Do the thing\n\n---\nSent by parent agent task parent-task-1, chat session old-chat. ' +
+            'An agent wrote this task description; it was not typed by a human.',
+        });
+        callerChatSession();
+        const message = await retry({ taskId: 'child-1' });
+        expect(message.startsWith('Do the thing\n\nNote: Previous attempt (child-1)')).toBe(true);
+        expect(message.match(/Sent by parent agent task/g)).toHaveLength(1);
+        expect(message).not.toContain('old-chat');
+        expect(message).toMatch(ATTRIBUTION);
+      });
+
+      it('attributes a newDescription the parent wrote for the retry', async () => {
+        setupRetryHappyPath();
+        callerChatSession();
+        const message = await retry({
+          taskId: 'child-1',
+          newDescription: 'Try the other approach',
+        });
+        expect(message.startsWith('Try the other approach')).toBe(true);
+        expect(message).toMatch(ATTRIBUTION);
+      });
     });
 
     it('rejects an unconfirmed predecessor before creating replacement state', async () => {
@@ -1114,10 +1177,16 @@ describe('MCP Orchestration Tools', () => {
     });
 
     it('should cancel queued task and cleanup dependencies', async () => {
+      // The canonical cancellation writes task status and snapshot authority in one two-query batch.
+      mockD1.batch.mockResolvedValueOnce([
+        { success: true, results: [['child-queued']], meta: { changes: 1 } },
+        { success: true, results: [], meta: { changes: 1 } },
+      ]);
+
       mockD1._handlers.push({
         match: 'from "tasks"',
         method: 'raw',
-        result: [['child-queued', 'parent-task-1', 'queued', 'proj-456']],
+        result: [['child-queued', 'parent-task-1', 'queued', 'proj-456', 'user-789', null, null]],
         once: true,
       });
 

@@ -163,8 +163,7 @@ export function RepoSelector({
           githubRepoId: foundRepo.id,
         });
       } else {
-        // For manually entered repos not in the list, default to 'main'
-        // The branch fetching will happen in CreateWorkspace component
+        // For manually entered repos not in the list, default to 'main'.
         onRepoSelect?.({ fullName: repoName, defaultBranch: 'main' });
       }
     },

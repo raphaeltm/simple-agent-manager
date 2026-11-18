@@ -18,7 +18,7 @@ fi
 # mktemp-created release directories must not retain owner-only traversal.
 if [[ "$EUID" == 0 ]]; then
   [[ $(runuser -u nobody -- "$root/current/bin/codex" --version) == 'codex-cli 0.160.0-sam-c2.2' ]]
-  [[ $(runuser -u nobody -- "$root/current/bin/codex-acp" --version) == '@agentclientprotocol/codex-acp 2.1.1-sam-c2.2' ]]
+  [[ $(runuser -u nobody -- "$root/current/bin/codex-acp" --version) == '@agentclientprotocol/codex-acp 2.1.1-sam-c2.3' ]]
 fi
 current=$(readlink -- "$root/current")
 [[ "$current" == releases/* ]]
@@ -138,11 +138,11 @@ wait "$second_pid"
 [[ $(readlink -- "$root/current") == "$current" ]]
 if [[ $# -eq 2 ]]; then
   prior_archive=$(realpath -- "$2")
-  printf '%s  %s\n' e85e7bfee875bb0bc0397a546073b324258d4cba2c0e54cb3808c3596825b292 "$prior_archive" | sha256sum --check --status
+  printf '%s  %s\n' 1fd3c07846581888284ed9c9d02bc1f51e3673610c3688d8da98db47030bfb95 "$prior_archive" | sha256sum --check --status
   upgrade_root="$test_dir/upgrade"
   mkdir "$upgrade_root"
   tar --extract --file "$prior_archive" --directory "$upgrade_root" --no-same-owner
-  prior='sam-codex-acp-1.13.1-sam-c2.1+cli-0.156.1-sam-c2.1-codemode2'
+  prior='sam-codex-acp-2.1.1-sam-c2.2+cli-0.160.0-sam-c2.2-codemode2'
   find "$upgrade_root" -type d -exec chmod 755 -- {} +
   [[ $(readlink -- "$upgrade_root/current") == "releases/$prior" ]]
   # Every rejected predecessor leaves the active link and new publication alone.
@@ -169,7 +169,9 @@ if [[ $# -eq 2 ]]; then
   [[ $(readlink -- "$upgrade_root/previous") == "releases/$prior" ]]
   (cd "$upgrade_root/previous" && sha256sum --check --status "$upgrade_root/catalog/$prior.sha256")
   (cd "$upgrade_root/notices/$prior" && sha256sum --check --status "$upgrade_root/catalog/$prior.notices.sha256")
-  [[ $("$upgrade_root/previous/bin/codex" --version) == 'codex-cli 0.156.1-sam-c2.1' ]]
+  [[ $("$upgrade_root/previous/bin/codex" --version) == 'codex-cli 0.160.0-sam-c2.2' ]]
+  [[ $("$upgrade_root/previous/bin/codex-acp" --version) == '@agentclientprotocol/codex-acp 2.1.1-sam-c2.2' ]]
+  [[ $("$upgrade_root/current/bin/codex-acp" --version) == '@agentclientprotocol/codex-acp 2.1.1-sam-c2.3' ]]
   "$installer" "$archive" "$upgrade_root" >/dev/null
   [[ $(readlink -- "$upgrade_root/previous") == "releases/$prior" ]]
   echo 'reviewed predecessor upgrade, tamper rejection and rollback preservation passed'

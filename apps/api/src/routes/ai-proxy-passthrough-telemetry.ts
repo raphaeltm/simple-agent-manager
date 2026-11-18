@@ -1,3 +1,4 @@
+import type { AgentCredentialScope } from '@simple-agent-manager/shared';
 import type { Context } from 'hono';
 
 import type { Env } from '../env';
@@ -20,6 +21,7 @@ interface PassthroughTelemetryPreparedRequest {
     agentType: string;
     credentialReference: string;
     credentialSource: CredentialSource;
+    credentialScope: AgentCredentialScope;
     credentialProvider: string;
     providerMode: string;
   };
@@ -39,6 +41,7 @@ async function recordPassthroughLimitHeaders(input: PassthroughLimitHeadersInput
     await updateAIProxyAgentCredentialAttribution(input.env, input.prepared, {
       credentialReference: input.prepared.upstream.credentialReference,
       credentialSource: input.prepared.upstream.credentialSource,
+      credentialScope: input.prepared.upstream.credentialScope,
       credentialProvider: input.prepared.upstream.credentialProvider,
       providerMode: input.prepared.upstream.providerMode,
     });

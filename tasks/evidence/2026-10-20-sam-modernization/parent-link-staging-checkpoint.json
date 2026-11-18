@@ -1,0 +1,86 @@
+{
+  "recordedAt": "2026-10-20T15:50:15.247291+00:00",
+  "runtimeCandidate": "6f810e7083bc9d5d592831203ba0c132762e5369",
+  "ci": {
+    "run": 39446429258,
+    "successfulAttempt": 2,
+    "firstAttempt": "cancelled: 13-minute checkout consumed the lint job budget; isolated lint rerun passed without gate changes"
+  },
+  "e2eSmoke": {
+    "run": 39446429297,
+    "result": "success"
+  },
+  "staging": {
+    "run": 39446454870,
+    "result": "success",
+    "deployment": "fd3bdd27-3a3d-43d3-8332-b548574a9fe5",
+    "version": "8a589128-bd19-43d7-8dad-13d36d5b7cb9",
+    "trafficPercent": 100,
+    "frontend": "successful exact-commit workflow deployment; existing token denied optional Pages metadata read"
+  },
+  "browser": {
+    "result": "passed",
+    "pageErrors": 0,
+    "unattributedConsoleErrors": 1,
+    "disableMs": 649,
+    "bothAccountsOffAfterCleanup": true,
+    "desktopMobileVisualReview": "passed"
+  },
+  "liveStopAttempt": {
+    "result": "failed before runtime readiness",
+    "dispatch": "one completed start receipt; grounded publication succeeded",
+    "node": "healthy heartbeat but readiness callback absent at cutoff",
+    "testStartupCutoffSeconds": 390,
+    "productionReadinessTimeoutSeconds": 900,
+    "originalReceiptAndFailedLedgerPreserved": true,
+    "cleanup": {
+      "taskCancelled": true,
+      "sessionStopped": true,
+      "workspaceAbsent": true,
+      "nodeAbsent": true,
+      "temporaryProfileAbsent": true,
+      "accountOff": true
+    }
+  },
+  "nextVerification": {
+    "kind": "single bounded stop-only run",
+    "workMinutes": 25,
+    "cleanupMinutes": 3,
+    "reason": "covers existing 15-minute platform readiness contract plus workspace/ACP and confirmed-stop checks",
+    "poolOrProductionTimeoutChanges": false
+  },
+  "remaining": [
+    "real awake confirmed stop and duplicate confirmation",
+    "final-head review and CI after test-only adjustment",
+    "CodeRabbit procedure",
+    "merge and exact production smoke"
+  ],
+  "limitations": [
+    "Earlier failures are not reclassified as passes",
+    "One browser console error remains unattributed",
+    "Broader roadmap parity is outside launch",
+    "No release completion claimed"
+  ],
+  "behavior": {
+    "result": "passed",
+    "scenarios": 6,
+    "completedReadOperations": 1,
+    "writeOperations": 0,
+    "cleanupOff": true,
+    "coverage": [
+      "page-scoped status and sources",
+      "ambiguous project",
+      "repository boundary",
+      "private constraints",
+      "synthetic quoted untrusted text",
+      "scoped proposed brief"
+    ]
+  },
+  "coreNavigation": {
+    "result": "passed",
+    "paths": ["/dashboard", "/projects", "/settings"],
+    "pageErrors": 0,
+    "consoleErrors": 0,
+    "samRemainedOff": true
+  }
+}

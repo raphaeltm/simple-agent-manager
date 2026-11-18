@@ -1,3 +1,10 @@
+import {
+  getLocalMonthlyAiCostUsd,
+  getLocalUsageBreakdown,
+  hasLocalAiCostMetering,
+  isMonthlyCostCapAvailable,
+  resolveAiGatewayId,
+} from '@simple-agent-manager/ai-proxy';
 import type {
   UserAiBudgetResponse,
   UserAiUsageResponse,
@@ -26,11 +33,13 @@ import {
 } from '../services/ai-gateway-logs';
 import {
   deleteUserBudgetSettings,
+  effectiveMonthlyCostCapUsd,
   getAdminAiAllowance,
   getProviderUsage,
   getTokenUsage,
   getUserBudgetSettings,
   resolveEffectiveLimits,
+  resolveMonthlyCostCeilingUsd,
   saveUserBudgetSettings,
   validateBudgetUpdate,
 } from '../services/ai-token-budget';
@@ -94,10 +103,15 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
   const period = parseGatewayPeriod(c.req.query('period'));
   const periodBounds = getGatewayPeriodBounds(period);
 
-  const gatewayId = c.env.AI_GATEWAY_ID;
+  const gatewayId = resolveAiGatewayId(c.env);
   if (!gatewayId) {
     const providerMap = new Map<string, UsageByProvider>();
-    const localProviderUsage = await getProviderUsage(c.env.KV, userId, new Date(periodBounds.startDate), c.env);
+    const localProviderUsage = await getProviderUsage(
+      c.env.KV,
+      userId,
+      new Date(periodBounds.startDate),
+      c.env
+    );
     let totalRequests = 0;
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
@@ -110,7 +124,19 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
       totalCostUsd += entry.estimatedCostUsd;
     }
 
-    // Gateway not configured — return local proxy usage only, not an error.
+    // Gateway not configured: SAM's own records, not an error. A failed per-model read degrades
+    // to empty breakdowns, never a failed usage page.
+    const breakdown = await getLocalUsageBreakdown(
+      c.env,
+      userId,
+      new Date(periodBounds.startDate)
+    ).catch((err: unknown) => {
+      log.warn('usage.local_breakdown_failed', {
+        userId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return { byModel: [], byDay: [] };
+    });
     return c.json({
       totalCostUsd,
       totalRequests,
@@ -118,9 +144,9 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
       totalOutputTokens,
       cachedRequests: 0,
       errorRequests: 0,
-      byModel: [],
+      byModel: breakdown.byModel,
       byProvider: Array.from(providerMap.values()).sort((a, b) => b.totalTokens - a.totalTokens),
-      byDay: [],
+      byDay: breakdown.byDay,
       period,
       periodLabel: getPeriodLabel(period),
     } satisfies UserAiUsageResponse);
@@ -178,7 +204,12 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
     } satisfies UserAiUsageResponse);
   }
 
-  const localProviderUsage = await getProviderUsage(c.env.KV, userId, new Date(periodBounds.startDate), c.env);
+  const localProviderUsage = await getProviderUsage(
+    c.env.KV,
+    userId,
+    new Date(periodBounds.startDate),
+    c.env
+  );
   for (const entry of localProviderUsage) {
     mergeLocalProviderUsage(providerMap, entry);
     totalRequests += entry.requests;
@@ -195,7 +226,9 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
     cachedRequests,
     errorRequests,
     byModel: Array.from(modelMap.values()).sort((a, b) => b.costUsd - a.costUsd),
-    byProvider: Array.from(providerMap.values()).sort((a, b) => b.costUsd - a.costUsd || b.totalTokens - a.totalTokens),
+    byProvider: Array.from(providerMap.values()).sort(
+      (a, b) => b.costUsd - a.costUsd || b.totalTokens - a.totalTokens
+    ),
     byDay: Array.from(dayMap.values()).sort((a, b) => a.date.localeCompare(b.date)),
     period,
     periodLabel: getPeriodLabel(period),
@@ -206,7 +239,7 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
 
 function mergeLocalProviderUsage(
   map: Map<string, UsageByProvider>,
-  entry: Awaited<ReturnType<typeof getProviderUsage>>[number],
+  entry: Awaited<ReturnType<typeof getProviderUsage>>[number]
 ): void {
   const key = `${entry.providerId}:${entry.dialect}`;
   const existing = map.get(key);
@@ -245,16 +278,19 @@ function mergeLocalProviderUsage(
 usageRoutes.get('/ai/budget', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
 
-  const [userSettings, dailyUsage] = await Promise.all([
+  const [userSettings, dailyUsage, ceilingUsd] = await Promise.all([
     getUserBudgetSettings(c.env.KV, userId),
     getTokenUsage(c.env.KV, userId, c.env),
+    resolveMonthlyCostCeilingUsd(c.env),
   ]);
 
   const effectiveLimits = resolveEffectiveLimits(userSettings, c.env);
 
   // Get current month cost from AI Gateway (reuse the same aggregation)
-  let monthCostUsd = 0;
-  const gatewayId = c.env.AI_GATEWAY_ID;
+  let monthCostUsd = hasLocalAiCostMetering(c.env)
+    ? await getLocalMonthlyAiCostUsd(c.env.KV, userId, c.env)
+    : 0;
+  const gatewayId = resolveAiGatewayId(c.env);
   if (gatewayId) {
     const periodBounds = getGatewayPeriodBounds('current-month');
     try {
@@ -277,18 +313,27 @@ usageRoutes.get('/ai/budget', requireAuth(), requireApproved(), async (c) => {
     alertThresholdPercent: DEFAULT_AI_USAGE_ALERT_THRESHOLD_PERCENT,
   };
 
-  const dailyInputPercent = effectiveLimits.dailyInputTokenLimit > 0
-    ? Math.min(100, (dailyUsage.inputTokens / effectiveLimits.dailyInputTokenLimit) * 100)
-    : 0;
-  const dailyOutputPercent = effectiveLimits.dailyOutputTokenLimit > 0
-    ? Math.min(100, (dailyUsage.outputTokens / effectiveLimits.dailyOutputTokenLimit) * 100)
-    : 0;
-  const monthlyCostPercent = settings.monthlyCostCapUsd !== null && settings.monthlyCostCapUsd > 0
-    ? Math.min(100, (monthCostUsd / settings.monthlyCostCapUsd) * 100)
+  const dailyInputPercent =
+    effectiveLimits.dailyInputTokenLimit > 0
+      ? Math.min(100, (dailyUsage.inputTokens / effectiveLimits.dailyInputTokenLimit) * 100)
+      : 0;
+  const dailyOutputPercent =
+    effectiveLimits.dailyOutputTokenLimit > 0
+      ? Math.min(100, (dailyUsage.outputTokens / effectiveLimits.dailyOutputTokenLimit) * 100)
+      : 0;
+  // The same cap the gate enforces (checkMonthlyCostCap); a gateway without the account API
+  // cannot price spend, so there the cap has no utilization.
+  const capAvailable = isMonthlyCostCapAvailable(c.env);
+  const effectiveCapUsd = capAvailable
+    ? effectiveMonthlyCostCapUsd(settings.monthlyCostCapUsd, ceilingUsd)
     : null;
+  const monthlyCostPercent =
+    effectiveCapUsd !== null ? Math.min(100, (monthCostUsd / effectiveCapUsd) * 100) : null;
 
-  const exceeded = dailyInputPercent >= 100 || dailyOutputPercent >= 100
-    || (monthlyCostPercent !== null && monthlyCostPercent >= 100);
+  const exceeded =
+    dailyInputPercent >= 100 ||
+    dailyOutputPercent >= 100 ||
+    (monthlyCostPercent !== null && monthlyCostPercent >= 100);
 
   const response: UserAiBudgetResponse = {
     settings,
@@ -299,10 +344,12 @@ usageRoutes.get('/ai/budget', requireAuth(), requireApproved(), async (c) => {
     },
     effectiveLimits,
     monthCostUsd,
+    monthlyCostCap: { available: capAvailable, ceilingUsd, effectiveCapUsd },
     utilization: {
       dailyInputPercent: Math.round(dailyInputPercent * 10) / 10,
       dailyOutputPercent: Math.round(dailyOutputPercent * 10) / 10,
-      monthlyCostPercent: monthlyCostPercent !== null ? Math.round(monthlyCostPercent * 10) / 10 : null,
+      monthlyCostPercent:
+        monthlyCostPercent !== null ? Math.round(monthlyCostPercent * 10) / 10 : null,
     },
     exceeded,
   };
@@ -323,14 +370,20 @@ usageRoutes.put('/ai/budget', requireAuth(), requireApproved(), async (c) => {
     return c.json({ error: 'INVALID_JSON', message: 'Invalid JSON body' }, 400);
   }
 
-  // Fetch admin allowance to enforce ceilings on user-set limits
-  const adminAllowance = await getAdminAiAllowance(c.env.KV, userId);
+  // Admin allowance (per user) and installation ceiling bound what the user may set.
+  const [adminAllowance, ceilingUsd] = await Promise.all([
+    getAdminAiAllowance(c.env.KV, userId),
+    resolveMonthlyCostCeilingUsd(c.env),
+  ]);
 
   let settings;
   try {
-    settings = validateBudgetUpdate(body, c.env, adminAllowance);
+    settings = validateBudgetUpdate(body, c.env, adminAllowance, ceilingUsd);
   } catch (err) {
-    return c.json({ error: 'VALIDATION_ERROR', message: err instanceof Error ? err.message : String(err) }, 400);
+    return c.json(
+      { error: 'VALIDATION_ERROR', message: err instanceof Error ? err.message : String(err) },
+      400
+    );
   }
 
   await saveUserBudgetSettings(c.env.KV, userId, settings);

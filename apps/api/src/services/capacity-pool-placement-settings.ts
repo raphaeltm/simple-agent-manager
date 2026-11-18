@@ -1,3 +1,8 @@
+import {
+  DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS,
+  resolveEffectiveNodeHostMemoryReserveMb,
+  type WorkspaceAdmissionEnv,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPoolPlacementSettings,
   CapacityPoolSelectionWeights,
@@ -8,7 +13,6 @@ import type {
 import {
   DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS,
   isJsonRecord,
-  LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION,
   normalizeResourceRequirements,
   PLATFORM_RESOURCE_DEFAULTS,
 } from '@simple-agent-manager/shared';
@@ -26,27 +30,6 @@ export const CAPACITY_POOL_SELECTION_SETTINGS_SETTING_KEY = 'capacityPools.selec
 export const CAPACITY_POOL_PLATFORM_DEFAULTS_SETTING_KEY = 'capacityPools.platformDefaults.v1';
 
 type PlacementSettingsSource = 'persisted' | 'environment' | 'default';
-
-export const DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS: Pick<
-  CapacityPoolPlacementSettings,
-  | 'version'
-  | 'sourceGeneration'
-  | 'legacyWorkloadAdapterVersion'
-  | 'selectionWeights'
-  | 'rolloutCohortPercent'
-> = {
-  version: 1,
-  sourceGeneration: 1,
-  legacyWorkloadAdapterVersion: LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION,
-  selectionWeights: {
-    priority: 100_000_000,
-    price: 1,
-    fit: 1_000_000,
-    capacity: 1,
-    candidateOrder: 1,
-  },
-  rolloutCohortPercent: 100,
-};
 
 export interface ResolvedCapacityPoolPlacementSettings {
   resourceDefaults: {
@@ -145,7 +128,11 @@ export async function resolveCapacityPoolPlacementSettings(
 }
 
 export function toSafeCapacityPoolPlacementSettingsSummary(
-  resolved: ResolvedCapacityPoolPlacementSettings
+  resolved: ResolvedCapacityPoolPlacementSettings,
+  env?: Pick<
+    WorkspaceAdmissionEnv,
+    'TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB' | 'VM_AGENT_MEMORY_RESERVE_MB'
+  >
 ): SafeCapacityPoolPlacementSettingsSummary {
   return {
     version: resolved.placementSettings.version,
@@ -155,6 +142,9 @@ export function toSafeCapacityPoolPlacementSettingsSummary(
     rolloutCohortPercent: resolved.placementSettings.rolloutCohortPercent,
     source: resolved.placementSettings.source,
     resourceDefaults: resolved.resourceDefaults,
+    // The same resolver placement uses (placement-resolver.ts), so the pool view's fit warning
+    // cannot disagree with what admission subtracts.
+    hostMemoryReserveMb: resolveEffectiveNodeHostMemoryReserveMb(env ?? {}),
   };
 }
 
@@ -165,10 +155,13 @@ export async function resolveSafeCapacityPoolPlacementSettingsSummary(
     | 'CAPACITY_POOL_LEGACY_WORKLOAD_MAPPING_JSON'
     | 'CAPACITY_POOL_SELECTION_SETTINGS_JSON'
     | 'CAPACITY_POOL_PLATFORM_DEFAULTS_JSON'
+    | 'TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB'
+    | 'VM_AGENT_MEMORY_RESERVE_MB'
   >
 ): Promise<SafeCapacityPoolPlacementSettingsSummary> {
   return toSafeCapacityPoolPlacementSettingsSummary(
-    await resolveCapacityPoolPlacementSettings(db, env)
+    await resolveCapacityPoolPlacementSettings(db, env),
+    env
   );
 }
 

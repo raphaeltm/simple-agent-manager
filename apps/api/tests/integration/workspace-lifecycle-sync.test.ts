@@ -49,9 +49,9 @@ describe('workspace lifecycle synchronization', () => {
     'utf8'
   );
   const doFile = [
-    readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/sessions.ts'), 'utf8'),
-    readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/activity.ts'), 'utf8'),
-    readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/index.ts'), 'utf8'),
+    readFileSync(resolve(process.cwd(), '../../packages/project-data/src/do/sessions.ts'), 'utf8'),
+    readFileSync(resolve(process.cwd(), '../../packages/project-data/src/do/activity.ts'), 'utf8'),
+    readFileSync(resolve(process.cwd(), '../../packages/project-data/src/do/index.ts'), 'utf8'),
   ].join('\n');
 
   describe('workspace stop → session stop synchronization', () => {

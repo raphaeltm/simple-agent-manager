@@ -5,32 +5,35 @@ import { formatOfferingNumber } from '../../lib/compute-pool-offerings';
 export function sourceSettingsLabel(group: MachineGroup): string {
   if (group.kind === 'platform') return 'Platform credentials';
   if (group.credentialSource === 'project') {
-    return group.kind === 'connection' ? 'Project connections' : 'Project credentials';
+    return group.kind === 'connection' ? 'Project accounts' : 'Project credentials';
   }
-  if (group.kind === 'connection') return 'Connections';
-  if (group.kind === 'cloud-provider-key') return 'Cloud Provider settings';
+  if (group.kind === 'connection' || group.kind === 'cloud-provider-key') {
+    return 'Infrastructure settings';
+  }
   return 'Cloud account';
 }
 
 export function sourceSettingsHref(group: MachineGroup, projectId: string | null): string | null {
   if (group.kind === 'platform') return '/admin/credentials';
   if (group.credentialSource === 'project') {
-    return projectId ? `/projects/${projectId}/settings/connections` : null;
+    return projectId ? `/projects/${projectId}/settings/accounts` : null;
   }
-  if (group.kind === 'connection') return '/settings/connections';
-  if (group.kind === 'cloud-provider-key') return '/settings/cloud-provider';
+  if (group.kind === 'connection' || group.kind === 'cloud-provider-key') {
+    return '/settings/infrastructure';
+  }
   return null;
 }
 
 /**
- * Section titles for pools with more than one connection. Identical titles get a
- * number so two connections to the same provider stay distinguishable.
+ * Section titles for pools with more than one connection: the connection's name when it has
+ * one, else where it is managed. Identical titles get a number so two connections to the same
+ * provider stay distinguishable.
  */
 export function groupTitles(groups: MachineGroup[]): Map<string, string> {
   const titles = new Map<string, string>();
   const seen = new Map<string, number>();
   for (const group of groups) {
-    const base = `${group.providerLabel} · ${sourceSettingsLabel(group)}`;
+    const base = `${group.providerLabel} · ${group.label ?? sourceSettingsLabel(group)}`;
     const count = (seen.get(base) ?? 0) + 1;
     seen.set(base, count);
     titles.set(group.key, count === 1 ? base : `${base} (${count})`);

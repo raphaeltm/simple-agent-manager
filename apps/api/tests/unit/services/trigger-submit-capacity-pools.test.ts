@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
+import { pickStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({
@@ -124,6 +125,7 @@ async function seedProjectDefaultPool(env: Env): Promise<void> {
     projectId: 'project-1',
     includeInstallation: false,
   });
+  await pickStarterMachines(drizzle(env.DATABASE, { schema }) as never);
 }
 
 describe('submitTriggeredTask capacity-pool integration', () => {

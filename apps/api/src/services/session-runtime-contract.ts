@@ -25,7 +25,7 @@ export const SessionRuntimeContractSchema = v.object({
   opencodeBaseUrl: nullableSetting,
   settingsResolved: v.literal(true),
   acpInteractions: AcpInteractionRuntimeConfigSchema,
-  promptKind: v.picklist(['task', 'conversation', 'trial', 'direct-workspace']),
+  promptKind: v.picklist(['task', 'conversation', 'direct-workspace']),
   taskContext: v.nullable(
     v.object({
       projectId: v.string(),
@@ -52,7 +52,7 @@ export async function resolveSessionRuntimeContract(
     projectId: string;
     agentType: string;
     overrides?: AgentSessionOverrides;
-    promptKind: 'task' | 'conversation' | 'trial' | 'direct-workspace';
+    promptKind: 'task' | 'conversation' | 'direct-workspace';
     taskContext?: { taskId: string; taskMode: 'task' | 'conversation' } | null;
   }
 ): Promise<SessionRuntimeContract> {

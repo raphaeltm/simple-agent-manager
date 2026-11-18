@@ -1,0 +1,37 @@
+/**
+ * Shared route utility functions.
+ *
+ * Consolidates helpers that were duplicated across multiple route/service files:
+ * - parsePositiveInt (was duplicated as parseIntSafe, parseIntOrDefault in 4+ files)
+ * - requireRouteParam (was duplicated in chat.ts, activity.ts, tasks.ts)
+ */
+
+import { errors } from './errors';
+
+/**
+ * Parse a query parameter as a positive integer, returning a fallback on failure.
+ */
+export function parsePositiveInt(value: string | undefined, fallback: number): number {
+  if (!value) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
+}
+
+/**
+ * Require a route parameter to be present, throwing 400 if missing.
+ */
+export function requireRouteParam(
+  c: { req: { param: (name: string) => string | undefined } },
+  name: string
+): string {
+  const value = c.req.param(name);
+  if (!value) {
+    throw errors.badRequest(`${name} is required`);
+  }
+  return value;
+}

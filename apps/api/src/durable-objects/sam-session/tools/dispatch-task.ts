@@ -6,6 +6,15 @@
  * are set so the UI groups it as a subtask (same semantics as the
  * workspace-MCP dispatch path in `routes/mcp/dispatch-tool.ts`).
  */
+import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  mergeResourceRequirementLayers,
+  normalizeResourceRequirementsInput,
+  ResourceRequirementsValidationError,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   ResourceRequirements,
   TaskMode,
@@ -23,29 +32,18 @@ import { ulid } from '../../../lib/ulid';
 import { AppError } from '../../../middleware/error';
 import { requireProjectCapability } from '../../../middleware/project-auth';
 import { requireRepositoryOwnerAccess } from '../../../routes/projects/_helpers';
+import { samAssistantAttribution } from '../../../services/agent-authorship';
 import { generateBranchName } from '../../../services/branch-name';
-import {
-  CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS,
-  CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
-  capacityPlacementSnapshotSqlValues,
-} from '../../../services/capacity-placement-snapshot';
+import { capacityPlacementSnapshotSqlValues } from '../../../services/capacity-placement-snapshot';
 import { resolveTaskStartPlacementCredentialAttribution } from '../../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
-import {
-  collectStoredResourceRequirementLayers,
-  createPersistedTaskResourcePlanJson,
-  firstResourceRequirementLayer,
-  firstResourceRequirementLayerJson,
-  mergeResourceRequirementLayers,
-  normalizeResourceRequirementsInput,
-  ResourceRequirementsValidationError,
-} from '../../../services/resource-requirements-input';
 import { resolveSkillProfile } from '../../../services/skills';
 import { markTaskFailedIfNonTerminal } from '../../../services/task-failure';
 import { startTaskRunnerDO } from '../../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../../services/task-title';
 import type { AnthropicToolDef, ToolContext } from '../types';
+import { insertSamDispatchedTask } from './dispatch-task-storage';
 
 const VALID_TASK_MODES: TaskMode[] = ['task', 'conversation'];
 const VALID_WORKSPACE_PROFILES: WorkspaceProfile[] = ['full', 'lightweight'];
@@ -172,6 +170,8 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
   const maxDescLen =
     Number(env.SAM_DISPATCH_MAX_DESCRIPTION_LENGTH) || DEFAULT_MAX_DESCRIPTION_LENGTH;
   const description = input.description.trim().slice(0, maxDescLen);
+  // The child's first message is model-written, so it names the SAM assistant (constitution XV).
+  const childDescription = description + samAssistantAttribution();
 
   // ── Validate optional params (before any DB access) ───────────────────
   let vmSize: VMSize | undefined;
@@ -386,30 +386,17 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
 
   const now = new Date().toISOString();
 
-  // ── Insert task ────────────────────────────────────────────────────────
-  await env.DATABASE.prepare(
-    `INSERT INTO tasks (id, project_id, user_id, parent_task_id, chat_session_id, title, description,
-     status, execution_step, priority, dispatch_depth, output_branch, created_by,
-     task_mode, agent_profile_hint, skill_id, skill_hint, mission_id, triggered_by,
-     requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirement_plan_json, resource_requirements_source, resolved_reservation_json,
-     credential_attribution_user_id, credential_attribution_project_id, credential_attribution_source,
-     ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
-     created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
-     ?, ?, ?, ?, ?, 'mcp',
-     ?, ?, ?, ?, ?, ?,
-     ?, ?, ?,
-     ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
-     ?, ?)`
-  )
-    .bind(
+  // Task persistence is separate from placement and runtime startup.
+  const inserted = await insertSamDispatchedTask(
+    env,
+    [
       taskId,
       input.projectId,
       ctx.userId,
       parentTaskId,
       chatSessionId,
       taskTitle,
-      description,
+      childDescription,
       priority,
       dispatchDepth,
       branchName,
@@ -430,9 +417,12 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
       credentialAttributionSource,
       ...capacityPlacementSnapshotSqlValues(capacityPlacementSnapshot),
       now,
-      now
-    )
-    .run();
+      now,
+    ],
+    { id: input.missionId?.trim() || null, projectId: input.projectId }
+  );
+
+  if (!inserted.meta.changes) return { error: 'Mission no longer accepts new tasks' };
 
   // Record status event: null -> queued
   const statusEventId = ulid();
@@ -462,7 +452,7 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
       input.projectId,
       sessionId,
       'user',
-      description,
+      childDescription,
       null
     );
   } catch (err) {
@@ -502,7 +492,7 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
       userEmail: userRow?.email ?? null,
       githubId: userRow?.githubId ?? null,
       taskTitle,
-      taskDescription: description,
+      taskDescription: childDescription,
       repository: project.repository,
       installationId: project.installationId,
       outputBranch: branchName,

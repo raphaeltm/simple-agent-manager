@@ -1,12 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import * as schema from '../../../src/db/schema';
-import type { Env } from '../../../src/env';
-import { markRejectedBeforeEffects } from '../../../src/lib/operation-effect-boundary';
-import { AppError } from '../../../src/middleware/error';
+import type { OperationContext } from '@simple-agent-manager/operations';
 import {
   samAgentAnswer,
   samChatSend,
@@ -16,8 +10,8 @@ import {
   samProjectGet,
   samProjectsList,
   samWorkStop,
-} from '../../../src/operations/connector-operations';
-import { OperationError } from '../../../src/operations/errors';
+} from '@simple-agent-manager/operations';
+import { OperationError } from '@simple-agent-manager/operations';
 import {
   samChatRead,
   samIdeaCreate,
@@ -25,10 +19,19 @@ import {
   samIdeaUpdate,
   samProfilesList,
   samTasksList,
-} from '../../../src/operations/platform-operations';
-import type { OperationContext } from '../../../src/operations/types';
+} from '@simple-agent-manager/operations';
+import Database from 'better-sqlite3';
+import * as v from 'valibot';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../../src/db/schema';
+import type { Env } from '../../../src/env';
+import { markRejectedBeforeEffects } from '../../../src/lib/operation-effect-boundary';
+import { AppError } from '../../../src/middleware/error';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { executeConnectorWrite } from '../../../src/services/connector-execution';
 import * as projectData from '../../../src/services/project-data';
+import { sessionAccessFromGetSession } from '../../helpers/session-access-mock';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({
@@ -48,7 +51,7 @@ vi.mock('../../../src/services/submit-task', () => ({ submitTask: mocks.submit }
 vi.mock('../../../src/routes/chat-acp-interactions', () => ({
   answerAgentInteraction: mocks.answer,
 }));
-vi.mock('../../../src/routes/chat', () => ({ answerAttention: mocks.answer }));
+vi.mock('../../../src/routes/chat-attention', () => ({ answerAttention: mocks.answer }));
 vi.mock('../../../src/routes/chat-stop', () => ({ stopChat: mocks.stop }));
 vi.mock('../../../src/services/acp-interaction-store', () => ({
   snapshotInteractions: mocks.snapshot,
@@ -67,6 +70,17 @@ vi.mock('../../../src/services/task-terminal-cleanup', () => ({
 }));
 vi.mock('../../../src/services/project-data', () => ({
   getSession: mocks.getSession,
+  getSessionAccess: (...args: [unknown, string, string, string]) =>
+    sessionAccessFromGetSession(mocks.getSession)(...args),
+  getSessionWithAccessGrants: async (
+    env: unknown,
+    projectId: string,
+    sessionId: string,
+    userId: string
+  ) => ({
+    ...(await sessionAccessFromGetSession(mocks.getSession)(env, projectId, sessionId, userId)),
+    grants: [],
+  }),
   getMessages: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
   recordActivityEvent: vi.fn().mockResolvedValue(undefined),
   admitProjectEvent: vi.fn().mockResolvedValue({ accepted: true }),
@@ -74,12 +88,25 @@ vi.mock('../../../src/services/project-data', () => ({
 
 // External runtime boundaries are mocked. Identity, current memberships, queries,
 // admission, receipts and audit use actual SQLite and the production functions.
+/** A `session_summaries.attention_json` value as `getAttentionSummary` writes it. */
+function attention(markerId: string, createdAt: number, reason: string): string {
+  return JSON.stringify({
+    markerId,
+    kind: 'needs_input',
+    createdAt,
+    expiresAt: null,
+    reason,
+    options: [],
+  });
+}
+
 describe('connector operations current membership and creator authority', () => {
   let sqlite: Database.Database;
   let env: Env;
   function ctx(userId = 'owner'): OperationContext {
     return {
       env,
+      ports: createOperationPorts(env),
       actor: {
         userId,
         via: 'connector',
@@ -98,11 +125,15 @@ describe('connector operations current membership and creator authority', () => 
       schema.projects,
       schema.projectMembers,
       schema.tasks,
+      schema.sessionSnapshots,
       schema.agentProfiles,
       schema.taskStatusEvents,
       schema.sessionSummaries,
       schema.triggers,
       schema.platformSettings,
+      schema.asks,
+      schema.runtimeSecretRequests,
+      schema.operationsActionApprovals,
     ]);
     sqlite.exec(
       readFileSync(
@@ -135,8 +166,8 @@ describe('connector operations current membership and creator authority', () => 
     const session = sqlite.prepare(
       'INSERT INTO session_summaries (id,project_id,created_by_user_id,updated_at,attention_json) VALUES (?,?,?,?,?)'
     );
-    session.run('chat', 'project', 'owner', 20, '{"message":"Needs approval"}');
-    session.run('other-chat', 'secret', 'outsider', 21, '{"message":"Secret"}');
+    session.run('chat', 'project', 'owner', 20, attention('m-chat', 20, 'Needs approval'));
+    session.run('other-chat', 'secret', 'outsider', 21, attention('m-other', 21, 'Secret'));
     sqlite
       .prepare(
         "INSERT INTO tasks (id,project_id,user_id,title,status,chat_session_id,updated_at) VALUES ('task','project','owner','Work','completed','chat','2026-10-09')"
@@ -155,7 +186,12 @@ describe('connector operations current membership and creator authority', () => 
     });
     mocks.notifications.mockResolvedValue({
       notifications: [
-        { id: 'visible', projectId: 'project', title: 'Visible' },
+        {
+          id: 'visible',
+          projectId: 'project',
+          title: 'Visible',
+          createdAt: '2026-07-14T09:30:00.000Z',
+        },
         { id: 'secret', projectId: 'secret', title: 'Secret' },
       ],
     });
@@ -204,13 +240,131 @@ describe('connector operations current membership and creator authority', () => 
     expect((await samChatsList.run(ctx('unknown'), {})).chats).toEqual([]);
     expect((await samChatsList.run(ctx('colleague'), {})).chats[0]?.attention).toBeNull();
   });
-  it('inbox filters other projects and limits private interaction details to creator', async () => {
-    const inbox = await samInboxGet.run(ctx(), {});
-    expect(inbox.pending).toHaveLength(1);
-    expect(inbox.notifications.map((n) => n.id)).toEqual(['visible']);
-    expect(inbox.pending[0]?.link).toContain('/projects/project/chat/chat');
+  it('chats and project counts show questions held in D1 asks (slice G) to the chat creator only', async () => {
+    const future = Date.now() + 3_600_000;
+    sqlite.exec(`
+      INSERT INTO session_summaries (id,project_id,created_by_user_id,updated_at)
+        VALUES ('asking','project','owner',40);
+      INSERT INTO asks (id,project_id,assignee_kind,assignee_user_id,kind,blocking,title,body_md,
+          source_session_id,status,expires_at,created_at,updated_at)
+        VALUES ('ask-1','project','user','owner','question',1,'Pick','Pick a region.','asking','open',${future},35,35);
+      -- Attack: the same chat id under another project must not reach it.
+      INSERT INTO asks (id,project_id,assignee_kind,assignee_user_id,kind,blocking,title,body_md,
+          source_session_id,status,expires_at,created_at,updated_at)
+        VALUES ('ask-foreign','secret','user','owner','question',1,'Foreign','Foreign.','chat','open',${future},99,99);
+    `);
+    const chats = Object.fromEntries(
+      (await samChatsList.run(ctx(), {})).chats.map((chat) => [chat.id, chat])
+    );
+    expect(chats.asking?.attention).toMatchObject({
+      markerId: 'ask-1',
+      kind: 'needs_input',
+      reason: 'Pick a region.',
+    });
+    // The marker question in 'chat' stays; the foreign ask is not merged into it.
+    expect(chats.chat?.attention).toMatchObject({ markerId: 'm-chat' });
+    // Another member sees no attention on the owner's chat.
+    const colleague = Object.fromEntries(
+      (await samChatsList.run(ctx('colleague'), {})).chats.map((chat) => [chat.id, chat])
+    );
+    expect(colleague.asking?.attention).toBeNull();
+    // The project count includes the chat waiting on an asks question (control: closed → not).
+    const count = async () =>
+      (await samProjectsList.run(ctx(), {})).projects.find((p) => p.id === 'project')
+        ?.needsAttention;
+    expect(await count()).toBe(2);
+    sqlite.prepare("UPDATE asks SET status = 'answered' WHERE id = 'ask-1'").run();
+    expect(await count()).toBe(1);
+  });
+
+  it('chats carry their task state beside the lifecycle label, flagging a stale active label', async () => {
+    sqlite.exec(`
+      INSERT INTO tasks (id,project_id,user_id,title,status,execution_step,parent_task_id,updated_at)
+        VALUES ('child','project','owner','Child','in_progress','running','task','2026-10-09');
+      INSERT INTO session_summaries (id,project_id,created_by_user_id,updated_at,task_id,status)
+        VALUES ('live','project','owner',30,'child','active');
+      UPDATE session_summaries SET task_id='task', status='active' WHERE id='chat';
+      INSERT INTO tasks (id,project_id,user_id,title,status,updated_at)
+        VALUES ('foreign-task','secret','outsider','Secret','failed','2026-10-09');
+      INSERT INTO session_summaries (id,project_id,created_by_user_id,updated_at,task_id,status)
+        VALUES ('mismatch','project','owner',25,'foreign-task','active');
+    `);
+    const chats = Object.fromEntries(
+      (await samChatsList.run(ctx(), {})).chats.map((chat) => [chat.id, chat])
+    );
+    expect(chats.live?.operational).toEqual({
+      taskStatus: 'in_progress',
+      executionStep: 'running',
+      parentTaskId: 'task',
+      taskTerminal: false,
+      labelMayBeStale: false,
+    });
+    // The index still says active although the task completed.
+    expect(chats.chat).toMatchObject({
+      status: 'active',
+      operational: { taskStatus: 'completed', taskTerminal: true, labelMayBeStale: true },
+    });
+    // A task from another project is never attached, even when the index points at it.
+    expect(chats.mismatch?.operational).toBeNull();
+    expect(JSON.stringify(chats)).not.toContain('"taskStatus":"failed"');
+  });
+  it('tasks list carries lineage, execution step and the chat session for apps', async () => {
+    sqlite.exec(
+      "INSERT INTO tasks (id,project_id,user_id,title,status,execution_step,parent_task_id,chat_session_id,updated_at) VALUES ('child','project','owner','Child','in_progress','running','task','child-chat','2026-10-10')"
+    );
+    const tasks = Object.fromEntries(
+      (await samTasksList.run(ctx(), {})).tasks.map((task) => [task.id, task])
+    );
+    expect(tasks.child).toMatchObject({
+      parentTaskId: 'task',
+      executionStep: 'running',
+      sessionId: 'child-chat',
+    });
+    expect(tasks.task).toMatchObject({ parentTaskId: null, sessionId: 'chat' });
+  });
+  it('sam_chat_start accepts a bounded one-chat model and effort and forwards them', async () => {
+    const ok = v.safeParse(samChatStart.input, {
+      projectId: 'project',
+      message: 'Work',
+      model: 'claude-opus-5-5',
+      effort: 'high',
+    });
+    expect(ok.success && ok.output).toMatchObject({ model: 'claude-opus-5-5', effort: 'high' });
+    for (const bad of [{ model: 'x'.repeat(201) }, { model: '' }, { effort: 'turbo' }])
+      expect(
+        v.safeParse(samChatStart.input, { projectId: 'project', message: 'Work', ...bad }).success
+      ).toBe(false);
+    const result = await samChatStart.run(ctx(), {
+      projectId: 'project',
+      message: 'Work',
+      agentProfileId: 'profile',
+      model: 'claude-opus-5-5',
+      effort: 'high',
+    });
+    expect(mocks.submit.mock.calls[0]?.[3]).toMatchObject({
+      agentProfileId: 'profile',
+      model: 'claude-opus-5-5',
+      effort: 'high',
+    });
+    expect(result).toMatchObject({
+      agentOverrides: { model: 'claude-opus-5-5', effort: 'high', scope: 'this_chat_only' },
+    });
+    // No override, no override block.
+    expect(
+      await samChatStart.run(ctx(), { projectId: 'project', message: 'Again' })
+    ).not.toHaveProperty('agentOverrides');
+  });
+  it("inbox filters other projects and lists only the creator's questions, without a DO call per chat", async () => {
     mocks.snapshot.mockClear();
-    expect((await samInboxGet.run(ctx('colleague'), {})).pending).toEqual([]);
+    const inbox = await samInboxGet.run(ctx(), {});
+    expect(inbox.items.map((item) => item.ref)).toEqual(['attention:chat:m-chat']);
+    expect(inbox.notifications.map((n) => n.id)).toEqual(['visible']);
+    expect(inbox.items[0]?.link).toContain('/projects/project/chat/chat');
+    // Undated inbox items let a months-old notification pass for news (2026-10-21).
+    expect(inbox.items[0]?.createdAt).toBe(new Date(20).toISOString());
+    expect(inbox.notifications[0]?.createdAt).toBe('2026-07-14T09:30:00.000Z');
+    expect((await samInboxGet.run(ctx('colleague'), {})).items).toEqual([]);
+    // The shared list reads the D1 index only: no Durable Object call per chat.
     expect(mocks.snapshot).not.toHaveBeenCalled();
   });
   const writes = [
@@ -298,7 +452,7 @@ describe('connector operations current membership and creator authority', () => 
   });
   it('inbox cursor independently advances all sources without repeating exhausted sources', async () => {
     sqlite.exec(
-      "INSERT INTO session_summaries (id,project_id,created_by_user_id,updated_at,attention_json) VALUES ('older','project','owner',10,'{}'); INSERT INTO tasks (id,project_id,user_id,title,status,updated_at) VALUES ('older-task','project','owner','Older failure','failed','2026-10-08')"
+      `INSERT INTO session_summaries (id,project_id,created_by_user_id,updated_at,attention_json) VALUES ('older','project','owner',10,'${attention('m-older', 10, 'Older question')}'); INSERT INTO tasks (id,project_id,user_id,title,status,updated_at) VALUES ('older-task','project','owner','Older failure','failed','2026-10-08')`
     );
     mocks.notifications
       .mockResolvedValueOnce({
@@ -309,24 +463,16 @@ describe('connector operations current membership and creator authority', () => 
         notifications: [{ id: 'n2', projectId: 'project', title: 'Second' }],
         nextCursor: null,
       });
-    mocks.snapshot.mockResolvedValue({
-      pending: [
-        { interactionId: 'one', kind: 'permission' },
-        { interactionId: 'two', kind: 'permission' },
-      ],
-      settled: [],
-      cursor: null,
-    });
     const first = await samInboxGet.run(ctx(), { limit: 1 });
-    expect(first.pending.map((row) => row.sessionId)).toEqual(['chat']);
-    expect(first.pending[0]?.interactions).toHaveLength(2);
+    // Blocking items oldest first: the older question leads.
+    expect(first.items.map((row) => row.ref)).toEqual(['attention:older:m-older']);
     expect(first.tasks.map((row) => row.id)).toEqual(['task']);
     expect(first.nextCursor).not.toBeNull();
     const second = await samInboxGet.run(ctx(), {
       limit: 1,
       cursor: first.nextCursor ?? undefined,
     });
-    expect(second.pending.map((row) => row.sessionId)).toEqual(['older']);
+    expect(second.items.map((row) => row.ref)).toEqual(['attention:chat:m-chat']);
     expect(second.tasks.map((row) => row.id)).toEqual(['older-task']);
     expect(second.notifications.map((row) => row.id)).toEqual(['n2']);
     expect(second.nextCursor).toBeNull();
@@ -360,7 +506,7 @@ describe('connector operations current membership and creator authority', () => 
   });
   it('cross-project task and idea lists exclude foreign/revoked projects and support cursor paging', async () => {
     sqlite.exec(
-      "INSERT INTO tasks (id,project_id,user_id,title,status,updated_at) VALUES ('idea-a','project','owner','Idea A','draft','2026-10-09'),('idea-b','project','owner','Idea B','draft','2026-10-09'),('private','secret','outsider','Private','draft','2026-10-10')"
+      "INSERT INTO tasks (id,project_id,user_id,title,status,is_idea,updated_at) VALUES ('idea-a','project','owner','Idea A','draft',1,'2026-10-09'),('idea-b','project','owner','Idea B','draft',1,'2026-10-09'),('private','secret','outsider','Private','draft',1,'2026-10-10')"
     );
     const first = await samIdeasSearch.run(ctx(), { limit: 1 });
     expect(first.ideas.map((idea) => ('ideaId' in idea ? idea.ideaId : ''))).toEqual(['idea-b']);
@@ -376,13 +522,17 @@ describe('connector operations current membership and creator authority', () => 
     expect((await samTasksList.run(ctx(), {})).tasks).toEqual([]);
     expect((await samIdeasSearch.run(ctx(), {})).ideas).toEqual([]);
   });
-  it('transcripts page with exact cursor and distinguish concise from detailed content', async () => {
+  it('stored-row transcripts page with exact cursor and distinguish concise from detailed content', async () => {
     const text = 'x'.repeat(2500);
     vi.mocked(projectData.getMessages).mockResolvedValue({
       messages: [{ id: 'message', role: 'assistant', content: text, createdAt: 10, sequence: 2 }],
       hasMore: true,
     });
-    const first = await samChatRead.run(ctx(), { projectId: 'project', sessionId: 'chat' });
+    const first = await samChatRead.run(ctx(), {
+      projectId: 'project',
+      sessionId: 'chat',
+      unit: 'rows',
+    });
     expect(first.messages[0]?.content.length).toBe(2000);
     expect(first).toMatchObject({ untrustedContent: true, nextCursor: '[10,2,"message"]' });
     const detailed = await samChatRead.run(ctx(), {
@@ -391,6 +541,7 @@ describe('connector operations current membership and creator authority', () => 
       cursor: '[10,2,"message"]',
       response_format: 'detailed',
       includeToolPayloads: true,
+      unit: 'rows',
     });
     expect(detailed.messages[0]?.content).toBe(text);
     expect(projectData.getMessages).toHaveBeenLastCalledWith(
@@ -401,6 +552,35 @@ describe('connector operations current membership and creator authority', () => 
       { createdAt: 10, sequence: 2, id: 'message' },
       null,
       undefined
+    );
+  });
+  it('requires server-owned reservation for SAM and forwards its fence without accepting model identity', async () => {
+    const c: OperationContext = { ...ctx(), actor: { ...ctx().actor, via: 'sam' } };
+    await expect(
+      samChatStart.run(c, { projectId: 'project', message: 'Work' })
+    ).rejects.toMatchObject({
+      code: 'invalid_input',
+    });
+    expect(mocks.submit).not.toHaveBeenCalled();
+    c.samDispatchReservation = {
+      taskId: 'reserved-task',
+      sessionId: 'reserved-session',
+      initialMessageId: 'reserved-message',
+      statusEventId: 'reserved-status',
+    };
+    c.assertEffectAllowed = vi.fn().mockResolvedValue(undefined);
+    await samChatStart.run(c, { projectId: 'project', message: 'Work', agentProfileId: 'profile' });
+    expect(mocks.submit).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ id: 'owner' }),
+      'project',
+      { projectId: 'project', message: 'Work', agentProfileId: 'profile' },
+      expect.any(Function),
+      'sam',
+      'Claude',
+      undefined,
+      c.samDispatchReservation,
+      c.assertEffectAllowed
     );
   });
   it('replays a successful start by key without calling provisioning twice and denies after membership removal', async () => {
@@ -431,27 +611,35 @@ describe('connector operations current membership and creator authority', () => 
     expect(mocks.send).not.toHaveBeenCalled();
     sqlite
       .prepare(
-        "INSERT INTO tasks (id,project_id,user_id,title,status) VALUES ('missing','project','owner','Idea','completed')"
+        "INSERT INTO tasks (id,project_id,user_id,title,status,is_idea) VALUES ('missing','project','owner','Idea','completed',1)"
       )
       .run();
+    // `completed` is a reopenable idea status now (a done idea can be reopened to draft), so
+    // completed → ready is a rejected transition rather than a terminal state.
     await expect(
       samIdeaUpdate.run(c, { projectId: 'project', ideaId: 'missing', status: 'ready' })
-    ).rejects.toThrow('terminal status');
-    sqlite.prepare("UPDATE tasks SET status='draft' WHERE id='missing'").run();
+    ).rejects.toThrow('Invalid status transition: completed → ready');
+    // A parked idea can only be reopened, so cancelled → completed is still refused.
+    // (draft → completed is allowed now: that is "Mark done", which the old table forbade.)
+    sqlite.prepare("UPDATE tasks SET status='cancelled' WHERE id='missing'").run();
     await expect(
       samIdeaUpdate.run(c, { projectId: 'project', ideaId: 'missing', status: 'completed' })
     ).rejects.toThrow('Invalid status transition');
     expect(sqlite.prepare('SELECT count(*) AS n FROM cli_operation_receipts').get()).toEqual({
       n: 0,
     });
+    // The successful transition this test needs in order to prove the receipt IS reserved
+    // once a call succeeds. `draft -> ready` is no longer one: ideas are not run in place
+    // (program decision 1), so "Mark done" is the move a person makes from a draft.
+    sqlite.prepare("UPDATE tasks SET status='draft' WHERE id='missing'").run();
     const result = await samIdeaUpdate.run(c, {
       projectId: 'project',
       ideaId: 'missing',
-      status: 'ready',
+      status: 'completed',
     });
     expect(result.updated).toBe(true);
     expect(
-      await samIdeaUpdate.run(c, { projectId: 'project', ideaId: 'missing', status: 'ready' })
+      await samIdeaUpdate.run(c, { projectId: 'project', ideaId: 'missing', status: 'completed' })
     ).toEqual(result);
   });
 
@@ -515,12 +703,50 @@ describe('connector operations current membership and creator authority', () => 
     });
     expect(run).toHaveBeenCalledTimes(1);
   });
-  it('isolates a corrupt attention row and exposes batched pending choices in inbox', async () => {
+  it('inbox restarts the shared list from a cursor issued before the list moved there', async () => {
+    const cursor = JSON.stringify({ sessions: [30, 'recent-a'], tasks: null, notifications: null });
+    const next = await samInboxGet.run(ctx(), { cursor });
+    expect(next.items.map((row) => row.ref)).toEqual(['attention:chat:m-chat']);
+  });
+  it('inbox question notifications carry the marker and options needed to answer', async () => {
+    mocks.notifications.mockResolvedValue({
+      notifications: [
+        {
+          id: 'question',
+          projectId: 'project',
+          sessionId: 'chat',
+          type: 'needs_input',
+          title: 'Decision needed',
+          createdAt: '2026-10-25T09:30:00.000Z',
+          metadata: { attentionMarkerId: 'marker-1', category: 'decision', options: ['A', 'B', 3] },
+        },
+        {
+          id: 'done',
+          projectId: 'project',
+          sessionId: 'chat',
+          type: 'task_complete',
+          title: 'Done',
+          metadata: { attentionMarkerId: 'not-a-question' },
+        },
+      ],
+    });
+
+    const inbox = await samInboxGet.run(ctx(), {});
+
+    expect(inbox.notifications[0]).toMatchObject({
+      id: 'question',
+      projectId: 'project',
+      sessionId: 'chat',
+      question: { markerId: 'marker-1', category: 'decision', options: ['A', 'B'] },
+    });
+    expect(inbox.notifications[1]).not.toHaveProperty('question');
+  });
+  it('isolates a corrupt attention row in the inbox and still lists the others', async () => {
+    sqlite.exec(
+      `INSERT INTO session_summaries (id,project_id,created_by_user_id,updated_at,attention_json) VALUES ('good','project','owner',30,'${attention('m-good', 30, 'Good')}')`
+    );
     sqlite.prepare("UPDATE session_summaries SET attention_json='bad-json' WHERE id='chat'").run();
     const inbox = await samInboxGet.run(ctx(), {});
-    expect(inbox.pending[0]).toMatchObject({
-      attention: null,
-      interactions: [{ answerOptions: [{ id: 'allow', name: 'Allow once' }] }],
-    });
+    expect(inbox.items.map((row) => row.ref)).toEqual(['attention:good:m-good']);
   });
 });

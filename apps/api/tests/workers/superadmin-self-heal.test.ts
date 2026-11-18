@@ -8,16 +8,17 @@
  *   2. The `session.create.after` login hook — extracted from a real `createAuth`
  *      instance and invoked against real D1.
  *
- * The sentinel user `system_anonymous_trials` (status='system', seeded by
+ * The system user `system_anonymous_trials` (`SYSTEM_USER_ID`, status='system', seeded by
  * migration 0043) is the orphan that broke first-user promotion; every scenario
  * asserts it is never mutated and never counted as a "real" user.
  */
-import { TRIAL_ANONYMOUS_USER_ID } from '@simple-agent-manager/shared';
+import { SYSTEM_USER_ID } from '@simple-agent-manager/shared';
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { createAuth } from '../../src/auth';
 import migrationSql from '../../src/db/migrations/0062_login_time_superadmin_self_heal.sql?raw';
+import { FIRST_SUPERADMIN_SETTING } from '../../src/services/first-superadmin';
 
 /**
  * Miniflare's D1 `exec()` splits its input on newlines and runs each line as a
@@ -45,13 +46,16 @@ interface UserRow {
  * we clear any real users left over from prior tests and re-assert the sentinel.
  */
 async function resetUsers(): Promise<void> {
+  await env.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?')
+    .bind(FIRST_SUPERADMIN_SETTING)
+    .run();
   await env.DATABASE.prepare(`DELETE FROM users WHERE status != 'system'`).run();
   await env.DATABASE.prepare(
     `INSERT INTO users (id, email, email_verified, role, status)
      VALUES (?, 'anonymous-trials@simple-agent-manager.internal', 0, 'user', 'system')
      ON CONFLICT(id) DO UPDATE SET role = 'user', status = 'system'`,
   )
-    .bind(TRIAL_ANONYMOUS_USER_ID)
+    .bind(SYSTEM_USER_ID)
     .run();
 }
 
@@ -116,7 +120,7 @@ describe('migration 0062 — guarded superadmin backfill (real D1)', () => {
 
     expect(await getUser('real-1')).toMatchObject({ role: 'superadmin', status: 'active' });
     // Sentinel is never touched.
-    expect(await getUser(TRIAL_ANONYMOUS_USER_ID)).toMatchObject({ role: 'user', status: 'system' });
+    expect(await getUser(SYSTEM_USER_ID)).toMatchObject({ role: 'user', status: 'system' });
   });
 
   it('does nothing when two real users exist (not single-operator)', async () => {
@@ -159,7 +163,7 @@ describe('migration 0062 — guarded superadmin backfill (real D1)', () => {
     // not promote it — there is no real human to heal.
     await env.DATABASE.exec(MIGRATION_UPDATE_SQL);
 
-    expect(await getUser(TRIAL_ANONYMOUS_USER_ID)).toMatchObject({ role: 'user', status: 'system' });
+    expect(await getUser(SYSTEM_USER_ID)).toMatchObject({ role: 'user', status: 'system' });
     const superadmins = await env.DATABASE.prepare(
       `SELECT COUNT(*) AS n FROM users WHERE role = 'superadmin'`,
     ).first<{ n: number }>();
@@ -177,7 +181,7 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
     await hook({ userId: 'real-1' });
 
     expect(await getUser('real-1')).toMatchObject({ role: 'superadmin', status: 'active' });
-    expect(await getUser(TRIAL_ANONYMOUS_USER_ID)).toMatchObject({ role: 'user', status: 'system' });
+    expect(await getUser(SYSTEM_USER_ID)).toMatchObject({ role: 'user', status: 'system' });
   });
 
   it('is idempotent — a second login is a no-op', async () => {
@@ -210,22 +214,31 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
     expect(await getUser('real-1')).toMatchObject({ role: 'user' });
   });
 
-  it('never promotes a suspended user, even as sole operator', async () => {
-    await insertUser('real-1', { role: 'user', status: 'suspended' });
+  it('does not reopen administration after the one-time election has completed', async () => {
+    await insertUser('later-user', { role: 'user', status: 'pending' });
+    await env.DATABASE.prepare(
+      `INSERT INTO platform_settings (key, value, updated_by)
+       VALUES (?, json_object('version', 1, 'ownerId', 'deleted-owner'), NULL)`,
+    )
+      .bind(FIRST_SUPERADMIN_SETTING)
+      .run();
     const hook = await getSessionAfterHook();
 
-    await hook({ userId: 'real-1' });
+    await hook({ userId: 'later-user' });
 
-    expect(await getUser('real-1')).toMatchObject({ role: 'user', status: 'suspended' });
+    expect(await getUser('later-user')).toMatchObject({ role: 'user', status: 'pending' });
   });
 
-  it('promotes a sole pending user on login (edge case 10)', async () => {
-    await insertUser('real-1', { role: 'user', status: 'pending' });
+  it.each([
+    ['never promotes a suspended user, even as sole operator', 'suspended', { role: 'user', status: 'suspended' }],
+    ['promotes a sole pending user on login (edge case 10)', 'pending', { role: 'superadmin', status: 'active' }],
+  ])('%s', async (_name, status, expected) => {
+    await insertUser('real-1', { role: 'user', status });
     const hook = await getSessionAfterHook();
 
     await hook({ userId: 'real-1' });
 
-    expect(await getUser('real-1')).toMatchObject({ role: 'superadmin', status: 'active' });
+    expect(await getUser('real-1')).toMatchObject(expected);
   });
 
   it('promotes the sole user even when REQUIRE_APPROVAL is unset (open registration)', async () => {
@@ -241,14 +254,15 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
   it('never mutates the sentinel even if its id is passed as the login user', async () => {
     const hook = await getSessionAfterHook();
 
-    await hook({ userId: TRIAL_ANONYMOUS_USER_ID });
+    await hook({ userId: SYSTEM_USER_ID });
 
-    expect(await getUser(TRIAL_ANONYMOUS_USER_ID)).toMatchObject({ role: 'user', status: 'system' });
+    expect(await getUser(SYSTEM_USER_ID)).toMatchObject({ role: 'user', status: 'system' });
   });
 
-  it('honors an env-overridden sentinel id', async () => {
-    // Re-seed: a custom sentinel plus the real user. The default sentinel is
-    // removed so it cannot satisfy the "single operator" guard on its own.
+  it('never counts any status=system row as a real user, whatever its id', async () => {
+    // Re-seed: a differently-named system row plus the real user. The default system user is
+    // removed so only the status guard can keep the other row out of the "single operator"
+    // count. (The retired TRIAL_ANONYMOUS_USER_ID override is ignored.)
     await env.DATABASE.prepare(`DELETE FROM users`).run();
     await env.DATABASE.prepare(
       `INSERT INTO users (id, email, email_verified, role, status)
@@ -260,5 +274,138 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
     await hook({ userId: 'real-1' });
 
     expect(await getUser('real-1')).toMatchObject({ role: 'superadmin', status: 'active' });
+  });
+});
+
+/**
+ * The ordinary first-superadmin election runs in `session.create.before`. These tests create a
+ * session through BetterAuth's own `internalAdapter.createSession` (the path every sign-in takes,
+ * `services/session-factory.ts`), so the real hook chain runs against real D1.
+ */
+describe('session.create.before — first-superadmin election via BetterAuth (real D1)', () => {
+  beforeEach(resetUsers);
+
+  async function createSession(userId: string, overrides?: Record<string, unknown>) {
+    const auth = await createAuth(authEnv(overrides) as never);
+    const ctx = await auth.$context;
+    return ctx.internalAdapter.createSession(userId, false);
+  }
+
+  async function electionMarker(): Promise<string | null> {
+    const row = await env.DATABASE.prepare('SELECT value FROM platform_settings WHERE key = ?')
+      .bind(FIRST_SUPERADMIN_SETTING)
+      .first<{ value: string }>();
+    return row ? (JSON.parse(row.value) as { ownerId: string }).ownerId : null;
+  }
+
+  it('elects the sole real user when their first session is created', async () => {
+    await insertUser('first-user', { role: 'user', status: 'pending' });
+
+    const session = await createSession('first-user');
+
+    expect(session?.userId).toBe('first-user');
+    expect(await getUser('first-user')).toMatchObject({ role: 'superadmin', status: 'active' });
+    expect(await electionMarker()).toBe('first-user');
+  });
+
+  it('does not elect a new sign-up while another real account exists', async () => {
+    await insertUser('existing-user', { role: 'user', status: 'suspended' });
+    await insertUser('stranger', { role: 'user', status: 'pending' });
+
+    const session = await createSession('stranger');
+
+    expect(session?.userId).toBe('stranger');
+    expect(await getUser('stranger')).toMatchObject({ role: 'user', status: 'pending' });
+    expect(await electionMarker()).toBeNull();
+  });
+
+  it('still creates the session, unpromoted, when D1 fails the election writes', async () => {
+    await insertUser('first-user', { role: 'user', status: 'pending' });
+    // Fail every D1 batch (the election) and every UPDATE of users (the election and the
+    // after-hook self-heal), while BetterAuth's own session INSERT goes through.
+    const outage = () => Promise.reject(new Error('D1_ERROR: simulated outage'));
+    const failingWrites = new Proxy(env.DATABASE, {
+      get(target, property) {
+        if (property === 'batch') return outage;
+        if (property === 'prepare') {
+          return (sql: string) => {
+            const statement = target.prepare(sql);
+            if (!/^\s*UPDATE users\b/i.test(sql)) return statement;
+            return new Proxy(statement, {
+              get(inner, key) {
+                if (key === 'bind') return () => ({ run: outage, first: outage, all: outage });
+                if (key === 'run' || key === 'first' || key === 'all') return outage;
+                const value = Reflect.get(inner, key, inner) as unknown;
+                return typeof value === 'function' ? value.bind(inner) : value;
+              },
+            });
+          };
+        }
+        const value = Reflect.get(target, property, target) as unknown;
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+
+    const session = await createSession('first-user', { DATABASE: failingWrites });
+
+    expect(session?.userId).toBe('first-user');
+    const stored = await env.DATABASE.prepare('SELECT user_id FROM sessions WHERE id = ?')
+      .bind(session?.id)
+      .first<{ user_id: string }>();
+    expect(stored?.user_id).toBe('first-user');
+    expect(await getUser('first-user')).toMatchObject({ role: 'user', status: 'pending' });
+    expect(await electionMarker()).toBeNull();
+
+    // Liveness: the same user is elected on the next sign-in once D1 recovers.
+    await createSession('first-user');
+    expect(await getUser('first-user')).toMatchObject({ role: 'superadmin', status: 'active' });
+  });
+
+  it('recovers a deleted sole superadmin through BOOTSTRAP_OWNER_EMAIL (documented path)', async () => {
+    // The election is closed for good: its winner was deleted and only ordinary accounts remain.
+    await env.DATABASE.prepare(
+      `INSERT INTO platform_settings (key, value, updated_by)
+       VALUES (?, json_object('version', 1, 'ownerId', 'deleted-owner'), NULL)`,
+    )
+      .bind(FIRST_SUPERADMIN_SETTING)
+      .run();
+    await insertUser('member', { role: 'user', status: 'active' });
+    await insertUser('owner', { role: 'user', status: 'active' });
+    const recovery = { BOOTSTRAP_OWNER_EMAIL: 'owner@example.com' };
+
+    try {
+      // Without the binding, the closed election promotes nobody.
+      await createSession('owner');
+      expect(await getUser('owner')).toMatchObject({ role: 'user' });
+
+      await createSession('owner', recovery);
+
+      expect(await getUser('owner')).toMatchObject({ role: 'superadmin', status: 'active' });
+      expect(await getUser('member')).toMatchObject({ role: 'user', status: 'active' });
+    } finally {
+      await env.DATABASE.prepare(
+        `DELETE FROM platform_settings WHERE key = 'setup.bootstrapOwnerEstablished'`,
+      ).run();
+    }
+  });
+
+  it('skips the election on installer instances bound to BOOTSTRAP_OWNER_EMAIL', async () => {
+    await env.DATABASE.prepare(
+      `INSERT INTO platform_settings (key, value, updated_by)
+       VALUES ('setup.bootstrapOwnerEstablished', json_object('version', 1, 'ownerId', 'owner'), NULL)
+       ON CONFLICT(key) DO NOTHING`,
+    ).run();
+    await insertUser('member', { role: 'user', status: 'active' });
+
+    try {
+      await createSession('member', { BOOTSTRAP_OWNER_EMAIL: 'owner@example.com' });
+
+      expect(await getUser('member')).toMatchObject({ role: 'user', status: 'active' });
+      expect(await electionMarker()).toBeNull();
+    } finally {
+      await env.DATABASE.prepare(
+        `DELETE FROM platform_settings WHERE key = 'setup.bootstrapOwnerEstablished'`,
+      ).run();
+    }
   });
 });

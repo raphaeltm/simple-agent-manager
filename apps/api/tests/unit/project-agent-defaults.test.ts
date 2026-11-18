@@ -30,7 +30,9 @@ import { resolveProjectAgentDefault } from '../../src/services/project-agent-def
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const apiSrc = (rel: string) => readFileSync(resolve(process.cwd(), 'src', rel), 'utf8');
-const webSrc = (rel: string) => readFileSync(resolve(process.cwd(), '../web/src', rel), 'utf8');
+// Full paths from apps/api, so CI suite selection (scripts/quality/ci-suite-selection.test.ts)
+// can see which web files this suite reads.
+const webSrc = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 const sharedSrc = (rel: string) =>
   readFileSync(resolve(process.cwd(), '../../packages/shared/src', rel), 'utf8');
 
@@ -140,7 +142,7 @@ describe('resolveProjectAgentDefault', () => {
 });
 
 describe('Project agent defaults — schema', () => {
-  const schema = apiSrc('db/schema.ts');
+  const schema = apiSrc('../../../packages/worker-core/src/schema.ts');
 
   it('projects table has agent_defaults column', () => {
     expect(schema).toContain("agentDefaults: text('agent_defaults')");
@@ -389,7 +391,7 @@ describe('Project agent defaults — mapper', () => {
 });
 
 describe('Project agent defaults — task submit resolution', () => {
-  const submit = apiSrc('services/submit-task.ts');
+  const submit = apiSrc('services/submit-vm-task.ts');
 
   it('imports resolveProjectAgentDefault', () => {
     expect(submit).toContain('resolveProjectAgentDefault');
@@ -418,9 +420,9 @@ describe('Project agent defaults — UI section (unified)', () => {
   // unified ProjectAgentCard + ProjectAgentsSection pair. Behavioral tests
   // live in apps/web/tests/unit/components/project-agents-section.test.tsx;
   // here we only assert the structural wiring to the new unified section.
-  const card = webSrc('components/ProjectAgentCard.tsx');
-  const section = webSrc('components/ProjectAgentsSection.tsx');
-  const page = webSrc('pages/ProjectSettings.tsx');
+  const card = webSrc('../web/src/components/ProjectAgentCard.tsx');
+  const section = webSrc('../web/src/components/ProjectAgentsSection.tsx');
+  const page = webSrc('../web/src/components/project-settings/ProjectSettingsAgentsTab.tsx');
 
   it('ProjectAgentCard imports ModelSelect for model combobox reuse', () => {
     expect(card).toContain("from './ModelSelect'");

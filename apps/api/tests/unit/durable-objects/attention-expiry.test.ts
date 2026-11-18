@@ -1,11 +1,11 @@
+import { createAttentionMarker } from '@simple-agent-manager/project-data/internal/do/attention';
+import { processExpiredAttentionMarkers } from '@simple-agent-manager/project-data/internal/do/attention-expiry';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { runMigrations } from '../../../src/durable-objects/migrations';
-import { createAttentionMarker } from '../../../src/durable-objects/project-data/attention';
-import { processExpiredAttentionMarkers } from '../../../src/durable-objects/project-data/attention-expiry';
-import type { Env } from '../../../src/durable-objects/project-data/types';
 import {
   failedTaskIncompleteSnapshotMessage,
   failedTaskNoticeId,
@@ -691,7 +691,8 @@ describe('delivery-aware attention expiry', () => {
 
       expect(taskRow()).toMatchObject({
         status: 'failed',
-        error_message: 'SAM check-in expired after the workspace lost its node; agent progress is unknown',
+        error_message:
+          'SAM check-in expired after the workspace lost its node; agent progress is unknown',
       });
       expect(failSession).not.toHaveBeenCalled();
       expect(cleanupTaskRun).not.toHaveBeenCalled();
@@ -731,7 +732,8 @@ describe('delivery-aware attention expiry', () => {
 
       expect(taskRow()).toMatchObject({
         status: 'failed',
-        error_message: 'No agent response to SAM check-in by deadline; node heartbeat remained healthy',
+        error_message:
+          'No agent response to SAM check-in by deadline; node heartbeat remained healthy',
       });
       expect(snapshotRow()).toMatchObject({
         status: 'pending',
@@ -789,7 +791,8 @@ describe('delivery-aware attention expiry', () => {
 
         expect(taskRow()).toMatchObject({
           status: 'failed',
-          error_message: 'No agent response to SAM check-in by deadline; node heartbeat remained healthy',
+          error_message:
+            'No agent response to SAM check-in by deadline; node heartbeat remained healthy',
         });
         expect(snapshotRow()).toBeUndefined();
         expect(persistMessage).toHaveBeenCalledWith(

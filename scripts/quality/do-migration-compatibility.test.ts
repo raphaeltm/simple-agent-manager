@@ -63,11 +63,11 @@ describe('resolveDurableObjectMigrations', () => {
 
     const resolved = resolveDurableObjectMigrations(history, null);
 
-    expect(history).toHaveLength(22);
+    expect(history).toHaveLength(23);
     expect(legacyCreateCount).toBe(7);
     expect(resolved).toHaveLength(history.length);
     expect(resolved.every((migration) => migration.new_classes === undefined)).toBe(true);
-    expect(resolved.flatMap((migration) => migration.new_sqlite_classes ?? [])).toHaveLength(23);
+    expect(resolved.flatMap((migration) => migration.new_sqlite_classes ?? [])).toHaveLength(24);
     expect(loadCheckedInMigrations()).toEqual(history);
   });
 
@@ -85,12 +85,48 @@ describe('resolveDurableObjectMigrations', () => {
     });
   });
 
+  it('keeps every Durable Object class a migration created exported by the API Worker', () => {
+    // Cloudflare rejects a deploy that stops exporting a class an existing namespace depends on
+    // unless a `deleted_classes` migration (which irreversibly deletes storage) is added. Retired
+    // classes therefore stay exported as tombstones, e.g. durable-objects/retired-trial.ts.
+    const history = loadCheckedInMigrations();
+    const created = new Set<string>();
+    for (const migration of history) {
+      for (const name of [
+        ...(migration.new_classes ?? []),
+        ...(migration.new_sqlite_classes ?? []),
+      ])
+        created.add(name);
+      for (const name of (migration as { deleted_classes?: string[] }).deleted_classes ?? [])
+        created.delete(name);
+    }
+    const indexSource = readFileSync(
+      resolve(import.meta.dirname, '../../apps/api/src/index.ts'),
+      'utf8'
+    );
+    const exported = new Set<string>();
+    for (const match of indexSource.matchAll(/^export \{([^}]*)\} from /gm)) {
+      for (const part of match[1]!.split(',')) {
+        const name = part
+          .trim()
+          .split(/\s+as\s+/)
+          .at(-1);
+        if (name) exported.add(name);
+      }
+    }
+
+    expect(created.size).toBeGreaterThan(0);
+    expect([...created].filter((name) => !exported.has(name))).toEqual([]);
+    for (const retired of ['TrialCounter', 'TrialEventBus', 'TrialOrchestrator'])
+      expect(created.has(retired), retired).toBe(true);
+  });
+
   it('preserves the complete migration history for an existing deployment at the latest tag', () => {
     const history = loadCheckedInMigrations();
     const latestTag = history.at(-1)?.tag;
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 
-    expect(latestTag).toBe('v22');
+    expect(latestTag).toBe('v23');
     const resolved = resolveDurableObjectMigrations(history, latestTag ?? null);
     const envConfig = generateApiWorkerEnv(
       { migrations: history },
@@ -106,12 +142,21 @@ describe('resolveDurableObjectMigrations', () => {
     expect(envConfig.migrations).toEqual(history);
   });
 
+  it('adds the builder SQLite class after the immutable deployed v22 prefix', () => {
+    const history = loadCheckedInMigrations();
+    const resolved = resolveDurableObjectMigrations(history, 'v22');
+    expect(resolved.slice(0, 22)).toEqual(history.slice(0, 22));
+    expect(resolved.slice(22)).toEqual([
+      { tag: 'v23', new_sqlite_classes: ['ComposeBuilderContainer'] },
+    ]);
+  });
+
   it('appends both Reliability SQLite classes after an unchanged deployed v21 prefix', () => {
     const history = loadCheckedInMigrations();
     const resolved = resolveDurableObjectMigrations(history, 'v21');
     expect(resolved.slice(0, 21)).toEqual(history.slice(0, 21));
     resolved.slice(0, 21).forEach((entry, index) => expect(entry).toBe(history[index]));
-    expect(resolved.slice(21)).toEqual([
+    expect(resolved.slice(21, 22)).toEqual([
       { tag: 'v22', new_sqlite_classes: ['McpRateCounter', 'WorkspaceBootLog'] },
     ]);
     const clean = resolveDurableObjectMigrations(history, null);

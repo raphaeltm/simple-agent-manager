@@ -75,8 +75,8 @@ adminQuotaRoutes.put('/default', jsonValidator(UpdateQuotaLimitSchema), async (c
 /** GET /api/admin/quotas/users — list all user quota overrides with usage. */
 adminQuotaRoutes.get('/users', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
-  const defaultQuota = await getDefaultQuota(db);
-  const users = await listUserQuotasWithUsage(db);
+  const quota = getDefaultQuota(db);
+  const [defaultQuota, users] = await Promise.all([quota, listUserQuotasWithUsage(db, quota)]);
   return c.json({ defaultQuota, users });
 });
 

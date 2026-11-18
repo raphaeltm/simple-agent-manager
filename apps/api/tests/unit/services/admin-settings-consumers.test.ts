@@ -23,7 +23,6 @@ import {
   resolvePlatformConfig,
   savePlatformIntegrationConfig,
 } from '../../../src/services/platform-config-core';
-import { isTrialsEnabled, setTrialsEnabled } from '../../../src/services/trial/kill-switch';
 import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
 let sqlite: Database.Database;
 let env: Env;
@@ -44,26 +43,20 @@ describe('Phase 1 existing consumer integration', () => {
   });
   it('preserves defaults and legacy environment/KV values until a D1 override exists', async () => {
     env.CONNECTOR_ENABLED = 'false';
-    await env.KV.put('trials:enabled', 'true');
     await env.KV.put('control-loops:cron-enabled', 'disabled');
     expect((await getConnectorSettings(env)).enabled).toBe(false);
-    expect(await isTrialsEnabled(env)).toBe(true);
     expect(await isOperationalLoopEnabled(env, 'cron')).toBe(false);
     expect(await isOperationalLoopEnabled(env, 'alarms')).toBe(true);
     await updateAdminSettings(env, {
-      changes: [
-        { name: 'trials.enabled', value: false },
-        { name: 'operations.cronSweepsEnabled', value: true },
-      ],
+      changes: [{ name: 'operations.cronSweepsEnabled', value: true }],
       actorUserId: 'admin',
     });
-    expect(await isTrialsEnabled(env)).toBe(false);
     expect(await isOperationalLoopEnabled(env, 'cron')).toBe(true);
   });
   it('legacy writers share revision/audit and reset reveals environment without modifying legacy KV', async () => {
     env.CONNECTOR_WRITE_ENABLED = 'false';
     await updateConnectorSettings(env, { writeEnabled: true }, 'alice');
-    await setTrialsEnabled(env, true, Date.now(), 'bob');
+    await setOperationalLoopEnabled(env, 'cron', true, Date.now(), 'bob');
     await setOperationalLoopEnabled(env, 'alarms', false, Date.now(), 'carol');
     await updateConnectorSettings(env, { writeEnabled: null }, 'alice');
     const view = await readAdminSettings(env, { fresh: true });
@@ -75,12 +68,11 @@ describe('Phase 1 existing consumer integration', () => {
           action: 'reset',
           actorUserId: 'alice',
         }),
-        expect.objectContaining({ name: 'trials.enabled', actorUserId: 'bob' }),
+        expect.objectContaining({ name: 'operations.cronSweepsEnabled', actorUserId: 'bob' }),
         expect.objectContaining({ name: 'operations.doAlarmsEnabled', actorUserId: 'carol' }),
       ])
     );
     expect((await getConnectorSettings(env)).writeEnabled).toBe(false);
-    expect(await env.KV.get('trials:enabled')).toBeNull();
     const setAlarm = vi.fn();
     expect(
       await deferAlarmWhenDisabled(
@@ -133,13 +125,12 @@ describe('Phase 1 existing consumer integration', () => {
     ).rejects.toThrow();
     expect((await resolvePlatformConfig(env)).github.clientId.value).toBe('github-client');
   });
-  it('expired reads fail closed for trial/connector and preserve an observed disabled operations brake', async () => {
+  it('expired reads fail closed for connector and preserve an observed disabled operations brake', async () => {
     await setOperationalLoopEnabled(env, 'alarms', false);
     expect(await isOperationalLoopEnabled(env, 'alarms')).toBe(false);
     invalidateAdminSettings(env);
     sqlite.close();
     expect(await isOperationalLoopEnabled(env, 'alarms')).toBe(false);
-    expect(await isTrialsEnabled(env)).toBe(false);
     expect((await getConnectorSettings(env)).enabled).toBe(false);
   });
 });

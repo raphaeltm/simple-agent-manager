@@ -4,6 +4,7 @@
  *
  * dispatch_task lives in dispatch-tool.ts due to its size.
  */
+import { ensurePullRequest } from '@simple-agent-manager/operations';
 import {
   DEFAULT_NOTIFICATION_FULL_BODY_LENGTH,
   MAX_NOTIFICATION_BODY_LENGTH,
@@ -17,7 +18,6 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
-import { runWorkspaceOperation } from '../../operations/workspace-adapter';
 import * as notificationService from '../../services/notification';
 import * as orchestratorService from '../../services/project-orchestrator';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
@@ -39,6 +39,7 @@ import {
   type McpTokenData,
 } from './_helpers';
 import { recordMcpActivityEvent } from './activity-events';
+import { runWorkspaceOperation } from './workspace-operation-adapter';
 
 export async function handleUpdateTaskStatus(
   requestId: string | number | null,
@@ -61,8 +62,7 @@ export async function handleUpdateTaskStatus(
   if (
     !tokenData.taskId ||
     tokenData.contextType === 'conversation' ||
-    tokenData.contextType === 'direct-workspace' ||
-    tokenData.contextType === 'trial'
+    tokenData.contextType === 'direct-workspace'
   ) {
     await recordMcpActivityEvent(env, tokenData, {
       eventType: `${tokenData.contextType ?? 'session'}.progress`,
@@ -184,6 +184,33 @@ export async function handleCompleteTask(
   const evidenceJson = evidenceValidation?.ok ? JSON.stringify(evidenceValidation.value) : null;
   const completionPrUrl = evidenceValidation?.ok ? (evidenceValidation.value.prUrl ?? null) : null;
 
+  const rememberCompletionPr = async () => {
+    if (!completionPrUrl) return;
+    const project = await env.DATABASE.prepare('SELECT repository FROM projects WHERE id = ?')
+      .bind(tokenData.projectId)
+      .first<{ repository: string }>();
+    if (project)
+      await ensurePullRequest(env, tokenData.projectId, project.repository, completionPrUrl);
+  };
+  const rememberCompletionPrBestEffort = async () => {
+    try {
+      await rememberCompletionPr();
+    } catch (error) {
+      log.warn('mcp.complete_task.pr_storage_failed', {
+        taskId: tokenData.taskId,
+        error: String(error),
+      });
+      _executionCtx?.waitUntil(
+        rememberCompletionPr().catch((retryError) => {
+          log.warn('mcp.complete_task.pr_storage_retry_failed', {
+            taskId: tokenData.taskId,
+            error: String(retryError),
+          });
+        })
+      );
+    }
+  };
+
   const now = new Date().toISOString();
 
   // Check task mode — in conversation mode, complete_task silently remaps to awaiting_followup
@@ -234,6 +261,8 @@ export async function handleCompleteTask(
       );
     }
 
+    await rememberCompletionPrBestEffort();
+
     log.info('mcp.complete_task.conversation_remapped', {
       taskId: tokenData.taskId,
       projectId: tokenData.projectId,
@@ -248,28 +277,8 @@ export async function handleCompleteTask(
       failureLogEvent: 'mcp.complete_task.conversation_activity_event_failed',
     });
 
-    // Emit session_ended notification for conversation-mode remap (agent finished turn)
-    // Use tokenData.userId as authoritative target
-    if (env.NOTIFICATION && tokenData.userId) {
-      try {
-        const [projectName, sessionId] = await Promise.all([
-          notificationService.getProjectName(env, tokenData.projectId),
-          notificationService.getChatSessionId(env, tokenData.workspaceId),
-        ]);
-        await notificationService.notifySessionEnded(env, tokenData.userId, {
-          projectId: tokenData.projectId,
-          projectName,
-          sessionId,
-          taskId: tokenData.taskId,
-          taskTitle: taskRow.title,
-        });
-      } catch (err) {
-        log.warn('mcp.complete_task.conversation_notification_failed', {
-          taskId: tokenData.taskId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
+    // No "your turn" notification: the agent files what the person needs in the inbox
+    // (spec decision 2 of idea 01M7G03ZCQ6TM6CMEYDRKQ8ST9; inbox Result items).
 
     return jsonRpcSuccess(requestId, {
       content: [{ type: 'text', text: 'Acknowledged. Conversation remains open for follow-up.' }],
@@ -308,6 +317,8 @@ export async function handleCompleteTask(
       'Task cannot be completed — it may not exist or is not in a completable status'
     );
   }
+
+  await rememberCompletionPrBestEffort();
 
   const completedEvent: TaskTerminalTransitionEvent = {
     transitionId: ulid(),

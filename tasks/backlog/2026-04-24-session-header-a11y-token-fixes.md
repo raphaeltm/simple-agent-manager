@@ -1,5 +1,11 @@
 # Session Header Accessibility and Design Token Fixes
 
+> **Reconciliation 2026-10-26:** no item fixed; #2389, #2417 and #2431 moved the cited lines. In
+> `SessionHeader.tsx` the undefined tokens are now `:319,509-510`, the task badge `:499-524` (its
+> only icon, completed, at `:521`) and the "Expired" chip `:288-289`. In `SessionToolRail.tsx` the
+> focus-ring buttons are `:157,233,306` and the Details `aria-expanded` is `:171`, still without
+> `aria-controls`.
+
 > **Reconciliation 2026-10-12:** no item fixed, but #2280 (`90cbf4ea4`) and #2238 (`0366b17d9`)
 > moved the cited lines in `apps/web/src/components/project-message-view/SessionHeader.tsx`: the
 > undefined tokens are now `:289,473-474`, and the task badge is `:463-488` (its only icon,
@@ -32,7 +38,7 @@
 >   - #12: `allowedHosts: true` in `apps/web/vite.config.ts:118` is still undocumented.
 > - **Moot/dropped:** #5 (44px touch targets). Current guidance says not to demand larger touch
 >   targets (`.claude/agents/ui-ux-specialist/UI_UX_SPECIALIST.md:31,73`,
->   `apps/web/.claude/rules/17-ui-visual-testing.md:69`).
+>   `.claude/rules/17-ui-visual-testing.md:69`).
 
 **Created**: 2026-04-24
 **Source**: Post-merge UI/UX specialist review + task-completion-validator of PR #804
@@ -87,3 +93,8 @@ The session header enhancements (PR #804) shipped with several accessibility gap
 - [ ] `hasDetails` constant removed, guards simplified
 - [ ] Playwright visual audit spec added with long-ID mock data scenarios
 - [ ] `allowedHosts: true` in vite.config.ts documented or reverted
+
+## Reconciliation (2026-11-09 weekly queue sweep)
+
+- Evidence: #1,#4,#9,#11 shipped earlier; undefined tokens gone after header split (#2535/#2594); CopyableId.tsx no aria-live; SessionToolRail.tsx:175 aria-expanded without aria-controls; SessionHeaderDetails.tsx icon only for completed; vite.config.ts:118 allowedHosts undocumented
+- Status: Remaining: copy announcement (#6), aria-controls (#7), failed icon (#8), cancelled/sleeping/expired badge (#10), allowedHosts comment (#12)

@@ -14,7 +14,14 @@ import {
 
 import type { Env } from '../env';
 import { AppError } from '../middleware/error';
-import { CALLBACK_TOKEN_GENERATION_ISSUED_AT_CLAIM } from './callback-token-claims';
+import {
+  CALLBACK_TOKEN_CREDENTIAL_GENERATION_CLAIM,
+  CALLBACK_TOKEN_GENERATION_ISSUED_AT_CLAIM,
+} from './callback-token-claims';
+import {
+  assertCallbackCredentialGenerationCurrent,
+  loadCallbackCredentialGeneration,
+} from './callback-token-generation';
 
 // Key ID format: key-YYYY-MM (rotates monthly)
 const KEY_ID = `key-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
@@ -53,6 +60,18 @@ function getIssuer(env: Env): string {
 }
 
 /**
+ * A token's expiry: `expiryMs` from now, but never later than `notAfter` when given. Session
+ * routes pass an agent sign-in session's hard expiry (`credentialNotAfter`), so a token minted by
+ * that session cannot outlive it.
+ */
+function cappedExpiry(expiryMs: number, notAfter?: Date, now = Date.now()): Date {
+  // requireAuth already refuses a session past its cap; never mint an already-dead token.
+  if (notAfter && notAfter.getTime() <= now) throw new Error('Session credential cap has passed');
+  const expiresAt = now + expiryMs;
+  return new Date(notAfter ? Math.min(expiresAt, notAfter.getTime()) : expiresAt);
+}
+
+/**
  * Get terminal token expiry in milliseconds.
  * Default: 1 hour.
  */
@@ -78,16 +97,19 @@ export async function signTerminalToken(
   userId: string,
   workspaceId: string,
   env: Env,
-  options: { sessionToken?: string | null } = {}
+  options: { sessionToken?: string | null; notAfter?: Date } = {}
 ): Promise<{ token: string; expiresAt: string }> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
-  const expiry = getTerminalTokenExpiry(env);
-  const expiresAt = new Date(Date.now() + expiry);
+  const expiresAt = cappedExpiry(getTerminalTokenExpiry(env), options.notAfter);
   const issuer = getIssuer(env);
 
   const token = await new SignJWT({
     workspace: workspaceId,
     ...(options.sessionToken ? { sessionToken: options.sessionToken } : {}),
+    // The VM agent turns this token into its own session cookie (SESSION_TTL, 24 h by default)
+    // and caps that session here (packages/vm-agent/internal/auth/session.go sessionExpiry), so a
+    // capped control-plane session's terminal access ends with it even off the Worker path.
+    ...(options.notAfter ? { sessionNotAfter: Math.floor(options.notAfter.getTime() / 1000) } : {}),
   })
     .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
     .setIssuer(issuer)
@@ -106,6 +128,21 @@ export async function signTerminalToken(
 export interface SignCallbackTokenOptions {
   /** Generation issue time (seconds) to preserve when renewing an existing token. */
   generationIssuedAtSeconds?: number;
+  /**
+   * The row's current credential generation (`callback_generation`). Required, so every
+   * signer states which runtime the token belongs to; null when the row was never rotated.
+   */
+  callbackGeneration: string | null;
+}
+
+export interface SignNodeCallbackTokenOptions {
+  /** The node row's current credential generation; null when never rotated. */
+  callbackGeneration: string | null;
+}
+
+function credentialGenerationClaim(generation: string | null): Record<string, string> {
+  // `!generation`: never mint an empty claim, which the verifier rejects as malformed.
+  return !generation ? {} : { [CALLBACK_TOKEN_CREDENTIAL_GENERATION_CLAIM]: generation };
 }
 
 /**
@@ -119,7 +156,7 @@ export interface SignCallbackTokenOptions {
 export async function signCallbackToken(
   workspaceId: string,
   env: Env,
-  options: SignCallbackTokenOptions = {}
+  options: SignCallbackTokenOptions
 ): Promise<string> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
   const expiry = getCallbackTokenExpiry(env);
@@ -134,6 +171,7 @@ export async function signCallbackToken(
     ...(generationIssuedAt !== undefined
       ? { [CALLBACK_TOKEN_GENERATION_ISSUED_AT_CLAIM]: generationIssuedAt }
       : {}),
+    ...credentialGenerationClaim(options.callbackGeneration),
   })
     .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
     .setIssuer(issuer)
@@ -154,7 +192,11 @@ export async function signCallbackToken(
  * Node-scoped tokens CANNOT be used for workspace-scoped endpoints (agent-key,
  * runtime-assets, etc.) to prevent cross-workspace secret access on multi-tenant nodes.
  */
-export async function signNodeCallbackToken(nodeId: string, env: Env): Promise<string> {
+export async function signNodeCallbackToken(
+  nodeId: string,
+  env: Env,
+  options: SignNodeCallbackTokenOptions
+): Promise<string> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
   const expiry = getCallbackTokenExpiry(env);
   const expiresAt = new Date(Date.now() + expiry);
@@ -164,6 +206,7 @@ export async function signNodeCallbackToken(nodeId: string, env: Env): Promise<s
     workspace: nodeId,
     type: 'callback',
     scope: 'node',
+    ...credentialGenerationClaim(options.callbackGeneration),
   })
     .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
     .setIssuer(issuer)
@@ -177,17 +220,37 @@ export async function signNodeCallbackToken(nodeId: string, env: Env): Promise<s
 }
 
 /**
+ * Sign a workspace callback token for the workspace row's CURRENT credential generation
+ * (one D1 read). For credentials handed to the runtime that is being created or dispatched
+ * now. Paths that renew or deliver to an existing runtime must instead carry the generation
+ * they verified or bound, so a retired runtime is never handed a current-generation token.
+ */
+export async function signCurrentWorkspaceCallbackToken(
+  workspaceId: string,
+  env: Env
+): Promise<string> {
+  const generation = await loadCallbackCredentialGeneration(env, 'workspace', workspaceId);
+  return signCallbackToken(workspaceId, env, { callbackGeneration: generation ?? null });
+}
+
+/** Node counterpart of {@link signCurrentWorkspaceCallbackToken}. */
+export async function signCurrentNodeCallbackToken(nodeId: string, env: Env): Promise<string> {
+  const generation = await loadCallbackCredentialGeneration(env, 'node', nodeId);
+  return signNodeCallbackToken(nodeId, env, { callbackGeneration: generation ?? null });
+}
+
+/**
  * Sign a management token for Control Plane -> Node Agent API calls.
  */
 export async function signNodeManagementToken(
   userId: string,
   nodeId: string,
   workspaceId: string | null,
-  env: Env
+  env: Env,
+  options: { notAfter?: Date } = {}
 ): Promise<{ token: string; expiresAt: string }> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
-  const expiry = getTerminalTokenExpiry(env);
-  const expiresAt = new Date(Date.now() + expiry);
+  const expiresAt = cappedExpiry(getTerminalTokenExpiry(env), options.notAfter);
   const issuer = getIssuer(env);
 
   const token = await new SignJWT({
@@ -209,17 +272,19 @@ export async function signNodeManagementToken(
   };
 }
 
-/** Token scope discriminator. Legacy tokens (pre-scoping) have no scope claim. */
+/** Token scope discriminator. Every callback token names exactly one scope. */
 export type CallbackTokenScope = 'node' | 'workspace';
 
-/**
- * Payload structure for verified callback tokens.
- * `scope` is optional for backward compatibility with legacy tokens.
- */
+/** Payload structure for verified callback tokens. */
 export interface CallbackTokenPayload {
   workspace: string;
   type: 'callback';
-  scope?: CallbackTokenScope;
+  scope: CallbackTokenScope;
+  /**
+   * The token's credential generation (`cgen`), null when absent. Verification has already
+   * proved it equals the row's current generation; renewals must carry it forward.
+   */
+  callbackGeneration: string | null;
 }
 
 export interface TerminalTokenPayload {
@@ -246,9 +311,18 @@ export interface LocalForwardTokenPayload {
 
 /**
  * Verify a callback token from VM Agent.
- * Returns the payload including the optional scope claim.
  *
- * @throws Error if token is invalid, expired, or has wrong audience
+ * Fails closed on anything SAM never mints: a missing or unknown `scope` (unscoped tokens
+ * stopped being issued in #483, and every renewal path mints scoped tokens) or a missing
+ * `iat` (every signer calls `setIssuedAt`, and the Instant stale-callback guard needs it).
+ *
+ * Also rejects a token from a retired runtime: its `cgen` claim must equal the current
+ * `callback_generation` of the workspace or node row it names (one D1 read). This is the
+ * single place every callback sink inherits revocation across reactivation from, so the
+ * check lives here rather than at each sink (`callback-token-generation.ts`).
+ *
+ * @throws AppError 401 if the token is invalid, expired, has the wrong audience, or lacks
+ *   a required claim; 403 if `expectedScope` is set and does not match.
  */
 export async function verifyCallbackToken(
   token: string,
@@ -280,24 +354,83 @@ export async function verifyCallbackToken(
     throw callbackTokenUnauthorized('Missing workspace claim');
   }
 
-  // Extract and validate optional scope claim (legacy tokens won't have it)
   const rawScope = payload.scope;
-  if (rawScope !== undefined && rawScope !== 'node' && rawScope !== 'workspace') {
-    throw callbackTokenUnauthorized('Invalid token scope claim');
+  if (rawScope !== 'node' && rawScope !== 'workspace') {
+    throw callbackTokenUnauthorized(
+      rawScope === undefined ? 'Missing token scope claim' : 'Invalid token scope claim'
+    );
   }
-  const scope = rawScope as CallbackTokenScope | undefined;
+  const scope: CallbackTokenScope = rawScope;
+
+  if (typeof payload.iat !== 'number' || !Number.isSafeInteger(payload.iat) || payload.iat <= 0) {
+    throw callbackTokenUnauthorized('Missing token issue time');
+  }
+
+  const rawGeneration = payload[CALLBACK_TOKEN_CREDENTIAL_GENERATION_CLAIM];
+  if (rawGeneration !== undefined && (typeof rawGeneration !== 'string' || rawGeneration === '')) {
+    throw callbackTokenUnauthorized('Invalid token generation claim');
+  }
+  const callbackGeneration: string | null =
+    typeof rawGeneration === 'string' ? rawGeneration : null;
 
   // Enforce expected scope when specified (unified scope check — F-010)
   if (options?.expectedScope && scope !== options.expectedScope) {
     throw callbackTokenForbidden(
-      `Token scope '${scope ?? 'none'}' does not match expected '${options.expectedScope}'`
+      `Token scope '${scope}' does not match expected '${options.expectedScope}'`
     );
   }
+
+  await assertCallbackCredentialGenerationCurrent(
+    env,
+    scope,
+    payload.workspace,
+    callbackGeneration
+  );
 
   return {
     workspace: payload.workspace,
     type: 'callback',
     scope,
+    callbackGeneration,
+  };
+}
+
+/** Verify only publish-job claims. Callers must additionally bind these claims to
+ * the current non-terminal job row and attempt in publish-job-token.ts. Generic
+ * workspace/node callback sinks continue to reject the publish-job scope. */
+export async function verifyPublishJobClaims(env: Env, token: string) {
+  const key = await importSPKI(env.JWT_PUBLIC_KEY, 'RS256');
+  let payload;
+  try {
+    ({ payload } = await jwtVerify(token, key, {
+      algorithms: ['RS256'],
+      issuer: `https://api.${env.BASE_DOMAIN}`,
+      audience: CALLBACK_AUDIENCE,
+    }));
+  } catch {
+    throw new AppError(401, 'UNAUTHORIZED', 'Invalid or expired publish job token');
+  }
+  if (
+    payload.scope !== 'publish-job' ||
+    payload.type !== 'callback' ||
+    typeof payload.jobId !== 'string' ||
+    payload.sub !== payload.jobId ||
+    typeof payload.projectId !== 'string' ||
+    typeof payload.environmentId !== 'string' ||
+    typeof payload.agentProfileId !== 'string' ||
+    typeof payload.attempt !== 'number' ||
+    !Number.isSafeInteger(payload.attempt) ||
+    payload.attempt < 1 ||
+    typeof payload.iat !== 'number' ||
+    typeof payload.exp !== 'number'
+  )
+    throw new AppError(401, 'UNAUTHORIZED', 'Invalid publish job claims');
+  return {
+    jobId: payload.jobId,
+    projectId: payload.projectId,
+    environmentId: payload.environmentId,
+    agentProfileId: payload.agentProfileId,
+    attempt: payload.attempt,
   };
 }
 
@@ -361,11 +494,12 @@ export async function signPortAccessToken(
   userId: string,
   workspaceId: string,
   port: number,
-  env: Env
+  env: Env,
+  options: { notAfter?: Date } = {}
 ): Promise<string> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
-  const expiry = getPortAccessTokenExpiry(env);
-  const expiresAt = new Date(Date.now() + expiry);
+  const now = Date.now();
+  const expiresAt = cappedExpiry(getPortAccessTokenExpiry(env), options.notAfter, now);
   const issuer = getIssuer(env);
 
   const token = await new SignJWT({
@@ -377,7 +511,7 @@ export async function signPortAccessToken(
     .setSubject(userId)
     .setAudience(PORT_ACCESS_AUDIENCE)
     .setExpirationTime(expiresAt)
-    .setIssuedAt()
+    .setIssuedAt(Math.floor(now / 1000))
     .sign(privateKey);
 
   return token;
@@ -419,11 +553,12 @@ export async function verifyPortAccessToken(
 
 export async function signLocalForwardToken(
   claims: Omit<LocalForwardTokenPayload, 'subject'>,
-  env: Env
+  env: Env,
+  options: { notAfter?: Date } = {}
 ): Promise<{ token: string; expiresAt: string }> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
-  const expiry = getLocalForwardTokenExpiry(env);
-  const expiresAt = new Date(Date.now() + expiry);
+  const now = Date.now();
+  const expiresAt = cappedExpiry(getLocalForwardTokenExpiry(env), options.notAfter, now);
   const issuer = getIssuer(env);
 
   const token = await new SignJWT({
@@ -440,7 +575,7 @@ export async function signLocalForwardToken(
     .setSubject(claims.userId)
     .setAudience(LOCAL_FORWARD_AUDIENCE)
     .setExpirationTime(expiresAt)
-    .setIssuedAt()
+    .setIssuedAt(Math.floor(now / 1000))
     .sign(privateKey);
 
   return {
@@ -588,6 +723,7 @@ export async function signIdentityToken(
 ): Promise<string> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
   const expirySeconds = expirySecondsOverride ?? getIdentityTokenExpiry(env);
+  const issuedAt = Math.floor(Date.now() / 1000);
   const issuer = getIssuer(env);
 
   const token = await new SignJWT({
@@ -601,8 +737,8 @@ export async function signIdentityToken(
     .setIssuer(issuer)
     .setSubject(`project:${claims.projectId}`)
     .setAudience(claims.audience)
-    .setExpirationTime(`${expirySeconds}s`)
-    .setIssuedAt()
+    .setExpirationTime(issuedAt + expirySeconds)
+    .setIssuedAt(issuedAt)
     .sign(privateKey);
 
   return token;

@@ -12,12 +12,17 @@ import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
 import { ulid } from '../../../lib/ulid';
+import {
+  samAssistantAttribution,
+  withoutAuthorAttribution,
+} from '../../../services/agent-authorship';
 import { generateBranchName } from '../../../services/branch-name';
 import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS,
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
   capacityPlacementSnapshotSqlValues,
 } from '../../../services/capacity-placement-snapshot';
+import { resolveSystemErrorFor } from '../../../services/inbox/system-error-resolve';
 import { resolveTaskStartPlacementCredentialAttribution } from '../../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
@@ -106,8 +111,6 @@ export async function retrySubtask(
       projectInstallationId: schema.projects.installationId,
       projectDefaultBranch: schema.projects.defaultBranch,
       projectDefaultVmSize: schema.projects.defaultVmSize,
-      projectDefaultProvider: schema.projects.defaultProvider,
-      projectDefaultLocation: schema.projects.defaultLocation,
       projectDefaultWorkspaceProfile: schema.projects.defaultWorkspaceProfile,
       projectDefaultDevcontainerConfigName: schema.projects.defaultDevcontainerConfigName,
       projectDefaultAgentType: schema.projects.defaultAgentType,
@@ -136,11 +139,14 @@ export async function retrySubtask(
   const deletionError = await replacementDeletionError(env, taskId, original.projectId, ctx.userId);
   if (deletionError) return deletionError;
 
-  // Use new description or fall back to original
-  const description = input.newDescription?.trim() || original.description;
+  // Use new description or fall back to original, without the author line it already carries
+  const description =
+    input.newDescription?.trim() || withoutAuthorAttribution(original.description ?? '');
   if (!description) {
     return { error: 'Task has no description and no newDescription was provided.' };
   }
+  // The replacement's first message is model-written, so it names the SAM assistant (constitution XV).
+  const childDescription = description + samAssistantAttribution();
 
   // Resolve matching profiles before interpreting a persisted legacy agent-type
   // hint. Skill defaults/overrides retain their original layering semantics.
@@ -181,8 +187,6 @@ export async function retrySubtask(
       project: {
         id: original.projectId,
         defaultVmSize: original.projectDefaultVmSize,
-        defaultProvider: original.projectDefaultProvider,
-        defaultLocation: original.projectDefaultLocation,
         defaultWorkspaceProfile: original.projectDefaultWorkspaceProfile,
         defaultDevcontainerConfigName: original.projectDefaultDevcontainerConfigName,
         defaultAgentType: original.projectDefaultAgentType,
@@ -242,28 +246,34 @@ export async function retrySubtask(
   const now = new Date().toISOString();
 
   // Insert new task + status event (batched for atomicity)
-  await env.DATABASE.batch([
+  const [inserted] = await env.DATABASE.batch([
     env.DATABASE.prepare(
+      // triggered_by 'mcp' like dispatch_task: the agent started this, not the person, so it
+      // must not count as their own new chat (e.g. the new-chat profile picker's recents).
       `INSERT INTO tasks (id, project_id, user_id, chat_session_id, title, description,
        status, execution_step, priority, dispatch_depth, output_branch, created_by,
-       task_mode, agent_profile_hint, skill_id, skill_hint, mission_id, coordination_channel,
+       task_mode, agent_profile_hint, skill_id, skill_hint, mission_id, coordination_channel, triggered_by,
        requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirements_source, resolved_reservation_json,
        credential_attribution_user_id, credential_attribution_project_id, credential_attribution_source,
        ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
        created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'queued', 'node_selection', 0, 0, ?, ?,
-       ?, ?, ?, ?, ?, ?,
+       SELECT ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', 0, 0, ?, ?,
+       ?, ?, ?, ?, ?, ?, 'mcp',
        ?, ?, ?, ?, ?,
        ?, ?, ?,
        ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
-       ?, ?)`
+       ?, ?
+       WHERE (? IS NULL OR EXISTS (
+         SELECT 1 FROM missions WHERE id = ? AND project_id = ?
+         AND status NOT IN ('cancelled', 'completed', 'failed')
+       ))`
     ).bind(
       newTaskId,
       original.projectId,
       ctx.userId,
       chatSessionId,
       taskTitle,
-      description,
+      childDescription,
       branchName,
       ctx.userId,
       resolvedTaskMode,
@@ -282,14 +292,19 @@ export async function retrySubtask(
       resolvedCredentialAttributionSource,
       ...capacityPlacementSnapshotSqlValues(capacityPlacementSnapshot),
       now,
-      now
+      now,
+      original.missionId ?? null,
+      original.missionId ?? null,
+      original.projectId
     ),
     env.DATABASE.prepare(
       `INSERT INTO task_status_events (id, task_id, from_status, to_status,
        actor_type, actor_id, reason, created_at)
-       VALUES (?, ?, NULL, 'queued', 'user', ?, ?, ?)`
-    ).bind(ulid(), newTaskId, ctx.userId, `Retry of task ${taskId} via SAM`, now),
+       SELECT ?, ?, NULL, 'queued', 'user', ?, ?, ? WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ?)`
+    ).bind(ulid(), newTaskId, ctx.userId, `Retry of task ${taskId} via SAM`, now, newTaskId),
   ]);
+
+  if (!inserted?.meta.changes) return { error: 'Mission no longer accepts retried tasks' };
 
   // Create chat session
   let sessionId: string;
@@ -308,7 +323,7 @@ export async function retrySubtask(
       original.projectId,
       sessionId,
       'user',
-      description,
+      childDescription,
       null
     );
   } catch (err) {
@@ -352,7 +367,7 @@ export async function retrySubtask(
       userEmail: userRow?.email ?? null,
       githubId: userRow?.githubId ?? null,
       taskTitle,
-      taskDescription: description,
+      taskDescription: childDescription,
       repository: original.projectRepository,
       installationId: original.projectInstallationId,
       outputBranch: branchName,
@@ -400,6 +415,15 @@ export async function retrySubtask(
 
   const appDomain = `app.${env.BASE_DOMAIN}`;
   const taskUrl = `https://${appDomain}/projects/${original.projectId}/ideas/${newTaskId}`;
+
+  // The retry worked: the original task's inbox error item closes (slice E). Never throws.
+  await resolveSystemErrorFor(env, {
+    projectId: original.projectId,
+    source: 'task',
+    subjectId: taskId,
+    resolution: 'retried',
+    resolvedByUserId: ctx.userId,
+  });
 
   log.info('sam.retry_subtask.created', {
     originalTaskId: taskId,

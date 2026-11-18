@@ -4,9 +4,18 @@ import { type drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { maybeJsonRecord } from '../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { buildSamBootstrapInstructions } from './agent-bootstrap-prompt';
+import {
+  createAcpSessionWithLogging,
+  type FreshStartReason,
+  persistFreshStartNotice,
+  prepareAcpSessionForFreshStart,
+  runMaybePhased,
+  transitionAcpSessionToRunning,
+} from './agent-session-acp-lifecycle';
 import { buildSessionMcpServers } from './mcp-connection-resolution';
 import {
   generateMcpToken,
@@ -22,12 +31,12 @@ import {
   restoreAgentSessionOnNode,
   startAgentSessionOnNode,
 } from './node-agent';
-import * as projectDataService from './project-data';
 import {
   loadSnapshotRuntimeContract,
   parseSessionRuntimeContract,
   resolveSessionRuntimeContract,
 } from './session-runtime-contract';
+import { TRANSCRIPT_ONLY_SLEEP_FALLBACK_REASON } from './session-snapshot-restore-response';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -80,15 +89,13 @@ export interface SamAwareAgentStartResult {
    * queued must deliver the wake's first prompt itself (`services/restored-session-prompt.ts`).
    */
   initialPromptSent: boolean;
-}
-
-async function runMaybePhased<T>(
-  input: SamAwareAgentStartInput,
-  name: string,
-  fn: () => Promise<T>
-): Promise<T> {
-  await input.beforeExternalMutation?.();
-  return input.runPhase ? input.runPhase(name, fn) : fn();
+  /**
+   * Outcome of the snapshot restore this start ran, if any. `degraded` covers every restore
+   * failure the VM agent reports (HOME, WIP or git, not only the agent context) and a
+   * transcript-only sleep fallback that had no files to restore, so only
+   * `restored` proves the replacement holds the snapshot's files.
+   */
+  snapshotRestore?: 'restored' | 'degraded';
 }
 
 async function ensureAgentSessionRow(
@@ -131,111 +138,30 @@ async function ensureAgentSessionRow(
   });
 }
 
-function shouldStartFreshAfterSnapshotRestore(restored: unknown): boolean {
-  const restoreRecord =
-    restored && typeof restored === 'object' ? (restored as Record<string, unknown>) : null;
+/**
+ * What the VM agent's restore (`restoreSessionSnapshot` in
+ * `packages/vm-agent/internal/server/session_snapshot_restore.go`) leaves the wake to do:
+ * - `restored`: the saved agent session was loaded; do not start a new one.
+ * - `degraded`: the files or the agent context could not all come back; start fresh.
+ * - `transcript-replay` with `transcript_only_sleep_fallback`: the bounded sleep fallback saved
+ *   no recovery point, so there was nothing to restore (`sessionSnapshotRestoreResponse`). The
+ *   workspace is the fresh checkout create-workspace provisioned and the agent session is
+ *   untouched, so start fresh from the transcript (policy a3780107). The recovery task already
+ *   carries the transcript-only wake prompt (`sessionRecoveryInitialPrompt`).
+ * Anything else fails the wake. That includes `transcript-replay` for a snapshot that vanished
+ * after the wake claimed it (`snapshot_missing_or_unavailable`), which this does not cover.
+ */
+function snapshotRestoreOutcome(restored: unknown): 'restored' | FreshStartReason {
+  const restoreRecord = maybeJsonRecord(restored);
   const status = restoreRecord?.status;
-  if (status === 'restored') return false;
-  if (status === 'degraded') return true;
-  throw new Error(`Strict session restore failed (${String(status ?? 'unknown')})`);
-}
-
-async function createAcpSessionWithLogging(
-  env: Env,
-  input: SamAwareAgentStartInput,
-  agentSessionId: string
-): Promise<string | null> {
-  try {
-    return await runMaybePhased(input, 'create_acp_session', () =>
-      ensureAcpSessionWithEnv(env, input, agentSessionId)
-    );
-  } catch (err) {
-    log.error('agent_session_bootstrap.acp_session_create_failed', {
-      projectId: input.projectId,
-      chatSessionId: input.chatSessionId,
-      agentSessionId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
+  if (status === 'restored') return 'restored';
+  if (status === 'degraded') return 'degraded_restore';
+  const reason = restoreRecord?.reason;
+  if (status === 'transcript-replay' && reason === TRANSCRIPT_ONLY_SLEEP_FALLBACK_REASON) {
+    return 'transcript_only';
   }
-}
-
-async function prepareAcpSessionForFreshStart(
-  env: Env,
-  input: SamAwareAgentStartInput,
-  agentSessionId: string
-): Promise<string> {
-  try {
-    if (input.chatSessionId) {
-      await projectDataService.persistMessage(
-        env,
-        input.projectId,
-        input.chatSessionId,
-        'system',
-        'SAM restored this sleeping conversation from a degraded snapshot, so the agent is starting fresh and will read the persisted transcript before continuing.',
-        null,
-        `degraded-wake-${agentSessionId}`
-      );
-    }
-    const session = await runMaybePhased(input, 'prepare_acp_session_fresh_start', () =>
-      projectDataService.prepareAcpSessionForFreshStart(env, input.projectId, agentSessionId, {
-        actorType: input.actor.type,
-        actorId: input.actor.id,
-        reason: `${input.actor.reasonPrefix} prepared fresh start after degraded snapshot restore`,
-        workspaceId: input.workspaceId,
-        nodeId: input.nodeId,
-        metadata: {
-          chatSessionId: input.chatSessionId ?? null,
-          restoreSnapshotChatSessionId: input.restoreSnapshotChatSessionId ?? null,
-        },
-      })
-    );
-    return session.id;
-  } catch (err) {
-    log.error('agent_session_bootstrap.acp_session_prepare_fresh_start_failed', {
-      projectId: input.projectId,
-      chatSessionId: input.chatSessionId,
-      agentSessionId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    throw err;
-  }
-}
-
-async function transitionAcpSessionToRunning(
-  env: Env,
-  input: SamAwareAgentStartInput,
-  acpSessionId: string,
-  agentSessionId: string,
-  allowSnapshotRestoreRecovery: boolean
-): Promise<void> {
-  const transition = () =>
-    projectDataService.transitionAcpSession(env, input.projectId, acpSessionId, 'running', {
-      actorType: input.actor.type,
-      actorId: input.actor.id,
-      reason: `${input.actor.reasonPrefix} started`,
-      acpSdkSessionId: agentSessionId,
-    });
-
-  try {
-    await runMaybePhased(input, 'mark_acp_session_running', transition);
-    return;
-  } catch (err) {
-    if (!allowSnapshotRestoreRecovery) throw err;
-    const existing = await projectDataService
-      .getAcpSession(env, input.projectId, acpSessionId)
-      .catch(() => null);
-    if (existing?.status !== 'failed') throw err;
-    log.warn('agent_session_bootstrap.acp_session_failed_before_restore_running_retry', {
-      projectId: input.projectId,
-      chatSessionId: input.chatSessionId,
-      agentSessionId,
-      acpSessionId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    await prepareAcpSessionForFreshStart(env, input, agentSessionId);
-    await runMaybePhased(input, 'mark_acp_session_running_after_restore_repair', transition);
-  }
+  const detail = typeof reason === 'string' && reason ? `: ${reason.slice(0, 80)}` : '';
+  throw new Error(`Strict session restore failed (${String(status ?? 'unknown')}${detail})`);
 }
 
 export async function startSamAwareAgentSession(
@@ -314,6 +240,13 @@ export async function startSamAwareAgentSession(
     await input.onAgentSessionId?.(agentSessionId);
 
     if (generatedMcpToken) {
+      // The runtime this session starts on: an MCP token from another generation is refused.
+      const workspaceGeneration = await db
+        .select({ callbackGeneration: schema.workspaces.callbackGeneration })
+        .from(schema.workspaces)
+        .where(eq(schema.workspaces.id, input.workspaceId))
+        .get();
+      const callbackGeneration = workspaceGeneration?.callbackGeneration ?? null;
       await runMaybePhased(input, 'store_mcp_token', () =>
         storeMcpToken(
           env.KV,
@@ -329,6 +262,7 @@ export async function startSamAwareAgentSession(
             workspaceId: input.workspaceId,
             chatSessionId: input.chatSessionId ?? undefined,
             agentSessionId,
+            callbackGeneration,
             createdAt: new Date().toISOString(),
           },
           env
@@ -371,6 +305,9 @@ export async function startSamAwareAgentSession(
     let acpSessionId = await createAcpSessionWithLogging(env, input, agentSessionId);
 
     let shouldStartFreshSession = true;
+    // A restore that resumed the saved agent keeps the degraded wording if its ACP session
+    // later needs the fresh-start repair (`transitionAcpSessionToRunning`).
+    let snapshotRestoreRepair: FreshStartReason | null = null;
     const restoreSnapshotChatSessionId = input.restoreSnapshotChatSessionId;
     if (restoreSnapshotChatSessionId) {
       const restored = await runMaybePhased(input, 'restore_acp_session', () => {
@@ -391,20 +328,33 @@ export async function startSamAwareAgentSession(
           ? restoreAgentSessionOnNode(...args, guardedMutationOptions)
           : restoreAgentSessionOnNode(...args);
       });
-      shouldStartFreshSession = shouldStartFreshAfterSnapshotRestore(restored);
-      if (shouldStartFreshSession) {
+      const restoreOutcome = snapshotRestoreOutcome(restored);
+      shouldStartFreshSession = restoreOutcome !== 'restored';
+      snapshotRestoreRepair = restoreOutcome === 'restored' ? 'degraded_restore' : restoreOutcome;
+      if (restoreOutcome !== 'restored') {
         log.warn('agent_session_bootstrap.snapshot_restore_degraded_starting_fresh', {
           projectId: input.projectId,
           chatSessionId: input.chatSessionId,
           restoreSnapshotChatSessionId,
           workspaceId: input.workspaceId,
           agentSessionId,
+          restoreOutcome,
         });
         if (!acpSessionId) {
           acpSessionId = await createAcpSessionWithLogging(env, input, agentSessionId);
         }
         if (acpSessionId) {
-          acpSessionId = await prepareAcpSessionForFreshStart(env, input, agentSessionId);
+          acpSessionId = await prepareAcpSessionForFreshStart(
+            env,
+            input,
+            agentSessionId,
+            restoreOutcome
+          );
+        } else {
+          // ACP bookkeeping failed (logged); the chat must still learn what was not restored.
+          await runMaybePhased(input, 'persist_fresh_start_notice', () =>
+            persistFreshStartNotice(env, input, agentSessionId, restoreOutcome)
+          );
         }
       }
     }
@@ -449,7 +399,7 @@ export async function startSamAwareAgentSession(
         input,
         runningAcpSessionId,
         agentSessionId,
-        Boolean(restoreSnapshotChatSessionId)
+        snapshotRestoreRepair
       );
     }
     if (restoreSnapshotChatSessionId) {
@@ -464,6 +414,9 @@ export async function startSamAwareAgentSession(
       mcpToken,
       agentStarted: true,
       initialPromptSent: shouldStartFreshSession,
+      ...(restoreSnapshotChatSessionId
+        ? { snapshotRestore: shouldStartFreshSession ? 'degraded' : 'restored' }
+        : {}),
     };
   } catch (err) {
     // Once persisted by the caller, the token belongs to its retry lifecycle.
@@ -481,38 +434,4 @@ export async function startSamAwareAgentSession(
       .catch(() => {});
     throw err;
   }
-}
-
-async function ensureAcpSessionWithEnv(
-  env: Env,
-  input: SamAwareAgentStartInput,
-  agentSessionId: string
-): Promise<string | null> {
-  if (!input.chatSessionId) return null;
-
-  const existing = await projectDataService
-    .getAcpSession(env, input.projectId, agentSessionId)
-    .catch(() => null);
-  if (existing?.id) return existing.id;
-
-  const acpSession = await projectDataService.createAcpSession(
-    env,
-    input.projectId,
-    input.chatSessionId,
-    null,
-    input.agentType,
-    null,
-    0,
-    agentSessionId
-  );
-
-  await projectDataService.transitionAcpSession(env, input.projectId, acpSession.id, 'assigned', {
-    actorType: input.actor.type,
-    actorId: input.actor.id,
-    reason: `${input.actor.reasonPrefix} assigned`,
-    workspaceId: input.workspaceId,
-    nodeId: input.nodeId,
-  });
-
-  return acpSession.id;
 }

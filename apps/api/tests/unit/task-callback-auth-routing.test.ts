@@ -13,7 +13,7 @@
  * See .claude/rules/06-api-patterns.md (Hono middleware scoping)
  */
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { log } from '../../src/lib/logger';
 import { AppError } from '../../src/middleware/error';
@@ -85,7 +85,9 @@ vi.mock('../../src/services/jwt', () => ({
     .fn()
     .mockResolvedValue({ workspace: 'ws-test', type: 'callback', scope: 'workspace' }),
   signCallbackToken: vi.fn().mockResolvedValue('mock-token'),
+  signCurrentWorkspaceCallbackToken: vi.fn().mockResolvedValue('mock-token'),
   signNodeCallbackToken: vi.fn().mockResolvedValue('mock-node-token'),
+  signCurrentNodeCallbackToken: vi.fn().mockResolvedValue('mock-node-token'),
 }));
 
 vi.mock('../../src/lib/logger', () => ({
@@ -111,7 +113,6 @@ vi.mock('../../src/services/project-data', () => ({
   markAgentCompleted: vi.fn().mockResolvedValue(undefined),
   scheduleIdleCleanup: vi.fn().mockResolvedValue(undefined),
   updateNodeHeartbeats: vi.fn().mockResolvedValue(0),
-  getSessionsForIdea: vi.fn().mockResolvedValue([]),
 }));
 
 // Mock notification service
@@ -119,7 +120,6 @@ vi.mock('../../src/services/notification', () => ({
   getProjectName: vi.fn().mockResolvedValue('Test Project'),
   notifyTaskComplete: vi.fn().mockResolvedValue(undefined),
   notifyTaskFailed: vi.fn().mockResolvedValue(undefined),
-  notifySessionEnded: vi.fn().mockResolvedValue(undefined),
   notifyPrCreated: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -129,7 +129,10 @@ vi.mock('../../src/services/task-runner', () => ({
 }));
 
 // Mock task status helpers
-vi.mock('../../src/services/task-status', () => ({
+// Partial: `task-status` also exports the status SETS that other modules read at
+// import time, and a wholesale mock silently drops them.
+vi.mock('../../src/services/task-status', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/services/task-status')>()),
   canTransitionTaskStatus: vi.fn().mockReturnValue(true),
   getAllowedTaskTransitions: vi.fn().mockReturnValue(['completed', 'failed']),
   isTaskStatus: vi.fn().mockReturnValue(true),
@@ -219,6 +222,9 @@ async function createTestApp(): Promise<Hono> {
 
 describe('task callback auth routing (regression)', () => {
   let app: Hono;
+  beforeAll(async () => {
+    await createTestApp();
+  }, 30_000);
 
   beforeEach(async () => {
     vi.clearAllMocks();

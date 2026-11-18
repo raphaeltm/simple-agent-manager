@@ -8,7 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   assertWorkerTextBindingLimit,
   checkTailWorkerExists,
+  CLOUDFLARE_STANDARD_WORKER_TEXT_BINDING_MAX,
   CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT,
+  containerImageOverrides,
   countWorkerTextBindings,
   detectArtifactsAvailable,
   encodeWorkflowCommandData,
@@ -76,6 +78,61 @@ afterEach(() => {
 });
 
 describe('sync wrangler config', () => {
+  it.each(['staging', 'prod'] as const)(
+    'emits persisted native traces without changing logs for %s',
+    (environment) => {
+      vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+      const checkedIn = TOML.parse(
+        readFileSync(join(import.meta.dirname, '../../apps/api/wrangler.toml'), 'utf-8')
+      ) as WranglerToml;
+      const generated = generateApiWorkerEnv(checkedIn, outputs, environment, false, false, null);
+      const serialized = TOML.parse(
+        TOML.stringify({ env: { [environment]: generated } } as TOML.JsonMap)
+      );
+      expect((serialized.env as TOML.JsonMap)[environment]).toMatchObject({
+        observability: {
+          enabled: true,
+          redact_query_string: true,
+          traces: { enabled: true, head_sampling_rate: 1, persist: true },
+          logs: { invocation_logs: true, head_sampling_rate: 1 },
+        },
+      });
+    }
+  );
+
+  it.each(['staging', 'prod'] as const)(
+    'preserves native trace overrides for %s',
+    (environment) => {
+      vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+      for (const traces of [
+        { head_sampling_rate: 0.05 },
+        { head_sampling_rate: 0 },
+        { enabled: false },
+        { persist: false, destinations: ['external-traces'] },
+      ]) {
+        const generated = generateApiWorkerEnv(
+          { observability: { enabled: true, redact_query_string: false, traces } },
+          outputs,
+          environment,
+          false,
+          false,
+          null
+        );
+        expect(generated.observability?.redact_query_string).toBe(true);
+        expect(generated.observability?.traces).toEqual({
+          enabled: true,
+          head_sampling_rate: 1,
+          persist: true,
+          ...traces,
+        });
+        expect(generated.observability?.logs).toEqual({
+          invocation_logs: true,
+          head_sampling_rate: 1,
+        });
+      }
+    }
+  );
+
   it('keeps the checked-in staging Worker under the text-binding guard', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
     const checkedIn = TOML.parse(
@@ -85,6 +142,43 @@ describe('sync wrangler config', () => {
     const generated = generateApiWorkerEnv(checkedIn, outputs, 'staging', false, false, null);
     expect(countWorkerTextBindings(generated)).toBeLessThanOrEqual(
       CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT
+    );
+  });
+
+  it('deploys digest-pinned prebuilt images in place of Dockerfiles, and rejects anything else', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    const checkedIn = TOML.parse(
+      readFileSync(join(import.meta.dirname, '../../apps/api/wrangler.toml'), 'utf-8')
+    ) as WranglerToml;
+    const reference = `registry.cloudflare.com/${'f'.repeat(32)}/s123abc-api-prod-sandboxdo-prebuilt@sha256:${'b'.repeat(64)}`;
+    vi.stubEnv('SAM_CONTAINER_IMAGE_OVERRIDES', JSON.stringify({ SandboxDO: reference }));
+    const generated = generateApiWorkerEnv(checkedIn, outputs, 'prod', false, false, null);
+    const images = Object.fromEntries(
+      (generated.containers ?? []).map((container) => [container.class_name, container.image])
+    );
+    expect(images.SandboxDO).toBe(reference);
+    // A class without an override still builds its Dockerfile.
+    expect(images.VmAgentContainer).toBe('./Dockerfile.vm-agent-container');
+    for (const bad of [
+      { SandboxDO: 'docker.io/library/busybox:latest' },
+      { SandboxDO: reference.replace(/@sha256:.*/, ':latest') },
+      { 'bad-class': reference },
+    ])
+      expect(() => containerImageOverrides(JSON.stringify(bad))).toThrow();
+    expect(() => containerImageOverrides('[]')).toThrow();
+    expect(containerImageOverrides('')).toEqual({});
+  });
+
+  it('keeps a self-hosted install under the standard account text-binding limit', () => {
+    // Installer deploys run without SAM's GitHub Environment overrides on accounts with the
+    // standard limit; every secret configure-secrets.sh can set is counted.
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    const checkedIn = TOML.parse(
+      readFileSync(join(import.meta.dirname, '../../apps/api/wrangler.toml'), 'utf-8')
+    ) as WranglerToml;
+    const generated = generateApiWorkerEnv(checkedIn, outputs, 'prod', false, false, null);
+    expect(countWorkerTextBindings(generated)).toBeLessThanOrEqual(
+      CLOUDFLARE_STANDARD_WORKER_TEXT_BINDING_MAX
     );
   });
 
@@ -116,6 +210,20 @@ describe('sync wrangler config', () => {
       );
     }
   );
+
+  it('omits the default SAM model binding and forwards a logged explicit override', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 'sam-test');
+    vi.stubEnv('SAM_MODEL', 'claude-sonnet-5');
+    const info = vi.spyOn(console, 'log').mockImplementation(() => {});
+    expect(getApiWorkerVars({}, outputs, 'prod', 'analytics-dataset', true).SAM_MODEL).toBe(
+      'claude-sonnet-5'
+    );
+    expect(info.mock.calls.flat().join(' ')).toContain('SAM_MODEL');
+    vi.stubEnv('SAM_MODEL', '');
+    expect(getApiWorkerVars({}, outputs, 'prod', 'analytics-dataset', true)).not.toHaveProperty(
+      'SAM_MODEL'
+    );
+  });
 
   it('forwards optional VM boot recovery overrides without requiring defaults as bindings', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
@@ -403,6 +511,26 @@ describe('sync wrangler config', () => {
     }
     expect(agreedLines).toEqual([]);
     expect(existsSync(summaryPath)).toBe(false);
+  });
+
+  it('ships the agent email send binding and Worker name only when this deploy prepared agent email', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    const checkedIn = TOML.parse(
+      readFileSync(join(import.meta.dirname, '../../apps/api/wrangler.toml'), 'utf-8')
+    ) as WranglerToml;
+
+    const off = generateApiWorkerEnv(checkedIn, outputs, 'staging', false, false, null);
+    const on = generateApiWorkerEnv(checkedIn, outputs, 'staging', false, false, null, true);
+
+    expect(off.send_email).toBeUndefined();
+    expect(off.vars?.AGENT_EMAIL_WORKER_NAME).toBeUndefined();
+    expect(on.send_email).toEqual([{ name: 'AGENT_EMAIL' }]);
+    // The admin setup points the agent@ routing rule at this exact script.
+    expect(on.vars?.AGENT_EMAIL_WORKER_NAME).toBe(on.name);
+    expect(on.name).toBe('s123abc-api-staging');
+    // Never declared at the top level, so Wrangler cannot warn about a top-level binding
+    // that a generated environment omits.
+    expect(checkedIn.send_email).toBeUndefined();
   });
 
   it('propagates the top-level CPU limit into generated deployment environments', () => {
@@ -907,6 +1035,22 @@ describe('sync wrangler config', () => {
     expect(String(envConfig.vars?.SETUP_TOKEN).length).toBeGreaterThan(20);
   });
 
+  it('masks the setup token in GitHub Actions before wrangler can print it', () => {
+    // wrangler deploy prints every plain-text var, and the deploy job echoes that output into a
+    // public log. On 2026-11-12 a token read from that log took over production's /setup.
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('GITHUB_ACTIONS', 'true');
+    const written: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      written.push(String(chunk));
+      return true;
+    });
+
+    const envConfig = generateApiWorkerEnv({}, outputs, 'prod', false, false, null);
+
+    expect(written).toContain(`::add-mask::${String(envConfig.vars?.SETUP_TOKEN)}\n`);
+  });
+
   it('includes SETUP_FORCE only when explicitly requested', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 
@@ -1176,17 +1320,53 @@ describe('Worker vars omitted because they equal the code default', () => {
     return comparable;
   }
 
-  it('pins every original binding to its retained value or proven runtime default', () => {
+  const RETIRED_WITH_ANONYMOUS_TRIALS = [
+    'TRIAL_MONTHLY_CAP',
+    'TRIAL_WORKSPACE_TTL_MS',
+    'TRIAL_ANONYMOUS_USER_ID',
+    'TRIAL_EXPIRE_BATCH_SIZE',
+    'TRIAL_CLEANUP_BATCH_SIZE',
+    'TRIAL_CLEANUP_DEADLINE_MS',
+    'TRIAL_NODE_DELETION_LOCK_STALE_MS',
+    'TRIAL_AGENT_TYPE_STAGING',
+    'TRIAL_AGENT_TYPE_PRODUCTION',
+    'TRIAL_DEFAULT_WORKSPACE_PROFILE',
+    'TRIALS_ENABLED_KV_KEY',
+  ] as const;
+  // The busy-build placement wait it bounded was removed (2026-11-08): a busy node is now ranked by
+  // its startup backlog instead of waited on, so nothing reads the timeout.
+  const RETIRED_WITH_BUSY_BUILD_WAIT = ['VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS'] as const;
+  // A question's window moved to the admin setting `inbox.questionTimeoutMinutes` with inbox
+  // slice G (2026-11-16): questions are D1 `asks` rows, and nothing reads the variable.
+  const RETIRED_WITH_QUESTION_ASKS = ['HUMAN_INPUT_TIMEOUT_MS'] as const;
+  const RETIRED_VARS: readonly string[] = [
+    ...RETIRED_WITH_ANONYMOUS_TRIALS,
+    ...RETIRED_WITH_BUSY_BUILD_WAIT,
+    ...RETIRED_WITH_QUESTION_ASKS,
+  ];
+
+  it('pins original bindings to retained values, deliberate retunes or proven runtime defaults', () => {
     const current = readCheckedInWrangler().vars ?? {};
-    const dead = new Set(bindingAudit.removedDead);
+    // Approved 2026-11-14 archive throughput tuning. Preserve the dated audit snapshot;
+    // These retained bindings intentionally differ from that historical baseline.
+    const retuned: Record<string, string> = {
+      // Replace the assistant model before Cloudflare retires GLM 5.3 Flash (2026-11-20).
+      SAM_MODEL: '@cf/deepseek-ai/deepseek-v4.1-flash-1017',
+      PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: '6000000',
+      PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS: '540000',
+    };
+    // Vars whose only consumer was deleted later (the anonymous-trial product, the busy-build
+    // wait; both 2026-11-08) are dead too: nothing reads them, so they are neither retained nor
+    // recorded as defaults.
+    const dead = new Set([...bindingAudit.removedDead, ...RETIRED_VARS]);
     expect(Object.keys(bindingAudit.variables)).toHaveLength(283);
     for (const [name, value] of Object.entries(bindingAudit.variables)) {
       if (has(current, name)) {
-        expect(current[name], name).toBe(value);
+        expect(current[name], name).toBe(retuned[name] ?? value);
       } else if (dead.has(name)) {
         expect(OMITTED_WORKER_VAR_DEFAULTS, name).not.toHaveProperty(name);
       } else {
-        expect(OMITTED_WORKER_VAR_DEFAULTS[name], name).toBe(value);
+        expect(OMITTED_WORKER_VAR_DEFAULTS[name], name).toBe(retuned[name] ?? value);
       }
     }
     expect(bindingAudit.removedDead).toEqual([
@@ -1209,10 +1389,12 @@ describe('Worker vars omitted because they equal the code default', () => {
           ...OMITTED_WORKER_VAR_DEFAULTS,
           ...Object.fromEntries(
             Object.entries(bindingAudit.variables).filter(
-              ([name]) => !bindingAudit.removedDead.includes(name)
+              ([name]) => !bindingAudit.removedDead.includes(name) && !RETIRED_VARS.includes(name)
             )
           ),
           ...checkedIn.vars,
+          // Deliberate retirement migration, independently pinned above.
+          SAM_MODEL: OMITTED_WORKER_VAR_DEFAULTS.SAM_MODEL,
         },
       });
       const after = varsFor(environment, checkedIn);
@@ -1310,5 +1492,54 @@ describe('Worker vars omitted because they equal the code default', () => {
       log.mockRestore();
     }
     expect(lines).toEqual(['  Environment override: OMITTED="5" replaces code default "9"']);
+  });
+});
+
+describe('dedicated Compose builder deployment settings', () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it('mirrors actual class capacity into admission and supports instance sizing overrides', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('DEPLOY_BUILDER_MAX_INSTANCES', '4');
+    vi.stubEnv('DEPLOY_BUILDER_INSTANCE_TYPE', 'standard-3');
+    const generated = generateApiWorkerEnv(
+      {
+        containers: [
+          {
+            class_name: 'ComposeBuilderContainer',
+            image: './Dockerfile.compose-builder',
+            instance_type: 'standard-4',
+            max_instances: 6,
+          },
+        ],
+      },
+      outputs,
+      'staging',
+      false,
+      false,
+      null
+    );
+    expect(generated.containers).toEqual([
+      {
+        class_name: 'ComposeBuilderContainer',
+        image: './Dockerfile.compose-builder',
+        instance_type: 'standard-3',
+        max_instances: 4,
+      },
+    ]);
+    expect(generated.vars?.DEPLOY_BUILDER_CLASS_MAX_INSTANCES).toBe('4');
+  });
+  it('fails closed on an invalid builder instance type', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('DEPLOY_BUILDER_INSTANCE_TYPE', 'typo');
+    expect(() =>
+      generateApiWorkerEnv(
+        { containers: [{ class_name: 'ComposeBuilderContainer', image: 'image' }] },
+        outputs,
+        'staging',
+        false,
+        false,
+        null
+      )
+    ).toThrow('DEPLOY_BUILDER_INSTANCE_TYPE');
   });
 });

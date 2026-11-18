@@ -1,4 +1,9 @@
-import type { CredentialSource, TaskAttachment, TaskMode } from '@simple-agent-manager/shared';
+import type {
+  AgentEffort,
+  CredentialSource,
+  TaskAttachment,
+  TaskMode,
+} from '@simple-agent-manager/shared';
 import { DEFAULT_TASK_TITLE_MAX_LENGTH } from '@simple-agent-manager/shared';
 import type { drizzle } from 'drizzle-orm/d1';
 
@@ -7,6 +12,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { buildVisibleInitialPrompt } from './agent-bootstrap-prompt';
+import { resolveTaskAgentOverrides } from './agent-profiles';
 import {
   acceptInstantSession,
   continueInstantSessionLaunch,
@@ -14,6 +20,8 @@ import {
 } from './instant-session';
 import { enrichMessageWithMentions } from './mention-enrichment';
 import { resolveProjectAgentDefault } from './project-agent-defaults';
+import { validateRunAgentConfiguration } from './run-agent-configuration';
+import type { SamDispatchReservation } from './sam-dispatch-reservation';
 import type { resolveSkillProfile } from './skills';
 import { transitionTaskToTerminal } from './task-terminal-transition';
 import { getTaskTitleConfig, truncateTitle } from './task-title';
@@ -24,6 +32,8 @@ type Db = ReturnType<typeof drizzle<typeof schema>>;
 export async function submitInstantTask(input: {
   db: Db;
   beforeTaskEffects?: () => void;
+  samReservation?: SamDispatchReservation;
+  assertEffectAllowed?: () => Promise<void>;
   env: Env;
   waitUntil: (promise: Promise<unknown>) => void;
   project: schema.Project;
@@ -39,10 +49,16 @@ export async function submitInstantTask(input: {
   historicalContext?: string;
   taskMode?: TaskMode;
   agentType?: string;
+  /** One-chat model/effort; null/absent inherits from the skill/profile/project. */
+  agentOverrides?: Readonly<{ model?: string | null; effort?: AgentEffort | null }>;
+  /** The caller's own account chosen for this run; validated here against the agent. */
+  agentConfigurationId?: string | null;
   attachments: TaskAttachment[];
   credentialAttributionUserId: string;
   credentialAttributionProjectId: string | null;
   credentialAttributionSource: CredentialSource;
+  /** Already-validated open idea; `acceptInstantSession` links it before the agent starts. */
+  sourceIdeaId?: string | null;
 }): Promise<{ taskId: string; sessionId: string; branchName: string; status: 'queued' }> {
   const { db, env, taskId, project, userId, profile, message } = input;
   const now = new Date().toISOString();
@@ -57,17 +73,29 @@ export async function submitInstantTask(input: {
     env.DEFAULT_TASK_AGENT_TYPE ??
     'opencode';
   const defaults = resolveProjectAgentDefault(project.agentDefaults, agentType);
+  const agentRun = resolveTaskAgentOverrides(agentType, input.agentOverrides ?? {}, {
+    model: profile?.model ?? defaults.model,
+    effort: profile?.effort,
+  });
+  // Before any task effect: an account that is not the caller's, paused, or for another agent.
+  const agentConfigurationId = await validateRunAgentConfiguration(db, {
+    userId,
+    configurationId: input.agentConfigurationId,
+    agentType,
+  });
   const { enrichedMessage } = await enrichMessageWithMentions(message, db, project.id, userId, env);
   const agentPrompt = input.historicalContext
     ? `${input.historicalContext}\n\nNew user prompt:\n${enrichedMessage}`
     : enrichedMessage;
   // A rejected insert can still have committed; keep retries reserved from here.
+  await input.assertEffectAllowed?.();
   input.beforeTaskEffects?.();
   await db.insert(schema.tasks).values({
     triggeredBy: input.triggeredBy ?? 'user',
     connectorClientName:
       input.triggeredBy === 'connector' ? (input.connectorClientName ?? 'Connector') : null,
     id: taskId,
+    chatSessionId: input.samReservation?.sessionId,
     projectId: project.id,
     userId,
     title,
@@ -79,6 +107,7 @@ export async function submitInstantTask(input: {
     agentProfileHint: profile?.profileId ?? null,
     skillId: profile?.skillId ?? null,
     skillHint: profile?.skillId ?? null,
+    agentConfigurationId,
     taskMode,
     outputBranch: input.branchName,
     credentialAttributionUserId: input.credentialAttributionUserId,
@@ -89,7 +118,7 @@ export async function submitInstantTask(input: {
     updatedAt: now,
   });
   await db.insert(schema.taskStatusEvents).values({
-    id: ulid(),
+    id: input.samReservation?.statusEventId ?? ulid(),
     taskId,
     fromStatus: null,
     toStatus: 'queued',
@@ -100,6 +129,9 @@ export async function submitInstantTask(input: {
   });
   const launch: LaunchInstantSessionInput = {
     taskId,
+    chatSessionId: input.samReservation?.sessionId,
+    initialMessageId: input.samReservation?.initialMessageId,
+    assertLaunchAllowed: input.assertEffectAllowed,
     project,
     userId,
     taskMode,
@@ -122,11 +154,12 @@ export async function submitInstantTask(input: {
     agentType,
     agentProfileId: profile?.profileId,
     skillId: profile?.skillId ?? null,
+    sourceIdeaId: input.sourceIdeaId ?? null,
     branch: input.branchName,
     attachments: input.attachments,
     overrides: {
-      model: profile?.model ?? defaults.model,
-      effort: profile?.effort,
+      model: agentRun.model,
+      effort: agentRun.effort,
       permissionMode: profile?.permissionMode ?? defaults.permissionMode,
     },
   };
@@ -145,6 +178,7 @@ export async function submitInstantTask(input: {
       status: 'queued',
     };
   } catch (error) {
+    if (input.samReservation) throw error;
     await transitionTaskToTerminal(env, {
       taskId,
       projectId: project.id,

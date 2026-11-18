@@ -55,7 +55,7 @@ Use **Edit** to rename a server, switch its authentication, or add, replace and 
 | **Personal** | Settings → MCP Servers     | Every session _you_ start, in any project       |
 | **Project**  | Project Settings → Runtime | Every session any member starts in that project |
 
-If a project server and a personal server share a name, the project one wins. Adding or changing a project-scoped server requires the `secret:write` capability, so project owners and admins can manage them but maintainers and viewers cannot.
+If a project server and a personal server share a name, the project one wins. Adding or changing a project-scoped server requires the `secret:write` capability, which project owners and admins have.
 
 Use the **Disable** toggle to stop injecting a server without deleting it and losing the credential.
 
@@ -80,7 +80,7 @@ How a chat shows that an MCP server isn't signed in depends on the server:
 
 The last two only happen in sessions labelled **Chat** (see
 [Chat or Task](/docs/guides/chat-features/#chat-or-task)), and only where link requests were turned
-on when the chat started. They are on the hosted service; self-hosted operators turn them on as
+on when the chat started. An installation's operator turns them on as
 described in [Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat). Elsewhere
 a server that wants a browser sign-in just fails, or its tools don't appear, so connect it with a
 token or API key from its dashboard instead. The chat's shortcut to personal MCP settings appears
@@ -114,3 +114,9 @@ Tools from a connected MCP server run inside your agent's session, which already
 The servers on this page are third-party tools you give your agents. SAM's own built-in tools also
 let agents create schedule, GitHub, and webhook triggers for their project; see
 [Ask an agent to set one up](/docs/guides/triggers/#ask-an-agent-to-set-one-up).
+
+## Pull requests that agents take over
+
+SAM's built-in tools also let an agent record that it's responsible for a pull request it didn't
+open, such as a release PR it was asked to shepherd; see
+[Pull requests an agent takes over](/docs/guides/agents/#pull-requests-an-agent-takes-over).

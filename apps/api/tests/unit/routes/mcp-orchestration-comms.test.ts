@@ -12,6 +12,7 @@ const mockEnqueueMailboxMessage = vi.fn();
 const mockCleanupTerminalTaskResources = vi.fn();
 const mockSyncTriggerExecutionStatus = vi.fn();
 const mockAcceptPromptDelivery = vi.fn();
+const mockChannelSend = vi.fn();
 
 vi.mock('../../../src/services/node-agent', () => ({
   sendPromptToAgentOnNode: (...args: unknown[]) => mockSendPromptToAgentOnNode(...args),
@@ -25,6 +26,11 @@ vi.mock('../../../src/services/orchestration-prompts', () => ({
 vi.mock('../../../src/services/project-data', () => ({
   enqueueMailboxMessage: (...args: unknown[]) => mockEnqueueMailboxMessage(...args),
   acceptPromptDelivery: (...args: unknown[]) => mockAcceptPromptDelivery(...args),
+}));
+
+vi.mock('../../../src/services/agent-message-channels', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/agent-message-channels')>()),
+  sendAgentMessageOverChannel: (...args: unknown[]) => mockChannelSend(...args),
 }));
 
 vi.mock('../../../src/services/task-terminal-cleanup', () => ({
@@ -59,8 +65,10 @@ function createMockD1() {
 
   // Wrap raw/all so the membership lookup short-circuits ahead of whatever a test
   // installed, without advancing that test's sequence cursor.
-  const wrap = <T>(inner: () => Promise<T>, membership: () => T) => () =>
-    isMembershipQuery() ? Promise.resolve(membership()) : inner();
+  const wrap =
+    <T>(inner: () => Promise<T>, membership: () => T) =>
+    () =>
+      isMembershipQuery() ? Promise.resolve(membership()) : inner();
   const rawImpl = stmt.raw;
   const allImpl = stmt.all;
   const membershipRaw = () => state.membershipRoles.map((role) => [role]) as never;
@@ -91,9 +99,10 @@ let mockD1 = createMockD1();
 const mockEnv: Partial<Env> = {
   DATABASE: mockD1 as unknown as D1Database,
   BASE_DOMAIN: 'example.com',
-  // These tests exercise the legacy direct-send compatibility path unless a
-  // case explicitly opts into the default-on durable handoff below.
-  DURABLE_PROMPT_DELIVERY_ENABLED: 'false',
+  // send_message_to_subtask has one transport, the agent pair channel (constitution XV).
+  DURABLE_PROMPT_DELIVERY_ENABLED: 'true',
+  PROJECT_EVENT_WAKE_ENABLED: 'true',
+  AGENT_MESSAGE_CHANNELS_ENABLED: 'true',
 };
 
 const parentTokenData = {
@@ -103,6 +112,15 @@ const parentTokenData = {
   workspaceId: 'ws-parent-001',
   createdAt: new Date().toISOString(),
 };
+
+const parentWithChat = { ...parentTokenData, chatSessionId: 'chat-parent-001' };
+
+function expectNoRawDelivery() {
+  expect(mockSendPromptToAgentOnNode).not.toHaveBeenCalled();
+  expect(mockPersistOrchestrationPrompt).not.toHaveBeenCalled();
+  expect(mockEnqueueMailboxMessage).not.toHaveBeenCalled();
+  expect(mockAcceptPromptDelivery).not.toHaveBeenCalled();
+}
 
 const activeCallerTaskRow = {
   id: 'parent-task-001',
@@ -155,6 +173,15 @@ describe('MCP Orchestration Communication Tools', () => {
     mockCleanupTerminalTaskResources.mockResolvedValue(undefined);
     mockSyncTriggerExecutionStatus.mockResolvedValue(undefined);
     mockAcceptPromptDelivery.mockResolvedValue({ message: { id: 'durable-message-001' } });
+    mockChannelSend.mockResolvedValue({
+      outcome: 'created',
+      channel: { name: 'agent-dm.pair' },
+      eventId: 'event-001',
+      sequence: 1,
+      recipientSubscriptionId: 'sub-child',
+      senderSubscriptionId: 'sub-parent',
+      retiredSubscriptionIds: [],
+    });
 
     const mod = await import('../../../src/routes/mcp/orchestration-comms');
     handleSendMessageToSubtask = mod.handleSendMessageToSubtask;
@@ -245,20 +272,16 @@ describe('MCP Orchestration Communication Tools', () => {
       const result = await handleSendMessageToSubtask(
         1,
         { taskId: 'child-001', message: 'hello' },
-        parentTokenData,
+        parentWithChat,
         mockEnv as Env
       );
 
       expect(result.error).toBeUndefined();
-      expect(mockSendPromptToAgentOnNode).toHaveBeenCalledWith(
-        'node-001',
-        'ws-child-001',
-        'agent-session-001',
-        'hello',
-        mockEnv,
-        'user-001',
-        'persisted-msg-001'
-      );
+      expect(mockChannelSend.mock.calls[0]![1]).toMatchObject({
+        message: 'hello',
+        recipient: { taskId: 'child-001', chatSessionId: 'chat-child-001' },
+      });
+      expectNoRawDelivery();
     });
 
     it('should reject when child task is in a terminal status', async () => {
@@ -311,7 +334,7 @@ describe('MCP Orchestration Communication Tools', () => {
       expect(result.error?.message).toContain('no workspace assigned');
     });
 
-    it('should deliver message successfully (happy path)', async () => {
+    it('publishes the message on the pair channel and never posts it into the child chat', async () => {
       mockD1ResultSequence([
         [
           activeCallerTaskRow,
@@ -334,11 +357,6 @@ describe('MCP Orchestration Communication Tools', () => {
         [
           {
             id: 'agent-session-001',
-          },
-        ],
-        [
-          {
-            chat_session_id: 'chat-child-001',
           },
         ],
       ]);
@@ -346,7 +364,7 @@ describe('MCP Orchestration Communication Tools', () => {
       const result = await handleSendMessageToSubtask(
         1,
         { taskId: 'child-001', message: 'Please focus on the auth module' },
-        parentTokenData,
+        parentWithChat,
         mockEnv as Env
       );
 
@@ -354,193 +372,68 @@ describe('MCP Orchestration Communication Tools', () => {
       const content = JSON.parse(
         (result.result as { content: Array<{ text: string }> }).content[0].text
       );
-      expect(content.delivered).toBe(true);
-
-      expect(mockSendPromptToAgentOnNode).toHaveBeenCalledWith(
-        'node-001',
-        'ws-child-001',
-        'agent-session-001',
-        'Please focus on the auth module',
-        mockEnv,
-        'user-001',
-        'persisted-msg-001'
-      );
-      expect(mockPersistOrchestrationPrompt).toHaveBeenCalledWith({
-        env: mockEnv,
-        projectId: 'proj-001',
-        chatSessionId: 'chat-child-001',
-        content: 'Please focus on the auth module',
-        source: 'parent_agent',
-        kind: 'orchestration_prompt',
-        parentTaskId: 'parent-task-001',
-        childTaskId: 'child-001',
-        senderId: 'ws-parent-001',
-      });
-      expect(mockPersistOrchestrationPrompt.mock.invocationCallOrder[0]).toBeLessThan(
-        mockSendPromptToAgentOnNode.mock.invocationCallOrder[0]
-      );
-    });
-
-    it('durably accepts the handoff and skips direct VM delivery when enabled', async () => {
-      mockD1ResultSequence([
-        [
-          activeCallerTaskRow,
-          {
-            id: 'child-001',
-            status: 'in_progress',
-            workspace_id: 'ws-child-001',
-            project_id: 'proj-001',
-            parent_task_id: 'parent-task-001',
-          },
-        ],
-        [
-          {
-            id: 'ws-child-001',
-            node_id: 'node-001',
-            chat_session_id: 'chat-child-001',
-            status: 'running',
-          },
-        ],
-        [{ id: 'agent-session-001' }],
-      ]);
-      const durableEnv = {
-        ...mockEnv,
-        DURABLE_PROMPT_DELIVERY_ENABLED: 'true',
-      } as Env;
-
-      const result = await handleSendMessageToSubtask(
-        1,
-        { taskId: 'child-001', message: 'durable handoff' },
-        parentTokenData,
-        durableEnv
-      );
-
-      expect(result.error).toBeUndefined();
-      const content = JSON.parse(
-        (result.result as { content: Array<{ text: string }> }).content[0]!.text
-      );
-      expect(content).toEqual({
-        delivered: false,
-        queued: true,
+      expect(content).toMatchObject({
         accepted: true,
-        messageId: 'durable-message-001',
+        delivered: false,
+        transport: 'agent_message_channel',
+        eventId: 'event-001',
       });
-      expect(mockAcceptPromptDelivery).toHaveBeenCalledWith(
-        durableEnv,
-        'proj-001',
-        expect.objectContaining({
-          targetSessionId: 'chat-child-001',
-          sourceKind: 'orchestration_handoff',
-        })
-      );
-      expect(mockSendPromptToAgentOnNode).not.toHaveBeenCalled();
-      expect(mockPersistOrchestrationPrompt).not.toHaveBeenCalled();
+      expect(mockChannelSend.mock.calls[0]![1]).toMatchObject({
+        projectId: 'proj-001',
+        message: 'Please focus on the auth module',
+        messageClass: 'deliver',
+        recipient: { taskId: 'child-001', chatSessionId: 'chat-child-001' },
+        actor: { taskId: 'parent-task-001', chatSessionId: 'chat-parent-001' },
+      });
+      expectNoRawDelivery();
     });
 
-    it('should return agent_busy when child responds with 409', async () => {
-      mockD1ResultSequence([
-        [
-          activeCallerTaskRow,
-          {
-            id: 'child-001',
-            status: 'in_progress',
-            workspace_id: 'ws-child-001',
-            project_id: 'proj-001',
-            parent_task_id: 'parent-task-001',
-          },
-        ],
-        [
-          {
-            id: 'ws-child-001',
-            node_id: 'node-001',
-            chat_session_id: 'chat-child-001',
-            status: 'running',
-          },
-        ],
-        [
-          {
-            id: 'agent-session-001',
-          },
-        ],
-        [
-          {
-            chat_session_id: 'chat-child-001',
-          },
-        ],
-      ]);
+    it.each([
+      ['flag_off', { AGENT_MESSAGE_CHANNELS_ENABLED: 'false' }],
+      ['project_event_wake_disabled', { PROJECT_EVENT_WAKE_ENABLED: 'false' }],
+      ['durable_prompt_delivery_disabled', { DURABLE_PROMPT_DELIVERY_ENABLED: 'false' }],
+    ] as const)(
+      'refuses rather than posting the text when channels are unavailable (%s)',
+      async (reason, overrides) => {
+        mockD1ResultSequence([
+          [
+            activeCallerTaskRow,
+            {
+              id: 'child-001',
+              status: 'in_progress',
+              workspace_id: 'ws-child-001',
+              project_id: 'proj-001',
+              parent_task_id: 'parent-task-001',
+            },
+          ],
+          [
+            {
+              id: 'ws-child-001',
+              node_id: 'node-001',
+              chat_session_id: 'chat-child-001',
+              status: 'running',
+            },
+          ],
+          [
+            {
+              id: 'agent-session-001',
+            },
+          ],
+        ]);
 
-      mockSendPromptToAgentOnNode.mockRejectedValue(
-        new Error('Node Agent request failed: 409 Agent is busy')
-      );
+        const result = await handleSendMessageToSubtask(
+          1,
+          { taskId: 'child-001', message: 'Please focus on the auth module' },
+          parentWithChat,
+          { ...mockEnv, ...overrides } as Env
+        );
 
-      const result = await handleSendMessageToSubtask(
-        1,
-        { taskId: 'child-001', message: 'hello' },
-        parentTokenData,
-        mockEnv as Env
-      );
-
-      expect(result.error).toBeUndefined();
-      const content = JSON.parse(
-        (result.result as { content: Array<{ text: string }> }).content[0].text
-      );
-      expect(content.delivered).toBe(false);
-      expect(content.queued).toBe(true);
-      expect(content.reason).toBe('agent_busy');
-      expect(mockPersistOrchestrationPrompt.mock.invocationCallOrder[0]).toBeLessThan(
-        mockSendPromptToAgentOnNode.mock.invocationCallOrder[0]
-      );
-      expect(mockEnqueueMailboxMessage).toHaveBeenCalledWith(
-        mockEnv,
-        'proj-001',
-        expect.objectContaining({
-          targetSessionId: 'chat-child-001',
-          sourceTaskId: 'parent-task-001',
-          content: 'hello',
-        })
-      );
-    });
-
-    it('should return internal error for non-409 delivery failures', async () => {
-      mockD1ResultSequence([
-        [
-          activeCallerTaskRow,
-          {
-            id: 'child-001',
-            status: 'in_progress',
-            workspace_id: 'ws-child-001',
-            project_id: 'proj-001',
-            parent_task_id: 'parent-task-001',
-          },
-        ],
-        [
-          {
-            id: 'ws-child-001',
-            node_id: 'node-001',
-            chat_session_id: 'chat-child-001',
-            status: 'running',
-          },
-        ],
-        [
-          {
-            id: 'agent-session-001',
-          },
-        ],
-      ]);
-
-      mockSendPromptToAgentOnNode.mockRejectedValue(new Error('Network timeout'));
-
-      const result = await handleSendMessageToSubtask(
-        1,
-        { taskId: 'child-001', message: 'hello' },
-        parentTokenData,
-        mockEnv as Env
-      );
-
-      expect(result.error).toBeDefined();
-      expect(result.error?.code).toBe(-32603);
-      expect(result.error?.message).toContain('Failed to send message');
-    });
+        expect(result.error?.message).toContain('Agent messaging is unavailable');
+        expect(result.error?.data).toMatchObject({ outcome: 'unavailable', reason });
+        expect(mockChannelSend).not.toHaveBeenCalled();
+        expectNoRawDelivery();
+      }
+    );
 
     it('should reject when no running agent session exists', async () => {
       mockD1ResultSequence([
@@ -576,7 +469,7 @@ describe('MCP Orchestration Communication Tools', () => {
       expect(result.error?.message).toContain('No running agent session');
     });
 
-    it('should truncate message to max length', async () => {
+    it('rejects a message over the channel byte cap with pointer guidance', async () => {
       mockD1ResultSequence([
         [
           activeCallerTaskRow,
@@ -603,17 +496,17 @@ describe('MCP Orchestration Communication Tools', () => {
         ],
       ]);
 
-      const longMessage = 'A'.repeat(40_000);
-
-      await handleSendMessageToSubtask(
+      const result = await handleSendMessageToSubtask(
         1,
-        { taskId: 'child-001', message: longMessage },
-        parentTokenData,
+        { taskId: 'child-001', message: 'A'.repeat(40_000) },
+        parentWithChat,
         mockEnv as Env
       );
 
-      const sentMessage = mockSendPromptToAgentOnNode.mock.calls[0][3] as string;
-      expect(sentMessage.length).toBeLessThanOrEqual(32_768);
+      expect(result.error?.message).toContain('send a pointer');
+      expect(result.error?.data).toMatchObject({ outcome: 'rejected', retryable: false });
+      expect(mockChannelSend).not.toHaveBeenCalled();
+      expectNoRawDelivery();
     });
   });
 
@@ -653,20 +546,24 @@ describe('MCP Orchestration Communication Tools', () => {
 
     it('cancels a sleeping child without contacting its released runtime', async () => {
       mockD1ResultSequence([
-        [{
-          id: 'child-001',
-          status: 'sleeping',
-          workspace_id: 'ws-child-001',
-          project_id: 'proj-001',
-          parent_task_id: 'parent-task-001',
-          recovery_source_task_id: 'source-child-001',
-        }],
-        [{
-          id: 'ws-child-001',
-          node_id: null,
-          chat_session_id: 'chat-child-001',
-          status: null,
-        }],
+        [
+          {
+            id: 'child-001',
+            status: 'sleeping',
+            workspace_id: 'ws-child-001',
+            project_id: 'proj-001',
+            parent_task_id: 'parent-task-001',
+            recovery_source_task_id: 'source-child-001',
+          },
+        ],
+        [
+          {
+            id: 'ws-child-001',
+            node_id: null,
+            chat_session_id: 'chat-child-001',
+            status: null,
+          },
+        ],
         [],
       ]);
 
@@ -779,10 +676,14 @@ describe('MCP Orchestration Communication Tools', () => {
         'node-001',
         'ws-child-001',
         'agent-session-001',
-        '[STOP REQUESTED BY PARENT] Task is no longer needed',
+        expect.stringContaining('SAM notice (system-generated, not a human message)'),
         envWithShortGrace,
         'user-001'
       );
+      // The parent's reason is agent-written: it is recorded on the task, never sent as text.
+      const warning = mockSendPromptToAgentOnNode.mock.calls[0]![3] as string;
+      expect(warning).toContain('parent agent task parent-task-001');
+      expect(warning).not.toContain('Task is no longer needed');
 
       expect(mockStopAgentSessionOnNode).toHaveBeenCalledWith(
         'node-001',

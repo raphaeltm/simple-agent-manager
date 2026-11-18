@@ -1,3 +1,5 @@
+import type { CommentMention } from '@simple-agent-manager/shared';
+
 import type {
   MessageCommentAction,
   MessageCommentAuthor,
@@ -31,6 +33,8 @@ export type UiCommentThread = {
   createdAt: number;
   updatedAt: number;
   anchor: { quote?: string | null };
+  /** Members @mentioned in the root comment. Message threads only; library files have none. */
+  mentions?: CommentMention[];
   replies: UiMessageCommentReply[];
   syncState?: CommentSyncState;
 };
@@ -85,7 +89,9 @@ export function commentsForMessage(
   return comments.filter((comment) => comment.anchor.messageId === messageId);
 }
 
-export function summarizeComments(comments: readonly UiMessageCommentThread[]): MessageCommentSummary {
+export function summarizeComments(
+  comments: readonly UiMessageCommentThread[]
+): MessageCommentSummary {
   return {
     count: comments.length,
     unresolvedCount: comments.filter((comment) => comment.status !== 'resolved').length,
@@ -103,15 +109,21 @@ export function relativeCommentTime(timestamp: number, now = Date.now()): string
 }
 
 export function authorDisplayName(author: MessageCommentAuthor): string {
-  return author.name?.trim() || author.email?.split('@')[0] || (author.kind === 'agent' ? 'Agent' : 'Someone');
+  return (
+    author.name?.trim() ||
+    author.email?.split('@')[0] ||
+    (author.kind === 'agent' ? 'Agent' : 'Someone')
+  );
 }
 
-export function buildOptimisticAuthor(user: {
-  id: string;
-  name: string | null;
-  email: string;
-  image?: string | null;
-} | null): MessageCommentAuthor {
+export function buildOptimisticAuthor(
+  user: {
+    id: string;
+    name: string | null;
+    email: string;
+    image?: string | null;
+  } | null
+): MessageCommentAuthor {
   return {
     id: user?.id ?? 'optimistic-user',
     name: user?.name ?? user?.email?.split('@')[0] ?? 'You',
@@ -141,7 +153,9 @@ export function upsertThread(
   const current = previous ?? [];
   const index = current.findIndex((candidate) => {
     if (candidate.id === incoming.id) return true;
-    return Boolean(candidate.clientId && incoming.clientId && candidate.clientId === incoming.clientId);
+    return Boolean(
+      candidate.clientId && incoming.clientId && candidate.clientId === incoming.clientId
+    );
   });
   if (index === -1) return [...current, normalized].sort(compareThreads);
   return [...current.slice(0, index), normalized, ...current.slice(index + 1)].sort(compareThreads);

@@ -20,10 +20,11 @@ describe('GitHub ProjectData event producer', () => {
     createSchemaTables(sqlite, [schema.projects]);
     sqlite
       .prepare(
-        `INSERT INTO projects (id, name, repository, github_repo_id)
-         VALUES (?, ?, ?, ?)`
+        // `user_id` is NOT NULL in production; the lookup excludes sentinel-owned projects by it.
+        `INSERT INTO projects (id, user_id, name, repository, github_repo_id)
+         VALUES (?, ?, ?, ?, ?)`
       )
-      .run('project-1', 'Project 1', 'acme/repo', 9001);
+      .run('project-1', 'user-1', 'Project 1', 'acme/repo', 9001);
     env = { DATABASE: createSqliteD1(sqlite) } as unknown as Env;
     admitProjectEvent.mockResolvedValue({
       outcome: 'created',

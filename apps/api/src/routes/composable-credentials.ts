@@ -10,6 +10,7 @@ import {
   DIALECT_VALUES,
   resolveHarnessDialect,
 } from '@simple-agent-manager/shared';
+import { assertOutboundUrl } from '@simple-agent-manager/worker-core';
 import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -23,24 +24,30 @@ import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { reconcileCapacityPoolsForCredentialMutation } from '../services/capacity-pool-credential-lifecycle';
 import { encrypt } from '../services/encryption';
+import { registerCCAttachmentRoutes, uniqueProjectIds } from './composable-credentials-attachments';
+import { registerCCProfileAttachmentRoutes } from './composable-credentials-profile-attachments';
 
 const ccRoutes = new Hono<{ Bindings: Env }>();
 
 ccRoutes.use('/*', requireAuth(), requireApproved());
 
+/**
+ * A user-supplied provider base URL: HTTPS to a public host. The control plane calls it (the AI
+ * proxy passthrough), so loopback, private-network and metadata hosts are refused here as well
+ * as at use time (`resolveProxyUpstream`), which is the control that cannot be bypassed.
+ */
 function requireHttpsBaseUrl(value: unknown): string {
   if (typeof value !== 'string' || value.trim() === '') {
     throw errors.badRequest('HTTPS baseUrl is required');
   }
+  let url: URL;
   try {
-    const url = new URL(value);
-    if (url.protocol !== 'https:') {
-      throw errors.badRequest('HTTPS baseUrl is required');
-    }
-    return value.trim();
+    url = assertOutboundUrl(value.trim());
   } catch {
-    throw errors.badRequest('HTTPS baseUrl is required');
+    throw errors.badRequest('baseUrl must be an HTTPS URL on a public host');
   }
+  if (url.protocol !== 'https:') throw errors.badRequest('HTTPS baseUrl is required');
+  return value.trim();
 }
 
 function requireDialect(value: unknown): Dialect {
@@ -127,10 +134,6 @@ async function listAffectedCredentialProjectIds(
       )
     );
   return uniqueProjectIds(rows.map((row) => row.projectId));
-}
-
-function uniqueProjectIds(projectIds: Array<string | null>): string[] {
-  return [...new Set(projectIds.filter((projectId): projectId is string => !!projectId))];
 }
 
 // =============================================================================
@@ -405,134 +408,7 @@ ccRoutes.delete('/configurations/:id', async (c) => {
   return c.json({ success: true });
 });
 
-// =============================================================================
-// Attachments
-// =============================================================================
-
-/** GET /api/cc/attachments — list user's attachments */
-ccRoutes.get('/attachments', async (c) => {
-  const db = drizzle(c.env.DATABASE, { schema });
-  const userId = getUserId(c);
-
-  const rows = await db
-    .select()
-    .from(schema.ccAttachments)
-    .where(eq(schema.ccAttachments.userId, userId));
-
-  const attachments = rows.map((row) => ({
-    id: row.id,
-    configurationId: row.configurationId,
-    consumerKind: row.consumerKind,
-    consumerTarget: row.consumerTarget,
-    projectId: row.projectId,
-    isActive: row.isActive,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  }));
-
-  return c.json({ attachments });
-});
-
-/** POST /api/cc/attachments — create an attachment */
-ccRoutes.post('/attachments', async (c) => {
-  const db = drizzle(c.env.DATABASE, { schema });
-  const userId = getUserId(c);
-  const body = await c.req.json();
-
-  const { configurationId, projectId } = body;
-  if (!configurationId) {
-    throw errors.badRequest('configurationId is required');
-  }
-
-  // Verify configuration belongs to user
-  const [cfg] = await db
-    .select()
-    .from(schema.ccConfigurations)
-    .where(
-      and(
-        eq(schema.ccConfigurations.id, configurationId),
-        eq(schema.ccConfigurations.ownerId, userId)
-      )
-    )
-    .limit(1);
-  if (!cfg) throw errors.badRequest('Configuration not found or not owned by user');
-
-  // Verify project belongs to user if provided
-  if (projectId) {
-    const [proj] = await db
-      .select({ id: schema.projects.id })
-      .from(schema.projects)
-      .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)))
-      .limit(1);
-    if (!proj) throw errors.badRequest('Project not found or not owned by user');
-  }
-
-  const id = `cc-att-${ulid()}`;
-  await db.insert(schema.ccAttachments).values({
-    id,
-    configurationId,
-    consumerKind: cfg.consumerKind,
-    consumerTarget: cfg.consumerTarget,
-    userId,
-    projectId: projectId ?? null,
-    isActive: true,
-  });
-  await reconcileCapacityPoolsForCredentialMutation(
-    c.env,
-    projectId ? { scope: 'project', userId, projectId } : { scope: 'user', userId }
-  );
-
-  return c.json({ id, configurationId, projectId: projectId ?? null }, 201);
-});
-
-/** PATCH /api/cc/attachments/:id — update an attachment (isActive) */
-ccRoutes.patch('/attachments/:id', async (c) => {
-  const db = drizzle(c.env.DATABASE, { schema });
-  const userId = getUserId(c);
-  const { id } = c.req.param();
-  const body = await c.req.json();
-
-  const updates: Record<string, unknown> = {};
-  if (typeof body.isActive === 'boolean') updates.isActive = body.isActive;
-
-  if (Object.keys(updates).length === 0) {
-    throw errors.badRequest('No valid fields to update');
-  }
-  updates.updatedAt = sql`(datetime('now'))`;
-
-  const result = await db
-    .update(schema.ccAttachments)
-    .set(updates)
-    .where(and(eq(schema.ccAttachments.id, id), eq(schema.ccAttachments.userId, userId)))
-    .returning({ id: schema.ccAttachments.id, projectId: schema.ccAttachments.projectId });
-
-  if (result.length === 0) throw errors.notFound('Attachment');
-  await reconcileCapacityPoolsForCredentialMutation(c.env, {
-    scope: 'user',
-    userId,
-    projectIds: uniqueProjectIds(result.map((row) => row.projectId)),
-  });
-  return c.json({ success: true });
-});
-
-/** DELETE /api/cc/attachments/:id */
-ccRoutes.delete('/attachments/:id', async (c) => {
-  const db = drizzle(c.env.DATABASE, { schema });
-  const userId = getUserId(c);
-  const { id } = c.req.param();
-
-  const result = await db
-    .delete(schema.ccAttachments)
-    .where(and(eq(schema.ccAttachments.id, id), eq(schema.ccAttachments.userId, userId)))
-    .returning({ id: schema.ccAttachments.id, projectId: schema.ccAttachments.projectId });
-
-  if (result.length === 0) throw errors.notFound('Attachment');
-  await reconcileCapacityPoolsForCredentialMutation(c.env, {
-    scope: 'user',
-    userId,
-    projectIds: uniqueProjectIds(result.map((row) => row.projectId)),
-  });
-  return c.json({ success: true });
-});
+registerCCAttachmentRoutes(ccRoutes);
+registerCCProfileAttachmentRoutes(ccRoutes);
 
 export { ccRoutes };

@@ -1,0 +1,248 @@
+/** Steps 1 and 2 of the create/edit flow: what starts it, and the details of when. */
+import { GITHUB_TRIGGER_DEFAULT_ACTIONS } from '@simple-agent-manager/shared';
+import { StatusBadge } from '@simple-agent-manager/ui';
+
+import { EmailTriggerFields } from '../../../components/triggers/EmailTriggerFields';
+import { GitHubFilterPreview } from '../../../components/triggers/GitHubFilterPreview';
+import { GitHubTriggerFields } from '../../../components/triggers/GitHubTriggerFields';
+import { buildGitHubFilters } from '../../../components/triggers/trigger-form-support';
+import { WebhookCallerFields } from '../../../components/triggers/WebhookCallerFields';
+import { WebhookTriggerFields } from '../../../components/triggers/WebhookTriggerFields';
+import type { AutomationStart } from '../../../lib/automation-routes';
+import { ChoiceCards } from '../fields';
+import { Notice } from '../page';
+import { OnceTimeFields } from '../schedule-time';
+import { KindIcon } from '../ui';
+import type { Errors } from './requests';
+import { type EditorState, type WebhookCaller, withWebhookCaller } from './state';
+import { ScheduleWhen } from './when-schedule';
+import { WatchWhen } from './when-watch';
+
+const STARTS: Array<{ id: AutomationStart; title: string; text: string; advanced?: boolean }> = [
+  {
+    id: 'schedule',
+    title: 'On a schedule',
+    text: 'Every day, on weekdays, weekly, monthly or every few hours.',
+  },
+  {
+    id: 'once',
+    title: 'Once, at a time you pick',
+    text: 'Start work later, or remind a chat about something.',
+  },
+  {
+    id: 'github',
+    title: 'When something happens on GitHub',
+    text: 'Issues, comments, pull requests, reviews or pushes.',
+  },
+  {
+    id: 'webhook',
+    title: 'When another service calls SAM',
+    text: 'Your CI, monitoring or app sends a request.',
+  },
+  {
+    id: 'email',
+    title: 'By email',
+    text: 'SAM gives it its own address. Email from an address you list starts it, and the agent can reply.',
+  },
+  {
+    id: 'event',
+    title: 'When SAM sees an event',
+    text: 'A task or release fails, a review arrives, an agent posts on a channel.',
+    advanced: true,
+  },
+];
+
+/** What happens next for each kind of caller, so the person knows what they will need. */
+function webhookNotice(caller: WebhookCaller, creating: boolean): string {
+  if (caller === 'slack')
+    return creating
+      ? 'After you create it, its page shows the address for Slack and a field for your Slack app’s signing secret, with four steps. Events that arrive while a run is busy wait in order.'
+      : 'Saving keeps its address and signing secret. Replace the secret on its page.';
+  if (caller === 'signed')
+    return creating
+      ? 'After you create it, its page shows its address and a field for the service’s signing secret. Events that arrive while a run is busy wait in order.'
+      : 'Saving keeps its address and signing secret. Replace the secret on its page.';
+  return creating
+    ? 'After you create it, SAM shows the URL and a secret token once. Paste both into the service that will call it.'
+    : 'Saving keeps its URL and token. To replace the token, use Get a new token on its page.';
+}
+
+export function StepStart({
+  value,
+  onChange,
+  emailAvailable,
+}: {
+  value: EditorState['start'];
+  onChange: (start: AutomationStart) => void;
+  /**
+   * Whether this deployment configured agent email. The Email start is hidden until it has:
+   * production does not offer the preview at all, so a disabled card would only add noise.
+   */
+  emailAvailable: boolean;
+}) {
+  return (
+    <ChoiceCards
+      label="What should start it?"
+      value={value === 'incident' ? null : value}
+      onChange={onChange}
+      columns={1}
+      options={STARTS.filter((start) => start.id !== 'email' || emailAvailable).map((start) => ({
+        id: start.id,
+        title: start.title,
+        text: start.text,
+        icon: (
+          <span className="flex items-center gap-2">
+            <KindIcon start={start.id} />
+            {start.advanced && <StatusBadge status="pending" label="Advanced" pulse={false} />}
+          </span>
+        ),
+      }))}
+    />
+  );
+}
+
+export function StepWhen({
+  state,
+  onChange,
+  errors,
+  creating,
+}: {
+  state: EditorState;
+  onChange: (state: EditorState) => void;
+  errors: Errors;
+  /** False when editing: the webhook's URL and token already exist. */
+  creating: boolean;
+}) {
+  switch (state.start) {
+    case 'schedule':
+      return (
+        <ScheduleWhen
+          value={state.schedule}
+          error={errors.schedule}
+          onChange={(schedule) => onChange({ ...state, schedule, scheduleTouched: true })}
+        />
+      );
+    case 'once':
+      return (
+        <OnceTimeFields
+          value={state.once}
+          error={errors.once}
+          onChange={(once) => onChange({ ...state, once })}
+        />
+      );
+    case 'github': {
+      const github = state.github;
+      const set = (patch: Partial<EditorState['github']>) =>
+        onChange({ ...state, github: { ...github, ...patch } });
+      return (
+        <div className="flex flex-col gap-3">
+          <GitHubTriggerFields
+            extraFilters={github}
+            onExtraFiltersChange={set}
+            actions={github.actions}
+            bodyContains={github.bodyContains}
+            branches={github.branches}
+            commandPrefix={github.commandPrefix}
+            disabled={false}
+            eventType={github.eventType}
+            ignoreActors={github.ignoreActors}
+            ignoreDrafts={github.ignoreDrafts}
+            labels={github.labels}
+            onActionsChange={(actions) => set({ actions })}
+            onBodyContainsChange={(bodyContains) => set({ bodyContains })}
+            onBranchesChange={(branches) => set({ branches })}
+            onCommandPrefixChange={(commandPrefix) => set({ commandPrefix })}
+            onEventTypeChange={(eventType) =>
+              // A new event resets its actions and clears filters the event does not have.
+              set({
+                eventType,
+                commandPrefix: eventType === 'issue_comment' ? '/sam' : '',
+                actions: GITHUB_TRIGGER_DEFAULT_ACTIONS[eventType],
+                ...(eventType === 'push' ? { labels: '', bodyContains: '' } : {}),
+                ...(eventType === 'issues' || eventType === 'issue_comment'
+                  ? { branches: '' }
+                  : {}),
+              })
+            }
+            onIgnoreActorsChange={(ignoreActors) => set({ ignoreActors })}
+            onIgnoreDraftsChange={(ignoreDrafts) => set({ ignoreDrafts })}
+            onLabelsChange={(labels) => set({ labels })}
+          />
+          <GitHubFilterPreview eventType={github.eventType} filters={buildGitHubFilters(github)} />
+          {errors.github && (
+            <p role="alert" className="m-0 text-[13px] font-medium text-danger-fg">
+              {errors.github}
+            </p>
+          )}
+        </div>
+      );
+    }
+    case 'webhook': {
+      const webhook = state.webhook;
+      const set = (patch: Partial<EditorState['webhook']>) =>
+        onChange({ ...state, webhook: { ...webhook, ...patch } });
+      return (
+        <div className="flex flex-col gap-3">
+          <WebhookCallerFields
+            value={webhook}
+            creating={creating}
+            errors={{ signature: errors.webhookSignature, eventId: errors.webhookEventId }}
+            onCallerChange={(caller) => onChange(withWebhookCaller(state, caller))}
+            onChange={set}
+          />
+          <Notice>{webhookNotice(webhook.caller, creating)}</Notice>
+          <WebhookTriggerFields
+            sourceLabel={webhook.sourceLabel}
+            includedHeaders={webhook.includedHeaders}
+            filterMode={webhook.filterMode}
+            filters={webhook.filters}
+            onSourceLabelChange={(sourceLabel) => set({ sourceLabel })}
+            onIncludedHeadersChange={(includedHeaders) => set({ includedHeaders })}
+            onFilterModeChange={(filterMode) => set({ filterMode })}
+            onFiltersChange={(filters) => set({ filters })}
+          />
+          {errors.webhook && (
+            <p role="alert" className="m-0 text-[13px] font-medium text-danger-fg">
+              {errors.webhook}
+            </p>
+          )}
+        </div>
+      );
+    }
+    case 'email': {
+      const email = state.email;
+      return (
+        <div className="flex flex-col gap-3">
+          <Notice>
+            {creating
+              ? 'SAM gives this automation its own email address once you save it. Mail whose From address is on the list below starts it, and the agent can reply by email. SAM checks only that the From address is on the list. It cannot confirm the sender really sent the mail, so keep that address private.'
+              : 'Its address stays the same — see it on this automation’s page. Saving changes who may use it.'}
+          </Notice>
+          <EmailTriggerFields
+            allowedSenders={email.allowedSenders}
+            onAllowedSendersChange={(allowedSenders) =>
+              onChange({ ...state, email: { ...email, allowedSenders } })
+            }
+            error={errors.email}
+          />
+        </div>
+      );
+    }
+    case 'event':
+      return (
+        <WatchWhen
+          value={state.watch}
+          errors={{ watch: errors.watch, limits: errors.limits }}
+          onChange={(watch) => onChange({ ...state, watch })}
+        />
+      );
+    case 'incident':
+      return (
+        <Notice tone="info">
+          Only the scheduled incident sweep starts this automation, so there is nothing to set here.
+        </Notice>
+      );
+    default:
+      return null;
+  }
+}

@@ -2,8 +2,8 @@
 // User
 // =============================================================================
 export type UserRole = 'superadmin' | 'admin' | 'user';
-// 'system' is the status of internal sentinel users (e.g. system_anonymous_trials,
-// seeded by migration 0043). It is never settable via the API (the `status`
+// 'system' is the status of internal sentinel users (SYSTEM_USER_ID, seeded by
+// migration 0043). It is never settable via the API (the `status`
 // additionalField is input:false) — only migrations write it. It is part of the
 // union so middleware and admin tooling can recognize and exclude internal rows
 // rather than silently coercing the value.
@@ -148,6 +148,11 @@ export interface GcpWorkloadIdentityCredential {
   wifPoolId: string;
   wifProviderId: string;
   defaultZone: string;
+  /**
+   * Google APIs SAM's setup enabled in the project. Absent on credentials set up before SAM
+   * recorded it, which are treated as missing every API added since.
+   */
+  enabledApis?: string[];
 }
 
 /** GCP service-account key credential. The private key is always encrypted at rest. */
@@ -174,6 +179,27 @@ export interface GcpCredentialMetadata {
   serviceAccountEmail: string;
   defaultZone: string;
   privateKeyId?: string;
+  /** Required Google APIs that are, or may be, unusable in the project. Empty when none. */
+  apiIssues?: GcpApiIssue[];
+}
+
+/**
+ * Why a required Google API is flagged on a GCP credential.
+ *
+ * - `api_disabled`: Google reported the API is not enabled in the project (`SERVICE_DISABLED`).
+ * - `permission_denied`: Google refused the call on IAM grounds for the project.
+ * - `not_enabled_by_setup`: SAM's setup for this credential predates the API being required, so
+ *   SAM never enabled it. It may still have been enabled by hand.
+ */
+export type GcpApiIssueReason = 'api_disabled' | 'permission_denied' | 'not_enabled_by_setup';
+
+export interface GcpApiIssue {
+  /** Service name, for example `cloudbilling.googleapis.com`. */
+  service: string;
+  label: string;
+  reason: GcpApiIssueReason;
+  /** When Google last reported it; absent for `not_enabled_by_setup`. */
+  observedAt?: string;
 }
 
 export interface SaveGcpServiceAccountCredentialRequest {
@@ -227,6 +253,56 @@ export type PlatformCredentialType = 'cloud-provider' | 'agent-api-key';
  *   $0 compute cost and are excluded from vCPU-hour metering and quota by construction.
  */
 export type CredentialSource = 'user' | 'project' | 'platform' | 'self-hosted';
+
+/**
+ * Which resolution tier chose an agent's credential: the account chosen for this run,
+ * a profile pin, a project pin, the user's default, or the platform. Ownership stays in
+ * `CredentialSource`; a run account and a profile pin are the user's own credential
+ * (`credentialSource: 'user'`).
+ */
+export type AgentCredentialScope = 'run' | 'profile' | 'project' | 'user' | 'platform';
+
+/** Which account a chat's agent ran on, for session details. */
+export interface SessionAgentCredential {
+  agentType: string | null;
+  /** Who owns the credential. */
+  credentialSource: 'user' | 'project' | 'platform' | null;
+  /** Which tier chose it. Null on sessions recorded before tiers were stored. */
+  credentialScope: AgentCredentialScope | null;
+  /** The account's name, only for the person who ran the session. */
+  accountName: string | null;
+  isOwnSession: boolean;
+}
+
+/**
+ * What a chat's agent actually runs with: the values the control plane resolved and froze
+ * into the session's runtime contract (`agent_sessions.runtime_contract_json`), after the
+ * profile, skill, project default and user settings were applied.
+ */
+export interface SessionAgentRuntimeConfig {
+  agentType: string;
+  /** Null means the agent picks its own default model. */
+  model: string | null;
+  /** Null or 'auto' means the agent's default effort. */
+  effort: string | null;
+  permissionMode: string;
+  /** OpenCode inference provider; null for other agents or the default provider. */
+  opencodeProvider: string | null;
+  /**
+   * The current name of the skill the session runs, when the viewer may see it. Unlike the
+   * other fields this is looked up live, not frozen: a renamed skill shows its new name and
+   * a deleted one shows nothing.
+   */
+  skillName: string | null;
+}
+
+/** GET /api/projects/:projectId/sessions/:sessionId/agent-credential */
+export interface SessionAgentCredentialResponse {
+  /** Null until the session's agent has received a credential. */
+  credential: SessionAgentCredential | null;
+  /** Null for sessions started before runtime contracts were recorded. */
+  runtime: SessionAgentRuntimeConfig | null;
+}
 
 export interface PlatformCredential {
   id: string;

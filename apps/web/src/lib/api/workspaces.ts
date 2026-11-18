@@ -1,7 +1,6 @@
 import type {
   AgentSession,
   CreateAgentSessionRequest,
-  CreateWorkspaceRequest,
   DetectedPort,
   Event,
   PortsResponse,
@@ -30,13 +29,6 @@ export async function listWorkspaces(
 
 export async function getWorkspace(id: string): Promise<WorkspaceResponse> {
   return request<WorkspaceResponse>(`/api/workspaces/${id}`);
-}
-
-export async function createWorkspace(data: CreateWorkspaceRequest): Promise<WorkspaceResponse> {
-  return request<WorkspaceResponse>('/api/workspaces', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
 }
 
 export async function updateWorkspace(

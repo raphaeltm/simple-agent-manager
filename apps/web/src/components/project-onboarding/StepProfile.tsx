@@ -96,6 +96,12 @@ export function StepProfile({
     <div className="grid gap-4">
       <StepHeader id={kind} title={copy.title} lead={copy.lead} />
       <Callout variant="info">{copy.callout}</Callout>
+      <p className="text-sm text-fg-muted">
+        {kind === 'conversation'
+          ? 'This agent becomes your project default unless you set up a task agent next.'
+          : 'This agent becomes your project default for tasks and automations without a selected profile.'}{' '}
+        You can change the default in Project Settings.
+      </p>
 
       {agentsError && (
         <Alert variant="error">
@@ -110,9 +116,9 @@ export function StepProfile({
 
       {!agentsLoading && !agentsError && configuredAgents.length === 0 && (
         <Alert variant="warning">
-          No agents are configured yet. Add an agent API key or OAuth token in{' '}
-          <Link to="/settings" className="underline">
-            Settings
+          No agents are configured yet. Connect an agent account in{' '}
+          <Link to="/settings/agents" className="underline">
+            Settings → Agents
           </Link>{' '}
           to create profiles, or skip this step and add them later.
         </Alert>

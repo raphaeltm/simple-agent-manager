@@ -12,6 +12,14 @@ import { listAgentActivityTasks } from '../../src/services/agent-activity';
 import { sleepWorkspaceSession } from '../../src/services/session-sleep';
 import type { SleepActivity } from '../helpers/session-sleep-fixture';
 
+// The ProjectData channel write is the only boundary mocked on the messaging path
+// (constitution XV: agent text travels only over the pair channel).
+const channelSend = vi.hoisted(() => vi.fn());
+vi.mock('../../src/services/agent-message-channels', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/services/agent-message-channels')>()),
+  sendAgentMessageOverChannel: (...args: unknown[]) => channelSend(...args),
+}));
+
 const {
   sleepBoundaryMocks: mocks,
   createSessionSleepFixture,
@@ -28,6 +36,16 @@ describe('sleeping task consumers after real VM teardown', () => {
     activity = { activity: 'idle', activityAt: START.getTime() };
     fixture = createSessionSleepFixture('in_progress', () => activity);
     ({ sqlite, env } = fixture);
+    mocks.cancelUnissuedSessionPrompts.mockImplementation(
+      async (_env, projectId, sessionId, taskId) => {
+        const current = sqlite
+          .prepare('SELECT id FROM tasks WHERE id=? AND project_id=? AND chat_session_id=?')
+          .get(taskId, projectId, sessionId);
+        return current
+          ? { matched: true, cancelled: 0 }
+          : { matched: false, reason: 'task_mismatch', cancelled: 0 };
+      }
+    );
     sqlite
       .prepare(
         "UPDATE tasks SET parent_task_id = 'parent-task', chat_session_id = 'chat-1' WHERE id = 'task-1'"
@@ -47,6 +65,18 @@ describe('sleeping task consumers after real VM teardown', () => {
       message: { id: 'message-1', targetSessionId: 'chat-1', deliveryState: 'queued' },
     });
     env.DURABLE_PROMPT_DELIVERY_ENABLED = 'true';
+    env.PROJECT_EVENT_WAKE_ENABLED = 'true';
+    env.AGENT_MESSAGE_CHANNELS_ENABLED = 'true';
+    channelSend.mockReset();
+    channelSend.mockResolvedValue({
+      outcome: 'created',
+      channel: { name: 'agent-dm.pair' },
+      eventId: 'event-1',
+      sequence: 1,
+      recipientSubscriptionId: 'sub-recipient',
+      senderSubscriptionId: 'sub-sender',
+      retiredSubscriptionIds: [],
+    });
   });
 
   afterEach(() => fixture.dispose());
@@ -56,6 +86,8 @@ describe('sleeping task consumers after real VM teardown', () => {
     projectId: 'project-1',
     userId: 'user-1',
     workspaceId: 'parent-workspace',
+    // A real calling agent always has a chat; the channel names it as the verified sender.
+    chatSessionId: 'parent-chat',
     createdAt: START.toISOString(),
   };
 
@@ -88,7 +120,7 @@ describe('sleeping task consumers after real VM teardown', () => {
   });
 
   it.each(['absent', 'deleted'])(
-    'durably accepts both message tools after VM teardown with a %s node',
+    'accepts both message tools over the channel after VM teardown with a %s node',
     async (nodeState) => {
       await sleep();
       if (nodeState === 'absent') sqlite.prepare("DELETE FROM nodes WHERE id = 'node-1'").run();
@@ -108,18 +140,19 @@ describe('sleeping task consumers after real VM teardown', () => {
       );
       expect(handoff.error).toBeUndefined();
       expect(durable.error).toBeUndefined();
-      expect(mocks.acceptPromptDelivery).toHaveBeenCalledTimes(2);
-      for (const call of mocks.acceptPromptDelivery.mock.calls) {
+      expect(channelSend).toHaveBeenCalledTimes(2);
+      for (const call of channelSend.mock.calls) {
         expect(call).toEqual([
           env,
-          'project-1',
           expect.objectContaining({
-            targetSessionId: 'chat-1',
-            displayContent: 'Continue work',
-            sourceTaskId: 'parent-task',
+            projectId: 'project-1',
+            message: 'Continue work',
+            recipient: expect.objectContaining({ taskId: 'task-1', chatSessionId: 'chat-1' }),
+            actor: expect.objectContaining({ taskId: 'parent-task' }),
           }),
         ]);
       }
+      expect(mocks.acceptPromptDelivery).not.toHaveBeenCalled();
       expect(mocks.sendPrompt).not.toHaveBeenCalled();
     }
   );
@@ -152,6 +185,7 @@ describe('sleeping task consumers after real VM teardown', () => {
     ]) {
       expect(result.error?.message).toMatch(/durable.*(disabled|enabled)|enable.*durable/i);
     }
+    expect(channelSend).not.toHaveBeenCalled();
     expect(mocks.acceptPromptDelivery).not.toHaveBeenCalled();
     expect(mocks.sendPrompt).not.toHaveBeenCalled();
   });
@@ -177,7 +211,9 @@ describe('sleeping task consumers after real VM teardown', () => {
         )
         .all()
     ).toEqual([{ from_status: 'sleeping', to_status: 'cancelled' }]);
-    expect(mocks.stopSession).toHaveBeenCalledWith(env, 'project-1', 'chat-1');
+    expect(mocks.stopSession).toHaveBeenCalledWith(env, 'project-1', 'chat-1', {
+      guard: { taskId: 'task-1' },
+    });
     expect(fixture.sessionStatus).toBe('stopped');
     expect(mocks.cleanupTaskRun).toHaveBeenCalled();
     expect(mocks.sendPrompt).not.toHaveBeenCalled();
@@ -254,7 +290,8 @@ describe('sleeping task consumers after real VM teardown', () => {
       (await handleSendDurableMessage(3, { targetTaskId: 'task-1', message: 'Wake' }, token, env))
         .error
     ).toBeDefined();
-    expect(mocks.acceptPromptDelivery).toHaveBeenCalledTimes(1);
+    expect(channelSend).toHaveBeenCalledTimes(1);
+    expect(mocks.acceptPromptDelivery).not.toHaveBeenCalled();
   });
 
   it.each(['removed', 'viewer'])(

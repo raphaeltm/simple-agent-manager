@@ -265,6 +265,9 @@ func (s *Store) DeleteWorkspaceExecutionProtocol(workspaceID string) error {
 	if _, err = tx.Exec(`DELETE FROM prompt_delivery_receipts WHERE workspace_id = ?`, workspaceID); err != nil {
 		return fmt.Errorf("delete workspace prompt receipts: %w", err)
 	}
+	if _, err = tx.Exec(`DELETE FROM steer_delivery_receipts WHERE workspace_id = ?`, workspaceID); err != nil {
+		return fmt.Errorf("delete workspace steer receipts: %w", err)
+	}
 	if _, err = tx.Exec(`DELETE FROM checkpoint_rollover_operations WHERE workspace_id = ?`, workspaceID); err != nil {
 		return fmt.Errorf("delete workspace checkpoint rollovers: %w", err)
 	}

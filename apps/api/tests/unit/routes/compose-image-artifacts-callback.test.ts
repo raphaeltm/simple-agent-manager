@@ -58,7 +58,7 @@ vi.mock('drizzle-orm', () => ({
   eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
 }));
 
-vi.mock('../../../src/db/schema', () => ({
+vi.mock('@simple-agent-manager/worker-core/schema', () => ({
   workspaces: WORKSPACES,
   nodes: NODES,
 }));
@@ -153,6 +153,16 @@ describe('compose-image-artifacts callback (vertical slice)', () => {
     policyResult = { environmentId: 'env-1' };
     verifiedPayload = { workspace: 'ws-1', type: 'callback', scope: 'workspace' };
   });
+
+  it.each(['init', 'complete'] as const)(
+    'bounds actual workspace-token %s body bytes',
+    async (path) => {
+      const app = await buildApp();
+      const response = await request(app, 'proj-1', path, { padding: '界'.repeat(400_000) }, {});
+      expect(response.status).toBe(413);
+      expect(createUploadsMock).not.toHaveBeenCalled();
+    }
+  );
 
   describe('POST /init', () => {
     const validInit = {

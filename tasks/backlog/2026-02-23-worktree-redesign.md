@@ -1,5 +1,9 @@
 # Redesign Worktree Selector
 
+> **Reconciliation 2026-10-26:** Still open: no merge since 10-12 touched the worktree limit,
+> polling or selector. Pointer fix: #2358 (`8778abe1c`) shifted the limit default to
+> `packages/vm-agent/internal/config/config_load.go:263` (still 5); the other 10-12 pointers hold.
+
 > **Reconciliation 2026-10-12:** Pointer correction only; nothing this week touched the scope.
 > #592 (`512510d87`) split `apps/web/src/pages/Workspace.tsx`. Worktrees now load through
 > `refreshWorktrees` (`apps/web/src/pages/workspace/useWorkspaceNavigation.ts:131-142`), called on

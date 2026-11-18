@@ -1,11 +1,11 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
-import { getMessages } from '../../../src/durable-objects/project-data/messages';
+import { getMessages } from '@simple-agent-manager/project-data/internal/do/messages';
 import {
   boundToolMetadataForStorage,
   DEFAULT_PROJECT_DATA_TOOL_METADATA_MAX_BYTES,
-} from '../../../src/durable-objects/project-data/tool-metadata-storage';
-import type { Env } from '../../../src/durable-objects/project-data/types';
+} from '@simple-agent-manager/project-data/internal/do/tool-metadata-storage';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
 import { log } from '../../../src/lib/logger';
 
 type QueryRow = Record<string, unknown>;
@@ -211,8 +211,18 @@ describe('ProjectData messages getMessages', () => {
   });
 
   it('supports oldest-first lookups for the initial user prompt', () => {
-    const initialPrompt = makeRow({ id: 'initial', content: 'Initial prompt', created_at: 1000, sequence: 1 });
-    const followUp = makeRow({ id: 'follow-up', content: 'Follow-up prompt', created_at: 3000, sequence: 3 });
+    const initialPrompt = makeRow({
+      id: 'initial',
+      content: 'Initial prompt',
+      created_at: 1000,
+      sequence: 1,
+    });
+    const followUp = makeRow({
+      id: 'follow-up',
+      content: 'Follow-up prompt',
+      created_at: 3000,
+      sequence: 3,
+    });
     const sql = makeSql([initialPrompt, followUp]);
 
     const result = getMessages(sql, 'session-1', 1, null, null, ['user'], true, 'asc');

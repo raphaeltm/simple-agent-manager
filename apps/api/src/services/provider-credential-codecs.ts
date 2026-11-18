@@ -144,7 +144,9 @@ export function buildProviderConfig(
     VultrRuntimeEnv &
     InfomaniakRuntimeEnv &
     DigitalOceanRuntimeEnv &
-    UpCloudRuntimeEnv
+    UpCloudRuntimeEnv,
+  /** Runtime admin settings; resolved by `buildProviderConfigForEnv` (infomaniak-provider-settings.ts). */
+  settings: { infomaniakBootVolumeGb?: number } = {}
 ): ProviderConfig {
   switch (provider) {
     case 'hetzner':
@@ -206,6 +208,7 @@ export function buildProviderConfig(
         requestTimeoutMs: parseOptionalInt(providerEnv?.INFOMANIAK_API_TIMEOUT_MS),
         ipPollTimeoutMs: parseOptionalInt(providerEnv?.INFOMANIAK_IP_POLL_TIMEOUT_MS),
         ipPollIntervalMs: parseOptionalInt(providerEnv?.INFOMANIAK_IP_POLL_INTERVAL_MS),
+        bootVolumeSizeGb: settings.infomaniakBootVolumeGb,
       };
     }
     case 'digitalocean':
@@ -278,6 +281,16 @@ export function buildProviderConfig(
   }
 }
 
+/**
+ * `enabledApis` is advisory: a malformed value is dropped (the credential then reads as predating
+ * the record) rather than making the whole credential unreadable.
+ */
+function optionalEnabledApis(obj: Record<string, unknown>): { enabledApis?: string[] } {
+  const value = obj.enabledApis;
+  if (!Array.isArray(value)) return {};
+  return { enabledApis: value.filter((api): api is string => typeof api === 'string') };
+}
+
 function requiredGcpString(obj: Record<string, unknown>, field: string): string {
   const value = obj[field];
   if (typeof value !== 'string' || value.trim().length === 0) {
@@ -337,6 +350,7 @@ export function parseGcpCredential(decryptedToken: string): GcpCredential {
       wifPoolId: requiredGcpString(obj, 'wifPoolId'),
       wifProviderId: requiredGcpString(obj, 'wifProviderId'),
       defaultZone: requiredGcpString(obj, 'defaultZone'),
+      ...optionalEnabledApis(obj),
     };
   }
 
@@ -361,10 +375,7 @@ export function parseGcpCredential(decryptedToken: string): GcpCredential {
  * consumed by provider constructors. Legacy rows store raw provider tokens;
  * composable credentials may store `{ provider, token }` wrapper JSON.
  */
-export function extractCloudProviderToken(
-  provider: string,
-  decryptedToken: string
-): string {
+export function extractCloudProviderToken(provider: string, decryptedToken: string): string {
   let parsed: unknown;
   try {
     parsed = JSON.parse(decryptedToken);

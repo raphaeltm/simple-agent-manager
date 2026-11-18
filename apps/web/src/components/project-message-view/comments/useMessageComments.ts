@@ -1,3 +1,4 @@
+import type { CommentMention } from '@simple-agent-manager/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
 
@@ -16,6 +17,7 @@ import {
   applyMessageCommentRealtimeEventToQueryCache,
   messageCommentQueryKeys,
   messageCommentsQueryOptions,
+  projectCommentQueryKeys,
 } from '../../../lib/query-options';
 import { useAuth } from '../../AuthProvider';
 import {
@@ -27,17 +29,24 @@ import {
   upsertThread,
 } from './comment-utils';
 
+/**
+ * `mentions` is required, not optional: a caller that forgets to forward the composer's picks
+ * fails to compile instead of silently notifying nobody. Pass `[]` when there are none.
+ * The display names only label the optimistic copy; the request carries the IDs alone.
+ */
 interface CreateThreadInput {
   messageId: string;
   quote?: string;
   body: string;
   action: MessageCommentAction;
+  mentions: CommentMention[];
 }
 
 interface ReplyInput {
   commentId: string;
   body: string;
   action: MessageCommentAction;
+  mentions: CommentMention[];
 }
 
 interface SendInput {
@@ -70,6 +79,15 @@ export function useMessageComments(projectId: string, sessionId: string, enabled
     [projectId, queryScope, sessionId]
   );
 
+  // Every mutation refreshes this session's threads and the project Comments page, which lists
+  // the same threads: a reply or resolve made here must not wait out the inbox's staleTime.
+  const invalidateAfterMutation = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey });
+    void queryClient.invalidateQueries({
+      queryKey: projectCommentQueryKeys.project(queryScope, projectId),
+    });
+  }, [projectId, queryClient, queryKey, queryScope]);
+
   const commentsQuery = useQuery({
     ...messageCommentsQueryOptions(queryScope, projectId, sessionId),
     enabled: enabled && Boolean(queryScope && projectId && sessionId),
@@ -97,6 +115,7 @@ export function useMessageComments(projectId: string, sessionId: string, enabled
         anchor: { kind: 'message', messageId: input.messageId, quote: input.quote },
         body: input.body,
         action: input.action,
+        mentions: input.mentions,
       }),
     onMutate: async (input) => {
       await queryClient.cancelQueries({ queryKey });
@@ -113,6 +132,7 @@ export function useMessageComments(projectId: string, sessionId: string, enabled
         createdAt: now,
         updatedAt: now,
         status: threadStatusForAction(input.action),
+        mentions: input.mentions,
         replies: [],
         syncState: 'pending',
       };
@@ -125,9 +145,7 @@ export function useMessageComments(projectId: string, sessionId: string, enabled
     onSuccess: (response) => {
       setComments((previous) => replaceThread(previous, response.comment));
     },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey });
-    },
+    onSettled: invalidateAfterMutation,
   });
 
   const replyMutation = useMutation({
@@ -136,6 +154,7 @@ export function useMessageComments(projectId: string, sessionId: string, enabled
         clientId: input.clientId,
         body: input.body,
         action: input.action,
+        mentions: input.mentions,
       }),
     onMutate: async (input) => {
       await queryClient.cancelQueries({ queryKey });
@@ -157,6 +176,7 @@ export function useMessageComments(projectId: string, sessionId: string, enabled
                     createdAt: now,
                     updatedAt: now,
                     sentToAgent: input.action === 'send_to_agent',
+                    mentions: input.mentions,
                     syncState: 'pending',
                   },
                 ],
@@ -169,9 +189,7 @@ export function useMessageComments(projectId: string, sessionId: string, enabled
     onSuccess: (response) => {
       setComments((previous) => replaceThread(previous, response.comment));
     },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey });
-    },
+    onSettled: invalidateAfterMutation,
   });
 
   const resolveMutation = useMutation({
@@ -187,9 +205,7 @@ export function useMessageComments(projectId: string, sessionId: string, enabled
     onSuccess: (response) => {
       setComments((previous) => replaceThread(previous, response.comment));
     },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey });
-    },
+    onSettled: invalidateAfterMutation,
   });
 
   const reopenMutation = useMutation({
@@ -205,9 +221,7 @@ export function useMessageComments(projectId: string, sessionId: string, enabled
     onSuccess: (response) => {
       setComments((previous) => replaceThread(previous, response.comment));
     },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey });
-    },
+    onSettled: invalidateAfterMutation,
   });
 
   const sendMutation = useMutation({
@@ -226,9 +240,7 @@ export function useMessageComments(projectId: string, sessionId: string, enabled
     onSuccess: (response) => {
       setComments((previous) => replaceThread(previous, response.comment));
     },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey });
-    },
+    onSettled: invalidateAfterMutation,
   });
 
   const applyRealtimeEvent = useCallback(
@@ -240,19 +252,37 @@ export function useMessageComments(projectId: string, sessionId: string, enabled
     [projectId, queryClient, queryScope, sessionId]
   );
 
+  // `mutateAsync` is stable for a mounted mutation, so these keep one identity across renders
+  // and the comment UI's memoized actions do not rebuild on every streamed token.
+  const { mutateAsync: createThreadAsync } = createThreadMutation;
+  const { mutateAsync: replyAsync } = replyMutation;
+  const { mutateAsync: resolveAsync } = resolveMutation;
+  const { mutateAsync: reopenAsync } = reopenMutation;
+  const { mutateAsync: sendAsync } = sendMutation;
+  const createThread = useCallback(
+    (input: CreateThreadInput) =>
+      createThreadAsync({ ...input, clientId: createOptimisticId('client-thread') }),
+    [createThreadAsync]
+  );
+  const reply = useCallback(
+    (input: ReplyInput) => replyAsync({ ...input, clientId: createOptimisticId('client-reply') }),
+    [replyAsync]
+  );
+  const resolve = useCallback((commentId: string) => resolveAsync(commentId), [resolveAsync]);
+  const reopen = useCallback((commentId: string) => reopenAsync(commentId), [reopenAsync]);
+  const sendToAgent = useCallback((input: SendInput) => sendAsync(input), [sendAsync]);
+
   return {
     comments: commentsQuery.data ?? [],
     loading: commentsQuery.isPending && commentsQuery.data === undefined,
     refreshing: commentsQuery.isFetching && commentsQuery.data !== undefined,
     error: commentsQuery.error instanceof Error ? commentsQuery.error.message : null,
     refetch: commentsQuery.refetch,
-    createThread: (input: CreateThreadInput) =>
-      createThreadMutation.mutateAsync({ ...input, clientId: createOptimisticId('client-thread') }),
-    reply: (input: ReplyInput) =>
-      replyMutation.mutateAsync({ ...input, clientId: createOptimisticId('client-reply') }),
-    resolve: (commentId: string) => resolveMutation.mutateAsync(commentId),
-    reopen: (commentId: string) => reopenMutation.mutateAsync(commentId),
-    sendToAgent: (input: SendInput) => sendMutation.mutateAsync(input),
+    createThread,
+    reply,
+    resolve,
+    reopen,
+    sendToAgent,
     applyingMutation:
       createThreadMutation.isPending ||
       replyMutation.isPending ||

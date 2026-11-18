@@ -15,6 +15,10 @@ vi.mock('drizzle-orm/d1', () => ({
 }));
 
 vi.mock('../../../src/middleware/auth', () => ({
+  // Agent sign-in session guards: inert for these ordinary-session route tests.
+  rejectAgentSignInSession: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  assertNotAgentSignInSession: () => undefined,
+
   requireAuth: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
   requireApproved: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
   getUserId: () => 'admin-user',
@@ -129,6 +133,11 @@ function createDeleteDb() {
             return chain;
           }),
           where: vi.fn(() => chain),
+          innerJoin: vi.fn(() => ({
+            where: () => ({
+              limit: async () => [{ project: makeProject(), membership: makeMember() }],
+            }),
+          })),
           limit: vi.fn(async () => {
             if (selectedTable === schema.projects) return [makeProject()];
             if (selectedTable === schema.projectMembers) return [makeMember()];
@@ -192,11 +201,9 @@ describe('shared project authorization consolidation', () => {
     const { db, deleteSpy, batchSpy } = createDeleteDb();
     mocks.currentDb = db;
 
-    const response = await createApp().request(
-      '/api/projects/proj-1',
-      { method: 'DELETE' },
-      { DATABASE: {} } as Env
-    );
+    const response = await createApp().request('/api/projects/proj-1', { method: 'DELETE' }, {
+      DATABASE: {},
+    } as Env);
 
     expect(response.status).toBe(403);
     const body = await response.json<{ error: string; message: string }>();

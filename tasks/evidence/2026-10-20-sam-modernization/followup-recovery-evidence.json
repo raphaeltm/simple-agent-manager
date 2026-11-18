@@ -1,0 +1,55 @@
+{
+  "runtimeCommit": "109d21080b567f55879840e3530c9a1b9a57cc84",
+  "originalRun": "793905ee-a90a-40b9-9a76-ca5229eb5ab7",
+  "originalJourneyResult": "failed; preserved",
+  "recoveryJob": "sx-fbe954e54ed2bc55c12b4ec501742dadb1b5e30d1e75cd8578891d71bd6b1ad9",
+  "recovery": {
+    "originalLedgerSha256": "51ccaee92a1656bb614db99f4d92eed7dc33b0675a1ba41bb4c604796d3481b8",
+    "completed": true,
+    "originalTurnId": "0633a0be-be1b-4092-bf85-70fd877e1439",
+    "originalState": "interrupted",
+    "receipts": [
+      {
+        "id": "94514e9ab76d019cb78b2c27757e3b14ddfe7acca21ffec67193e7b4fc90b290",
+        "operation": "sam_chat_read",
+        "state": "completed"
+      },
+      {
+        "id": "b2d1a17df0286e0e3d194cad3d6ebb9e96023281a6fc6f00d366eaa843d10984",
+        "operation": "sam_chat_send",
+        "state": "completed"
+      }
+    ],
+    "sameKeyReplay": true,
+    "dispatchReceiptReconciled": true,
+    "recoveryTurnId": "4f3dbefc-4619-4acf-93d4-f102b9e83e13",
+    "recoveryState": "completed",
+    "recoveryActions": [
+      {
+        "id": "1233a07f6055806c95066a9df49fd66b48929de34f56b06cd255c1f1a8936b3e",
+        "operation": "sam_chat_read",
+        "state": "completed"
+      }
+    ],
+    "responseCharacters": 42,
+    "responseSha256": "08316fd3462c8cee177a85a24cf658e0878199ccad0cdd3476ad2ce0365de432",
+    "originalReceiptsUnchanged": true,
+    "originalSessionStillStopped": true,
+    "originalWorkspaceAbsent": true,
+    "originalNodeAbsent": true,
+    "originalLedgerUnchanged": true,
+    "disabled": true
+  },
+  "freshLifecycle": {
+    "runId": "c4edab9c-90a1-4939-bdd4-dc523389a27b",
+    "jobId": "sx-576830646f9ba335f726ed02480255fb08a33767c9ed0f3ed0fa059774004dc1",
+    "result": "failed at initial-answer phase; preserved",
+    "cleanup": "all six owned cleanup steps confirmed",
+    "observation": "Initial-answer deadline elapsed before full repository report; complete 33-row transcript read ruled out pagination truncation.",
+    "controlledStop": "not reached; focused active-stop verification pending"
+  },
+  "limitations": [
+    "No original failed turn is reclassified as completed.",
+    "Model response text and project transcript are excluded from this public artifact."
+  ]
+}

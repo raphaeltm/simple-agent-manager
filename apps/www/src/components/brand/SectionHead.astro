@@ -1,0 +1,30 @@
+---
+/**
+ * Chapter heading for the brand guide: outlined chapter number behind, a kicker, a heading
+ * that rises word by word, and the lede (default slot).
+ */
+import { type SectionId, sectionNumber, SECTIONS } from '../../data/brand';
+
+interface Props {
+  id: SectionId;
+  title: string;
+}
+
+const { id, title } = Astro.props;
+const number = sectionNumber(id);
+const label = SECTIONS.find((section) => section.id === id)?.label ?? '';
+const words = title.split(' ');
+---
+
+<header class="bg-head" data-progress>
+  <span class="bg-num" aria-hidden="true" data-word={number}></span>
+  <p class="bg-kicker">{number} / {label}</p>
+  <h2 class="bg-title bg-words" id={`${id}-title`}>
+    {words.map((word, index) => (
+      <Fragment>
+        <span class="w"><span style={`--w:${index}`}>{word}</span></span>{index < words.length - 1 ? ' ' : ''}
+      </Fragment>
+    ))}
+  </h2>
+  {Astro.slots.has('default') && <p class="bg-lede" data-reveal style="--i:2"><slot /></p>}
+</header>

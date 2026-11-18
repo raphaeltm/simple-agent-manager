@@ -1,0 +1,78 @@
+{
+  "outcome": "completed",
+  "start": "2026-11-03T17:58:19.000Z",
+  "finished": "2026-11-03T18:27:52.000Z",
+  "sourceCommit": "601bb681c40ae11de51cb4a834bf99dc148ee2aa",
+  "proofWorker": "sam-build-proof-53fbd16d2b0f",
+  "instanceType": "standard-3",
+  "configuredMaximumSeconds": 3600,
+  "launcherElapsedSeconds": 1773,
+  "computeEstimateUsdForElapsed": 0.1084,
+  "conservativeIncrementalEstimateUsd": 2,
+  "actualBilledUsd": null,
+  "phases": [
+    {
+      "phase": "bootstrap",
+      "enteredAt": null
+    },
+    {
+      "phase": "codex-source-build",
+      "enteredAt": "2026-11-03T18:01:27.679Z"
+    },
+    {
+      "phase": "application-build",
+      "enteredAt": "2026-11-03T18:18:08.572Z"
+    },
+    {
+      "phase": "cli-build",
+      "enteredAt": "2026-11-03T18:19:45.196Z"
+    },
+    {
+      "phase": "vm-agent-build",
+      "enteredAt": "2026-11-03T18:21:17.858Z"
+    },
+    {
+      "phase": "runtime-image-build",
+      "enteredAt": "2026-11-03T18:24:49.508Z"
+    },
+    {
+      "phase": "sandbox-image-build",
+      "enteredAt": "2026-11-03T18:26:39.478Z"
+    },
+    {
+      "phase": "completed",
+      "enteredAt": "2026-11-03T18:27:34.026Z"
+    }
+  ],
+  "peakDiskUsedBytes": 7910014976,
+  "finalDiskAvailableBytes": 7717527552,
+  "peakMemoryBytes": null,
+  "peakMemoryNote": "cgroup memory.peak was not readable inside the managed container; no OOM kill occurred",
+  "cleanup": {
+    "launcher": "Deleted only proof resources sam-build-proof-53fbd16d2b0f",
+    "verifiedAt": "2026-11-03T18:28:14Z",
+    "proofWorkersRemaining": [],
+    "containerApplications": [
+      "sam-api-staging-vmagentcontainer-staging",
+      "sam-api-staging-sandboxdo-staging"
+    ]
+  },
+  "priorAttemptsToday": [
+    {
+      "proofWorker": "sam-build-proof-5ecb3919e02d",
+      "sourceCommit": "2553a1fe63d417f2b470cb06f22c993f40fea159",
+      "outcome": "failed in bootstrap after ~2.5 min with no error text (pre-trap); cleanup verified"
+    },
+    {
+      "proofWorker": "sam-build-proof-0a64bf109964",
+      "sourceCommit": "91835aec81e1d641345126a71823dcc6607a0544",
+      "outcome": "failed in bootstrap: curl (22) 404 on Go download, line 21; cleanup verified"
+    },
+    {
+      "proofWorker": "sam-build-proof-87bf18007091",
+      "sourceCommit": "7283f0b3b7745cb64aa60a37c4752d8292ac0325 (throwaway probe branch, deleted)",
+      "outcome": "intentional egress probe: all download sources 2xx from AMS IPv6 egress; cleanup verified"
+    }
+  ],
+  "launcher": "scripts/deploy/installer-builder-proof.ts run detached from the workspace via SAM exec_with_secrets (installer-build-proof.yml is not dispatchable until it exists on main; exec jobs are capped at 60 min)"
+}

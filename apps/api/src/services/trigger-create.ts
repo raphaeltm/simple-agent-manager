@@ -1,10 +1,18 @@
 /** Canonical trigger creation shared by authenticated REST and project-scoped MCP. */
+import { cronToNextFire, validateCronExpression } from '@simple-agent-manager/cron';
+import {
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from '@simple-agent-manager/scheduler-core';
 import {
   DEFAULT_CRON_MIN_INTERVAL_MINUTES,
   DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
   DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT,
   DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
   DEFAULT_TRIGGER_NAME_MAX_LENGTH,
+  isWebhookSignedScheme,
 } from '@simple-agent-manager/shared';
 import { and, count, eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
@@ -16,17 +24,20 @@ import { parsePositiveInt } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import type { CreateTriggerSchema } from '../schemas/triggers';
-import { cronToNextFire, validateCronExpression } from './cron-utils';
+import { generateAddressKey } from './agent-email/address';
+import { requireAgentEmailOn, resolveAllowedSenders } from './agent-email/trigger-config';
+import { validateGitHubTriggerQueueConfig } from './github-trigger-config';
 import type { McpTokenData } from './mcp-token';
-import {
-  ResourceRequirementsValidationError,
-  serializeResourceRequirementsInput,
-} from './resource-requirements-input';
 import { clearTriggerPageCaches } from './trigger-cache';
 import { resolveMaxTriggersPerProject } from './trigger-limits';
 import { prepareWebhookClaim } from './webhook-credential-claim';
-import { getWebhookTriggerLimits, validateWebhookTriggerConfig } from './webhook-trigger-config';
-import { createWebhookTokenMaterial, webhookConfigValues } from './webhook-trigger-store';
+import {
+  applyWebhookSchemeDefaults,
+  getWebhookTriggerLimits,
+  validateWebhookTriggerConfig,
+} from './webhook-trigger-config';
+import { webhookConfigValues } from './webhook-trigger-config-rows';
+import { createWebhookTokenMaterial } from './webhook-trigger-store';
 type Database = ReturnType<typeof drizzle<typeof schema>>;
 function triggerResourceRequirementsJson(body: {
   resourceRequirements?: unknown;
@@ -102,6 +113,7 @@ export function validateTriggerSourceFields(
     cronExpression?: unknown;
     cronTimezone?: unknown;
     webhookConfig?: unknown;
+    emailConfig?: unknown;
   }
 ) {
   if (body.githubConfig !== undefined && sourceType !== 'github')
@@ -113,6 +125,22 @@ export function validateTriggerSourceFields(
     throw errors.badRequest('Cron schedule fields are only valid for cron triggers');
   if (body.webhookConfig !== undefined && sourceType !== 'webhook')
     throw errors.badRequest('webhookConfig is only valid for webhook triggers');
+  if (body.emailConfig !== undefined && sourceType !== 'email')
+    throw errors.badRequest('emailConfig is only valid for email triggers');
+}
+
+/** Webhook and email triggers start agents from outside input, so they always name a profile. */
+const EXPLICIT_PROFILE_SOURCES = new Set(['webhook', 'email']);
+
+/**
+ * Refuses an update that would clear the agent profile of a trigger that must keep one.
+ * Shared by the REST PATCH route and MCP `update_trigger`; `undefined` means not supplied.
+ */
+export function assertKeepsAgentProfile(sourceType: string, agentProfileId: unknown): void {
+  if (!EXPLICIT_PROFILE_SOURCES.has(sourceType)) return;
+  if (agentProfileId === null || (typeof agentProfileId === 'string' && !agentProfileId.trim())) {
+    throw errors.badRequest(`agentProfileId is required for ${sourceType} triggers`);
+  }
 }
 
 function validateTriggerCreation(env: Env, body: v.InferOutput<typeof CreateTriggerSchema>) {
@@ -139,6 +167,9 @@ function validateTriggerCreation(env: Env, body: v.InferOutput<typeof CreateTrig
   if (body.sourceType === 'webhook' && (!body.webhookConfig || !body.agentProfileId)) {
     throw errors.badRequest('webhookConfig and agentProfileId are required for webhook triggers');
   }
+  if (body.sourceType === 'email' && !body.agentProfileId) {
+    throw errors.badRequest('agentProfileId is required for email triggers');
+  }
   if (body.webhookConfig) {
     const configError = validateWebhookTriggerConfig(
       body.webhookConfig,
@@ -158,8 +189,25 @@ export async function createTrigger(
   claimIdentity?: McpTokenData
 ) {
   const projectId = project.id;
+  if (body.sourceType === 'webhook' && body.webhookConfig) {
+    body = { ...body, webhookConfig: applyWebhookSchemeDefaults(body.webhookConfig) };
+  }
+  // A signed automation is verified with the sender's own secret, which a person saves on its
+  // page. It has no SAM token to return, and nothing for an agent to claim.
+  const signedWebhook = isWebhookSignedScheme(
+    body.webhookConfig?.verification?.scheme ?? 'sam_bearer'
+  );
   const { name, promptTemplate } = validateTriggerCreation(env, body);
+  const githubConfig =
+    body.sourceType === 'github'
+      ? await validateGitHubTriggerQueueConfig(env, body.githubConfig, { applyDefaults: true })
+      : undefined;
+  if (body.sourceType === 'email') await requireAgentEmailOn(env);
   await validateReferences(db, projectId, body.agentProfileId, body.skillId);
+  const allowedSenders =
+    body.sourceType === 'email'
+      ? await resolveAllowedSenders(db, env, userId, body.emailConfig?.allowedSenders)
+      : [];
 
   const [sameName, total] = await Promise.all([
     db
@@ -232,7 +280,7 @@ export async function createTrigger(
   };
 
   const claim =
-    body.sourceType === 'webhook' && claimIdentity
+    body.sourceType === 'webhook' && claimIdentity && !signedWebhook
       ? prepareWebhookClaim(env, claimIdentity)
       : undefined;
   let webhookToken: Awaited<ReturnType<typeof createWebhookTokenMaterial>> | undefined;
@@ -244,14 +292,28 @@ export async function createTrigger(
         .insert(schema.webhookTriggerConfigs)
         .values({ ...webhookConfigValues(id, body.webhookConfig, webhookToken), ...claim?.values }),
     ]);
-  } else if (body.sourceType === 'github' && body.githubConfig) {
+  } else if (body.sourceType === 'email') {
+    await db.batch([
+      db.insert(schema.triggers).values(values),
+      db.insert(schema.triggerEmailConfigs).values({
+        triggerId: id,
+        addressKey: generateAddressKey(),
+        allowedSendersJson: JSON.stringify(allowedSenders),
+        createdAt: now,
+        updatedAt: now,
+      }),
+    ]);
+  } else if (body.sourceType === 'github' && githubConfig) {
     await db.batch([
       db.insert(schema.triggers).values(values),
       db.insert(schema.githubTriggerConfigs).values({
         id: ulid(),
         triggerId: id,
-        eventType: body.githubConfig.eventType,
-        filtersJson: JSON.stringify(body.githubConfig.filters ?? {}),
+        eventType: githubConfig.eventType,
+        filtersJson: JSON.stringify(githubConfig.filters),
+        subjectAffinity: githubConfig.subjectAffinity ?? false,
+        queueMaxPending: githubConfig.queueMaxPending ?? DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
+        queueTtlSeconds: githubConfig.queueTtlSeconds ?? DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
         createdAt: now,
         updatedAt: now,
       }),
@@ -263,5 +325,9 @@ export async function createTrigger(
   const created = await db.select().from(schema.triggers).where(eq(schema.triggers.id, id)).get();
   if (!created) throw errors.internal('Created trigger not found');
   clearTriggerPageCaches(projectId);
-  return { created, webhookToken: claim ? undefined : webhookToken, webhookClaim: claim?.response };
+  return {
+    created,
+    webhookToken: claim || signedWebhook ? undefined : webhookToken,
+    webhookClaim: claim?.response,
+  };
 }

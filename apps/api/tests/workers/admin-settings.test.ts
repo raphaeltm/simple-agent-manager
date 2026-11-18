@@ -17,7 +17,7 @@ beforeEach(async () => {
   await seedUser(actor);
   await bindings.DATABASE.batch([
     bindings.DATABASE.prepare(
-      "DELETE FROM platform_settings WHERE key LIKE 'connector.%' OR key LIKE 'operations.%' OR key LIKE 'integration.%' OR key='trials.enabled'"
+      "DELETE FROM platform_settings WHERE key LIKE 'connector.%' OR key LIKE 'operations.%' OR key LIKE 'integration.%'"
     ),
     bindings.DATABASE.prepare(
       "DELETE FROM platform_credentials WHERE credential_type='platform-integration'"

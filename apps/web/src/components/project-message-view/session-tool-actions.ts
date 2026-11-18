@@ -10,7 +10,6 @@ import { isExpiredTask } from '@simple-agent-manager/shared';
 import type { LucideIcon } from 'lucide-react';
 import {
   Activity,
-  CalendarClock,
   CheckCircle2,
   Clock,
   Flag,
@@ -18,8 +17,13 @@ import {
   GitCompare,
   GitFork,
   Info,
+  Link2,
   MessageSquareQuote,
+  ReceiptText,
   RotateCcw,
+  Users,
+  Workflow,
+  XCircle,
 } from 'lucide-react';
 
 import type { ChatSessionResponse } from '../../lib/api';
@@ -62,12 +66,16 @@ export type SessionToolId =
   | 'git'
   | 'timeline'
   | 'resources'
-  | 'events'
+  | 'automation'
+  | 'related'
+  | 'receipt'
   | 'comments'
+  | 'share'
   | 'retry'
   | 'fork'
   | 'report'
   | 'complete'
+  | 'cancel'
   | 'details';
 
 export interface SessionToolAction {
@@ -83,6 +91,11 @@ export interface SessionToolAction {
   tone?: 'default' | 'success';
   /** Unresolved comment count — a dot in icon mode, a number in label mode. */
   badge?: number;
+  /**
+   * Renders the badge as "N+". Set when the server could only establish a minimum count
+   * (`CappedList.totalIsLowerBound`), so a bare number would assert what it declined to claim.
+   */
+  badgeIsLowerBound?: boolean;
   /**
    * Amber-tints the badge, matching the header chip's "N needs you" treatment. Without
    * it the two surfaces disagreed about urgency for the same session.
@@ -106,15 +119,35 @@ export interface BuildSessionToolActionsInput {
   unresolvedCommentCount: number;
   /** Subset of the above whose last activity came from someone else. */
   needsAttentionCommentCount?: number;
+  /** Ideas, files and pull requests this chat is related to — the Related badge. */
+  relatedCount?: number;
+  /** True when `relatedCount` is a minimum, so the badge reads "N+". */
+  relatedCountIsLowerBound?: boolean;
   /** Handler availability mirrors the old per-button `{onOpenX && ...}` guards. */
   hasFilesHandler: boolean;
   hasGitHandler: boolean;
   hasTimelineHandler: boolean;
   hasResourcesHandler: boolean;
-  hasEventsHandler: boolean;
+  hasAutomationHandler: boolean;
+  hasRelatedHandler: boolean;
+  /** The Run receipt (Insights slice R); offered only for a task-backed chat. */
+  hasReceiptHandler?: boolean;
   hasCommentsHandler: boolean;
   hasRetryHandler: boolean;
   hasForkHandler: boolean;
+  hasShareHandler?: boolean;
+  /** People the session is shared with — the Share badge. */
+  sharedWithCount?: number;
+  /**
+   * Whether this viewer can add or remove people (owner and grantees). Everyone else can only
+   * see who has access, so their hint must not invite them to share.
+   */
+  canManageShare?: boolean;
+  /**
+   * Files/Git: the owner, and teammates the session is shared with (their reads are limited to
+   * the repository folder). Other members do not get them.
+   */
+  canBrowseWorkspace?: boolean;
   /** True while a mark-complete request is in flight. */
   completing?: boolean;
   /** Drives `aria-expanded` on the Details action. */
@@ -135,6 +168,19 @@ type SessionToolSpec = Omit<SessionToolAction, 'group'>;
 /** Stamps one group onto every spec a builder produced. */
 function withGroup(group: SessionToolGroup, specs: SessionToolSpec[]): SessionToolAction[] {
   return specs.map((spec) => ({ ...spec, group }));
+}
+
+/**
+ * Related tool hint.
+ *
+ * Names the three things it lists, because in icon-only mode a chain-link glyph is the whole
+ * affordance and "Related" alone does not say related to what.
+ */
+function buildRelatedHint(count: number, isLowerBound: boolean): string {
+  const base = 'See the ideas, files and pull requests related to this chat';
+  if (count <= 0) return base;
+  const noun = count === 1 && !isLowerBound ? 'item' : 'items';
+  return `${base} — ${count}${isLowerBound ? ' or more' : ''} ${noun}`;
 }
 
 /** Comment tool hint — attention outranks a plain unresolved count. */
@@ -159,14 +205,18 @@ function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolSp
     hasGitHandler,
     hasTimelineHandler,
     hasResourcesHandler,
-    hasEventsHandler,
+    hasAutomationHandler,
+    hasRelatedHandler,
     hasCommentsHandler,
+    canBrowseWorkspace = true,
+    relatedCount = 0,
+    relatedCountIsLowerBound = false,
   } = input;
 
   const actions: SessionToolSpec[] = [];
 
   // Files / Git / Workspace need a live workspace to act on.
-  if (session.workspaceId && sessionState === 'active') {
+  if (session.workspaceId && sessionState === 'active' && canBrowseWorkspace) {
     if (hasFilesHandler) {
       actions.push({
         id: 'files',
@@ -194,6 +244,26 @@ function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolSp
     });
   }
 
+  /*
+   * Related sits beside Timeline on purpose: Timeline answers "what happened in this chat"
+   * and Related answers "what this chat is connected to". Both are always present and both
+   * are reading surfaces, so they belong together and above the operational tools.
+   *
+   * It is offered even with nothing linked — the panel's empty state is how someone learns the
+   * feature exists, and hiding the tool until a link happens would make it undiscoverable on
+   * exactly the chats where a user might want to create one.
+   */
+  if (hasRelatedHandler) {
+    actions.push({
+      id: 'related',
+      label: 'Related',
+      hint: buildRelatedHint(relatedCount, relatedCountIsLowerBound),
+      icon: Link2,
+      badge: relatedCount > 0 ? relatedCount : undefined,
+      badgeIsLowerBound: relatedCountIsLowerBound,
+    });
+  }
+
   if (hasResourcesHandler) {
     actions.push({
       id: 'resources',
@@ -203,12 +273,12 @@ function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolSp
     });
   }
 
-  if (hasEventsHandler) {
+  if (hasAutomationHandler) {
     actions.push({
-      id: 'events',
-      label: 'Events',
-      hint: 'Session events and schedules',
-      icon: CalendarClock,
+      id: 'automation',
+      label: 'Automation',
+      hint: 'What this chat waits for, and reminders',
+      icon: Workflow,
     });
   }
 
@@ -226,10 +296,31 @@ function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolSp
   return actions;
 }
 
+function buildShareHint(sharedWithCount: number, canManageShare: boolean): string {
+  if (sharedWithCount === 0) {
+    return canManageShare ? 'Share chat access with a teammate' : 'See who has access to this chat';
+  }
+  const people = `${sharedWithCount} ${sharedWithCount === 1 ? 'person' : 'people'}`;
+  return canManageShare
+    ? `Shared with ${people} — manage chat access`
+    : `Shared with ${people} — see who has access`;
+}
+
 /** Tools that act on the task behind the session. */
 function buildSessionGroup(input: BuildSessionToolActionsInput): SessionToolSpec[] {
   const { session, taskEmbed, hasRetryHandler, hasForkHandler } = input;
+  const { hasShareHandler = false, sharedWithCount = 0, canManageShare = false } = input;
   const actions: SessionToolSpec[] = [];
+
+  if (hasShareHandler) {
+    actions.push({
+      id: 'share',
+      label: 'Share',
+      hint: buildShareHint(sharedWithCount, canManageShare),
+      icon: Users,
+      badge: sharedWithCount > 0 ? sharedWithCount : undefined,
+    });
+  }
 
   // Retry / Fork act on the task, so they only exist when there is one.
   //
@@ -240,6 +331,16 @@ function buildSessionGroup(input: BuildSessionToolActionsInput): SessionToolSpec
   // now read `taskEmbed`, falling back to the session fields only when the embed has not
   // arrived yet (the detail response populates it, list responses do not).
   const hasTask = !!(taskEmbed?.id ?? session.task?.id ?? session.taskId);
+  // The receipt reads the task's run, so like Retry and Fork it exists only with a task. It is
+  // offered while the run is live too: it then shows the time so far.
+  if (hasTask && input.hasReceiptHandler) {
+    actions.push({
+      id: 'receipt',
+      label: 'Receipt',
+      hint: 'Run receipt: where the time went, the outcome and what slowed it down',
+      icon: ReceiptText,
+    });
+  }
   if (hasTask) {
     if (hasRetryHandler && !isExpiredTask(taskEmbed ?? session.task)) {
       actions.push({
@@ -262,6 +363,26 @@ function buildSessionGroup(input: BuildSessionToolActionsInput): SessionToolSpec
   return actions;
 }
 
+/**
+ * How the rail can end this task. A task that has never started (draft, ready, queued,
+ * delegated) cannot be completed (`apps/api/src/services/task-status.ts`), only cancelled,
+ * which also stops a queued run from spawning later. Started tasks are completed.
+ */
+export function taskEndIntent(status: string | undefined): 'completed' | 'cancelled' | null {
+  switch (status) {
+    case 'in_progress':
+    case 'sleeping':
+      return 'completed';
+    case 'draft':
+    case 'ready':
+    case 'queued':
+    case 'delegated':
+      return 'cancelled';
+    default:
+      return null;
+  }
+}
+
 /** Cross-cutting tools, pinned to the bottom of the rail. */
 function buildMetaGroup(input: BuildSessionToolActionsInput): SessionToolSpec[] {
   const { taskEmbed, reportEnabled, completing = false, detailsExpanded = false } = input;
@@ -276,19 +397,22 @@ function buildMetaGroup(input: BuildSessionToolActionsInput): SessionToolSpec[] 
     });
   }
 
-  const canMarkComplete = !!(
-    taskEmbed?.id &&
-    taskEmbed.status !== 'completed' &&
-    taskEmbed.status !== 'cancelled' &&
-    taskEmbed.status !== 'failed'
-  );
-  if (canMarkComplete) {
+  const endIntent = taskEndIntent(taskEmbed?.id ? taskEmbed.status : undefined);
+  if (endIntent === 'completed') {
     actions.push({
       id: 'complete',
       label: completing ? 'Completing...' : 'Complete',
       hint: 'Mark this task complete',
       icon: CheckCircle2,
       tone: 'success',
+      disabled: completing,
+    });
+  } else if (endIntent === 'cancelled') {
+    actions.push({
+      id: 'cancel',
+      label: completing ? 'Cancelling...' : 'Cancel task',
+      hint: 'Cancel this task before it starts',
+      icon: XCircle,
       disabled: completing,
     });
   }

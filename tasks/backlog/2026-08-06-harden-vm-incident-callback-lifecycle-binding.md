@@ -1,5 +1,9 @@
 # Harden VM Incident Callback Lifecycle and Workspace Binding
 
+> **Reconciliation 2026-10-26:** Still open. Pointer correction: the deleted-node `/errors` 410 test
+> is now `apps/api/tests/workers/route-auth-validation.test.ts:920` (#2276 grew the setup above it;
+> `:901` is now the origin-CA test).
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**
@@ -13,7 +17,7 @@
 >     `node_mismatch` (`apps/api/src/services/vm-error-correlation.ts`, commit fd1d1aa08; tests in
 >     `vm-error-correlation.test.ts`).
 >   - The shared callback policy is documented in
->     `apps/api/.claude/rules/34-vm-agent-callback-auth.md:38`.
+>     `.claude/rules/34-vm-agent-callback-auth.md:38`.
 > - **Still open:**
 >   - The body `workspaceId` is still stored as-is when it belongs to another node; only task and
 >     session are nulled. `apps/api/tests/integration/observability-ingestion.test.ts:1003-1011`

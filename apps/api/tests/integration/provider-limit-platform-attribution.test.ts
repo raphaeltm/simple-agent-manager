@@ -1,3 +1,4 @@
+import { newProviderLimitWait } from '@simple-agent-manager/scheduler-core';
 import { AI_PROXY_BILLING_MODE_KV_KEY } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
@@ -15,7 +16,6 @@ import { taskCallbackRoute } from '../../src/routes/tasks/callback';
 import { runtimeRoutes } from '../../src/routes/workspaces/runtime';
 import { resolveUpstreamAuth } from '../../src/services/ai-billing';
 import { encrypt } from '../../src/services/encryption';
-import { newProviderLimitWait } from '../../src/services/provider-limit-policy';
 import { rejectedProviderWindow } from '../../src/services/provider-limit-window';
 import { queueWorkspaceSessionSleep } from '../../src/services/session-sleep';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
@@ -23,6 +23,7 @@ import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 vi.mock('../../src/services/jwt', () => ({
   verifyCallbackToken: vi.fn(async () => ({ workspace: 'workspace-1', scope: 'workspace' })),
   signCallbackToken: vi.fn(),
+  signCurrentWorkspaceCallbackToken: vi.fn(),
 }));
 vi.mock('../../src/services/project-data', () => ({
   persistMessage: vi.fn(async () => 'notice'),
@@ -49,6 +50,9 @@ describe('platform quota attribution at real credential and callback boundaries'
       DATABASE: createSqliteD1(sqlite),
       ENCRYPTION_KEY: encryptionKey,
       BASE_DOMAIN: 'fixture.example',
+      CF_ACCOUNT_ID: 'account-test',
+      CF_API_TOKEN: 'cf-token-test',
+      AI_GATEWAY_ID: 'gateway-test',
       AI_PROXY_ENABLED: 'true',
       KV: {
         get: vi.fn(async (key: string) => (key === AI_PROXY_BILLING_MODE_KV_KEY ? mode : null)),

@@ -30,7 +30,11 @@ const mocks = vi.hoisted(() => ({
   drizzle: vi.fn(),
 }));
 
-vi.mock('../../../src/services/jwt', () => mocks.jwt);
+vi.mock('../../../src/services/jwt', () => ({
+  ...mocks.jwt,
+  signCurrentWorkspaceCallbackToken: mocks.jwt.signCallbackToken,
+  signCurrentNodeCallbackToken: mocks.jwt.signNodeCallbackToken,
+}));
 vi.mock('../../../src/services/telemetry', () => mocks.telemetry);
 vi.mock('../../../src/services/vm-agent-container', () => mocks.container);
 vi.mock('drizzle-orm/d1', () => ({ drizzle: mocks.drizzle }));
@@ -88,7 +92,8 @@ describe('getCfContainerCreateWorkspaceTimeoutMs', () => {
 
 describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
   it.each(['cf-container', 'vm', 'no-database'])(
-    'preserves a sleep identity error before any %s external fetch', async (runtime) => {
+    'preserves a sleep identity error before any %s external fetch',
+    async (runtime) => {
       mocks.drizzle.mockReturnValue({
         select: () => ({ from: () => ({ where: () => ({ get: async () => ({ runtime }) }) }) }),
       });
@@ -98,9 +103,16 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
       const beforeExternalMutation = vi.fn().mockRejectedValue(error);
       const env = runtime === 'no-database' ? { BASE_DOMAIN: 'example.com' } : cfContainerEnv;
 
-      await expect(fetchNodeAgent('node-1', env as never,
-        'https://node-1.vm.example.com/workspaces/ws-1/stop', { method: 'POST' }, 30_000,
-        { beforeExternalMutation })).rejects.toBe(error);
+      await expect(
+        fetchNodeAgent(
+          'node-1',
+          env as never,
+          'https://node-1.vm.example.com/workspaces/ws-1/stop',
+          { method: 'POST' },
+          30_000,
+          { beforeExternalMutation }
+        )
+      ).rejects.toBe(error);
 
       expect(beforeExternalMutation).toHaveBeenCalledOnce();
       expect(directFetch).not.toHaveBeenCalled();
@@ -220,6 +232,14 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
     mocks.container.fetchVmAgentContainer.mockImplementation(() => pendingResponse(60_000));
 
     const deletionPromise = deleteWorkspaceOnNode('node-1', 'ws-1', cfContainerEnv, 'user-1', {
+      deletionMode: 'explicit',
+      identity: {
+        workspaceId: 'ws-1',
+        nodeId: 'node-1',
+        userId: 'user-1',
+        nodeRuntimeIncarnationId: 'incarnation',
+        workspaceGeneration: '',
+      },
       requestTimeoutMs: 50,
     });
     const rejection = expect(deletionPromise).rejects.toThrow('Request timed out after 50ms');

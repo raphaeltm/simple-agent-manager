@@ -37,7 +37,25 @@ vi.mock('../../../src/middleware/project-auth', () => ({
 }));
 vi.mock('drizzle-orm/d1', () => ({ drizzle: () => ({}) }));
 vi.mock('../../../src/services/agent-profiles', () => ({ listProfiles: async () => [sol] }));
-vi.mock('../../../src/routes/chat-session-ownership', () => ({ requireSessionCreator: vi.fn() }));
+// The caller owns the chat. Who may write to a session is tested in session-access-writer.test.ts;
+// this fixture checks the CLI against the route's request and response contract.
+vi.mock('../../../src/services/session-access', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/session-access')>()),
+  requireSessionWriter: async (
+    _env: unknown,
+    projectId: string,
+    sessionId: string,
+    userId: string
+  ) => ({
+    projectId,
+    sessionId,
+    session: { id: sessionId, status: 'active' },
+    role: 'owner',
+    actorUserId: userId,
+    ownerUserId: userId,
+    grantId: null,
+  }),
+}));
 vi.mock('../../../src/services/mention-enrichment', () => ({
   enrichMessageWithMentions: async (content: string) => ({ enrichedMessage: content }),
 }));

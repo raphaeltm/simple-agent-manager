@@ -6,6 +6,7 @@ const CLEANUP_IMPORT_TEST_TIMEOUT_MS = 15_000;
 
 const mocks = vi.hoisted(() => ({
   drizzle: vi.fn(),
+  cleanupWorkspaceForDeletion: vi.fn(),
   stopWorkspaceOnNode: vi.fn(),
   markIdle: vi.fn(),
   stopNodeResources: vi.fn(),
@@ -25,6 +26,12 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: (...args: unknown[]) => mocks.drizzle(...args),
+}));
+
+// The central operation is covered with real SQL in workspace deletion suites.
+// These tests exercise only task-terminal delegation and call ordering.
+vi.mock('../../../src/services/workspace-cleanup', () => ({
+  cleanupWorkspaceForDeletion: (...args: unknown[]) => mocks.cleanupWorkspaceForDeletion(...args),
 }));
 
 vi.mock('../../../src/services/node-agent', () => ({
@@ -110,6 +117,7 @@ describe('cleanupTerminalTaskResources', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    mocks.cleanupWorkspaceForDeletion.mockResolvedValue({ status: 'confirmed' });
     mocks.stopSession.mockResolvedValue(undefined);
     mocks.failSession.mockResolvedValue(undefined);
     mocks.queueWorkspaceSessionSleep.mockResolvedValue(undefined);
@@ -275,11 +283,15 @@ describe('cleanupTerminalTaskResources', () => {
   );
 
   it(
-    'archives a failed task destructively without consulting preservation',
+    'delegates failed-task archive to exact explicit deletion without automatic preservation',
     async () => {
-      // Control (policy e8897480): Archive / Complete & Delete must still tear down
-      // immediately and discard the restore state, even for a failed task.
+      // Explicit archive delegates data removal to the durable operation. Failed
+      // task preservation policy does not grant or prevent that explicit authority.
       const order: string[] = [];
+      mocks.cleanupWorkspaceForDeletion.mockImplementation(async () => {
+        order.push('cleanupWorkspaceForDeletion');
+        return { status: 'confirmed' };
+      });
       mocks.drizzle.mockReturnValue(failedTaskDb());
       mocks.deleteSessionSnapshotState.mockImplementation(async () => {
         order.push('deleteSessionSnapshotState');
@@ -306,15 +318,24 @@ describe('cleanupTerminalTaskResources', () => {
 
       expect(mocks.preserveFailedTaskWork).not.toHaveBeenCalled();
       expect(mocks.queueWorkspaceSessionSleep).not.toHaveBeenCalled();
-      expect(order).toEqual(['deleteSessionSnapshotState', 'failSession', 'cleanupTaskRun']);
+      expect(order).toEqual(['cleanupWorkspaceForDeletion']);
+      expect(mocks.cleanupWorkspaceForDeletion).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: 'explicit', userId: 'workspace-owner-1' })
+      );
+      expect(mocks.deleteSessionSnapshotState).not.toHaveBeenCalled();
+      expect(mocks.failSession).not.toHaveBeenCalled();
     },
     CLEANUP_IMPORT_TEST_TIMEOUT_MS
   );
 
   it(
-    'deletes retained state before stopping an explicitly archived session',
+    'delegates archive so backup purge follows confirmed physical deletion',
     async () => {
       const order: string[] = [];
+      mocks.cleanupWorkspaceForDeletion.mockImplementation(async () => {
+        order.push('cleanupWorkspaceForDeletion');
+        return { status: 'confirmed' };
+      });
       const db = buildDb([
         [
           {
@@ -351,7 +372,12 @@ describe('cleanupTerminalTaskResources', () => {
       });
 
       expect(mocks.queueWorkspaceSessionSleep).not.toHaveBeenCalled();
-      expect(order).toEqual(['deleteSessionSnapshotState', 'stopSession', 'cleanupTaskRun']);
+      expect(order).toEqual(['cleanupWorkspaceForDeletion']);
+      expect(mocks.cleanupWorkspaceForDeletion).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: 'explicit', userId: 'workspace-owner-1' })
+      );
+      expect(mocks.deleteSessionSnapshotState).not.toHaveBeenCalled();
+      expect(mocks.stopSession).not.toHaveBeenCalled();
     },
     CLEANUP_IMPORT_TEST_TIMEOUT_MS
   );

@@ -35,6 +35,7 @@ vi.mock('../../../src/services/provider-credentials', async (original) => ({
 vi.mock('../../../src/services/jwt', async (original) => ({
   ...(await original<typeof import('../../../src/services/jwt')>()),
   signNodeCallbackToken: vi.fn(async () => 'node-callback'),
+  signCurrentNodeCallbackToken: vi.fn(async () => 'node-callback'),
 }));
 vi.mock('../../../src/services/dns', () => ({
   createNodeBackendDNSRecord: vi.fn(async () => 'dns-new'),

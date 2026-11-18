@@ -1,0 +1,48 @@
+{
+  "recordedAt": "2026-11-09T12:27:32.977611+00:00",
+  "baseCommit": "3b65a30f4501ceea29795a8bb78fc33a2dc52cd6",
+  "results": [
+    {
+      "guard": "trusted-base-openroot",
+      "sourceSha256": "f8dac2e9948a908280cbc52c018f473066b4f7042cd5da0a45bb9b6d0822792c",
+      "mutantExitCode": 1,
+      "ownerControls": {
+        "TestContextSourceWorkingDirectorySwap/VM/owner": true,
+        "TestContextSourceWorkingDirectorySwap/Instant/owner": true
+      },
+      "attacksFailWithoutGuard": {
+        "TestContextSourceWorkingDirectorySwap/VM/swap": true,
+        "TestContextSourceWorkingDirectorySwap/Instant/swap": true
+      },
+      "mutationRestored": true
+    },
+    {
+      "guard": "preserve-source-capability",
+      "sourceSha256": "c867805572388d7d6d5a567322152e2f1cf0e9d9c1da2cef6a5e368e3419e97e",
+      "mutantExitCode": 1,
+      "ownerControls": {
+        "TestOpenedRootRetainsOwnerAfterPathSwap/owner": true
+      },
+      "attacksFailWithoutGuard": {
+        "TestOpenedRootRetainsOwnerAfterPathSwap/swap": true
+      },
+      "mutationRestored": true
+    },
+    {
+      "guard": "directory-only-source-open",
+      "sourceSha256": "f8dac2e9948a908280cbc52c018f473066b4f7042cd5da0a45bb9b6d0822792c",
+      "mutantExitCode": 1,
+      "ownerControls": {
+        "TestContextSourceWorkingDirectorySwap/VM/owner": true,
+        "TestContextSourceWorkingDirectorySwap/Instant/owner": true
+      },
+      "attacksFailWithoutGuard": {
+        "TestContextSourceRejectsFifo/VM/existing": true,
+        "TestContextSourceRejectsFifo/VM/swap": true,
+        "TestContextSourceRejectsFifo/Instant/existing": true,
+        "TestContextSourceRejectsFifo/Instant/swap": true
+      },
+      "mutationRestored": true
+    }
+  ]
+}

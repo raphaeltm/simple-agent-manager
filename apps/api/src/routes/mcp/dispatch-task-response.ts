@@ -6,7 +6,7 @@ import { type JsonRpcResponse, jsonRpcSuccess } from './_helpers';
 export function getConversationTaskModeWarning(): string {
   return (
     'Resolved taskMode is "conversation": the dispatched agent will not auto-complete. ' +
-    'Actively manage its lifecycle with send_message_to_subtask and get_session_messages, ' +
+    'Actively manage its lifecycle with send_message_to_subtask and sessions_read method messages, ' +
     'or pass taskMode: "task" explicitly to use task completion semantics.'
   );
 }
@@ -48,7 +48,7 @@ export function buildDispatchTaskSuccessResponse(input: {
             dispatchDepth: input.newDepth,
             url: taskUrl,
             message: input.isInstantRuntime
-              ? 'Task queued for Instant launch. Its chat session (sessionId) is created in the background and becomes readable when background session creation completes; use get_task_details to follow the task.'
+              ? 'Task queued for Instant launch. Its chat session (sessionId) is created in the background and becomes readable when background session creation completes; use tasks_read method get to follow the task.'
               : `Task dispatched successfully. The agent will start working independently. Track progress at: ${taskUrl}`,
           },
           null,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { AGENT_TYPE_VALUES } from '../src/agents';
 import { PLATFORM_AI_MODELS } from '../src/constants/ai-services';
 import { getModelGroupsForAgent, getModelsForAgent, isKnownModel } from '../src/model-catalog';
 
@@ -16,6 +17,18 @@ function toClaudeCodeBaseModelId(modelId: string): string {
 }
 
 describe('model-catalog', () => {
+  it('covers every supported agent with models, leaving Amp model selection to its harness', () => {
+    for (const agentType of AGENT_TYPE_VALUES) {
+      const models = getModelsForAgent(agentType);
+      if (agentType === 'amp') {
+        expect(models).toEqual([]);
+      } else {
+        expect(models.length, agentType).toBeGreaterThan(0);
+        expect(new Set(models.map((model) => model.id)).size, agentType).toBe(models.length);
+      }
+    }
+  });
+
   describe('getModelGroupsForAgent', () => {
     it('returns grouped models for claude-code', () => {
       const groups = getModelGroupsForAgent('claude-code');
@@ -31,6 +44,7 @@ describe('model-catalog', () => {
       expect(latestModels).toEqual([
         'gpt-6-astra',
         'gpt-6.1-sol',
+        'gpt-6.1-terra',
         'gpt-6-sol',
         'gpt-6-luna',
       ]);
@@ -45,16 +59,18 @@ describe('model-catalog', () => {
       );
       expect(
         groups
-          .find((group) => group.label === 'GPT-5.5 / 5.2 (Previous)')
+          .find((group) => group.label === 'GPT-5.5 / 5.2 (Legacy)')
           ?.models.map((model) => model.id)
       ).toEqual(['gpt-5.5', 'gpt-5.2']);
       expect(
         groups
-          .find((group) => group.label === 'GPT-5.4 (Legacy, hidden upstream)')
+          .find((group) => group.label === 'GPT-5.4 (Legacy; API key only)')
           ?.models.map((model) => model.id)
       ).toEqual(['gpt-5.4', 'gpt-5.4-mini']);
-      expect(namesById.get('gpt-5.4')).toContain('Legacy');
-      expect(namesById.get('gpt-5.4-mini')).toContain('Legacy');
+      expect(namesById.get('gpt-5.4')).toContain('API key only');
+      expect(namesById.get('gpt-5.5')).toBe('GPT-5.5 (API key only)');
+      expect(namesById.get('gpt-5.2')).toContain('Deprecated for ChatGPT sign-in');
+      expect(namesById.get('gpt-5.4-mini')).toContain('API key only');
       expect(namesById.has('gpt-5.4-pro')).toBe(false);
       expect(namesById.has('gpt-5.4-nano')).toBe(false);
       expect(namesById.has('gpt-5.3-codex')).toBe(false);
@@ -72,7 +88,8 @@ describe('model-catalog', () => {
         expect.arrayContaining([
           'mistral-medium-latest',
           'zai-glm-5-3',
-          'zai-glm-5-2',
+          'zai-glm-5-3-flash',
+          'mistral-large-4-0',
           'mistral-small-latest',
           'mistral-large-latest',
           'codestral-latest',
@@ -81,6 +98,14 @@ describe('model-catalog', () => {
           'ministral-3b-latest',
         ])
       );
+      expect(allModels.find((model) => model.id === 'mistral-large-latest')?.name).toBe(
+        'Mistral Large (latest)'
+      );
+      expect(isKnownModel('mistral-vibe', 'zai-glm-5-2')).toBe(false);
+      expect(allModels.find((model) => model.id === 'mistral-medium-latest')).toMatchObject({
+        name: 'Mistral Medium 3.5 (Deprecated)',
+        group: 'Legacy (Deprecated)',
+      });
       expect(allModels.some((model) => model.id === 'mistral-medium-3-5')).toBe(false);
       expect(allModels.some((model) => model.id === 'codestral-2508')).toBe(false);
       expect(allModels.some((model) => model.id === 'mistral-medium-3-5-2604')).toBe(false);
@@ -94,12 +119,25 @@ describe('model-catalog', () => {
       const groups = getModelGroupsForAgent('google-gemini');
       expect(groups.length).toBeGreaterThanOrEqual(1);
       const allModels = groups.flatMap((g) => g.models);
+      expect(groups[0]?.models).toEqual([
+        { id: 'gemini-4-carbon', name: 'Gemini 4 Carbon', group: 'Gemini 4 (Latest)' },
+        { id: 'gemini-4-hydrogen', name: 'Gemini 4 Hydrogen', group: 'Gemini 4 (Latest)' },
+        {
+          id: 'gemini-4-argon',
+          name: 'Gemini 4 Argon',
+          group: 'Gemini 4 (Latest)',
+        },
+      ]);
       expect(allModels.some((m) => m.id === 'gemini-3.8-flash')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.7-flash')).toBe(true);
-      expect(allModels.find((m) => m.id === 'gemini-3.7-flash')?.name).toContain('Deprecated');
+      expect(allModels.find((m) => m.id === 'gemini-3.7-flash')?.name).toBe(
+        'Gemini 3.7 Flash (Deprecated; routes to 3.8)'
+      );
       expect(allModels.some((m) => m.id === 'gemini-2.5-pro')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.6-flash')).toBe(true);
-      expect(allModels.some((m) => m.id === 'gemini-3.5-flash')).toBe(true);
+      expect(allModels.find((m) => m.id === 'gemini-3.5-flash')?.name).toBe(
+        'Gemini 3.5 Flash (Legacy; routes to 3.6)'
+      );
       expect(allModels.some((m) => m.id === 'gemini-3.5-flash-lite')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-2.5-flash-lite')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.1-pro-preview')).toBe(true);
@@ -108,15 +146,33 @@ describe('model-catalog', () => {
       expect(allModels.some((m) => m.id === 'gemini-3.1-pro')).toBe(false);
       expect(allModels.some((m) => m.id === 'gemini-2.0-flash')).toBe(false);
 
-      const currentGroup = groups.find((group) => group.label === 'Gemini 2.5 (Current)');
+      const currentGroup = groups.find(
+        (group) => group.label === 'Gemini 2.5 (Legacy; existing users)'
+      );
       expect(currentGroup?.models.map((model) => model.name)).toEqual([
-        'Gemini 2.5 Pro',
-        'Gemini 2.5 Flash',
+        'Gemini 2.5 Pro (Deprecated; routes to 3.8 on 2026-12-01)',
+        'Gemini 2.5 Flash (Deprecated; routes to 3.5 Flash-Lite on 2026-12-01)',
         'Gemini 2.5 Flash-Lite',
       ]);
       expect(allModels.find((model) => model.id === 'gemini-3.1-flash-lite')?.name).toBe(
         'Gemini 3.1 Flash-Lite'
       );
+    });
+
+    it('returns the Gemini models Antigravity offers with API key auth', () => {
+      expect(getModelsForAgent('google-antigravity').map((model) => model.id)).toEqual([
+        'gemini-3.8-flash',
+        'gemini-3.7-flash',
+        'gemini-3.6-flash',
+        'gemini-3.5-flash',
+        'gemini-3.1-pro',
+      ]);
+    });
+
+    it('labels Sonnet 4.5 with its announced retirement date', () => {
+      expect(
+        getModelsForAgent('claude-code').find((m) => m.id === 'claude-sonnet-4-5-20250929')?.name
+      ).toBe('Claude Sonnet 4.5 (Deprecated; retires 2026-11-30)');
     });
 
     it('returns empty array for unknown agent type', () => {
@@ -128,7 +184,7 @@ describe('model-catalog', () => {
       expect(groups.length).toBeGreaterThanOrEqual(2);
       const allModels = groups.flatMap((g) => g.models);
       expect(groups.map((g) => g.label)).toEqual(
-        expect.arrayContaining(['OpenCode Zen', 'OpenCode Go'])
+        expect.arrayContaining(['OpenCode', 'OpenCode Go'])
       );
       expect(allModels.some((m) => m.id === 'opencode/claude-sonnet-4-6')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode/gpt-6-astra')).toBe(true);
@@ -138,34 +194,32 @@ describe('model-catalog', () => {
       expect(allModels.some((m) => m.id === 'opencode/gemini-3.7-flash')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode/grok-4.7')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode/muse-spark-1.3')).toBe(true);
-      expect(allModels.some((m) => m.id === 'opencode/muse-spark-1.3-contributor-free')).toBe(
-        true
-      );
-      expect(allModels.some((m) => m.id === 'opencode/ling-3.0-flash-fin-free')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/gemini-4-argon')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/deepseek-v4.1-flash-free')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode/fledge-alpha-free')).toBe(false);
-      expect(allModels.some((m) => m.id === 'opencode/exo-free')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/beam-free')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode/claude-haiku-5-5')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/claude-haiku-5-5')).toBe(true);
-      expect(allModels.some((m) => m.id === 'opencode-go/space-bunny')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode-go/kimi-k3.1-pro')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/space-bunny-free')).toBe(false);
-      expect(allModels.some((m) => m.id === 'opencode/ling-3.1-flash-free')).toBe(true);
-      expect(allModels.some((m) => m.id === 'opencode/longcat-2.5-preview-free')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/glm-5.3-flash-free')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/longcat-2.5-preview-free')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode/qwen3.8-max')).toBe(true);
-      expect(allModels.some((m) => m.id === 'opencode/muse-spark-1.2-contributor-free')).toBe(false);
+      expect(allModels.some((m) => m.id === 'opencode/muse-spark-1.2-contributor-free')).toBe(
+        false
+      );
       expect(allModels.some((m) => m.id === 'opencode/x-preview-f-free')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode/ling-3.0-tiny-free')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode-go/glm-5.2')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/glm-5.3')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/gpt-6-luna')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/grok-4.7')).toBe(true);
-      expect(allModels.some((m) => m.id === 'opencode-go/longcat-2.5-preview-free')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode-go/longcat-2.5-preview-free')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode-go/qwen3.7-max')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode-go/kimi-k2.6')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode-go/glm-5.1')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode-go/qwen3.6-plus')).toBe(false);
-      expect(allModels.some((m) => m.id === 'opencode-go/deepseek-v4-flash-vision-exp')).toBe(
-        true
-      );
+      expect(allModels.some((m) => m.id === 'opencode-go/gemini-4-argon')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/muse-spark-1.3-contributor')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/ox-alpha-free')).toBe(false);
     });
@@ -175,6 +229,7 @@ describe('model-catalog', () => {
     it('returns flat list of models for claude-code', () => {
       const models = getModelsForAgent('claude-code');
       expect(models.length).toBeGreaterThanOrEqual(14);
+      expect(models.some((m) => m.id === 'claude-fable-5-2')).toBe(true);
       expect(models.some((m) => m.id === 'claude-fable-5-1')).toBe(true);
       expect(models.some((m) => m.id === 'claude-fable-5')).toBe(true);
       expect(models.some((m) => m.id === 'claude-opus-5-5')).toBe(true);
@@ -194,6 +249,7 @@ describe('model-catalog', () => {
       const namesById = new Map(models.map((model) => [model.id, model.name]));
 
       const expectedOneMillionContextModels = [
+        'claude-fable-5-2',
         'claude-fable-5-1',
         'claude-fable-5',
         'claude-opus-5-5',
@@ -201,8 +257,6 @@ describe('model-catalog', () => {
         'claude-sonnet-5-5',
         'claude-sonnet-5',
         'claude-haiku-5-5',
-        'claude-opus-4-8[1m]',
-        'claude-opus-4-7[1m]',
         'claude-opus-4-6[1m]',
         'claude-sonnet-4-6[1m]',
       ];
@@ -214,7 +268,12 @@ describe('model-catalog', () => {
       expect(models.some((model) => model.id === 'claude-sonnet-5[1m]')).toBe(false);
       expect(models.some((model) => model.id === 'claude-opus-5-5[1m]')).toBe(false);
       expect(models.some((model) => model.id === 'claude-opus-5[1m]')).toBe(false);
+      expect(models.some((model) => model.id === 'claude-fable-5-2[1m]')).toBe(false);
       expect(models.some((model) => model.id === 'claude-fable-5-1[1m]')).toBe(false);
+      expect(models.some((model) => model.id === 'claude-opus-4-8[1m]')).toBe(false);
+      expect(models.some((model) => model.id === 'claude-opus-4-7[1m]')).toBe(false);
+      expect(namesById.get('claude-opus-4-8')).toContain('1M context');
+      expect(namesById.get('claude-opus-4-7')).toContain('1M context');
 
       for (const modelId of expectedOneMillionContextModels) {
         expect(
@@ -254,12 +313,7 @@ describe('model-catalog', () => {
         .filter(isClaudeCode1mSelector);
 
       expect(selectorIds).toEqual(
-        expect.arrayContaining([
-          'claude-opus-4-8[1m]',
-          'claude-opus-4-7[1m]',
-          'claude-opus-4-6[1m]',
-          'claude-sonnet-4-6[1m]',
-        ])
+        expect.arrayContaining(['claude-opus-4-6[1m]', 'claude-sonnet-4-6[1m]'])
       );
 
       for (const selectorId of selectorIds) {
@@ -277,6 +331,7 @@ describe('model-catalog', () => {
 
   describe('isKnownModel', () => {
     it('returns true for a known claude model', () => {
+      expect(isKnownModel('claude-code', 'claude-fable-5-2')).toBe(true);
       expect(isKnownModel('claude-code', 'claude-fable-5-1')).toBe(true);
       expect(isKnownModel('claude-code', 'claude-opus-5-5')).toBe(true);
       expect(isKnownModel('claude-code', 'claude-sonnet-5-5')).toBe(true);
@@ -285,7 +340,7 @@ describe('model-catalog', () => {
     });
 
     it('returns true for a Claude Code 1M selector variant', () => {
-      expect(isKnownModel('claude-code', 'claude-opus-4-8[1m]')).toBe(true);
+      expect(isKnownModel('claude-code', 'claude-opus-4-6[1m]')).toBe(true);
     });
 
     it('returns false for a codex model under claude-code', () => {
@@ -295,6 +350,7 @@ describe('model-catalog', () => {
     it('returns true for a codex model under openai-codex', () => {
       expect(isKnownModel('openai-codex', 'gpt-6-astra')).toBe(true);
       expect(isKnownModel('openai-codex', 'gpt-6.1-sol')).toBe(true);
+      expect(isKnownModel('openai-codex', 'gpt-6.1-terra')).toBe(true);
       expect(isKnownModel('openai-codex', 'gpt-6-sol')).toBe(true);
       expect(isKnownModel('openai-codex', 'gpt-6-luna')).toBe(true);
       expect(isKnownModel('openai-codex', 'gpt-5.6-sol')).toBe(true);

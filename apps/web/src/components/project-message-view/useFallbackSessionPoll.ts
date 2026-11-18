@@ -81,7 +81,9 @@ export function useFallbackSessionPoll({
         const taskStatus = data.session.task?.status ?? '';
         const agentSessId = data.session.agentSessionId ?? '';
         const planFingerprint = getPlanFingerprint(data.state);
-        const fingerprint = `${data.messages.length}:${newLastId}:${data.session.status}:${taskStatus}:${agentSessId}:${planFingerprint}`;
+        const providerLimitReason = data.session.task?.providerLimitReason ?? '';
+        const providerLimitVersion = data.session.task?.providerLimitVersion ?? '';
+        const fingerprint = `${providerLimitVersion}:${providerLimitReason}:${data.messages.length}:${newLastId}:${data.session.status}:${taskStatus}:${agentSessId}:${planFingerprint}`;
         if (fingerprint !== lastPollFingerprint) {
           lastPollFingerprint = fingerprint;
           setSession(data.session);

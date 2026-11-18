@@ -9,11 +9,13 @@ import { parse } from 'yaml';
 
 import {
   auditPrompt,
+  auditSignedDeliveryIntents,
   findOwnedAuditTrigger,
   hasAuditReply,
   readAuditMessages,
   resolveAuditRepository,
   smokeSessionCookie,
+  validateAuditFixture,
 } from '../e2e/github-trigger-audit-fixture.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -41,23 +43,37 @@ globalThis.fetch = async (url, options) => {
     assert(options.headers.Authorization.startsWith('Bearer '));
     assert(options.headers['X-GitHub-Api-Version'] === '2026-03-10');
     if (process.env.TEST_VARIANT === 'metadata-failure') throw new Error(process.env.GH_APP_PRIVATE_KEY);
-    return new Response(JSON.stringify({ slug: 'test-app', events: ['issues','issue_comment','pull_request','push'], permissions: { issues: 'write', contents: 'read' }, privateCanary: 'PRIVATE_METADATA_CANARY' }));
+    return new Response(JSON.stringify({ slug: 'test-app', events: ['issues','issue_comment','pull_request','push','pull_request_review','pull_request_review_comment','check_run','check_suite','workflow_run'], permissions: { issues: 'write', contents: 'read' }, privateCanary: 'PRIVATE_METADATA_CANARY' }));
   }
   if (url === 'https://api.github.com/app/installations/' + fixture.installationId) return new Response(JSON.stringify({ permissions: { issues: 'write' }, repository_selection: 'selected', suspended_at: null, account: { privateCanary: 'PRIVATE_METADATA_CANARY' } }));
   if (url === 'https://api.github.com/app/hook/config') return new Response(JSON.stringify({ content_type: process.env.TEST_VARIANT === 'hook-content' ? 'form' : 'json', insecure_ssl: process.env.TEST_VARIANT === 'hook-tls' ? '1' : '0', url: (process.env.GITHUB_TRIGGER_AUDIT_ENVIRONMENT === 'production' ? 'https://api.example.test' : 'https://api.sammy.party') + '/api/github/webhook' + (process.env.TEST_VARIANT === 'hook-destination' ? '?secret=PRIVATE_METADATA_CANARY' : ''), secret: 'PRIVATE_METADATA_CANARY' }));
   assert(url === 'https://api.sammy.party/api/github/webhook' || url === 'https://api.example.test/api/github/webhook');
   assert(options.method === 'POST');
-  assert(options.headers['X-GitHub-Delivery'] === fixture.deliveryId);
+  const delivery=(fixture.deliveries || [{deliveryId:fixture.deliveryId,eventType:'issues',subjectNumber:1}]).find(item=>item.deliveryId===options.headers['X-GitHub-Delivery']);
+  assert(delivery);
+  assert(options.headers['X-GitHub-Event']===delivery.eventType);
   assert(options.headers['X-Hub-Signature-256'] === 'sha256=' + createHmac('sha256', process.env.GH_WEBHOOK_SECRET).update(options.body).digest('hex'));
   const body = JSON.parse(options.body);
-  assert(body.action === 'opened' && body.issue.body === fixture.marker);
+  if(['check_run','check_suite','workflow_run'].includes(delivery.eventType)) {
+    assert(body.action==='completed' && body[delivery.eventType].head_sha===delivery.headSha);
+    assert(body[delivery.eventType].name===fixture.marker && body[delivery.eventType].conclusion==='success');
+  } else if(delivery.eventType.startsWith('pull_request_review')) {
+    assert(!body.issue && body.pull_request.number===delivery.subjectNumber);
+    assert(body.pull_request.labels[0].name===fixture.marker);
+    const content=body.review || body.comment;
+    assert(content.user.login===body.sender.login && content.author_association==='MEMBER');
+    assert(content.body.startsWith('/sam '+fixture.marker) && Number.isSafeInteger(content.id));
+    if(body.review) assert(body.action==='submitted' && content.state==='changes_requested');
+    else assert(body.action==='created' && content.path==='fixture.ts' && content.line===7);
+  } else assert(body.action === (delivery.eventType==='issues'?'opened':'created') && body.issue.body === fixture.marker && body.issue.number===delivery.subjectNumber);
+  if(delivery.eventType==='issue_comment') { assert(body.comment.body.startsWith('/sam '+fixture.marker)); assert(body.issue.pull_request.url.includes('/pulls/'+delivery.subjectNumber)); assert(Number.isSafeInteger(body.comment.id) && body.comment.id > 0); }
   assert(body.sender.login === (process.env.GITHUB_TRIGGER_AUDIT_ENVIRONMENT === 'production' ? 'simple-agent-manager[bot]' : 'sam-staging-audit'));
   sent++;
   if (process.env.TEST_VARIANT === 'send-failure') throw new Error(options.headers['X-Hub-Signature-256']);
   return new Response('{}');
 };
 process.on('exit', () => {
-  if (!process.env.TEST_VARIANT) assert(sent === 2);
+  if (!process.env.TEST_VARIANT) assert(sent === 2*(fixture.deliveries?.length || 1));
   if (['metadata-failure', 'hook-content', 'hook-tls', 'hook-destination'].includes(process.env.TEST_VARIANT)) assert(sent === 0);
 });
 `;
@@ -76,6 +92,7 @@ function run(overrides: Record<string, string> = {}) {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,
+        GITHUB_TRIGGER_AUDIT_OUTPUT: '.tmp/github-trigger-test',
         SMOKE_TEST_API_URL: 'https://api.sammy.party',
         GH_WEBHOOK_SECRET: 'SIGNING_KEY_CANARY',
         GH_APP_ID: '123',
@@ -94,11 +111,64 @@ function assertRedacted(output: string) {
   expect(output).not.toContain('Bearer ');
 }
 describe('bounded GitHub audit signer', () => {
+  it.each([
+    '------------------------------------',
+    '12345678123412341234123456789abc----',
+    'zzzzzzzz-1234-1234-1234-123456789abc',
+  ])('rejects malformed content identity %s in both fixture paths', (deliveryId) => {
+    expect(() => validateAuditFixture({ ...fixture, deliveryId })).toThrow(
+      'Invalid fixture delivery ID'
+    );
+    expect(() =>
+      auditSignedDeliveryIntents(
+        {
+          ...fixture,
+          deliveries: [{ deliveryId, eventType: 'pull_request_review', subjectNumber: 7 }],
+        },
+        'staging'
+      )
+    ).toThrow('Invalid fixture delivery ID');
+  });
   it('signs two fixed realistic deliveries and emits allowlisted App metadata without credentials', () => {
     const output = run();
     expect(output).toContain('githubAppMetadata');
     expect(output).toContain('syntheticSignedDelivery');
     assertRedacted(output);
+  });
+  it.each(['issues', 'issue_comment', 'pull_request_review', 'pull_request_review_comment'])(
+    'signs at most two simultaneous %s fixtures, each with a stable duplicate replay',
+    (eventType) => {
+      const output = run({
+        GITHUB_TRIGGER_AUDIT_FIXTURE: JSON.stringify({
+          ...fixture,
+          deliveries: [
+            { deliveryId: fixture.deliveryId, eventType, subjectNumber: 7 },
+            {
+              deliveryId: '22345678-1234-1234-1234-123456789abc',
+              eventType,
+              subjectNumber: eventType === 'issues' ? 8 : 7,
+            },
+          ],
+        }),
+      });
+      expect(output.match(/syntheticSignedDelivery/g)).toHaveLength(4);
+      assertRedacted(output);
+    }
+  );
+  it('rejects custom batch/comment fixtures in production', () => {
+    expect(() =>
+      run({
+        GITHUB_TRIGGER_AUDIT_ENVIRONMENT: 'production',
+        SMOKE_TEST_API_URL: 'https://api.example.test',
+        BASE_DOMAIN: 'example.test',
+        GITHUB_TRIGGER_AUDIT_FIXTURE: JSON.stringify({
+          ...fixture,
+          deliveries: [
+            { deliveryId: fixture.deliveryId, eventType: 'issue_comment', subjectNumber: 7 },
+          ],
+        }),
+      })
+    ).toThrow();
   });
   it('uses the bot actor only on the approved production origin', () => {
     const output = run({
@@ -446,4 +516,35 @@ it('production checkout guard rejects main drift before signing', () => {
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+describe('staging signed CI webhook fixtures', () => {
+  it.each(['check_run', 'check_suite', 'workflow_run'])(
+    'sends and replays %s through the signing boundary',
+    (eventType) => {
+      const ci = {
+        ...fixture,
+        deliveries: [
+          { deliveryId: fixture.deliveryId, eventType, headSha: '1'.repeat(40), subjectNumber: 1 },
+        ],
+      };
+      expect(run({ GITHUB_TRIGGER_AUDIT_FIXTURE: JSON.stringify(ci) })).toContain('"status":200');
+      const intent = auditSignedDeliveryIntents(ci, 'staging')[0];
+      expect(JSON.parse(intent.payload)[eventType].head_sha).toBe('1'.repeat(40));
+      expect(() => auditSignedDeliveryIntents(ci, 'production')).toThrow('staging-only');
+    }
+  );
+  it.each(['', 'short', '1'.repeat(41)])('refuses invalid full CI SHA %s', (headSha) => {
+    expect(() =>
+      auditSignedDeliveryIntents(
+        {
+          ...fixture,
+          deliveries: [
+            { deliveryId: fixture.deliveryId, eventType: 'check_run', subjectNumber: 1, headSha },
+          ],
+        },
+        'staging'
+      )
+    ).toThrow('Full CI commit SHA required');
+  });
 });

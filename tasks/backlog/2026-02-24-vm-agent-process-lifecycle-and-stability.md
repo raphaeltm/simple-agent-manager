@@ -1,5 +1,12 @@
 # VM Agent Process Lifecycle & Long-Running Stability
 
+> **Reconciliation 2026-10-26:** No merge since 10-12 touched the open scope; `/health` still
+> returns only `status` (`packages/vm-agent/internal/server/routes.go:13-18`). Pointer fixes: the
+> systemd lines are `packages/cloud-init/src/template.ts:254-255`, the max-restarts handler is
+> `acp/session_host_process.go:323-341`, the workspace-ready retry is `bootstrap/bootstrap.go:3120`
+> and idle auto-suspend is `acp/session_host.go:505-566`. For the 1d decision: the API already
+> caps running sessions on its create route (`apps/api/src/routes/workspaces/agent-sessions.ts:175`).
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** (VM paths below are under `packages/vm-agent/internal/`)

@@ -1,12 +1,14 @@
+import {
+  comparePlacementHostsByStrategy,
+  comparePlacementRolloutHosts,
+  type PlacementHostSignals,
+  resolvePlacementRollout,
+} from '@simple-agent-manager/scheduler-core';
 import { describe, expect, it } from 'vitest';
 
 import { taskPlacementStrategy } from '../../../src/durable-objects/task-runner/node-selection';
+import { compareReusableHosts } from '../../../src/durable-objects/task-runner/task-placement-strategy';
 import type { TaskRunnerState } from '../../../src/durable-objects/task-runner/types';
-import { resolvePlacementRollout } from '../../../src/services/placement-rollout';
-import {
-  comparePlacementHostsByStrategy,
-  type PlacementHostSignals,
-} from '../../../src/services/placement-strategy';
 
 const input = { userId: 'user', poolId: 'pool', strategy: 'pack' as const };
 function state(percent: number): TaskRunnerState {
@@ -21,7 +23,11 @@ function state(percent: number): TaskRunnerState {
     },
   } as unknown as TaskRunnerState;
 }
-const host = (id: string, projectedUtilization: number): PlacementHostSignals => ({
+const host = (
+  id: string,
+  projectedUtilization: number,
+  startupBacklog = 0
+): PlacementHostSignals => ({
   nodeId: id,
   cpuMillisCapacity: 8000,
   cpuMillisCommitted: 0,
@@ -30,6 +36,7 @@ const host = (id: string, projectedUtilization: number): PlacementHostSignals =>
   diskMbCapacity: 80000,
   diskMbCommitted: 0,
   coTenantCount: 1,
+  startupBacklog,
   projectedUtilization,
   observedLoadScore: 10,
   capacitySource: 'observed',
@@ -59,6 +66,27 @@ describe('ranking rollout on the same eligible host set', () => {
       if (low.mode === 'enabled')
         expect(resolvePlacementRollout({ ...identity, cohortPercent: 80 }).mode).toBe('enabled');
     }
+  });
+  it('compares strategies only below the backlog tier the real selection ranks first', () => {
+    const runState = state(100);
+    runState.config.vmLocation = 'fsn1';
+    const candidates = [
+      { id: 'emptier-queued', vmLocation: 'fsn1', signals: host('emptier-queued', 0.2, 3) },
+      { id: 'fuller-queued', vmLocation: 'fsn1', signals: host('fuller-queued', 0.8, 3) },
+      { id: 'idle', vmLocation: 'fsn1', signals: host('idle', 0.5, 0) },
+    ];
+    const rollout = comparePlacementRolloutHosts({
+      ...input,
+      settings: runState.config.capacityPoolSelection?.selectionSettings,
+      candidates,
+      compare: (a, b, strategy) => compareReusableHosts(runState, a, b, strategy),
+    });
+    // Both strategies pick the node the TaskRunner picks: the one with no queued startups.
+    expect(rollout).toMatchObject({
+      baselineSelectedNodeId: 'idle',
+      configuredSelectedNodeId: 'idle',
+      differenceReasons: ['same-selection'],
+    });
   });
   it('keeps old plans readable and defaults absent rollout settings to configured behavior', () => {
     const old = state(100);

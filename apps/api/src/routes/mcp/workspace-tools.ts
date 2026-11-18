@@ -20,6 +20,7 @@ import {
   signTerminalToken,
 } from '../../services/jwt';
 import { fetchNodeAgent } from '../../services/node-agent';
+import { getNodeBackendBaseUrl } from '../../services/node-agent-readiness';
 import {
   INTERNAL_ERROR,
   INVALID_PARAMS,
@@ -93,10 +94,8 @@ export async function lookupWorkspaceForVmAgent(
   };
 }
 
-function vmAgentUrlForPath(env: Env, nodeId: string, path: string): string {
-  const protocol = env.VM_AGENT_PROTOCOL || 'https';
-  const port = env.VM_AGENT_PORT || '8443';
-  return `${protocol}://${nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}${path}`;
+export function vmAgentUrlForPath(env: Env, nodeId: string, path: string): string {
+  return `${getNodeBackendBaseUrl(nodeId, env)}${path}`;
 }
 
 function vmAgentToolUrl(
@@ -105,9 +104,7 @@ function vmAgentToolUrl(
   workspaceId: string,
   toolPath: VmAgentToolPath
 ): string {
-  const protocol = env.VM_AGENT_PROTOCOL || 'https';
-  const port = env.VM_AGENT_PORT || '8443';
-  return `${protocol}://${nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}/workspaces/${encodeURIComponent(workspaceId)}/mcp/${toolPath}`;
+  return `${getNodeBackendBaseUrl(nodeId, env)}/workspaces/${encodeURIComponent(workspaceId)}/mcp/${toolPath}`;
 }
 
 async function fetchVmAgentJson(
@@ -233,6 +230,33 @@ export async function startBuildPublishJobOnVm(
     },
     body,
     timeoutMs
+  );
+}
+
+/** Durable cancellation is already committed before this best-effort request. */
+export async function cancelBuildPublishJobOnVm(
+  env: Env,
+  workspaceId: string,
+  userId: string,
+  nodeId: string,
+  publishJobId: string,
+  timeoutMs: number
+): Promise<unknown> {
+  const { token } = await signNodeManagementToken(userId, nodeId, workspaceId, env);
+  const path = `/workspaces/${encodeURIComponent(workspaceId)}/mcp/build-and-publish-jobs/${encodeURIComponent(publishJobId)}/cancel`;
+  return fetchVmAgentJson(
+    env,
+    nodeId,
+    vmAgentUrlForPath(env, nodeId, path),
+    'POST',
+    {
+      Authorization: `Bearer ${token}`,
+      'X-SAM-Node-Id': nodeId,
+      'X-SAM-Workspace-Id': workspaceId,
+    },
+    {},
+    timeoutMs,
+    { noWakeContainer: true, recoverContainerOnTimeout: false }
   );
 }
 

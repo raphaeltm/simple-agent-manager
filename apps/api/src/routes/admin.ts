@@ -1,12 +1,18 @@
+import type { ProjectData as ProjectDataDO } from '@simple-agent-manager/project-data/durable-object';
 import type { UserRole, UserStatus } from '@simple-agent-manager/shared';
 import { desc, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
-import type { ProjectData as ProjectDataDO } from '../durable-objects/project-data';
 import type { Env } from '../env';
-import { getUserId, requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
+import {
+  getUserId,
+  rejectAgentSignInSession,
+  requireApproved,
+  requireAuth,
+  requireSuperadmin,
+} from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { getTaskReconciliationDiagnostics } from '../scheduled/stuck-tasks';
 import {
@@ -25,6 +31,13 @@ const adminRoutes = new Hono<{ Bindings: Env }>();
 
 // All admin routes require auth + approval + superadmin
 adminRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
+// Approving accounts, changing roles and opening signup grant lasting access to the instance; an
+// agent sign-in session must not (services/agent-sign-in/session-cap.ts).
+adminRoutes.on(
+  ['PUT', 'PATCH'],
+  ['/signup-approval', '/users/:userId', '/users/:userId/role'],
+  rejectAgentSignInSession()
+);
 
 /**
  * GET /api/admin/signup-approval - Read runtime signup approval config

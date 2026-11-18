@@ -13,8 +13,11 @@ export default defineConfig({
   },
   test: {
     // Transform this Workers-only dependency so its runtime import uses the test alias.
-    server: { deps: { inline: ['@cloudflare/workers-oauth-provider'] } },
+    server: {
+      deps: { inline: ['@cloudflare/workers-oauth-provider', /@cloudflare\/containers\//] },
+    },
     globals: true,
+    setupFiles: ['./tests/setup/project-data-ports.ts', './tests/setup/repo-hosting-ports.ts'],
     include: ['tests/**/*.test.ts'],
     exclude: ['tests/workers/**'],
     coverage: coverageConfig(['src/**/*.ts'], {

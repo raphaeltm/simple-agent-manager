@@ -1,4 +1,9 @@
+import {
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from '@simple-agent-manager/scheduler-core';
 import type {
+  AgentEffort,
   AgentProfile,
   CreateAgentProfileRequest,
   GitHubCliPolicy,
@@ -25,10 +30,6 @@ import {
   baseProfileInsertValues,
   toBaseProfileFields,
 } from './profile-fields';
-import {
-  ResourceRequirementsValidationError,
-  serializeResourceRequirementsInput,
-} from './resource-requirements-input';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -107,6 +108,35 @@ function validateProfileEffort(agentType: string, effort: unknown): void {
   if (!isAgentEffortSupported(agentType, effort)) {
     throw errors.badRequest(`Effort '${effort}' is not supported for agent type '${agentType}'`);
   }
+}
+
+/** The model and effort a task's agent launches with. */
+export interface TaskAgentRunSettings {
+  model: string | null;
+  effort: AgentEffort | null;
+}
+
+/**
+ * Apply one-chat model/effort overrides over the inherited (skill → profile → project) values.
+ * A blank or null override inherits. The effort is checked against the agent that will run, so
+ * callers must resolve `agentType` first and call this before any task effect.
+ */
+export function resolveTaskAgentOverrides(
+  agentType: string,
+  requested: Readonly<{ model?: string | null; effort?: AgentEffort | null }>,
+  inherited: Readonly<{ model?: string | null; effort?: AgentEffort | null }>
+): TaskAgentRunSettings {
+  validateProfileEffort(agentType, requested.effort);
+  // An inherited effort the launching agent can't run (an explicit agentType over the
+  // profile's) is dropped rather than sent, as `resolveSkillProfile` does for a skill's.
+  const inheritedEffort =
+    inherited.effort && isAgentEffortSupported(agentType, inherited.effort)
+      ? inherited.effort
+      : null;
+  return {
+    model: requested.model?.trim() || inherited.model || null,
+    effort: requested.effort ?? inheritedEffort,
+  };
 }
 
 /** Convert a DB row to an API response */
@@ -323,8 +353,6 @@ export async function resolveAgentProfile(
       timeoutMinutes: p.timeoutMinutes,
       vmSizeOverride: p.vmSizeOverride,
       resourceRequirementsJson: p.resourceRequirementsJson,
-      provider: p.provider,
-      vmLocation: p.vmLocation,
       workspaceProfile: p.workspaceProfile,
       runtime: isAgentProfileRuntime(p.runtime) ? p.runtime : null,
       devcontainerConfigName: p.devcontainerConfigName,
@@ -347,8 +375,6 @@ export async function resolveAgentProfile(
       timeoutMinutes: null,
       vmSizeOverride: null,
       resourceRequirementsJson: null,
-      provider: null,
-      vmLocation: null,
       workspaceProfile: null,
       runtime: null,
       devcontainerConfigName: null,

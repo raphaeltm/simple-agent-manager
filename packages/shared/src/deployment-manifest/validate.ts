@@ -23,8 +23,7 @@ export interface ManifestError {
 }
 
 export type ManifestValidationResult =
-  | { success: true; manifest: DeploymentManifest }
-  | { success: false; errors: ManifestError[] };
+  { success: true; manifest: DeploymentManifest } | { success: false; errors: ManifestError[] };
 
 // =============================================================================
 // Dangerous Compose-ism detection
@@ -36,9 +35,11 @@ export type ManifestValidationResult =
  * so agents get a clear explanation rather than a generic "unrecognized key".
  */
 const DANGEROUS_FIELDS: Record<string, string> = {
-  build: 'Images must be prebuilt and pushed to a registry. The "build" field is not allowed — use a digest-pinned image instead.',
+  build:
+    'Images must be prebuilt and pushed to a registry. The "build" field is not allowed — use a digest-pinned image instead.',
   privileged: 'Privileged containers are not allowed. Remove the "privileged" field.',
-  network_mode: 'Custom network modes (e.g., host networking) are not allowed. All services share one private network.',
+  network_mode:
+    'Custom network modes (e.g., host networking) are not allowed. All services share one private network.',
   ports: 'Host port publishing is not allowed. Use the "routes" array to expose services.',
   devices: 'Device access is not allowed. Remove the "devices" field.',
   cap_add: 'Adding Linux capabilities is not allowed. Remove the "cap_add" field.',
@@ -49,7 +50,8 @@ const DANGEROUS_FIELDS: Record<string, string> = {
   pid: 'PID namespace sharing is not allowed. Remove the "pid" field.',
   ipc: 'IPC namespace sharing is not allowed. Remove the "ipc" field.',
   extends: 'The "extends" field is not supported. Define each service inline.',
-  env_file: 'The "env_file" field is not allowed. Use "env" with plain values or { "secret": "name" } references.',
+  env_file:
+    'The "env_file" field is not allowed. Use "env" with plain values or { "secret": "name" } references.',
   runtime: 'Custom container runtimes are not allowed. Remove the "runtime" field.',
 };
 
@@ -101,10 +103,7 @@ export function validateManifest(input: unknown): ManifestValidationResult {
 // Phase 1: Dangerous field detection
 // =============================================================================
 
-function detectDangerousFields(
-  input: Record<string, unknown>,
-  errors: ManifestError[],
-): void {
+function detectDangerousFields(input: Record<string, unknown>, errors: ManifestError[]): void {
   // Check top-level dangerous fields
   for (const [field, message] of Object.entries(DANGEROUS_FIELDS)) {
     if (field in input) {
@@ -115,8 +114,14 @@ function detectDangerousFields(
   // Check service-level dangerous fields
   const services = input['services'];
   if (typeof services === 'object' && services !== null && !Array.isArray(services)) {
-    for (const [serviceName, serviceConfig] of Object.entries(services as Record<string, unknown>)) {
-      if (typeof serviceConfig !== 'object' || serviceConfig === null || Array.isArray(serviceConfig)) {
+    for (const [serviceName, serviceConfig] of Object.entries(
+      services as Record<string, unknown>
+    )) {
+      if (
+        typeof serviceConfig !== 'object' ||
+        serviceConfig === null ||
+        Array.isArray(serviceConfig)
+      ) {
         continue;
       }
       for (const [field, message] of Object.entries(DANGEROUS_FIELDS)) {
@@ -143,10 +148,7 @@ function formatZodErrors(error: ZodError): ManifestError[] {
 // Phase 3: Cross-reference validation
 // =============================================================================
 
-function validateCrossReferences(
-  manifest: DeploymentManifest,
-  errors: ManifestError[],
-): void {
+function validateCrossReferences(manifest: DeploymentManifest, errors: ManifestError[]): void {
   const declaredServices = new Set(Object.keys(manifest.services));
   const declaredVolumes = new Set(Object.keys(manifest.volumes));
 

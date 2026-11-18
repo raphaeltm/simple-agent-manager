@@ -18,8 +18,8 @@
  *   DOCS_SHOTS=1 npx playwright test docs-screenshots-agent-requests \
  *     --project="Desktop (1280x800)" --project="iPhone SE (375x667)"
  *
- * The committed PNGs were then palette-compressed (no visible change), from apps/www:
- * sharp(file).png({ palette: true, quality: 90, effort: 10, dither: 0.6 }).
+ * The committed PNGs were then palette-compressed (about 5x smaller, no visible change) with
+ * `pnpm --filter @simple-agent-manager/www compress:screenshots public/images/docs`.
  */
 import { expect, type Page, type Route, test } from '@playwright/test';
 
@@ -387,6 +387,7 @@ const INTERACTIONS: Record<string, InteractionFixture> = {
 const USAGE_CREDENTIAL = {
   credentialReference: 'cc_credentials:cred-claude',
   credentialId: 'cred-claude',
+  credentialName: 'Personal Max',
   credentialSource: 'user',
   provider: 'anthropic',
   providerMode: 'direct',
@@ -676,14 +677,19 @@ test('docs: external link request card', async ({ page }) => {
 test('docs: usage limits dialog from the chat header', async ({ page }) => {
   await openChat(page, USAGE, [USAGE, ...OTHER_SESSIONS]);
 
+  // On a phone the header is one row; its chips live in the session-info sheet.
+  if (isMobile(page)) {
+    await page.getByRole('button', { name: /Show session info$/ }).click();
+  }
   const chip = page.getByTestId('credential-limit-chip');
   await expect(chip).toBeVisible({ timeout: 20000 });
-  await expect(chip).toHaveText('Claude · 5h 78% · Week 31%');
+  await expect(chip).toHaveText('Claude 78% · 31%');
   await chip.click();
 
   const details = page.getByTestId('credential-limit-details');
   await expect(details).toBeVisible();
-  await expect(details.getByRole('heading', { name: 'Claude usage' })).toBeVisible();
+  await expect(details.getByText('Claude usage')).toBeVisible();
+  await expect(details.getByRole('heading', { name: 'Personal Max' })).toBeVisible();
   await expect(details.getByText('Warning')).toBeVisible();
   const windows = details.getByTestId('credential-limit-window');
   await expect(windows).toHaveCount(2);
@@ -695,7 +701,8 @@ test('docs: usage limits dialog from the chat header', async ({ page }) => {
   await expect(windows.nth(1)).toContainText('31% used');
 
   await opaqueBackdrop(page);
-  const panel = page.locator('.glass-panel-container').filter({ has: details });
+  // The Dialog pane: details sit in its scrolling body, which sits in the pane.
+  const panel = details.locator('xpath=../..');
   await expectNoOverflow(page);
   await docsShot(
     page,

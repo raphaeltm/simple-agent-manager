@@ -89,6 +89,7 @@ function credential(
   return {
     credentialReference: `cc_credentials:${credentialId}`,
     credentialId,
+    credentialName: null,
     credentialSource: 'user',
     provider: 'anthropic',
     providerMode: 'direct',
@@ -100,10 +101,14 @@ function credential(
   };
 }
 
-const CLAUDE_CRED = credential('cred-claude', [
-  window('claude.five_hour', 72, { windowMinutes: 300 }),
-  window('claude.seven_day', 31, { windowMinutes: 10080, resetsAt: NOW + 3 * 86_400_000 }),
-]);
+const CLAUDE_CRED = credential(
+  'cred-claude',
+  [
+    window('claude.five_hour', 72, { windowMinutes: 300 }),
+    window('claude.seven_day', 31, { windowMinutes: 10080, resetsAt: NOW + 3 * 86_400_000 }),
+  ],
+  { credentialName: 'Work Max' }
+);
 
 const CODEX_CRITICAL_CRED = credential(
   'cred-codex',
@@ -115,7 +120,12 @@ const CODEX_CRITICAL_CRED = credential(
       resetsAt: NOW + 5 * 86_400_000,
     }),
   ],
-  { provider: 'openai', agentType: 'openai-codex' }
+  {
+    provider: 'openai',
+    agentType: 'openai-codex',
+    credentialName:
+      'Shared engineering ChatGPT Pro subscription for the platform team (rotated monthly)',
+  }
 );
 
 const OPENCODE_MANY_CRED = credential(
@@ -302,7 +312,14 @@ function agentSettingsHandler(opencodeProvider: 'opencode-zen' | 'opencode-go') 
     if (path.includes('/api/auth')) return respond(200, MOCK_USER);
     if (path === '/api/agents') {
       return respond(200, {
-        agents: [{ id: 'opencode', name: 'OpenCode', description: 'OpenCode agent with multi-provider support' }],
+        agents: [
+          {
+            id: 'opencode',
+            name: 'OpenCode',
+            description: 'OpenCode agent with multi-provider support',
+            configured: true,
+          },
+        ],
       });
     }
     if (path === '/api/model-catalog/opencode') {
@@ -311,8 +328,20 @@ function agentSettingsHandler(opencodeProvider: 'opencode-zen' | 'opencode-go') 
         source: 'dynamic',
         updatedAt: '2026-06-27T00:00:00.000Z',
         groups: [
-          { label: 'OpenCode Zen', models: [{ id: 'opencode/claude-sonnet-4-6', name: 'Claude Sonnet 4.6', group: 'OpenCode Zen' }] },
-          { label: 'OpenCode Go', models: [{ id: 'opencode-go/glm-5.2', name: 'GLM-5.2', group: 'OpenCode Go' }] },
+          {
+            label: 'OpenCode Zen',
+            models: [
+              {
+                id: 'opencode/claude-sonnet-4-6',
+                name: 'Claude Sonnet 4.6',
+                group: 'OpenCode Zen',
+              },
+            ],
+          },
+          {
+            label: 'OpenCode Go',
+            models: [{ id: 'opencode-go/glm-5.2', name: 'GLM-5.2', group: 'OpenCode Go' }],
+          },
         ],
       });
     }
@@ -334,7 +363,8 @@ function agentSettingsHandler(opencodeProvider: 'opencode-zen' | 'opencode-go') 
     if (path === '/api/projects') return respond(200, { projects: [] });
     if (path === '/api/credentials') return respond(200, []);
     if (path === '/api/credentials/agent') return respond(200, { credentials: [] });
-    if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
+    if (path.startsWith('/api/notifications'))
+      return respond(200, { notifications: [], unreadCount: 0 });
     if (path.startsWith('/api/github')) return respond(200, []);
     return undefined;
   };
@@ -344,7 +374,7 @@ async function openAgentSettings(page: Page, opencodeProvider: 'opencode-zen' | 
   await dismissOnboarding(page);
   await setupAuditRoutes(page, agentSettingsHandler(opencodeProvider));
   await page.goto('/settings/agents');
-  await page.getByTestId('agent-card-opencode').waitFor({ timeout: 15_000 });
+  await page.getByTestId('agent-settings-opencode').waitFor({ timeout: 15_000 });
   await page.waitForTimeout(600);
 }
 
@@ -368,8 +398,20 @@ async function openSettings(page: Page, scenario: LimitsScenario) {
  * The chip must sit inside the header card horizontally: its right edge may not
  * pass the header's right edge (rule 17: assert the relationship in coordinates).
  */
+/**
+ * Where the session's chips live: the header on desktop, and on a phone (<=767px, the
+ * `useIsMobile` breakpoint) the session-info sheet opened from the one-row header's title.
+ */
+async function sessionChipsScope(page: Page) {
+  if ((page.viewportSize()?.width ?? 1280) > 767) return page.getByTestId('session-header');
+  await page.getByRole('button', { name: /Show session info/ }).click();
+  const sheet = page.getByTestId('session-info-sheet');
+  await expect(sheet).toBeVisible();
+  return sheet;
+}
+
 async function expectChipInsideHeader(page: Page) {
-  const header = page.getByTestId('session-header');
+  const header = await sessionChipsScope(page);
   const chip = header.getByTestId('credential-limit-chip');
   await expect(chip).toBeVisible();
   const headerBox = await header.boundingBox();
@@ -383,7 +425,9 @@ function surfaceTests() {
   test('chat header shows the session credential chip and opens details', async ({ page }) => {
     await openChat(page, 'normal', CLAUDE_CRED);
     await expectChipInsideHeader(page);
-    await expect(page.getByTestId('credential-limit-chip')).toHaveText(
+    // The header shows the short text; the accessible name keeps every window's label.
+    await expect(page.getByTestId('credential-limit-chip')).toHaveText(/Claude 72% · 31%/);
+    await expect(page.getByTestId('credential-limit-chip')).toHaveAccessibleName(
       /Claude · 5h 72% · Week 31%/
     );
     await assertNoOverflow(page);
@@ -394,6 +438,7 @@ function surfaceTests() {
     const details = page.getByTestId('credential-limit-details');
     await expect(details).toBeVisible();
     await expect(details.getByTestId('credential-limit-window')).toHaveCount(2);
+    await expect(details.getByTestId('credential-limit-account-name')).toHaveText('Work Max');
     await expect(details).toContainText('resets in 2h');
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
@@ -403,19 +448,25 @@ function surfaceTests() {
   test('chat header renders a critical Codex credential', async ({ page }) => {
     await openChat(page, 'normal', CODEX_CRITICAL_CRED);
     await expectChipInsideHeader(page);
-    await expect(page.getByTestId('credential-limit-chip')).toHaveText(
-      /Codex · 5h 93% · Week 100%/
-    );
+    await expect(page.getByTestId('credential-limit-chip')).toHaveText(/Codex 93% · 100%/);
     await expect(page.getByTestId('credential-limit-chip')).toHaveAccessibleName(/Limit reached/);
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
     await screenshot(page, 'credential-limits-chat-critical', { scopeToProject: true });
+    await page.getByTestId('credential-limit-chip').click();
+    await expect(page.getByTestId('credential-limit-account-name')).toContainText(
+      'Shared engineering ChatGPT Pro'
+    );
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await screenshot(page, 'credential-limits-chat-critical-details', { scopeToProject: true });
   });
 
   test('chat header collapses many windows and stays inside the card', async ({ page }) => {
     await openChat(page, 'normal', OPENCODE_MANY_CRED);
     await expectChipInsideHeader(page);
-    await expect(page.getByTestId('credential-limit-chip')).toHaveText(
+    await expect(page.getByTestId('credential-limit-chip')).toHaveText(/OpenCode 7% · 39% · \+3/);
+    await expect(page.getByTestId('credential-limit-chip')).toHaveAccessibleName(
       /OpenCode · Rolling 7% · Week 39% · Month 19% · \+2/
     );
     await assertNoOverflow(page);
@@ -425,7 +476,10 @@ function surfaceTests() {
     await expect(
       page.getByTestId('credential-limit-details').getByTestId('credential-limit-window')
     ).toHaveCount(5);
-    await expect(page.getByTestId('credential-limit-details')).toContainText('reset due');
+    // The Sonnet window's reset passed after its sample: it reads 0% and says so.
+    await expect(page.getByTestId('credential-limit-details')).toContainText(
+      'reset 1m ago · no sample since'
+    );
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
     await screenshot(page, 'credential-limits-chat-many-details', { scopeToProject: true });
@@ -435,14 +489,14 @@ function surfaceTests() {
     page,
   }) => {
     await openChat(page, 'empty', CLAUDE_CRED);
-    await expect(page.getByTestId('session-header')).toContainText('Active');
+    await expect(await sessionChipsScope(page)).toContainText('Active');
     await expect(page.getByTestId('credential-limit-chip')).toHaveCount(0);
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
     await screenshot(page, 'credential-limits-chat-empty', { scopeToProject: true });
 
     await openChat(page, 'error', CLAUDE_CRED);
-    await expect(page.getByTestId('session-header')).toContainText('Active');
+    await expect(await sessionChipsScope(page)).toContainText('Active');
     await expect(page.getByTestId('credential-limit-chip')).toHaveCount(0);
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
@@ -468,7 +522,9 @@ function surfaceTests() {
     await screenshot(page, 'credential-limits-settings-details', { scopeToProject: true });
   });
 
-  test('agent settings show the Zen console note only for the opencode-zen provider', async ({ page }) => {
+  test('agent settings show the Zen console note only for the opencode-zen provider', async ({
+    page,
+  }) => {
     await openAgentSettings(page, 'opencode-zen');
     const note = page.getByTestId('opencode-zen-balance-note');
     await note.scrollIntoViewIfNeeded();
@@ -479,7 +535,7 @@ function surfaceTests() {
     await screenshot(page, 'credential-limits-agent-settings-zen-note', { scopeToProject: true });
 
     await openAgentSettings(page, 'opencode-go');
-    await expect(page.getByTestId('agent-card-opencode')).toBeVisible();
+    await expect(page.getByTestId('agent-settings-opencode')).toBeVisible();
     await expect(page.getByTestId('opencode-zen-balance-note')).toHaveCount(0);
   });
 

@@ -5,8 +5,13 @@
  * `node_agent_ready` in `./node-agent-ready-step`; both are re-exported here so
  * the DO's step table keeps one import site. See rule 18.
  */
+import { resolveEffectiveNodeHostMemoryReserveMb } from '@simple-agent-manager/scheduler-core';
+
 import { log } from '../../lib/logger';
-import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
+import {
+  isNodeAgentVersionCompatible,
+  normalizeAgentVersion,
+} from '../../services/node-agent-compatibility';
 import {
   type CapacityAwareNodePlacementRow,
   capacityPoolNoCandidatesError,
@@ -14,18 +19,10 @@ import {
   resolveReusableNodeCapacitySnapshot,
 } from '../../services/placement-resolver';
 import { filterReusableNodesByCurrentAuthority } from '../../services/reusable-node-authority';
-import {
-  getVmAdmissionConfig,
-  waitForVmAdmissionCapacity,
-} from '../../services/vm-admission-control';
-import {
-  resolveEffectiveNodeHostMemoryReserveMb,
-  trustedWorkspaceNodeCapacityColumnsSql,
-} from '../../services/workspace-resource-capacity';
+import { trustedWorkspaceNodeCapacityColumnsSql } from '../../services/workspace-admission-sql';
 import { shouldProvisionSpreadNode } from './capacity-pool-node-limit';
-import { buildAdmissionIdentity, scheduleAdmissionWait } from './node-provisioning-admission';
 import {
-  findReusableNodePlacement,
+  findNodeWithCapacity,
   getTaskReservation,
   hasReusableNodeReservationCapacity,
   nodeSatisfiesTaskResources,
@@ -33,13 +30,12 @@ import {
   tryClaimWarmNode,
   verifyNodeAgentHealthy,
 } from './node-selection';
+import { adoptReusableNodeSelection } from './node-selection-shared';
 import { persistPlacementDiagnostics } from './placement-diagnostics';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 export { handleNodeAgentReady } from './node-agent-ready-step';
 export { verifyNodeAgentHealthy } from './node-selection';
-
-const BUSY_BUILD_ADMISSION_REASON = 'compatible_node_building_workspace';
 
 // =========================================================================
 // Step Handlers
@@ -111,7 +107,8 @@ export async function handleNodeSelection(
          placement_explanation_json AS placementExplanationJson,
          last_metrics AS lastMetrics,
          last_heartbeat_at AS lastHeartbeatAt,
-         agent_version AS agentVersion
+         agent_version AS agentVersion,
+         agent_ready_at AS agentReadyAt
        FROM nodes WHERE id = ? AND user_id = ?`
     )
       .bind(state.config.preferredNodeId, state.userId)
@@ -120,20 +117,63 @@ export async function handleNodeSelection(
             id: string;
             status: string;
             agentVersion: string | null;
+            agentReadyAt: string | null;
           })
         | null
       >();
 
-    if (!node || node.status !== 'running') {
+    if (!node || !['creating', 'running'].includes(node.status)) {
       throw Object.assign(new Error('Specified node is not available'), { permanent: true });
+    }
+    // Missing version is boot progress, not evidence of a different build. Keep
+    // the shared compatibility predicate strict for reuse, dispatch and cleanup.
+    const agentVersion = normalizeAgentVersion(node.agentVersion);
+    if (
+      agentVersion &&
+      !isNodeAgentVersionCompatible(agentVersion, rc.env.VM_AGENT_REQUIRED_VERSION)
+    ) {
+      throw Object.assign(
+        new Error('Specified node agent build differs from the required VM agent build'),
+        { permanent: true }
+      );
+    }
+    const waitingForVersion =
+      !agentVersion && !!normalizeAgentVersion(rc.env.VM_AGENT_REQUIRED_VERSION);
+    const awaitingReadiness = node.status === 'creating' || !node.agentReadyAt || waitingForVersion;
+    if (awaitingReadiness || state.agentReadyStartedAt !== null) {
+      // Stay in selection: each alarm must revalidate ownership, placement and
+      // reservation capacity before adopting a user-pinned node. Never replace it.
+      state.agentReadyStartedAt ??= Date.now();
+      const deadline = state.agentReadyStartedAt + rc.getAgentReadyTimeoutMs();
+      let reason = 'agent readiness deadline exceeded';
+      if (waitingForVersion) {
+        reason = 'agent has not reported a version yet';
+      } else if (awaitingReadiness) {
+        reason = 'agent has not become ready yet';
+      }
+      // The callback timestamp is server-assigned. A delayed alarm must not
+      // reject readiness that arrived on time; current version/admission checks still apply.
+      const readyAt = node.agentReadyAt ? Date.parse(node.agentReadyAt) : Number.NaN;
+      const readyByDeadline = !awaitingReadiness && Number.isFinite(readyAt) && readyAt <= deadline;
+      if (Date.now() >= deadline && !readyByDeadline) {
+        throw Object.assign(new Error(`Specified node not ready by deadline: ${reason}`), {
+          permanent: true,
+        });
+      }
+      if (awaitingReadiness) {
+        log.info('task_runner_do.preferred_node_waiting', {
+          taskId: state.taskId,
+          nodeId: node.id,
+          reason,
+          deadline,
+        });
+        await rc.ctx.storage.put('state', state);
+        await rc.ctx.storage.setAlarm(Math.min(deadline, Date.now() + rc.getAgentPollIntervalMs()));
+        return;
+      }
     }
     if (!nodeSatisfiesTaskResources(node, state)) {
       throw Object.assign(new Error('Specified node does not satisfy the requested resources'), {
-        permanent: true,
-      });
-    }
-    if (!isNodeAgentVersionCompatible(node.agentVersion, rc.env.VM_AGENT_REQUIRED_VERSION)) {
-      throw Object.assign(new Error('Specified node is running an incompatible VM agent build'), {
         permanent: true,
       });
     }
@@ -171,8 +211,8 @@ export async function handleNodeSelection(
 
     // Verify the VM agent is actually reachable before reusing
     if (await verifyNodeAgentHealthy(node.id, rc)) {
-      state.stepResults.nodeId = node.id;
-      state.stepResults.capacityPlacementSnapshot = capacityPlacementSnapshot;
+      // An explicit pin has no alternative node, so it carries no backlog guard.
+      adoptReusableNodeSelection(state, { nodeId: node.id, capacityPlacementSnapshot });
       await persistPlacementDiagnostics(state, rc, { queue: {} });
       await rc.advanceToStep(state, 'workspace_creation');
       return;
@@ -197,8 +237,7 @@ export async function handleNodeSelection(
   const warmNode = await tryClaimWarmNode(state, rc);
   if (warmNode) {
     if (await verifyNodeAgentHealthy(warmNode.nodeId, rc)) {
-      state.stepResults.nodeId = warmNode.nodeId;
-      state.stepResults.capacityPlacementSnapshot = warmNode.capacityPlacementSnapshot;
+      adoptReusableNodeSelection(state, warmNode);
       await persistPlacementDiagnostics(state, rc, { queue: {} });
       await rc.advanceToStep(state, 'workspace_creation');
       return;
@@ -211,13 +250,13 @@ export async function handleNodeSelection(
     });
   }
 
-  // Try existing running nodes with capacity
-  const existingPlacement = await findReusableNodePlacement(state, rc);
-  if (existingPlacement?.kind === 'selected') {
-    const existingNode = existingPlacement.selection;
+  // Try existing running nodes with capacity. A node busy building another workspace is
+  // still a candidate: this start queues behind its build slot, and ranking prefers the
+  // shortest queue. Nothing here provisions because a build queue is long.
+  const existingNode = await findNodeWithCapacity(state, rc);
+  if (existingNode) {
     if (await verifyNodeAgentHealthy(existingNode.nodeId, rc)) {
-      state.stepResults.nodeId = existingNode.nodeId;
-      state.stepResults.capacityPlacementSnapshot = existingNode.capacityPlacementSnapshot;
+      adoptReusableNodeSelection(state, existingNode);
       await persistPlacementDiagnostics(state, rc, { queue: {} });
       await rc.advanceToStep(state, 'workspace_creation');
       return;
@@ -227,33 +266,6 @@ export async function handleNodeSelection(
       taskId: state.taskId,
       nodeId: existingNode.nodeId,
     });
-  }
-  if (existingPlacement?.kind === 'deferrable') {
-    const admissionIdentity = await buildAdmissionIdentity(state, rc);
-    if (admissionIdentity) {
-      const waitResult = await waitForVmAdmissionCapacity(
-        rc.env,
-        admissionIdentity,
-        BUSY_BUILD_ADMISSION_REASON,
-        null,
-        null,
-        { waitTimeoutMs: getVmAdmissionConfig(rc.env).busyBuildWaitTimeoutMs }
-      );
-      if (waitResult.kind === 'expired') {
-        await persistPlacementDiagnostics(state, rc, {
-          selectedNodeId: null,
-          queue: {
-            state: 'expired',
-            reason: BUSY_BUILD_ADMISSION_REASON,
-            waitDeadlineAt: waitResult.waitDeadlineAt,
-          },
-        });
-        await rc.advanceToStep(state, 'node_provisioning');
-        return;
-      }
-      await scheduleAdmissionWait(state, rc, waitResult);
-      return;
-    }
   }
 
   // No node found — need to provision

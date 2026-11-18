@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useSearchParams } from 'react-router';
 
 import { useAuth } from '../components/AuthProvider';
+import { LoginProvidersPending } from '../components/LoginProvidersPending';
 import { useLoginProviders } from '../hooks/useLoginProviders';
 import { useQueryScope } from '../hooks/useQueryScope';
 import { decideConnectorConsent, getConnectorConsent } from '../lib/api/connector';
@@ -19,7 +20,7 @@ export function ConnectorConsent() {
   const [params] = useSearchParams();
   const query = params.get('request') ?? '';
   const { isAuthenticated, isLoading } = useAuth();
-  const providers = useLoginProviders();
+  const { providers, failed: providersFailed, retry: retryProviders } = useLoginProviders();
   const scope = useQueryScope();
   // Consent preview creates a bound one-use handle; never refresh it on focus/reconnect.
   const preview = useQuery({
@@ -71,8 +72,11 @@ export function ConnectorConsent() {
         ) : !isAuthenticated ? (
           <>
             <p>Sign in to review this app’s access.</p>
+            {!providers && (
+              <LoginProvidersPending failed={providersFailed} retry={retryProviders} />
+            )}
             {(['github', 'google', 'gitlab'] as const)
-              .filter((provider) => providers[provider])
+              .filter((provider) => providers?.[provider])
               .map((provider) => (
                 <Button
                   key={provider}

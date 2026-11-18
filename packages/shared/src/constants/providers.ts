@@ -95,6 +95,7 @@ export const PROVIDER_LOCATIONS: Record<CredentialProvider, LocationMeta[]> = {
     { id: 'pl-waw-1', name: 'Warsaw 1', country: 'PL' },
     { id: 'pl-waw-2', name: 'Warsaw 2', country: 'PL' },
   ],
+  // Labelled suggestions only. GCP locations are validated by shape (`GCP_ZONE_PATTERN`).
   gcp: [
     { id: 'us-central1-a', name: 'Iowa', country: 'US' },
     { id: 'us-east1-b', name: 'South Carolina', country: 'US' },
@@ -215,10 +216,25 @@ export function getDefaultLocationForProvider(provider: CredentialProvider): str
   return PROVIDER_DEFAULT_LOCATIONS[provider];
 }
 
+/**
+ * Shape of a Compute Engine zone name: `<region>-<letter>`, where a region is a geography plus a
+ * numbered location (`us-central1`, `northamerica-northeast2`, `me-central2`). Google adds regions
+ * and zones over time, so GCP locations are validated by shape, and the live catalog decides what
+ * actually exists. `PROVIDER_LOCATIONS.gcp` is only a list of labelled suggestions.
+ */
+export const GCP_ZONE_PATTERN = /^[a-z]+(?:-[a-z]+)*\d+-[a-z]$/;
+
 /** Check if a location is valid for the given provider. */
 export function isValidLocationForProvider(
   provider: CredentialProvider,
   location: string
 ): boolean {
+  if (provider === 'gcp') return GCP_ZONE_PATTERN.test(location);
   return PROVIDER_LOCATIONS[provider].some((loc) => loc.id === location);
+}
+
+/** What a valid location looks like, for an error message about an invalid one. */
+export function describeValidLocations(provider: CredentialProvider): string {
+  if (provider === 'gcp') return 'a Compute Engine zone name such as us-central1-a';
+  return `one of ${PROVIDER_LOCATIONS[provider].map((location) => location.id).join(', ')}`;
 }

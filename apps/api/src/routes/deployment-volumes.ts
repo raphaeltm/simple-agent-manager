@@ -14,6 +14,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import * as v from 'valibot';
 
+import { createDeploymentProviderPort } from '../app-deployment-ports/providers';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
@@ -95,7 +96,9 @@ async function resolveManualVolumeCreateProvider(
 
     for (const volume of existingVolumes) {
       if (volume.providerName !== firstVolume.providerName) {
-        throw new Error('Existing environment volumes use mixed providers; resolve them before adding more');
+        throw new Error(
+          'Existing environment volumes use mixed providers; resolve them before adding more'
+        );
       }
       if (volume.location !== requestedLocation) {
         throw new Error(
@@ -159,9 +162,14 @@ deploymentVolumeRoutes.post(
         createOptions.targetProvider = targetProvider;
       }
 
-      const volume = await createEnvironmentVolume(db, c.env, userId, {
-        ...createOptions,
-      });
+      const volume = await createEnvironmentVolume(
+        db,
+        createDeploymentProviderPort(c.env),
+        userId,
+        {
+          ...createOptions,
+        }
+      );
       return c.json(volume, 201);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Volume creation failed';
@@ -211,7 +219,13 @@ deploymentVolumeRoutes.delete(
     await requireOwnedEnvironment(db, envId, projectId);
 
     try {
-      await deleteEnvironmentVolume(db, c.env, userId, volumeId, envId);
+      await deleteEnvironmentVolume(
+        db,
+        createDeploymentProviderPort(c.env),
+        userId,
+        volumeId,
+        envId
+      );
       return c.json({ success: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Volume deletion failed';
@@ -238,7 +252,12 @@ deploymentVolumeRoutes.post(
     await requireOwnedEnvironment(db, envId, projectId);
 
     try {
-      const volumes = await attachEnvironmentVolumesToLinkedNode(db, c.env, userId, envId);
+      const volumes = await attachEnvironmentVolumesToLinkedNode(
+        db,
+        createDeploymentProviderPort(c.env),
+        userId,
+        envId
+      );
       return c.json({ volumes });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Volume attach failed';
@@ -265,7 +284,12 @@ deploymentVolumeRoutes.post(
     await requireOwnedEnvironment(db, envId, projectId);
 
     try {
-      const volumes = await detachEnvironmentVolumesFromLinkedNode(db, c.env, userId, envId);
+      const volumes = await detachEnvironmentVolumesFromLinkedNode(
+        db,
+        createDeploymentProviderPort(c.env),
+        userId,
+        envId
+      );
       return c.json({ volumes });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Volume detach failed';

@@ -1,5 +1,5 @@
-import { TRIAL_ANONYMOUS_USER_ID } from '@simple-agent-manager/shared';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { SYSTEM_USER_ID } from '@simple-agent-manager/shared';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { selectPrimaryGitHubEmail } from '../../src/auth';
 
@@ -7,11 +7,15 @@ interface AuthTestUser {
   id: string;
   email: string;
   name: string;
+  emailVerified?: boolean;
   role?: string;
   status?: string;
 }
 
 type BeforeCreateHook = (user: AuthTestUser) => Promise<{ data: AuthTestUser }>;
+type SessionBeforeHook = (session: {
+  userId: string;
+}) => Promise<false | { data: { userId: string } }>;
 type SessionAfterHook = (session: { userId?: string | null }) => Promise<void>;
 
 interface BetterAuthOptions {
@@ -26,6 +30,7 @@ interface BetterAuthOptions {
     };
     session?: {
       create?: {
+        before?: SessionBeforeHook;
         after?: SessionAfterHook;
       };
     };
@@ -34,6 +39,7 @@ interface BetterAuthOptions {
 
 const mocks = vi.hoisted(() => ({
   drizzle: vi.fn(() => ({})),
+  establishFirstSuperadmin: vi.fn(async () => undefined),
 }));
 
 // Capture the options passed to betterAuth so we can assert on config
@@ -50,13 +56,18 @@ vi.mock('drizzle-orm/d1', () => ({
   drizzle: mocks.drizzle,
 }));
 
+vi.mock('../../src/services/first-superadmin', () => ({
+  establishFirstSuperadmin: mocks.establishFirstSuperadmin,
+  FIRST_SUPERADMIN_SETTING: 'setup.firstSuperadminEstablished',
+}));
+
 vi.mock('../../src/services/platform-config', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/services/platform-config')>();
   const { buildResolvedPlatformConfig } = await import('../helpers/platform-config-fixture');
   return {
     ...actual,
     // Mock only the D1 boundary; the real select* projections still run.
-    resolvePlatformConfig: async (env: Parameters<typeof buildResolvedPlatformConfig>[0]) =>
+    resolveLoginOAuthConfig: async (env: Parameters<typeof buildResolvedPlatformConfig>[0]) =>
       buildResolvedPlatformConfig(env),
   };
 });
@@ -72,22 +83,15 @@ function fakeEnv(requireApproval = 'true') {
   };
 }
 
-function installExistingUsersQuery(existingUsers: Array<{ id: string }>) {
+function installSignupApprovalQuery() {
   const get = vi.fn(async () => undefined);
-  const all = vi.fn(async () => existingUsers);
-  const limit = vi.fn(() => ({ all }));
-  const where = vi.fn(() => ({ limit }));
+  const where = vi.fn(() => ({ get }));
   const from = vi.fn(() => ({ where }));
-  const select = vi.fn((fields?: Record<string, unknown>) => {
-    if (fields && 'value' in fields) {
-      return { from: vi.fn(() => ({ where: vi.fn(() => ({ get })) })) };
-    }
-    return { from };
-  });
+  const select = vi.fn(() => ({ from }));
 
   mocks.drizzle.mockReturnValue({ select });
 
-  return { all, from, get, limit, select, where };
+  return { from, get, select, where };
 }
 
 async function getBeforeCreateHook(): Promise<BeforeCreateHook> {
@@ -130,6 +134,18 @@ async function getSessionAfterHook(env: Record<string, unknown>): Promise<Sessio
   return hook;
 }
 
+async function getSessionBeforeHook(env: Record<string, unknown>): Promise<SessionBeforeHook> {
+  const { createAuth } = await import('../../src/auth');
+  await createAuth(env as never);
+
+  const hook = capturedOptions?.databaseHooks?.session?.create?.before;
+  if (!hook) {
+    throw new Error('BetterAuth session.create.before hook was not registered');
+  }
+
+  return hook;
+}
+
 const newUser: AuthTestUser = {
   id: 'github-user-1',
   email: 'user@example.com',
@@ -141,6 +157,7 @@ describe('BetterAuth configuration', () => {
     capturedOptions = undefined;
     mocks.drizzle.mockReset();
     mocks.drizzle.mockReturnValue({});
+    mocks.establishFirstSuperadmin.mockClear();
   });
 
   it('enables OAuth token encryption (encryptOAuthTokens: true)', async () => {
@@ -217,23 +234,8 @@ describe('BetterAuth configuration', () => {
     expect(capturedOptions?.socialProviders).not.toHaveProperty('google');
   });
 
-  it('promotes the first real user when only the trial sentinel exists', async () => {
-    const query = installExistingUsersQuery([]);
-    const beforeCreate = await getBeforeCreateHook();
-
-    const result = await beforeCreate(newUser);
-
-    expect(result.data).toMatchObject({
-      id: newUser.id,
-      role: 'superadmin',
-      status: 'active',
-    });
-    expect(query.where).toHaveBeenCalledOnce();
-    expect(query.all).toHaveBeenCalledOnce();
-  });
-
-  it('keeps later real users pending when the sentinel and a real user exist', async () => {
-    installExistingUsersQuery([{ id: 'real-user-1' }]);
+  it('creates approval-gated users pending until the atomic session election', async () => {
+    const query = installSignupApprovalQuery();
     const beforeCreate = await getBeforeCreateHook();
 
     const result = await beforeCreate(newUser);
@@ -243,10 +245,44 @@ describe('BetterAuth configuration', () => {
       role: 'user',
       status: 'pending',
     });
+    expect(query.where).toHaveBeenCalledOnce();
   });
 
-  it('uses the shared trial sentinel user id in tests', () => {
-    expect(TRIAL_ANONYMOUS_USER_ID).toBe('system_anonymous_trials');
+  it('elects an ordinary first administrator at the session boundary', async () => {
+    const beforeSession = await getSessionBeforeHook(fakeEnv());
+
+    await expect(beforeSession({ userId: newUser.id })).resolves.toEqual({
+      data: { userId: newUser.id },
+    });
+
+    expect(mocks.establishFirstSuperadmin).toHaveBeenCalledOnce();
+    expect(mocks.establishFirstSuperadmin).toHaveBeenCalledWith(
+      expect.objectContaining({ BASE_DOMAIN: 'example.com' }),
+      newUser.id
+    );
+  });
+
+  it('still creates the session when the election throws, without retrying privilege', async () => {
+    mocks.establishFirstSuperadmin.mockRejectedValueOnce(
+      new Error('D1_ERROR: database unavailable')
+    );
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const beforeSession = await getSessionBeforeHook(fakeEnv());
+
+    await expect(beforeSession({ userId: newUser.id })).resolves.toEqual({
+      data: { userId: newUser.id },
+    });
+
+    expect(mocks.establishFirstSuperadmin).toHaveBeenCalledOnce();
+    const logged = error.mock.calls
+      .map(([line]) => JSON.parse(String(line)) as Record<string, unknown>)
+      .find((entry) => entry.event === 'auth.first_superadmin_election.failed');
+    expect(logged).toMatchObject({ userId: newUser.id, action: 'continued_without_promotion' });
+    error.mockRestore();
+  });
+
+  it('uses the migration-seeded system user id', () => {
+    expect(SYSTEM_USER_ID).toBe('system_anonymous_trials');
   });
 });
 
@@ -287,22 +323,33 @@ describe('login-time superadmin self-heal (session.create.after)', () => {
     expect(sql).toContain('u2.id != ?2');
     // No-existing-superadmin guard.
     expect(sql).toContain("u3.role = 'superadmin'");
-    // ?1 = current user id (referenced twice), ?2 = sentinel id.
-    expect(bind).toHaveBeenCalledWith('github-user-1', TRIAL_ANONYMOUS_USER_ID);
+    // ?1 = current user id, ?2 = sentinel id, ?3 = the durable one-time election marker.
+    expect(sql).toContain('platform_settings election');
+    expect(bind).toHaveBeenCalledWith(
+      'github-user-1',
+      SYSTEM_USER_ID,
+      'setup.firstSuperadminEstablished'
+    );
     expect(run).toHaveBeenCalledOnce();
   });
 
-  it('honors an env-overridden sentinel id when binding', async () => {
+  it('ignores the retired TRIAL_ANONYMOUS_USER_ID override and binds the seeded system user', async () => {
+    // The system row id is fixed by migration 0043; an override could only name a row that
+    // does not exist, which would let the real system row count as a "real user".
     const { db, bind } = makeSelfHealDb({ changes: 0 });
     const hook = await getSessionAfterHook({
       ...fakeEnv(),
       DATABASE: db,
       TRIAL_ANONYMOUS_USER_ID: 'custom_sentinel',
-    });
+    } as never);
 
     await hook({ userId: 'github-user-1' });
 
-    expect(bind).toHaveBeenCalledWith('github-user-1', 'custom_sentinel');
+    expect(bind).toHaveBeenCalledWith(
+      'github-user-1',
+      SYSTEM_USER_ID,
+      'setup.firstSuperadminEstablished'
+    );
   });
 
   it('does nothing (no query) when the session userId is null', async () => {
@@ -368,4 +415,96 @@ describe('GitHub auth email selection', () => {
 
     expect(selected).toBe('public@profile.com');
   });
+});
+
+describe('installer bootstrap owner hooks', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it('denies unverified or wrong initial identities and reserves promotion for the session election', async () => {
+    const { createAuth } = await import('../../src/auth');
+    const first = vi.fn(async () => null);
+    await createAuth({
+      ...fakeEnv(),
+      BOOTSTRAP_OWNER_EMAIL: 'owner@example.com',
+      DATABASE: {
+        prepare: () => ({ bind: () => ({ first, run: async () => ({ meta: { changes: 0 } }) }) }),
+      },
+    } as never);
+    const hook = capturedOptions!.databaseHooks!.user!.create!.before!;
+    expect(
+      await hook({ ...newUser, email: 'other@example.com', emailVerified: true } as AuthTestUser)
+    ).toBe(false);
+    expect(
+      await hook({ ...newUser, email: 'owner@example.com', emailVerified: false } as AuthTestUser)
+    ).toBe(false);
+    expect(
+      await hook({ ...newUser, email: 'OWNER@example.com', emailVerified: true } as AuthTestUser)
+    ).toMatchObject({ data: { email: 'owner@example.com', role: 'user', status: 'active' } });
+  });
+  it('restricts login-time self-heal to the configured verified owner', async () => {
+    const { db, prepare, bind } = makeSelfHealDb();
+    const hook = await getSessionAfterHook({
+      ...fakeEnv(),
+      DATABASE: db,
+      BOOTSTRAP_OWNER_EMAIL: ' Owner@Example.com ',
+    });
+    await hook({ userId: 'github-user-1' });
+    expect(prepare).toHaveBeenCalledWith(
+      expect.stringContaining('AND lower(trim(email)) = ?4 AND email_verified = 1')
+    );
+    expect(bind).toHaveBeenCalledWith(
+      'github-user-1',
+      SYSTEM_USER_ID,
+      'setup.firstSuperadminEstablished',
+      'owner@example.com'
+    );
+  });
+  it.each([true, false])(
+    'takes GitHub email verification from the selected email entry: %s',
+    async (verified) => {
+      const { createAuth } = await import('../../src/auth');
+      vi.stubGlobal(
+        'fetch',
+        vi
+          .fn()
+          .mockResolvedValueOnce(
+            Response.json({ id: 42, login: 'owner', email: 'owner@example.com' })
+          )
+          .mockResolvedValueOnce(
+            Response.json([{ email: 'owner@example.com', primary: true, verified }])
+          )
+      );
+      // No existing provider link: preserve the provider verification under test.
+      await createAuth({
+        ...fakeEnv(),
+        DATABASE: {
+          prepare: vi.fn(() => ({ bind: vi.fn(() => ({ first: vi.fn(async () => null) })) })),
+        },
+      } as never);
+      const github = capturedOptions!.socialProviders!.github as {
+        getUserInfo(token: { accessToken: string }): Promise<{ user: { emailVerified: boolean } }>;
+      };
+      const result = await github.getUserInfo({ accessToken: 'test-access-token' });
+      expect(result.user.emailVerified).toBe(verified);
+    }
+  );
+});
+
+it('does not repeat first-user administration on an installer instance after its elected user rows are deleted', async () => {
+  const { createAuth } = await import('../../src/auth');
+  installSignupApprovalQuery();
+  await createAuth({
+    ...fakeEnv(),
+    BOOTSTRAP_OWNER_EMAIL: 'owner@example.com',
+    DATABASE: {
+      prepare: () => ({
+        bind: () => ({
+          first: async () => ({ value: JSON.stringify({ version: 1, ownerId: 'deleted-owner' }) }),
+        }),
+      }),
+    },
+  } as never);
+  const hook = capturedOptions!.databaseHooks!.user!.create!.before!;
+  expect(await hook({ ...newUser, email: 'other@example.com', emailVerified: true })).toMatchObject(
+    { data: { role: 'user', status: 'pending' } }
+  );
 });

@@ -15,6 +15,10 @@ exports[`agent assembler harness capability snapshots > preserves current oauth 
     },
     "openaiCompatibleError": "agent claude-code does not support openai-compatible proxy credentials",
   },
+  "google-antigravity": {
+    "oauthError": "no oauth env var mapping for agent google-antigravity",
+    "openaiCompatibleError": "agent google-antigravity does not support openai-compatible proxy credentials",
+  },
   "google-gemini": {
     "oauthError": "no oauth env var mapping for agent google-gemini",
     "openaiCompatibleError": "agent google-gemini does not support openai-compatible proxy credentials",

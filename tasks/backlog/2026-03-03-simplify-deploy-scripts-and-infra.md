@@ -1,5 +1,9 @@
 # Simplify Deploy Scripts and Infrastructure
 
+> **Reconciliation 2026-10-26:** No further split. `sync-wrangler-config.ts` grew to 1,358 lines
+> (1,327 on 10-12): #2335 and #2305 added optional var names and #2413 (`99b3ac5b8`) added the
+> agent-email binding. The other sizes and pointers in the 10-12 block still hold.
+
 > **Reconciliation 2026-10-12:** #2303 (`73feb757d`, commit `8e68d27ba`) moved the environment
 > override report out of `sync-wrangler-config.ts` into
 > `scripts/deploy/environment-var-overrides.ts` (213 lines). The file is now 1,327 lines (1,463 on

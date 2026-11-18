@@ -62,3 +62,8 @@ export function expectTrustedOwnerTokenLookup(
     body: { accountId, userId },
   });
 }
+
+/** Durable Object state for the access-token locks: they use only `waitUntil`. */
+export function makeLockState() {
+  return { waitUntil: vi.fn((_promise: Promise<unknown>) => undefined) };
+}

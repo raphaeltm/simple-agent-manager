@@ -10,12 +10,13 @@ vi.mock('../../src/services/node-agent', async () => ({
   fetchNodeAgent: boundary.fetch,
 }));
 
+import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { mcpRoutes } from '../../src/routes/mcp';
 import type { JsonRpcResponse } from '../../src/routes/mcp/_helpers';
 import { encrypt } from '../../src/services/encryption';
 import type { McpTokenData } from '../../src/services/mcp-token';
-import { createSqliteD1 } from '../helpers/sqlite-d1';
+import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 let sqlite: Database.Database | undefined;
 afterEach(() => {
@@ -27,14 +28,26 @@ async function fixture() {
   sqlite = new Database(':memory:');
   sqlite.exec('CREATE TABLE platform_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
   sqlite.exec(`
-    CREATE TABLE workspaces(id TEXT PRIMARY KEY,user_id TEXT,project_id TEXT,agent_profile_hint TEXT,status TEXT,node_id TEXT);
+    CREATE TABLE workspaces(id TEXT PRIMARY KEY,user_id TEXT,project_id TEXT,agent_profile_hint TEXT,status TEXT,node_id TEXT, callback_generation TEXT);
     CREATE TABLE agent_sessions(id TEXT PRIMARY KEY,workspace_id TEXT,user_id TEXT,agent_profile_id TEXT,skill_id TEXT);
-    CREATE TABLE agent_profiles(id TEXT PRIMARY KEY,project_id TEXT);
+    CREATE TABLE agent_profiles(id TEXT PRIMARY KEY,project_id TEXT,user_id TEXT);
     CREATE TABLE skills(id TEXT PRIMARY KEY,project_id TEXT);
-    INSERT INTO workspaces VALUES('ws','user','project',NULL,'running','node-1'),('other-ws','other-user','other-project',NULL,'running','node-2');
+    INSERT INTO workspaces VALUES('ws','user','project',NULL,'running','node-1',NULL),('other-ws','other-user','other-project',NULL,'running','node-2',NULL);
+    CREATE TABLE nodes(id TEXT PRIMARY KEY,user_id TEXT,status TEXT, callback_generation TEXT);
+    INSERT INTO nodes VALUES('node-1','user','running',NULL),('node-2','other-user','running',NULL);
     INSERT INTO agent_sessions VALUES('session','ws','user','profile','skill'),('other-session','other-ws','other-user',NULL,NULL);
-    INSERT INTO agent_profiles VALUES('profile','project');
+    INSERT INTO agent_profiles VALUES('profile','project','user');
     INSERT INTO skills VALUES('skill','project');
+  `);
+  // The MCP token lifecycle gate requires each workspace owner to be an active project member.
+  createSchemaTables(sqlite, [schema.users, schema.projectMembers]);
+  sqlite.exec(`
+    INSERT INTO users (id, email, status) VALUES
+      ('user', 'user@example.test', 'active'),
+      ('other-user', 'other-user@example.test', 'active');
+    INSERT INTO project_members (project_id, user_id, role, status) VALUES
+      ('project', 'user', 'owner', 'active'),
+      ('other-project', 'other-user', 'owner', 'active');
   `);
   for (const scope of ['project', 'profile', 'skill']) {
     sqlite.exec(
@@ -56,6 +69,8 @@ async function fixture() {
   sqlite
     .prepare('INSERT INTO project_runtime_env_vars VALUES(?,?,?,?,?,?)')
     .run('plain', 'project', 'PLAIN', 'nonsecret', null, 0);
+  // Agent-collected secret expiry (migration 0236); NULL keeps these rows non-expiring.
+  sqlite.exec('ALTER TABLE project_runtime_env_vars ADD COLUMN expires_at INTEGER');
   const keys = await crypto.subtle.generateKey(
     {
       name: 'RSASSA-PKCS1-v1_5',

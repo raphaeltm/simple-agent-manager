@@ -13,7 +13,12 @@ import { createMemoryKv, createSqliteD1 } from '../../helpers/sqlite-d1';
 function createEnv(overrides: Partial<Env> = {}): Env {
   const sqlite = new Database(':memory:');
   sqlite.exec(`
-    CREATE TABLE users (id TEXT PRIMARY KEY);
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      role TEXT NOT NULL DEFAULT 'user',
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at INTEGER NOT NULL DEFAULT 0
+    );
     INSERT INTO users (id) VALUES ('system_anonymous_trials');
     CREATE TABLE platform_settings (
       key TEXT PRIMARY KEY NOT NULL,
@@ -250,7 +255,7 @@ describe('setup routes', () => {
       completed: true,
       status: {
         integrations: {
-          gitlabOAuth: { configured: true, label: 'set here' },
+          gitlabOAuth: { configured: true, label: 'stored in SAM' },
         },
       },
     });
@@ -258,9 +263,9 @@ describe('setup routes', () => {
 
   it('rejects invalid GitLab host values', async () => {
     const res = await createApp().request(
-      '/api/setup/config',
+      '/api/setup/complete',
       {
-        method: 'PUT',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.13' },
         body: JSON.stringify({
           token: 'setup-token',
@@ -451,7 +456,7 @@ describe('setup routes', () => {
       });
     }
 
-    function setupRequest(method: 'POST' | 'PUT', ip: string, withConfig: boolean) {
+    function setupRequest(method: 'POST', ip: string, withConfig: boolean) {
       return {
         method,
         headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': ip },
@@ -479,30 +484,6 @@ describe('setup routes', () => {
     function expectNoSecretMarkers(body: string): void {
       for (const marker of ALL_SECRET_MARKERS) expect(body).not.toContain(marker);
     }
-
-    it('PUT /config returns only the status projection, never a secret value', async () => {
-      const res = await createApp().request(
-        '/api/setup/config',
-        setupRequest('PUT', '198.51.100.30', true),
-        envWithSecrets()
-      );
-
-      expect(res.status).toBe(200);
-      const text = await res.text();
-      expectNoSecretMarkers(text);
-
-      const json = JSON.parse(text) as { status: { integrations: Record<string, unknown> } };
-      expect(Object.keys(json)).toEqual(['status']);
-      // Liveness: the projection still reports every seeded secret, so an empty body cannot pass.
-      expect(json.status.integrations).toMatchObject({
-        githubOAuth: { configured: true, source: 'environment' },
-        githubApp: { configured: true, source: 'environment' },
-        githubWebhook: { configured: true, source: 'environment' },
-        googleInfrastructureOAuth: { configured: true, source: 'environment' },
-        googleOAuth: { configured: true, source: 'runtime' },
-        gitlabOAuth: { configured: true, source: 'runtime' },
-      });
-    });
 
     it('POST /verify and POST /complete never return a secret value either', async () => {
       const env = envWithSecrets();

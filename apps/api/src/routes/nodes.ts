@@ -1,7 +1,7 @@
 import {
   DEFAULT_VM_LOCATION,
   DEFAULT_VM_SIZE,
-  getLocationsForProvider,
+  describeValidLocations,
   isValidLocationForProvider,
 } from '@simple-agent-manager/shared';
 import { and, desc, eq, ne } from 'drizzle-orm';
@@ -15,15 +15,17 @@ import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireNodeOwnership } from '../middleware/node-auth';
-import { CreateNodeSchema, jsonValidator } from '../schemas';
+import { ConfirmManualNodeDeletionSchema, CreateNodeSchema, jsonValidator } from '../schemas';
 import { resolveCanonicalVmAllocationPlan } from '../services/canonical-vm-allocation';
 import { scheduleDirectProvisioning } from '../services/direct-provisioning';
 import { getRuntimeLimits } from '../services/limits';
 import { stopWorkspaceOnNode } from '../services/node-agent';
+import { getNodeResourceUsage } from '../services/node-resource-usage';
 import { createNodeRecord, stopNodeResources } from '../services/nodes';
 import { recordNodeRoutingMetric } from '../services/telemetry';
 import { deleteNodeRoute } from './nodes/delete';
 import { nodeDiagnosticsRoutes } from './nodes/diagnostics';
+import { confirmManualNodeDeletionRoute } from './nodes/manual-deletion';
 import {
   loadDeploymentEnvironmentSummaries,
   refreshNodeHealth,
@@ -125,9 +127,8 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
 
   // Validate location against provider if provider is specified
   if (provider && !isValidLocationForProvider(provider, vmLocation)) {
-    const validLocations = getLocationsForProvider(provider).map((l) => l.id);
     throw errors.badRequest(
-      `Location '${vmLocation}' is not valid for provider '${provider}'. Valid locations: ${validLocations.join(', ')}`
+      `Location '${vmLocation}' is not valid for provider '${provider}'. Expected ${describeValidLocations(provider)}`
     );
   }
 
@@ -211,6 +212,11 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
   return c.json(created, 201);
 });
 
+// Registered before `/:id`, which would otherwise capture "resource-usage" as a node id.
+nodesRoutes.get('/resource-usage', async (c) => {
+  return c.json(await getNodeResourceUsage(c.env, getUserId(c)));
+});
+
 nodesRoutes.get('/:id', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const node = await requireNodeOwnership(c, c.req.param('id'));
@@ -264,6 +270,11 @@ nodesRoutes.post('/:id/stop', async (c) => {
 });
 
 nodesRoutes.delete('/:id', deleteNodeRoute);
+nodesRoutes.post(
+  '/:id/manual-deletion',
+  jsonValidator(ConfirmManualNodeDeletionSchema),
+  confirmManualNodeDeletionRoute
+);
 
 nodesRoutes.route('/', nodeDiagnosticsRoutes);
 

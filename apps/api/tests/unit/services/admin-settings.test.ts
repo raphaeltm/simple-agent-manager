@@ -20,6 +20,22 @@ afterEach(() => {
   sqlite.close();
 });
 describe('admin settings mutation and outage safety', () => {
+  it('validates provider reset tolerance bounds and invalidates cached values after changes', async () => {
+    const name = 'operations.providerLimitResetWindowToleranceMs' as const;
+    expect(await resolveAdminSetting(env, name)).toBe(60_000);
+    for (const value of [0, 1000, 300_000]) {
+      await updateAdminSettings(env, { actorUserId: 'admin', changes: [{ name, value }] });
+      expect(await resolveAdminSetting(env, name)).toBe(value);
+    }
+    for (const value of [-1, 300_001, 1.5, '1000']) {
+      await expect(
+        updateAdminSettings(env, { actorUserId: 'admin', changes: [{ name, value }] })
+      ).rejects.toMatchObject({ statusCode: 400 });
+    }
+    await updateAdminSettings(env, { actorUserId: 'admin', changes: [{ name, value: null }] });
+    expect(await resolveAdminSetting(env, name)).toBe(60_000);
+  });
+
   it('legacy atomic guard rolls back arbitrary statements when prior validation is stale', async () => {
     const changes = [
       { name: 'integration.github.clientId' as const, value: 'client-one' },
@@ -27,7 +43,7 @@ describe('admin settings mutation and outage safety', () => {
     ];
     const revision = await validateAdminSettingsChanges(env, changes);
     await updateAdminSettings(env, {
-      changes: [{ name: 'trials.enabled', value: true }],
+      changes: [{ name: 'operations.stalledTaskClassifierEnabled', value: false }],
       actorUserId: 'other',
     });
     await expect(
@@ -102,7 +118,6 @@ describe('admin settings mutation and outage safety', () => {
       changes: [
         { name: 'operations.cronSweepsEnabled', value: false },
         { name: 'connector.enabled', value: true },
-        { name: 'trials.enabled', value: true },
       ],
     });
     expect(await resolveAdminSetting(env, 'operations.cronSweepsEnabled')).toBe(false);
@@ -114,7 +129,6 @@ describe('admin settings mutation and outage safety', () => {
     vi.advanceTimersByTime(60_001);
     expect(await resolveAdminSetting(env, 'operations.cronSweepsEnabled')).toBe(false);
     expect(await resolveAdminSetting(env, 'connector.enabled')).toBe(false);
-    expect(await resolveAdminSetting(env, 'trials.enabled')).toBe(false);
     await expect(readAdminSettings(env, { fresh: true })).rejects.toThrow(
       'Admin settings are unavailable'
     );

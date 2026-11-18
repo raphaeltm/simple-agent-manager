@@ -43,17 +43,6 @@ export default defineConfig({
           ADMIN_LOGS: {
             className: 'AdminLogs',
           },
-          TRIAL_COUNTER: {
-            className: 'TrialCounter',
-            useSQLite: true,
-          },
-          TRIAL_EVENT_BUS: {
-            className: 'TrialEventBus',
-          },
-          TRIAL_ORCHESTRATOR: {
-            className: 'TrialOrchestrator',
-            useSQLite: true,
-          },
           SAM_SESSION: {
             className: 'SamSession',
             useSQLite: true,
@@ -99,10 +88,6 @@ export default defineConfig({
           SESSION_IDLE_TIMEOUT_MINUTES: '60',
           DO_SUMMARY_SYNC_DEBOUNCE_MS: '5000',
           NODE_HEARTBEAT_STALE_SECONDS: '180',
-          TRIAL_CLAIM_TOKEN_SECRET: 'test-trial-secret-do-not-use-in-production',
-          TRIAL_SSE_HEARTBEAT_MS: '60000',
-          TRIAL_SSE_POLL_TIMEOUT_MS: '500',
-          TRIAL_SSE_MAX_DURATION_MS: '5000',
           NODE_WARM_TIMEOUT_MS: '5000',
           WORKSPACE_STOPPED_TTL_MS: '3000',
           ENCRYPTION_KEY: 'SK4ihJazAK3GIWUQcM6nZ1odR6KQHrqRAVSp6HdPxrg=',

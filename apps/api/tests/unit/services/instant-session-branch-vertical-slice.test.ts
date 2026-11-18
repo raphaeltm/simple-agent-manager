@@ -46,7 +46,11 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../src/lib/logger', () => ({ log: mocks.log, createModuleLogger: () => mocks.log }));
-vi.mock('../../../src/services/jwt', () => mocks.jwt);
+vi.mock('../../../src/services/jwt', () => ({
+  ...mocks.jwt,
+  signCurrentWorkspaceCallbackToken: mocks.jwt.signCallbackToken,
+  signCurrentNodeCallbackToken: mocks.jwt.signNodeCallbackToken,
+}));
 vi.mock('../../../src/services/node-agent', () => mocks.nodeAgent);
 vi.mock('../../../src/services/nodes', () => mocks.nodes);
 vi.mock('../../../src/services/project-data', () => mocks.projectData);

@@ -1,5 +1,11 @@
 # cf-container wake/restore hardening follow-ups
 
+> **Reconciliation 2026-10-26:** all five items are still open. #2382 (`fde7d0f24`) added a
+> transcript-fallback branch that calls `/start` with an `AbortSignal.timeout`
+> (`apps/api/src/durable-objects/vm-agent-container.ts:997-1033`); the `/restore` `containerFetch`
+> moved to `:1035-1057` and still has no deadline. The three earlier timeouts shifted one line
+> (`:919`, `:952`, `:989`); the Go, `jwt.ts` and `node-agent.ts` pointers still hold.
+
 > **Reconciliation 2026-10-12:** All five items are still open. #2261 (`ab76c0f42`) moved three of
 > the locations in the 2026-10-05 note. Before restoring, `wakeFromSnapshot` now probes the
 > container's capabilities and re-creates the workspace and the agent session, each call with an

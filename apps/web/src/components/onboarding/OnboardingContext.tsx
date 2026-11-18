@@ -87,6 +87,9 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     }
 
     if (setupComplete) {
+      // The wizard's own last steps complete the setup; an open overlay stays up so the user
+      // reaches its hand-off. Closing it records the dismissal.
+      if (overlayOpen) return;
       setDismissed(true);
       if (userId) localStorage.setItem(getStorageKey(userId), 'true');
       return;
@@ -96,7 +99,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
       // First visit with incomplete setup — auto-show the overlay.
       setOverlayOpen(true);
     }
-  }, [loading, setupComplete, userId]);
+  }, [loading, setupComplete, userId, overlayOpen]);
 
   const needsOnboarding = !setupComplete && !loading;
 

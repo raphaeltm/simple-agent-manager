@@ -41,7 +41,7 @@ Before moving ANY task from `tasks/active/` to `tasks/archive/`, you MUST run th
 ### Validation Rules
 
 - **CRITICAL/HIGH findings block merge.** Fix them in the branch before merging. Filing a backlog task is NOT an acceptable alternative — the validator exists to catch gaps _before_ they ship, not to generate follow-up work. The only exception is explicit human approval to defer a specific finding.
-- **A validator FAIL means the task is not complete.** Return to implementation. Do NOT proceed to PR creation or merge.
+- **A validator FAIL means the task is not complete.** Return to implementation. Do NOT mark the PR ready or merge.
 - **Do NOT rationalize gaps.** "It works when I test it manually" is not an answer to "no test covers this acceptance criterion." Either add the test or document the manual verification with evidence.
 - **"Fix or defer" is not a real choice.** If you have time to write a backlog task file, you have time to write the test or fix the gap. The backlog escape hatch has been abused in every case where it was used (PR #568, PR #570) — the follow-up tasks add friction and delay but deliver the same work that should have been done in the original PR.
 
@@ -86,17 +86,17 @@ The receiving agent will then follow the full `/do` workflow: research, task fil
 
 ### Right-Size Dispatched Workspaces
 
-Oversized dispatches are not free. The Hetzner account has 10 servers shared by production and staging, and a dedicated large node recreates the one-node-per-agent problem the scheduler work exists to remove. Placement also subtracts the 512 MB host reserve before matching an offering, so a request of exactly 8 GB excludes every 8 GB machine and lands on 16 GB, and a request of exactly 4 GB lands on 8 GB. Observed 2026-09-13: a 4 vCPU / 8 GB `resourceRequirements` request placed a branch-reconciliation task on a dedicated cx43 (8 vCPU / 16 GB).
+Oversized dispatches are not free. The Hetzner account has 10 servers shared by production and staging, and a dedicated large node recreates the one-node-per-agent problem the scheduler work exists to remove. Placement also subtracts the 1 GB host reserve before matching an offering, so a request above 3 GB excludes every 4 GB machine and lands on 8 GB, and a request above 7 GB lands on 16 GB. (Before 2026-11-08 the reserve was 512 MB and admission also charged measured host use on top of it, so a 3.5 GB request provisioned a 4 GB machine that could never admit it.) Observed 2026-09-13: a 4 vCPU / 8 GB `resourceRequirements` request placed a branch-reconciliation task on a dedicated cx43 (8 vCPU / 16 GB).
 
 1. **Prefer omitting `resourceRequirements` and `vmSize`.** The profile, skill, or project default applies and the pool can pack the task onto an existing node.
 2. **Look for prior signals before setting anything.** Read the previous attempt's task file or handoff notes, look for recorded OOM kills or "serialize heavy validation" remarks, check what comparable tasks ran on (`nodes.provider_instance_memory_mb` for their workspaces), and check the profile defaults.
-3. **If no signal exists, estimate, cite the source in the dispatch description, and cap the request at 2 vCPU and a 4 GB machine.** In `resourceRequirements` terms that is `minVcpu: 2` and `minMemoryGb` at most `3.5`, because of the host reserve.
+3. **If no signal exists, estimate, cite the source in the dispatch description, and cap the request at 2 vCPU and a 4 GB machine.** In `resourceRequirements` terms that is `minVcpu: 2` and `minMemoryGb` at most `3`, because of the host reserve.
 4. **Exceed the cap only for an out-of-memory failure actually observed at that size for this kind of work**, and say so in the dispatch. "The test suite is big" is a guess, not an observation.
 5. **Never combine `resourceRequirements` with `runtime: "cf-container"`**; the dispatch is rejected.
 
 ### Verify Dispatch Succeeded
 
-After calling `dispatch_task`, wait a few seconds and then check the task status (via `get_task_details` or `list_tasks`) to confirm it was properly dispatched and picked up. The dispatch system can occasionally fail silently — catching this early avoids wasted time waiting for work that never started.
+After calling `dispatch_task`, wait a few seconds and then check the task status (via `tasks_read` method `get` or `tasks_read` method `list`) to confirm it was properly dispatched and picked up. The dispatch system can occasionally fail silently — catching this early avoids wasted time waiting for work that never started.
 
 Verification must confirm all of:
 
@@ -122,9 +122,9 @@ Before resolving an incident, check whether the signature is already covered by 
 
 Before retrying or redispatching the same work after a SAM task fails, diagnose the failed start:
 
-- Call `get_task_details` for the failed task and read any output summary, output branch, branch, PR URL, profile/skill/mode evidence, and status evidence.
+- Call `tasks_read` method `get` for the failed task and read any output summary, output branch, branch, PR URL, profile/skill/mode evidence, and status evidence.
 - If there is a session, read enough messages to distinguish no-workspace/startup failure, transient provider error, human-cancel recovery, wrong profile, or real task failure.
-- Call `list_tasks`/`list_project_agents` to check for active duplicates with the same prompt, title, output branch, branch, PR, profile, or skill.
+- Call `tasks_read` method `list`/`tasks_read` method `agents` to check for active duplicates with the same prompt, title, output branch, branch, PR, profile, or skill.
 - If an active duplicate exists, inspect or coordinate with it instead of creating another copy.
 - If the failure was a transient provider or platform startup issue, adjust the retry only after confirming the current platform behavior has not already fixed it.
 - Include the failed task ID and any active duplicate task IDs in your report or retry context.
@@ -145,7 +145,7 @@ When Raphaël asks for status, open PRs, task history, deployment state, or a si
 When a task asks you to review a previous session or recover context from recent conversations, keep the search bounded and evidence-driven:
 
 - If the prompt names a parent/target session, task, PR, or branch, inspect that object directly first with the relevant SAM MCP or GitHub tool instead of starting with broad global searches.
-- Search tools keep normal long multi-word queries searchable by matching retained terms separately. Generous byte/term guardrails still disclose any trimming through `queryTruncated`, the effective `query`, and `queryLimits`. Callers that require exact coverage should refine an over-limit query or read known sessions directly via `get_session_messages`.
+- Search tools keep normal long multi-word queries searchable by matching retained terms separately. Generous byte/term guardrails still disclose any trimming through `queryTruncated`, the effective `query`, and `queryLimits`. Callers that require exact coverage should refine an over-limit query or read known sessions directly via `sessions_read` method `messages`.
 - Do not create a duplicate robustness idea for historical SQLite pattern-complexity failures unless the bounded search path still reproduces the error.
 - Update the current or resumed session topic when it is stale and the available SAM tool supports it. Do not rewrite unrelated historical session titles unless the task explicitly includes durable state cleanup.
 - A context-resume review remains read-only by default. Only create task files, branches, commits, PRs, or dispatched work when the user asks for implementation, durable artifacts, or delegation.

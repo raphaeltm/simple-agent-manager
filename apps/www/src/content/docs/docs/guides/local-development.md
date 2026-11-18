@@ -38,11 +38,11 @@ This starts:
 ## Prerequisites
 
 ```bash
-node --version   # v20.x or higher
+node --version   # v22.22+ (Node 22 LTS) or v24.x or higher
 pnpm --version   # 9.x or higher
 ```
 
-Go 1.26.6+ is needed if you're working on the VM Agent (`packages/vm-agent/`) or CLI (`packages/cli/`).
+Go 1.26.11+ is needed if you're working on the VM Agent (`packages/vm-agent/`) or CLI (`packages/cli/`).
 
 ## Setup
 
@@ -94,6 +94,15 @@ Packages must be built in dependency order:
 ```bash
 pnpm --filter @simple-agent-manager/shared build
 pnpm --filter @simple-agent-manager/providers build
+pnpm --filter @simple-agent-manager/worker-core build
+pnpm --filter @simple-agent-manager/cron build
+pnpm --filter @simple-agent-manager/app-deployment build
+pnpm --filter @simple-agent-manager/scheduler-core build
+pnpm --filter @simple-agent-manager/project-data build
+pnpm --filter @simple-agent-manager/agent-email build
+pnpm --filter @simple-agent-manager/operations build
+pnpm --filter @simple-agent-manager/repo-hosting build
+pnpm --filter @simple-agent-manager/ai-proxy build
 pnpm --filter @simple-agent-manager/api build
 ```
 

@@ -7,7 +7,7 @@ import {
   CheckCircle2,
   CirclePause,
   HelpCircle,
-  Loader2,
+  LoaderCircle,
   Moon,
   XCircle,
 } from 'lucide-react';
@@ -19,6 +19,19 @@ const DEFAULT_STALE_SESSION_THRESHOLD_MS = 3 * 60 * 60 * 1000; // 3 hours
 export const STALE_SESSION_THRESHOLD_MS = parseInt(
   import.meta.env.VITE_STALE_SESSION_THRESHOLD_MS || String(DEFAULT_STALE_SESSION_THRESHOLD_MS)
 );
+
+/**
+ * How long a chat stays in the list's Needs attention section after its attention marker
+ * was raised (ms). Older blocked chats fall back to their lifecycle section, where their
+ * row still shows the status label. A malformed override falls back to the default, so it
+ * cannot silently empty the section.
+ */
+const DEFAULT_ATTENTION_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+const parsedAttentionWindowMs = Number.parseInt(import.meta.env.VITE_ATTENTION_WINDOW_MS ?? '', 10);
+export const ATTENTION_WINDOW_MS =
+  Number.isFinite(parsedAttentionWindowMs) && parsedAttentionWindowMs > 0
+    ? parsedAttentionWindowMs
+    : DEFAULT_ATTENTION_WINDOW_MS;
 
 export type SessionState = 'active' | 'idle' | 'sleeping' | 'terminated';
 
@@ -162,6 +175,53 @@ export function getAttentionState(session: ChatSessionResponse): AttentionState 
   return 'stopped';
 }
 
+// =============================================================================
+// Session List Sections
+// =============================================================================
+
+/**
+ * Where a session sits in the project chat list, in display order: something a person must
+ * act on, then sessions whose runtime is awake (working or idle), then sleeping sessions a
+ * message can wake, then everything that can no longer be resumed.
+ *
+ * Awake, Sleeping and History are placed by state only, never by message age, so a
+ * long-quiet awake session stays visible. Needs attention is limited to recent requests
+ * (`ATTENTION_WINDOW_MS`). Within a section the list keeps conversation recency.
+ */
+export type SessionSection = 'attention' | 'awake' | 'sleeping' | 'history';
+
+export const SESSION_SECTION_ORDER: readonly SessionSection[] = [
+  'attention',
+  'awake',
+  'sleeping',
+  'history',
+];
+
+/**
+ * Section for a session. Pass the task-enriched session so terminal tasks land in History.
+ * `now` is injectable for tests.
+ */
+export function getSessionSection(
+  session: ChatSessionResponse,
+  now: number = Date.now()
+): SessionSection {
+  const state = getSessionState(session);
+  if (state === 'terminated') return 'history';
+  // An unanswered question or a failed wake needs a person even when the session is
+  // asleep; it outranks the lifecycle state, matching the row's own status label. Only
+  // recent ones, though: a request nobody answered for days is old news, not a to-do. The
+  // window runs from when the request was raised, not from the chat's last message, so a
+  // busy chat cannot keep an old request at the top.
+  const attention = getAttentionState(session);
+  if (
+    (attention === 'needs_input' || attention === 'wake_failed') &&
+    now - (session.attention?.createdAt ?? 0) <= ATTENTION_WINDOW_MS
+  ) {
+    return 'attention';
+  }
+  return state === 'sleeping' ? 'sleeping' : 'awake';
+}
+
 /** Whether a session's attention state should be treated as high-priority. */
 export function isHighPriorityAttention(state: AttentionState): boolean {
   return state === 'needs_input' || state === 'wake_failed' || state === 'error';
@@ -171,7 +231,7 @@ export function isHighPriorityAttention(state: AttentionState): boolean {
  * Attention state -> icon + color + label mapping (uses design tokens).
  *
  * Single source of truth consumed by `SessionItem` (full session card) and the
- * Focus Mode session strip (`FocusStrip`). The `active` icon (`Loader2`) is the
+ * Focus Mode session strip (`FocusStrip`). The `active` icon (`LoaderCircle`) is the
  * only one intended to spin — callers add `animate-spin` when the state is
  * `active`.
  */
@@ -190,8 +250,10 @@ export const ATTENTION_ICON: Record<
     label: 'Wake failed',
   },
   error: { icon: AlertCircle, color: 'var(--sam-color-danger, #ef4444)', label: 'Error' },
-  active: { icon: Loader2, color: 'var(--sam-color-success)', label: 'Running' },
-  idle: { icon: CirclePause, color: 'var(--sam-color-warning, #f59e0b)', label: 'Idle' },
+  // SAM Glass: green spins while working, a moon means resting, amber is reserved for
+  // "waiting on you" (needs_input) — an idle agent is not waiting on anyone in particular.
+  active: { icon: LoaderCircle, color: 'var(--sam-color-success)', label: 'Running' },
+  idle: { icon: Moon, color: 'var(--sam-color-fg-muted)', label: 'Idle' },
   sleeping: { icon: Moon, color: 'var(--sam-color-info, #3b82f6)', label: 'Sleeping' },
   completed: { icon: CheckCircle2, color: 'var(--sam-color-fg-muted)', label: 'Completed' },
   failed: { icon: XCircle, color: 'var(--sam-color-danger, #ef4444)', label: 'Failed' },

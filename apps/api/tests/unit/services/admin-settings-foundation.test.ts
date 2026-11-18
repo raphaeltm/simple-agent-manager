@@ -45,17 +45,79 @@ function rows(enabled: boolean): AdminSettingOverrideRow[] {
 
 describe('Phase 1 settings registry', () => {
   it('covers bounded Phase 1 controls and reuses Connector defaults', () => {
-    expect(new Set(ADMIN_SETTINGS_REGISTRY.map((setting) => setting.name)).size).toBe(23);
-    expect(ADMIN_SETTINGS_REGISTRY).toHaveLength(23);
+    expect(new Set(ADMIN_SETTINGS_REGISTRY.map((setting) => setting.name)).size).toBe(
+      ADMIN_SETTINGS_REGISTRY.length
+    );
     for (const [key, value] of Object.entries(CONNECTOR_DEFAULTS)) {
       const definition = findAdminSetting(`connector.${key}`)!;
       expect(definition.defaultValue).toEqual(value);
       expect(definition.validate(value)).toBe(true);
     }
-    expect(findAdminSetting('trials.enabled')?.defaultValue).toBe(false);
+    const workloadLifetime = findAdminSetting('operations.workloadIdentityTokenTtlSeconds')!;
+    expect(workloadLifetime).toMatchObject({ defaultValue: 300, range: { min: 1, max: 600 } });
+    expect(workloadLifetime.validate(1)).toBe(true);
+    expect(workloadLifetime.validate(600)).toBe(true);
+    expect(workloadLifetime.validate(0)).toBe(false);
+    expect(workloadLifetime.validate(601)).toBe(false);
+    expect(workloadLifetime.validate(1.5)).toBe(false);
+    // The retired anonymous-trial switch is gone; a saved row for it is ignored.
+    expect(findAdminSetting('trials.enabled' as never)).toBeUndefined();
     expect(findAdminSetting('operations.cronSweepsEnabled')?.defaultValue).toBe(true);
     expect(findAdminSetting('operations.doAlarmsEnabled')?.defaultValue).toBe(true);
     expect(findAdminSetting('operations.stalledTaskClassifierEnabled')?.defaultValue).toBe(true);
+    expect(findAdminSetting('collaboration.sessionAccessMaxGrants')?.defaultValue).toBe(10);
+    expect(findAdminSetting('collaboration.commentMentionsMax')?.defaultValue).toBe(10);
+    expect(findAdminSetting('collaboration.commentNotificationWindowSeconds')?.defaultValue).toBe(
+      600
+    );
+    const contextMessages = findAdminSetting('collaboration.commentContextMessages')!;
+    expect(contextMessages).toMatchObject({
+      defaultValue: 6,
+      category: 'Collaboration',
+      range: { min: 1, max: 50 },
+    });
+    for (const value of [0, 51, 2.5, '6']) expect(contextMessages.validate(value)).toBe(false);
+    const contextRows = findAdminSetting('collaboration.commentContextMaxRows')!;
+    expect(contextRows).toMatchObject({
+      defaultValue: 1_000,
+      category: 'Collaboration',
+      range: { min: 50, max: 5_000 },
+    });
+    for (const value of [49, 5_001]) expect(contextRows.validate(value)).toBe(false);
+    expect(contextRows.validate(50)).toBe(true);
+    const usageWindow = findAdminSetting('chat.profileUsageWindowDays')!;
+    expect(usageWindow).toMatchObject({
+      defaultValue: 30,
+      category: 'Chat',
+      range: { min: 1, max: 365 },
+    });
+    for (const value of [0, 366, 1.5, '30']) expect(usageWindow.validate(value)).toBe(false);
+    const agentEmail = ADMIN_SETTINGS_REGISTRY.filter((setting) =>
+      setting.name.startsWith('agentEmail.')
+    );
+    expect(
+      Object.fromEntries(agentEmail.map((setting) => [setting.name, setting.defaultValue]))
+    ).toEqual({
+      'agentEmail.setupPlanTimeoutMs': 15_000,
+      'agentEmail.readTimeoutMs': 5_000,
+      'agentEmail.maxInboundBytes': 5 * 1024 * 1024,
+      'agentEmail.maxBodyChars': 12_000,
+      'agentEmail.maxReplyChars': 20_000,
+      'agentEmail.maxRepliesPerRun': 5,
+      'agentEmail.maxAllowedSenders': 20,
+      'agentEmail.inboundPerTriggerPerHour': 20,
+      'agentEmail.processingLeaseSeconds': 120,
+      'agentEmail.loopbackPerHour': 10,
+      'agentEmail.setupRunsPerHour': 10,
+      'agentEmail.maxDeliveryAttempts': 5,
+      'agentEmail.retryBaseSeconds': 60,
+      'agentEmail.retryMaxSeconds': 900,
+      'agentEmail.recoveryBatchSize': 10,
+      'agentEmail.signInCodesPerEmailPerHour': 5,
+      'agentEmail.signInCodesPerIpPerHour': 20,
+      'agentEmail.signInCodeAttemptsPerEmailPerHour': 10,
+    });
+    expect(agentEmail.every((setting) => setting.category === 'Email')).toBe(true);
     expect(findAdminSetting('feedback.projectId')).toBeUndefined();
     expect(findAdminSetting('integration.github.appPrivateKey')).toBeUndefined();
     expect(findAdminSetting('__proto__')).toBeUndefined();
@@ -63,7 +125,7 @@ describe('Phase 1 settings registry', () => {
 
   it('rejects malformed values without accepting boolean-like strings or unsafe numeric inputs', () => {
     for (const value of ['false', null, 0, [], {}]) {
-      expect(findAdminSetting('trials.enabled')?.validate(value)).toBe(false);
+      expect(findAdminSetting('connector.enabled')?.validate(value)).toBe(false);
     }
     const ttl = findAdminSetting('connector.accessTokenTtlSeconds')!;
     for (const value of [59, 1.5, NaN, Infinity, 2147483648, '3600'])
@@ -87,8 +149,8 @@ describe('Phase 1 settings registry', () => {
 
   it('publishes secret classification without secret values or credential implementation', () => {
     const secrets = ADMIN_SETTINGS_REGISTRY.filter((setting) => setting.secret);
-    expect(secrets).toHaveLength(4);
-    expect(new Set(secrets.map((setting) => setting.credential?.provider)).size).toBe(4);
+    expect(secrets).toHaveLength(5);
+    expect(new Set(secrets.map((setting) => setting.credential?.provider)).size).toBe(5);
     for (const secret of secrets) {
       expect(secret.defaultValue).toBeNull();
       const metadata = publicAdminSettingDefinition(secret);
@@ -161,6 +223,52 @@ describe('D1 settings snapshot cache', () => {
       .read(database)
       .catch((error: Error) => expect(error.message).not.toContain('secret-canary'));
     expect(load).toHaveBeenCalledTimes(3);
+  });
+
+  it('recovers changed persisted settings after overload without invalidation', async () => {
+    const { database, set } = fixture();
+    let now = 0;
+    const cache = new AdminSettingsCache(undefined, () => now);
+    expect((await cache.read(database))[0]?.value).toBe('true');
+    const originalPrepare = database.prepare;
+    const prepare = vi.spyOn(database, 'prepare').mockImplementation(() => {
+      throw new Error('D1_OVERLOADED private SQL parameters');
+    });
+    now = ADMIN_SETTINGS_CACHE_MAX_MS;
+    await expect(cache.read(database)).rejects.toThrow('Admin settings are unavailable');
+    set(false);
+    prepare.mockImplementation(originalPrepare);
+    expect((await cache.read(database))[0]?.value).toBe('false');
+    expect(prepare).toHaveBeenCalledTimes(2);
+  });
+
+  it('coalesces concurrent overload failures and starts a fresh recovery read', async () => {
+    const { database } = fixture();
+    let rejectRead!: (error: Error) => void;
+    const load = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<AdminSettingOverrideRow[]>((_resolve, reject) => {
+            rejectRead = reject;
+          })
+      )
+      .mockResolvedValue(rows(false));
+    const cache = new AdminSettingsCache(undefined, () => 0, load);
+    const reads = [cache.read(database), cache.read(database), cache.read(database)];
+    const settled = Promise.allSettled(reads);
+    expect(load).toHaveBeenCalledTimes(1);
+    rejectRead(new Error('D1_OVERLOADED private SQL parameters'));
+    for (const result of await settled) {
+      expect(result.status).toBe('rejected');
+      if (result.status === 'rejected') {
+        expect(result.reason.message).toBe(
+          'Admin settings are unavailable; retry after the database recovers.'
+        );
+      }
+    }
+    expect((await cache.read(database))[0]?.value).toBe('false');
+    expect(load).toHaveBeenCalledTimes(2);
   });
 
   it('revokes a pre-save read from both cache publication and its waiting callers', async () => {
@@ -280,13 +388,47 @@ describe('D1 settings snapshot cache', () => {
           release = resolve;
         })
     );
-    const cache = new AdminSettingsCache(undefined, () => now, load);
+    const cache = new AdminSettingsCache(100, () => now, load);
     const first = cache.read(database);
-    now = ADMIN_SETTINGS_CACHE_MAX_MS - 1;
+    now = 99;
     const second = cache.read(database);
-    now = ADMIN_SETTINGS_CACHE_MAX_MS;
+    now = 100;
     release(rows(true));
     await expect(first).rejects.toThrow('Admin settings are unavailable');
     await expect(second).rejects.toThrow('Admin settings are unavailable');
   });
+});
+
+it('evicts a timed-out shared load, recovers, and ignores its late stale result', async () => {
+  vi.useFakeTimers();
+  try {
+    let release!: (value: AdminSettingOverrideRow[]) => void;
+    const load = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          })
+      )
+      .mockResolvedValue(rows(false));
+    const cache = new AdminSettingsCache(60_000, () => Date.now(), load);
+    const database = {} as D1Database;
+    const first = cache.read(database, false, 60_000, 100);
+    const concurrent = cache.read(database, false, 60_000, 100);
+    const failures = Promise.all([
+      expect(first).rejects.toThrow('unavailable'),
+      expect(concurrent).rejects.toThrow('unavailable'),
+    ]);
+    await vi.advanceTimersByTimeAsync(101);
+    await failures;
+    expect(load).toHaveBeenCalledOnce();
+    expect(await cache.read(database, false, 60_000, 100)).toEqual(rows(false));
+    release(rows(true));
+    await Promise.resolve();
+    expect(await cache.read(database, false, 60_000, 100)).toEqual(rows(false));
+    expect(load).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
 });

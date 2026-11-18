@@ -246,7 +246,6 @@ function createState(offerings: Offering[] = INCIDENT_CHAIN): TaskRunnerState {
     lastStepAt: Date.now(),
     provisioningStartedAt: null,
     agentReadyStartedAt: null,
-    workspaceReadyStartedAt: null,
     workspaceDispatchStartedAt: null,
     workspaceDispatchAttempts: 0,
     workspaceDispatchLastAttemptAt: null,

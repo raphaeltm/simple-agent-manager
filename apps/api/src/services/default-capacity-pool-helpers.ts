@@ -1,9 +1,4 @@
 import type { CapacityPoolScope, CredentialProvider } from '@simple-agent-manager/shared';
-import type { VMSize } from '@simple-agent-manager/shared';
-import {
-  getDefaultLocationForProvider,
-  getLocationsForProvider,
-} from '@simple-agent-manager/shared';
 
 export interface DefaultPoolScopeIdentity {
   scope: CapacityPoolScope;
@@ -19,15 +14,6 @@ export interface DefaultCapacitySourceReference {
 }
 
 export const CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE = 'capacity-source-external-ref';
-
-export function orderedLocationsForProvider(provider: CredentialProvider) {
-  const locations = getLocationsForProvider(provider);
-  const defaultLocation = getDefaultLocationForProvider(provider);
-  return [
-    ...locations.filter((location) => location.id === defaultLocation),
-    ...locations.filter((location) => location.id !== defaultLocation),
-  ];
-}
 
 export function defaultPoolId(scope: DefaultPoolScopeIdentity): string {
   switch (scope.scope) {
@@ -76,16 +62,6 @@ export function defaultCandidateId(
   return `cap-candidate-default:${poolId}:${sourceId}:${provider}:${location}:${offeringKey}`;
 }
 
-export function legacyDefaultCandidateId(
-  poolId: string,
-  sourceId: string,
-  provider: CredentialProvider,
-  location: string,
-  size: VMSize
-): string {
-  return `cap-candidate-default:${poolId}:${sourceId}:${provider}:${location}:${size}`;
-}
-
 export function legacyCredentialReference(credentialId: string): string {
   return `credentials:${credentialId}`;
 }
@@ -100,10 +76,4 @@ export function composableCredentialReference(credentialId: string): string {
 
 export function composableAttachmentReference(attachmentId: string): string {
   return `cc_attachments:${attachmentId}`;
-}
-
-export function timestampVersion(timestamp: string | null | undefined): number | null {
-  if (!timestamp) return null;
-  const parsed = Date.parse(timestamp);
-  return Number.isFinite(parsed) ? parsed : null;
 }

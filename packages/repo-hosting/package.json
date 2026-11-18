@@ -1,0 +1,45 @@
+{
+  "name": "@simple-agent-manager/repo-hosting",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GitHub App and user OAuth, GitLab and repository browsing for the SAM API worker",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./ports": {
+      "types": "./dist/ports.d.ts",
+      "import": "./dist/ports.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts'"
+  },
+  "dependencies": {
+    "@simple-agent-manager/shared": "workspace:*",
+    "@simple-agent-manager/worker-core": "workspace:*",
+    "diff": "^9.0.0",
+    "drizzle-orm": "catalog:",
+    "isomorphic-git": "1.44.12",
+    "jose": "catalog:",
+    "valibot": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
+    "@typescript-eslint/eslint-plugin": "catalog:",
+    "@typescript-eslint/parser": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

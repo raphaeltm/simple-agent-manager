@@ -1,6 +1,7 @@
 import type {
   CreateCredentialRequest,
   CredentialResponse,
+  GcpApiIssue,
   SaveAgentCredentialRequest,
   SaveGcpServiceAccountCredentialRequest,
 } from '@simple-agent-manager/shared';
@@ -26,14 +27,18 @@ export interface CredentialValidationResponse {
   message: string;
 }
 
-export async function validateCredential(data: CreateCredentialRequest): Promise<CredentialValidationResponse> {
+export async function validateCredential(
+  data: CreateCredentialRequest
+): Promise<CredentialValidationResponse> {
   return request<CredentialValidationResponse>('/api/credentials/validate', {
     method: 'POST',
     body: JSON.stringify(data),
   });
 }
 
-export async function validateAgentCredential(data: SaveAgentCredentialRequest): Promise<CredentialValidationResponse> {
+export async function validateAgentCredential(
+  data: SaveAgentCredentialRequest
+): Promise<CredentialValidationResponse> {
   return request<CredentialValidationResponse>('/api/credentials/agent/validate', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -51,7 +56,7 @@ export async function deleteCredential(provider: string): Promise<void> {
 // =============================================================================
 
 export async function saveGcpServiceAccountCredential(
-  data: SaveGcpServiceAccountCredentialRequest,
+  data: SaveGcpServiceAccountCredentialRequest
 ): Promise<{ success: true; credential: CredentialResponse }> {
   return request('/api/gcp/service-account', {
     method: 'PUT',
@@ -97,10 +102,18 @@ export async function runGcpSetup(data: GcpSetupRequest): Promise<GcpSetupRespon
   });
 }
 
-export async function verifyGcpSetup(): Promise<{ success: boolean; verified: boolean; error?: string }> {
-  return request<{ success: boolean; verified: boolean; error?: string }>('/api/gcp/verify', {
-    method: 'POST',
-  });
+export interface GcpVerifyResponse {
+  success: boolean;
+  verified: boolean;
+  error?: string;
+  /** Result of the live Cloud Billing check; present when verification succeeded. */
+  billingCheck?: 'ok' | 'owner_fixable' | 'fault';
+  apiIssues?: GcpApiIssue[];
+}
+
+/** Verify the stored Google Cloud credential and re-check the Google APIs SAM can probe. */
+export async function verifyGcpSetup(): Promise<GcpVerifyResponse> {
+  return request<GcpVerifyResponse>('/api/gcp/verify', { method: 'POST' });
 }
 
 export async function getGcpOAuthResult(): Promise<{ handle: string }> {

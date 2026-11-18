@@ -287,6 +287,74 @@ describe('MCP update_trigger and delete_trigger handlers', () => {
     ).toEqual({ count: 0 });
   });
 
+  it.each(['webhook', 'email'])(
+    'keeps the agent profile of %s triggers, which run on outside input',
+    async (sourceType) => {
+      sqlite.exec(
+        "INSERT INTO agent_profiles (id, project_id) VALUES ('profile-1', 'project-1'), ('profile-2', 'project-1')"
+      );
+      insertTrigger('trigger-outside');
+      sqlite
+        .prepare(
+          "UPDATE triggers SET source_type = ?, agent_profile_id = 'profile-1', cron_expression = NULL, cron_timezone = NULL WHERE id = 'trigger-outside'"
+        )
+        .run(sourceType);
+      const profile = () =>
+        (
+          sqlite
+            .prepare("SELECT agent_profile_id FROM triggers WHERE id = 'trigger-outside'")
+            .get() as { agent_profile_id: string | null }
+        ).agent_profile_id;
+
+      for (const agentProfileId of [null, '  ']) {
+        const response = await handleUpdateTrigger(
+          'req-1',
+          { triggerId: 'trigger-outside', agentProfileId },
+          tokenData,
+          env
+        );
+        expect(response.error?.message).toBe(
+          `agentProfileId is required for ${sourceType} triggers`
+        );
+        expect(profile()).toBe('profile-1');
+      }
+
+      // Switching to another profile in the project still works.
+      parseContent(
+        await handleUpdateTrigger(
+          'req-1',
+          { triggerId: 'trigger-outside', agentProfileId: 'profile-2' },
+          tokenData,
+          env
+        )
+      );
+      expect(profile()).toBe('profile-2');
+    }
+  );
+
+  it('still lets a schedule trigger fall back to the project default profile', async () => {
+    sqlite.exec("INSERT INTO agent_profiles (id, project_id) VALUES ('profile-1', 'project-1')");
+    insertTrigger('trigger-cron-profile');
+    sqlite.exec(
+      "UPDATE triggers SET agent_profile_id = 'profile-1' WHERE id = 'trigger-cron-profile'"
+    );
+
+    parseContent(
+      await handleUpdateTrigger(
+        'req-1',
+        { triggerId: 'trigger-cron-profile', agentProfileId: null },
+        tokenData,
+        env
+      )
+    );
+
+    expect(
+      sqlite
+        .prepare("SELECT agent_profile_id FROM triggers WHERE id = 'trigger-cron-profile'")
+        .get()
+    ).toEqual({ agent_profile_id: null });
+  });
+
   it('rejects cross-project updates without mutating the trigger', async () => {
     insertTrigger('trigger-3', 'project-2');
 

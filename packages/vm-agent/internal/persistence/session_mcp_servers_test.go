@@ -148,3 +148,44 @@ func TestGetSessionMcpServers_SkipsARowWithMalformedHeadersWithoutLeakingThem(t 
 		t.Fatalf("warning leaks the stored header value:\n%s", logs.String())
 	}
 }
+
+// Rotating a workspace's sam-mcp tokens must visit every persisted session, not
+// only those a live SessionHost has loaded into memory, and must not be stopped
+// by one unreadable row or confused by another workspace's sessions.
+func TestListWorkspaceSessionMcpServers_GroupsSessionsAndSkipsOnlyTheBadRow(t *testing.T) {
+	store := openTestStore(t)
+	for _, seed := range []struct {
+		workspace, session string
+		servers            []McpServer
+	}{
+		{"ws-1", "sess-a", []McpServer{
+			{URL: "https://api.example.com/mcp", Token: "sam-a", Name: "sam-mcp"},
+			{URL: "https://backend.composio.dev/mcp", Name: "composio"},
+		}},
+		{"ws-1", "sess-b", []McpServer{{URL: "https://api.example.com/mcp", Token: "sam-b", Name: "sam-mcp"}}},
+		{"ws-2", "sess-c", []McpServer{{URL: "https://api.example.com/mcp", Token: "sam-c", Name: "sam-mcp"}}},
+	} {
+		if err := store.UpsertSessionMcpServers(seed.workspace, seed.session, seed.servers); err != nil {
+			t.Fatalf("UpsertSessionMcpServers: %v", err)
+		}
+	}
+	if _, err := store.db.Exec(
+		"UPDATE session_mcp_servers SET headers = '[{' WHERE workspace_id = 'ws-1' AND session_id = 'sess-a' AND sort_order = 1",
+	); err != nil {
+		t.Fatalf("corrupt row: %v", err)
+	}
+
+	got, err := store.ListWorkspaceSessionMcpServers("ws-1")
+	if err != nil {
+		t.Fatalf("ListWorkspaceSessionMcpServers: %v", err)
+	}
+	if len(got) != 2 || len(got["sess-a"]) != 1 || got["sess-a"][0].Token != "sam-a" ||
+		len(got["sess-b"]) != 1 || got["sess-b"][0].Token != "sam-b" {
+		t.Fatalf("got %#v, want sess-a (bad composio row skipped) and sess-b only", got)
+	}
+
+	empty, err := store.ListWorkspaceSessionMcpServers("ws-none")
+	if err != nil || empty == nil || len(empty) != 0 {
+		t.Fatalf("empty workspace = %#v, %v; want an empty non-nil map", empty, err)
+	}
+}

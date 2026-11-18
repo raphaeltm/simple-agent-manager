@@ -28,6 +28,7 @@ import { log } from '../lib/logger';
 import { stopWorkspaceOnNode } from './node-agent';
 import { handOffEmptyWorkspaceNode } from './node-warm-handoff';
 import { stopNodeResources } from './nodes';
+import { sleptFallbackRecord } from './session-sleep-episode';
 import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
 
 function getCleanupDelayMs(env: Env): number {
@@ -50,7 +51,8 @@ export async function cleanupTaskRun(
   taskId: string,
   env: Env,
   warmTimeoutOverrideMs?: number | null,
-  requiredUserId?: string
+  requiredUserId?: string,
+  options: { requireStopAcknowledgement?: boolean } = {}
 ): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
   const cleanupDelay = getCleanupDelayMs(env);
@@ -62,9 +64,10 @@ export async function cleanupTaskRun(
 
   const [task] = await db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).limit(1);
 
-  if (!task || !task.workspaceId) {
-    return;
+  if (!task && options.requireStopAcknowledgement) {
+    throw new Error('SAM stop target no longer exists');
   }
+  if (!task || !task.workspaceId) return;
 
   const workspaceConditions = [eq(schema.workspaces.id, task.workspaceId)];
   if (requiredUserId) {
@@ -78,6 +81,16 @@ export async function cleanupTaskRun(
     .limit(1);
 
   if (!workspace || !workspace.nodeId) {
+    if (options.requireStopAcknowledgement) {
+      // A removed workspace needs no stop. A filtered-out owner or an attached
+      // workspace without a node is ambiguous and must not produce success.
+      const [existing] = await db
+        .select({ id: schema.workspaces.id })
+        .from(schema.workspaces)
+        .where(eq(schema.workspaces.id, task.workspaceId))
+        .limit(1);
+      if (existing) throw new Error('SAM stop resource identity is unconfirmed');
+    }
     if (requiredUserId) {
       log.info('task_run.cleanup.skipped_owner_mismatch', {
         taskId,
@@ -114,6 +127,10 @@ export async function cleanupTaskRun(
     .where(and(eq(schema.nodes.id, workspace.nodeId), eq(schema.nodes.userId, cleanupUserId)))
     .limit(1);
 
+  if (options.requireStopAcknowledgement && !node) {
+    throw new Error('SAM stop node identity is unconfirmed');
+  }
+
   if (node?.runtime === 'cf-container') {
     const [snapshot] = workspace.chatSessionId
       ? await db
@@ -121,6 +138,14 @@ export async function cleanupTaskRun(
             status: schema.sessionSnapshots.status,
             degradation: schema.sessionSnapshots.degradation,
             expiresAt: schema.sessionSnapshots.expiresAt,
+            sleepStatus: schema.sessionSnapshots.sleepStatus,
+            sleepingAt: schema.sessionSnapshots.sleepingAt,
+            sleepFallbackJson: schema.sessionSnapshots.sleepFallbackJson,
+            snapshotGeneration: schema.sessionSnapshots.snapshotGeneration,
+            workspaceId: schema.sessionSnapshots.workspaceId,
+            nodeId: schema.sessionSnapshots.nodeId,
+            userId: schema.sessionSnapshots.userId,
+            projectId: schema.sessionSnapshots.projectId,
           })
           .from(schema.sessionSnapshots)
           .where(eq(schema.sessionSnapshots.chatSessionId, workspace.chatSessionId))
@@ -128,10 +153,23 @@ export async function cleanupTaskRun(
       : [];
     const preserveSleepingSnapshot =
       workspace.status === 'sleeping' &&
-      snapshot?.status === 'available' &&
-      snapshot.degradation === 'none' &&
-      Date.parse(snapshot.expiresAt) > Date.now();
+      snapshot &&
+      Date.parse(snapshot.expiresAt) > Date.now() &&
+      ((snapshot.status === 'available' && snapshot.degradation === 'none') ||
+        // A committed bounded fallback has already stopped paid compute. Keep
+        // its logical Instant identity so a message can start fresh from the
+        // transcript. A stopping/unconfirmed or replaced runtime is not proof.
+        (snapshot.sleepStatus === 'sleeping' &&
+          snapshot.sleepingAt !== null &&
+          snapshot.workspaceId === workspace.id &&
+          snapshot.nodeId === workspace.nodeId &&
+          snapshot.userId === workspace.userId &&
+          snapshot.projectId === workspace.projectId &&
+          Boolean(sleptFallbackRecord(snapshot))));
     if (preserveSleepingSnapshot) {
+      if (options.requireStopAcknowledgement) {
+        throw new Error('Preserved sleep cannot acknowledge a SAM stop');
+      }
       log.info('task_run.cleanup.cf_container_sleep_preserved', {
         taskId,
         workspaceId: workspace.id,
@@ -149,6 +187,16 @@ export async function cleanupTaskRun(
     return;
   }
 
+  if (
+    options.requireStopAcknowledgement &&
+    workspace.status !== 'running' &&
+    workspace.status !== 'recovery'
+  ) {
+    // A legacy stopped row may have been written after a swallowed node failure.
+    // Do not replay a stop or manufacture acknowledgement from control-plane state.
+    throw new Error('SAM workspace stop acknowledgement is unavailable');
+  }
+
   // Stop the workspace (idempotent: only if still running/recovery)
   if (workspace.status === 'running' || workspace.status === 'recovery') {
     try {
@@ -160,6 +208,9 @@ export async function cleanupTaskRun(
         nodeId: workspace.nodeId,
         error: err instanceof Error ? err.message : String(err),
       });
+      // Interactive SAM receipts must not certify a stop without its acknowledgement.
+      // Background cleanup retains its existing best-effort deletion scheduling.
+      if (options.requireStopAcknowledgement) throw err;
     }
 
     const stoppedAt = new Date().toISOString();

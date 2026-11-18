@@ -30,6 +30,8 @@ function setup() {
       description TEXT,
       status TEXT NOT NULL,
       priority INTEGER NOT NULL,
+      is_idea INTEGER NOT NULL DEFAULT 0,
+      triggered_by TEXT,
       task_mode TEXT NOT NULL,
       dispatch_depth INTEGER NOT NULL,
       created_by TEXT NOT NULL,

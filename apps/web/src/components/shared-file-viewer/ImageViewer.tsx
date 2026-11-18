@@ -1,5 +1,5 @@
 import { Spinner } from '@simple-agent-manager/ui';
-import { type FC, type PointerEvent as ReactPointerEvent, type SyntheticEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { type FC, type PointerEvent as ReactPointerEvent, type ReactNode, type SyntheticEvent, useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   FILE_PREVIEW_INLINE_MAX_BYTES,
@@ -14,6 +14,8 @@ interface ImageViewerProps {
   fileName: string;
   /** File size in bytes (if known from directory listing). */
   fileSize?: number;
+  /** Replaces the default "Failed to load image" note when the image can't be decoded. */
+  errorFallback?: ReactNode;
 }
 
 interface Point {
@@ -249,7 +251,7 @@ function useImageTransform(dimensions: { w: number; h: number } | null) {
  * Images are rendered via <img src> tag — SVGs are safe in this context
  * because browsers block script execution inside <img> elements.
  */
-export const ImageViewer: FC<ImageViewerProps> = ({ src, fileName, fileSize }) => {
+export const ImageViewer: FC<ImageViewerProps> = ({ src, fileName, fileSize, errorFallback }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [dimensions, setDimensions] = useState<{ w: number; h: number } | null>(null);
@@ -290,6 +292,8 @@ export const ImageViewer: FC<ImageViewerProps> = ({ src, fileName, fileSize }) =
     setDimensions(null);
     setUserConfirmedLoad(false);
   }, [src]);
+
+  if (error && errorFallback) return <>{errorFallback}</>;
 
   // Too large — download only
   if (isTooLarge) {

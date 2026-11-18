@@ -21,6 +21,8 @@ vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_c: any, next: any) => next()),
   requireApproved: () => vi.fn((_c: any, next: any) => next()),
   getUserId: () => 'user-123',
+  // An ordinary session: the agent sign-in refusal passes through.
+  rejectAgentSignInSession: () => vi.fn((_c: any, next: any) => next()),
 }));
 
 function buildApp() {
@@ -161,6 +163,28 @@ describe('Web Push subscription routes', () => {
           endpoint: 'http://push.example.test/subscription',
           keys: { p256dh: 'B'.repeat(87), auth: 'A'.repeat(22) },
         }),
+      },
+      mockEnv
+    );
+
+    expect(response.status).toBe(400);
+    expect(addPushSubscription).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'https://127.0.0.1/subscription',
+    'https://169.254.169.254/latest',
+    'https://[::ffff:10.0.0.1]/x',
+    'https://minio:9000/x',
+    'https://metadata.google.internal/x',
+  ])('rejects a non-public subscription endpoint (%s) before the DO call', async (endpoint) => {
+    const app = buildApp();
+    const response = await app.request(
+      '/notifications/push/subscriptions',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint, keys: { p256dh: 'B'.repeat(87), auth: 'A'.repeat(22) } }),
       },
       mockEnv
     );

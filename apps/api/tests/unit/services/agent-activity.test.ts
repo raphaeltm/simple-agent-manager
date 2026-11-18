@@ -13,6 +13,7 @@ function createActivityDb() {
     schema.projects,
     schema.workspaces,
     schema.tasks,
+    schema.taskPullRequestAssociations,
     schema.sessionSnapshots,
   ]);
   const env = {

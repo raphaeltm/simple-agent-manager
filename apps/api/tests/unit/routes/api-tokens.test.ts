@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { buildAuthTestApp, createMockAuth } from './auth-test-helpers';
 
@@ -149,7 +150,9 @@ describe('API token routes', () => {
       expect(mockGetSession).toHaveBeenCalledWith(
         expect.objectContaining({ query: { disableCookieCache: true } })
       );
-      expect(currentMockDB.select).not.toHaveBeenCalled();
+      for (const read of currentMockDB.select.mock.results) {
+        expect(read.value.from).toHaveBeenCalledWith(schema.platformSettings);
+      }
       expect(currentMockDB.insert).not.toHaveBeenCalled();
       expect(currentMockDB.update).not.toHaveBeenCalled();
     }
@@ -208,11 +211,21 @@ describe('API token routes', () => {
 
     const res = await buildApp().request('/api/auth/token-login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'CF-Connecting-IP': '203.0.113.7',
+        'X-Forwarded-For': '198.51.100.66',
+      },
       body: JSON.stringify({ token: 'sam_pat_validtoken123' }),
     });
 
     expect(res.status).toBe(200);
+    expect(mockCreateSession).toHaveBeenCalledWith(
+      'user-1',
+      false,
+      { ipAddress: '203.0.113.7' },
+      false
+    );
     const body = await res.json();
     expect(body.sessionCookie).toMatch(/better-auth\.session_token=/);
     expect(body.user.email).toBe('test@example.com');

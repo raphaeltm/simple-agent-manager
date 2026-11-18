@@ -11,6 +11,7 @@ import type { KnowledgeEntityIndexEntry } from '../../durable-objects/project-da
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { resolveAgentMessageChannelsConfig } from '../../services/agent-message-channels';
+import { resolveOperationsPlaybook } from '../../services/fleet-ops/playbook';
 import * as projectDataService from '../../services/project-data';
 import {
   INTERNAL_ERROR,
@@ -19,20 +20,20 @@ import {
   jsonRpcSuccess,
   type McpTokenData,
 } from './_helpers';
+import type { BudgetedPolicy, InstructionPayloadParts } from './instruction-budget';
 import { buildEventingInstructions } from './instruction-eventing-guidance';
 import {
   buildKnowledgeInstructions,
   buildPolicyInstructions,
-  formatKnowledgeDirectives,
-  formatKnowledgeEntityIndex,
-  formatPolicyDirectives,
-  type PolicyEntry,
   serializeRejection,
 } from './instruction-formatting';
+import { buildInstructionIdeaSlice, type InstructionIdeaContext } from './instruction-idea-context';
+import { INBOX_TURN_END_INSTRUCTION } from './instruction-inbox-guidance';
+import { renderWithinBudgets } from './instruction-payload';
 
 export { handleRequestHumanInput } from './human-input-tool';
 
-type InstructionContextType = 'task' | 'conversation' | 'trial' | 'direct-workspace';
+type InstructionContextType = 'task' | 'conversation' | 'direct-workspace';
 
 interface ResolvedInstructionContext {
   type: InstructionContextType;
@@ -150,6 +151,10 @@ export async function handleGetInstructions(
     KNOWLEDGE_DEFAULTS.autoRetrievePerEntityLimit;
   const entityIndexLimit =
     parseInt(env.KNOWLEDGE_ENTITY_INDEX_LIMIT || '', 10) || KNOWLEDGE_DEFAULTS.entityIndexLimit;
+  // The chat this agent is attached to. Task contexts carry it on the task row; a
+  // conversation context carries it on the token.
+  const chatSessionId =
+    context.chatSessionId ?? context.task?.chatSessionId ?? tokenData.chatSessionId ?? null;
   let knowledgeContext: {
     entityName: string;
     entityType: string;
@@ -158,7 +163,7 @@ export async function handleGetInstructions(
   }[] = [];
   // Retrieve active project policies (Phase 4: Policy Propagation).
   // Policies are dynamic rules and preferences that agents must follow.
-  let policyContext: PolicyEntry[] = [];
+  let policyContext: BudgetedPolicy[] = [];
   let entityIndex: KnowledgeEntityIndexEntry[] = [];
   let totalEntities = 0;
 
@@ -170,17 +175,23 @@ export async function handleGetInstructions(
   // entity index, which is what tells the agent the injected set is partial — if ranked
   // retrieval dies, the index alone still says what exists and how to fetch it, instead
   // of the pre-existing behaviour of silently injecting nothing at all.
-  const [knowledgeResult, entityIndexResult, policyResult] = await Promise.allSettled([
-    projectDataService.getAllHighConfidenceKnowledge(
-      env,
-      tokenData.projectId,
-      minConfidence,
-      highConfidenceLimit,
-      perEntityLimit
-    ),
-    projectDataService.getKnowledgeEntityIndex(env, tokenData.projectId, entityIndexLimit),
-    projectDataService.getActivePolicies(env, tokenData.projectId),
-  ]);
+  const [knowledgeResult, entityIndexResult, policyResult, ideaSliceResult, playbookResult] =
+    await Promise.allSettled([
+      projectDataService.getAllHighConfidenceKnowledge(
+        env,
+        tokenData.projectId,
+        minConfidence,
+        highConfidenceLimit,
+        perEntityLimit
+      ),
+      projectDataService.getKnowledgeEntityIndex(env, tokenData.projectId, entityIndexLimit),
+      projectDataService.getActivePolicies(env, tokenData.projectId),
+      // Already isolated internally; a failure degrades to "no idea block".
+      buildInstructionIdeaSlice(env, tokenData.projectId, chatSessionId),
+      // Already isolated internally; null outside the Operations project or with tools off.
+      resolveOperationsPlaybook(env, tokenData.projectId),
+    ]);
+  const operationsPlaybook = playbookResult.status === 'fulfilled' ? playbookResult.value : null;
 
   // Each slice is shape-checked, not just status-checked. `allSettled` only reports
   // whether the RPC threw; a fulfilled-but-malformed value (an older DO revision mid-deploy,
@@ -220,6 +231,17 @@ export async function handleGetInstructions(
     });
   }
 
+  let ideaSlice: { idea: InstructionIdeaContext; instructions: string[] } | null = null;
+  if (ideaSliceResult.status === 'fulfilled') {
+    ideaSlice = ideaSliceResult.value ?? null;
+  } else {
+    log.warn('mcp.get_instructions.idea_context_failed', {
+      projectId: tokenData.projectId,
+      chatSessionId,
+      error: serializeRejection(ideaSliceResult.reason),
+    });
+  }
+
   if (policyResult.status === 'fulfilled' && Array.isArray(policyResult.value)) {
     policyContext = policyResult.value.map((p) => ({
       id: p.id,
@@ -229,6 +251,9 @@ export async function handleGetInstructions(
       confidence: p.confidence,
       scope: p.scope,
       expiresAt: p.expiresAt,
+      // An older DO revision mid-deploy returns rows without these; read them as pinned.
+      injectMode: p.injectMode ?? 'pinned',
+      updatedAt: p.updatedAt,
     }));
   } else {
     log.warn('mcp.get_instructions.policy_retrieval_failed', {
@@ -240,16 +265,6 @@ export async function handleGetInstructions(
     });
   }
 
-  // Format knowledge as actionable directives grouped by entity, not raw JSON.
-  // Agents are more likely to apply knowledge when it reads like instructions.
-  const knowledgeDirectives =
-    [
-      formatKnowledgeDirectives(knowledgeContext),
-      formatKnowledgeEntityIndex(entityIndex, knowledgeContext, totalEntities),
-    ]
-      .filter((section): section is string => section !== null)
-      .join('\n') || null;
-
   // Build knowledge-related instructions based on whether knowledge exists.
   // A project with entities but nothing above the confidence bar still has knowledge —
   // it is reachable by search — so it must not get the "no stored knowledge" bootstrap text.
@@ -258,7 +273,6 @@ export async function handleGetInstructions(
     context.type === 'conversation' || context.task?.taskMode === 'conversation'
   );
 
-  const policyDirectives = formatPolicyDirectives(policyContext);
   const policyInstructions = buildPolicyInstructions(
     policyContext.length > 0,
     context.type === 'conversation' || context.task?.taskMode === 'conversation'
@@ -267,7 +281,7 @@ export async function handleGetInstructions(
   const isConversation =
     context.type === 'conversation' || context.task?.taskMode === 'conversation';
 
-  const result = {
+  const buildResult = (parts: InstructionPayloadParts) => ({
     context: {
       type: context.type,
       chatSessionId: context.chatSessionId ?? undefined,
@@ -297,6 +311,9 @@ export async function handleGetInstructions(
           },
         }
       : {}),
+    // Present only when this chat was started from an idea (Start work). The content is
+    // wrapped in the untrusted-data envelope; see operations/untrusted-text.ts.
+    ...(ideaSlice ? { idea: ideaSlice.idea } : {}),
     project: {
       id: project.id,
       name: project.name,
@@ -306,12 +323,20 @@ export async function handleGetInstructions(
     },
     instructions: [
       'Tool names in these instructions refer to SAM MCP tools from the `sam-mcp` MCP server.',
+      // How to reach a person; the inbox tools need a task-backed agent token. Second, so it is
+      // read before the mode details: an agent that saw it eighth still answered in the chat.
+      ...(tokenData.taskId ? [INBOX_TURN_END_INSTRUCTION] : []),
       'After reading this response, check whether the current chat session topic/title accurately reflects the actual work. ' +
         'If the title is stale, generic, copied from a fork such as "get details from previous session", or the session changes direction later, ' +
         'call the SAM MCP `update_session_topic` tool with a concise descriptive topic.',
       ...(isConversation
         ? [
-            'You are in a conversation with a human. Respond to their messages directly.',
+            // The chat is where the person writes to you, not where they read: answers go to
+            // their inbox (INBOX_TURN_END_INSTRUCTION, above). The inbox tools need a task, so a
+            // taskless conversation keeps answering in the chat.
+            tokenData.taskId
+              ? 'A person started this conversation and may write to you here, but they do not watch it: whatever you want them to see goes in their inbox, as described above.'
+              : 'You are in a conversation with a human. Respond to their messages directly.',
             'Use the SAM MCP `dispatch_task` tool to spawn follow-up work to other agents when needed.',
             'Use the SAM MCP `update_task_status` tool to report significant findings or progress.',
             'Do NOT call the SAM MCP `complete_task` tool — the human will end the conversation when they are ready.',
@@ -330,8 +355,13 @@ export async function handleGetInstructions(
             agentMessageChannelsEnabled: resolveAgentMessageChannelsConfig(env).enabled,
           })
         : []),
+      ...(ideaSlice ? ideaSlice.instructions : []),
+      ...(operationsPlaybook
+        ? ['This is the Operations project: follow `operationsPlaybook` when debugging SAM itself.']
+        : []),
       ...knowledgeInstructions,
       ...policyInstructions,
+      ...parts.sizeNotes,
       ...(project.repoProvider === 'artifacts'
         ? [
             'This project uses SAM Git (Cloudflare Artifacts) — NOT GitHub.',
@@ -362,11 +392,30 @@ export async function handleGetInstructions(
     // the LLM, for which prose and JSON are equally parseable; a bare id array would need
     // its titles re-duplicated to be correlatable, costing ~2x the inline form; and callers
     // that need structured policy data already have `list_policies` / `get_policy`.
-    ...(knowledgeDirectives ? { knowledgeDirectives } : {}),
-    ...(policyDirectives ? { policyDirectives } : {}),
-  };
-
-  return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+    ...(operationsPlaybook ? { operationsPlaybook } : {}),
+    ...(parts.knowledgeDirectives ? { knowledgeDirectives: parts.knowledgeDirectives } : {}),
+    ...(parts.policyDirectives ? { policyDirectives: parts.policyDirectives } : {}),
   });
+  const render = (parts: InstructionPayloadParts) => JSON.stringify(buildResult(parts), null, 2);
+
+  const text = await renderWithinBudgets({
+    env,
+    projectId: tokenData.projectId,
+    contextType: context.type,
+    policies: policyContext,
+    knowledge: knowledgeContext,
+    entityIndex,
+    totalEntities,
+    taskText: [
+      context.task?.title,
+      context.task?.description,
+      typeof context.session?.topic === 'string' ? context.session.topic : null,
+      ideaSlice?.idea.title,
+    ]
+      .filter((part): part is string => typeof part === 'string')
+      .join('\n'),
+    render,
+  });
+
+  return jsonRpcSuccess(requestId, { content: [{ type: 'text', text }] });
 }

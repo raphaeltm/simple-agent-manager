@@ -35,6 +35,8 @@ export const CreatePolicySchema = v.object({
   // and then hands the pair to the shared `validatePolicyLifecycle`, which owns
   // the real error messages. Nullable because null means "never expires".
   expiresAt: v.optional(v.nullable(v.unknown())),
+  // Passed to the `isPolicyInjectMode` type guard, same as scope.
+  injectMode: v.optional(v.string()),
 });
 
 export const UpdatePolicySchema = v.object({
@@ -48,4 +50,6 @@ export const UpdatePolicySchema = v.object({
   // On update, an explicit null clears the expiry (makes the policy permanent),
   // which is why this is nullable rather than merely optional.
   expiresAt: v.optional(v.nullable(v.unknown())),
+  // Absent leaves the inject mode unchanged (rule 73).
+  injectMode: v.optional(v.string()),
 });

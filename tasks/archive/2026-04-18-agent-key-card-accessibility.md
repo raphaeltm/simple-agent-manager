@@ -1,0 +1,131 @@
+# AgentKeyCard accessibility refactor
+
+> **Reconciliation 2026-11-02:** Superseded. #2474 (`09b7f3e08`) deleted `AgentKeyCard.tsx`, and no
+> code references it. The replacement shared accounts UI addresses A-1 to A-3 by design:
+> `components/accounts/AccountCard.tsx` uses design-system `Button`/`DropdownMenu` (labelled
+> "Actions for <account>") and `ConfirmDialog`, and `AgentConnectForm.tsx:152` is a labelled
+> `radiogroup`. Any new a11y gaps in the accounts components belong in a fresh task. Candidate for
+> archive. Archived by the 2026-11-02 weekly queue reconciliation.
+
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** none of the accessibility items. The delete-scope fix shipped earlier (see
+>   Moot/dropped).
+> - **Still open:** (all in `apps/web/src/components/AgentKeyCard.tsx`)
+>   - A-1: Update and Remove are ~20px text buttons with no `aria-label` or design-system
+>     focus ring (`:151–163`).
+>   - A-2: `window.confirm()` in `handleDelete` (`:122`).
+>   - A-3: the credential-type buttons have no `role="group"` or `aria-pressed` (`:172–205`).
+>   - From the merged file: disclosure semantics (`aria-expanded`, `aria-controls`, a labelled
+>     region) for the Update button that reveals the form; re-check the colour/emoji-only
+>     status finding (the standalone card now shows a text `StatusBadge`); unit tests for the
+>     new ARIA; Playwright (375px, 1280px) and axe checks.
+> - **Moot/dropped:**
+>   - Delete-scope decision: already shipped in PR #1027 (95049646b, 2026-05-16) before it was
+>     carried in here. The card passes the kind (`AgentKeyCard.tsx:130`); user scope calls
+>     `deleteAgentCredentialByKind` (`AgentsSection.tsx:94`) and project scope calls
+>     `deleteProjectAgentCredential(projectId, agentType, kind)` (`ProjectAgentsSection.tsx:92`).
+>   - Show/hide toggle ARIA: the card has no reveal toggle now (plain `type="password"` inputs).
+>   - Memoizing credential-kind select options: the kind is chosen with two buttons, not a
+>     select.
+
+**Created**: 2026-04-18
+**Priority**: HIGH
+**Source**: ui-ux-specialist review of PR `sam/project-credential-overrides`
+
+## Problem
+
+`apps/web/src/components/AgentKeyCard.tsx` has three pre-existing accessibility issues flagged HIGH by the ui-ux-specialist during the project-credential-overrides review. These are shared-component issues that affect both user settings (`/settings/agents`) and project settings (`/projects/:id/settings`), so fixing them cross-cuts multiple surfaces and warrants a dedicated PR with focused a11y testing.
+
+The project-credential-overrides PR defers these to this task because:
+
+- Not introduced by that PR (pre-existing in the shared component)
+- Fixing requires coordinated a11y test pass across user + project contexts
+- A focused PR is cheaper to review than bundling unrelated a11y work
+
+## Findings to Address
+
+### A-1 — Touch targets below 44px (HIGH)
+
+Lines 152 and 156 of `AgentKeyCard.tsx`:
+
+```tsx
+<button onClick={() => setShowForm(true)} className="text-xs bg-transparent border-none cursor-pointer py-0.5 px-2 text-accent">
+  Update
+</button>
+<button
+  onClick={() => handleDelete(activeCredential.credentialKind)}
+  disabled={loading}
+  className={`text-xs bg-transparent border-none cursor-pointer py-0.5 px-2 text-danger ...`}
+>
+  {loading ? 'Removing...' : 'Remove'}
+</button>
+```
+
+- Effective touch target ~20px tall (`py-0.5` + `text-xs` line height). Below the 44px minimum.
+- No `aria-label` — "Remove" without agent name is ambiguous.
+- No design-system focus ring (browser default only).
+
+**Acceptance**: Replace with `<Button variant="ghost" size="sm">` (or equivalent) that meets 44px minimum on touch. Add `aria-label={\`Remove ${agent.name} ${typeLabel}\`}`.
+
+### A-2 — `window.confirm()` in delete handler (HIGH)
+
+Line 68 of `AgentKeyCard.tsx`:
+
+```tsx
+if (!confirm(`Remove the ${agent.name} ${typeLabel}? ...`)) {
+  return;
+}
+```
+
+`window.confirm()` is inaccessible in many assistive-technology configurations and cannot be styled.
+
+**Acceptance**: Replace with a design-system confirmation modal/dialog component. The dialog must be focus-trapped, dismissible via Escape, and announce properly to screen readers.
+
+### A-3 — Credential type tabs not grouped (HIGH)
+
+Lines 170–195 of `AgentKeyCard.tsx` — `API Key` / `OAuth Token` buttons are rendered as two sibling `<button type="button">` elements with no `role="group"`, `role="tablist"`, or `aria-pressed` state.
+
+**Acceptance**: Wrap in a group with accessible name (e.g., `<div role="group" aria-label="Credential type">`) and add `aria-pressed` so screen readers announce the toggle state. Alternatively use the existing `ButtonGroup` component from `@simple-agent-manager/ui` if it supports two-state toggle semantics.
+
+## Scope
+
+Only `apps/web/src/components/AgentKeyCard.tsx`. Do not change the API, the credential flow, or the surrounding settings pages.
+
+## Acceptance Criteria
+
+- [ ] Touch targets for Update/Remove meet 44×44 min (measured via Playwright `boundingBox`)
+- [ ] `aria-label` on Update/Remove buttons includes agent name + credential type
+- [ ] Design-system focus ring visible on keyboard focus (Tab navigation)
+- [ ] `window.confirm()` replaced with a design-system dialog
+- [ ] Credential-type toggle wrapped in `role="group"` with `aria-pressed` on each button
+- [ ] Playwright visual audit at 375px and 1280px passes for both user settings and project settings contexts
+- [ ] axe-core or similar accessibility scan passes
+
+## Merged findings from `2026-04-18-agent-key-card-a11y.md` (consolidated 2026-09-23)
+
+The two 2026-04-18 AgentKeyCard files came out of the same review cycle on the same component
+and were being worked as if independent. The a11y-scoped file is folded in here; its distinct
+items are below. `AgentKeyCard` is shared by user scope (`AgentsSection`) and project scope
+(`ProjectAgentsSection` -> `ProjectAgentCard`), so one fix covers both.
+
+- [ ] `aria-pressed` + `aria-controls` on the show/hide toggle, with the label switching between
+      "Show value" and "Hide value"
+- [ ] Turn the Add-credential affordance into a real disclosure: `aria-expanded`, `aria-controls`,
+      and `role="region"` + `aria-labelledby` on the revealed form
+- [ ] Visually-hidden text on the active-credential status (currently colour + emoji only)
+- [ ] Memoize credential-kind options / stabilize handlers so the select does not rebuild every
+      render and re-announce to assistive tech
+- [ ] **Delete-scope decision (correctness, pre-existing).** `deleteAgentCredential(agentType)`
+      deletes ALL credentials for the agent, while `deleteAgentCredentialByKind(agentType, kind)`
+      exists. The UI always calls the broad delete even when one kind is shown active. Either
+      switch Remove to the kind-specific call, or keep the broad behaviour and change the confirm
+      copy to say so.
+- [ ] Update unit tests for the new ARIA attributes and the chosen delete behaviour. Existing
+      tests select via `button.text-danger`; do not break that selector without updating them.
+
+## References
+
+- Source review: `ui-ux-specialist` on PR `sam/project-credential-overrides`
+- Rule 17: `.claude/rules/17-ui-visual-testing.md` (Playwright visual audit)
+- Rule 25: `.claude/rules/25-review-merge-gate.md` (explicit deferral of reviewer findings)

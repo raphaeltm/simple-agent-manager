@@ -5,6 +5,7 @@ import {
   DEFAULT_AI_PROXY_ANTHROPIC_MODEL,
   DEFAULT_AI_PROXY_MODEL,
   DEFAULT_DEBUG_AGENT_MODEL,
+  DEFAULT_PROJECT_BRIEF_MODEL,
   DEFAULT_SANDBOX_MODEL,
   DEFAULT_TASK_TITLE_MODEL,
   DEFAULT_TTS_CLEANUP_MODEL,
@@ -28,6 +29,32 @@ describe('AI Model Registry', () => {
     it('has exactly one default model', () => {
       const defaults = PLATFORM_AI_MODELS.filter((m) => m.isDefault);
       expect(defaults).toHaveLength(1);
+    });
+
+    it('routes GPT-6.1 Terra with published pricing and Responses-only tools', () => {
+      const model = PLATFORM_AI_MODELS.find((entry) => entry.id === 'gpt-6.1-terra');
+      expect(model).toMatchObject({
+        label: 'GPT-6.1 Terra',
+        costPer1kInputTokens: 0.001,
+        costPer1kOutputTokens: 0.005,
+        contextWindow: 1050000,
+        supportsChatCompletionsToolCalls: false,
+        intendedRole: 'workspace-agent',
+      });
+      expect(DEFAULT_AI_PROXY_ALLOWED_MODELS.split(',')).toContain('gpt-6.1-terra');
+    });
+
+    it('registers the SAM DeepSeek default with published pricing and tool support', () => {
+      expect(DEFAULT_SAM_MODEL).toBe('@cf/deepseek-ai/deepseek-v4.1-flash-1017');
+      expect(PLATFORM_AI_MODELS.find((model) => model.id === DEFAULT_SAM_MODEL)).toMatchObject({
+        provider: 'workers-ai',
+        costPer1kInputTokens: 0.0003,
+        costPer1kCachedInputTokens: 0.000006,
+        costPer1kOutputTokens: 0.0012,
+        contextWindow: 1048576,
+        toolCallSupport: 'good',
+      });
+      expect(DEFAULT_AI_PROXY_ALLOWED_MODELS.split(',')).toContain(DEFAULT_SAM_MODEL);
     });
 
     it('has unique model IDs', () => {
@@ -106,6 +133,7 @@ describe('AI Model Registry', () => {
         DEFAULT_AI_PROXY_MODEL,
         DEFAULT_AI_PROXY_ANTHROPIC_MODEL,
         DEFAULT_SAM_MODEL,
+        DEFAULT_PROJECT_BRIEF_MODEL,
       };
       for (const [name, modelId] of Object.entries(defaults)) {
         expect(platformIds.has(modelId), `${name} (${modelId}) missing from PLATFORM_AI_MODELS`).toBe(
@@ -308,21 +336,24 @@ describe('AI Model Registry', () => {
       expect(model!.unifiedApiModelId).toBe('anthropic/claude-sonnet-4-6');
     });
 
-    it('registers Claude Fable 5.1 with current Anthropic metadata', () => {
-      const model = PLATFORM_AI_MODELS.find((m) => m.id === 'claude-fable-5-1');
+    it.each([
+      { id: 'claude-fable-5-2', label: 'Claude Fable 5.2', input: 0.008, output: 0.04 },
+      { id: 'claude-fable-5-1', label: 'Claude Fable 5.1', input: 0.01, output: 0.05 },
+    ])('registers $label with current Anthropic metadata', ({ id, label, input, output }) => {
+      const model = PLATFORM_AI_MODELS.find((m) => m.id === id);
 
       expect(model).toBeDefined();
       expect(model).toMatchObject({
-        label: 'Claude Fable 5.1',
+        label,
         provider: 'anthropic',
         tier: 'premium',
-        costPer1kInputTokens: 0.01,
-        costPer1kOutputTokens: 0.05,
+        costPer1kInputTokens: input,
+        costPer1kOutputTokens: output,
         contextWindow: 1000000,
         toolCallSupport: 'excellent',
         intendedRole: 'workspace-agent',
         fallbackGroup: 'anthropic-premium',
-        unifiedApiModelId: 'anthropic/claude-fable-5-1',
+        unifiedApiModelId: `anthropic/${id}`,
       });
     });
 

@@ -13,6 +13,8 @@ import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { errors } from '../../middleware/error';
 import { getBlockedTaskIds, isTaskBlocked } from '../../services/task-graph';
+import { taskRecoveryCancellationQuery } from '../../services/task-recovery-cancellation';
+import { triggerExecutionSyncableWhere } from '../../services/trigger-execution-sync';
 import {
   assertWorkspaceCallbackIdentityCurrent,
   type WorkspaceCallbackIdentitySnapshot,
@@ -34,6 +36,7 @@ function taskWorkspaceCallbackCondition(expected: WorkspaceCallbackIdentitySnaps
        AND callback_workspace.chat_session_id IS ${expected.chatSessionId}
        AND callback_workspace.node_id IS ${expected.nodeId}
        AND callback_workspace.status IS ${expected.status}
+       AND callback_workspace.callback_generation IS ${expected.callbackGeneration ?? null}
        AND callback_node.status IS ${expected.nodeStatus}
   )`;
 }
@@ -224,6 +227,8 @@ export async function setTaskStatus(
     outputSummary?: string;
     outputBranch?: string;
     outputPrUrl?: string;
+    outputPrNumber?: number | null;
+    outputCommitSha?: string | null;
     errorMessage?: string;
     callbackFence?: TaskWorkspaceCallbackFence;
   } = {}
@@ -264,6 +269,12 @@ export async function setTaskStatus(
   if (options.outputPrUrl !== undefined) {
     nextValues.outputPrUrl = options.outputPrUrl?.trim() || null;
   }
+  if (options.outputPrNumber !== undefined) {
+    nextValues.outputPrNumber = options.outputPrNumber;
+  }
+  if (options.outputCommitSha !== undefined) {
+    nextValues.outputCommitSha = options.outputCommitSha;
+  }
 
   if (toStatus === 'failed') {
     nextValues.errorMessage = options.errorMessage?.trim() || task.errorMessage || 'Task failed';
@@ -273,7 +284,7 @@ export async function setTaskStatus(
 
   let updatedTask: schema.Task | undefined;
   if (options.callbackFence) {
-    const rows = await db
+    const update = db
       .update(schema.tasks)
       .set(nextValues)
       .where(
@@ -287,15 +298,26 @@ export async function setTaskStatus(
         )
       )
       .returning();
+    const rows =
+      toStatus === 'cancelled'
+        ? (await db.batch([update, taskRecoveryCancellationQuery(db, task, now)]))[0]
+        : await update;
     updatedTask = rows[0];
     if (!updatedTask) return rejectChangedTaskCallbackFence(options.callbackFence);
   } else {
     // project_id is defence-in-depth (rule 11): callers already resolved `task` through
     // requireProjectTaskById, but the write predicate must not depend on that alone.
-    await db
+    const update = db
       .update(schema.tasks)
       .set(nextValues)
       .where(and(eq(schema.tasks.id, task.id), eq(schema.tasks.projectId, task.projectId)));
+    if (toStatus === 'cancelled') {
+      // Cancellation revokes this wake attempt in the SAME D1 transaction.
+      // Keep the snapshot available for a later, fresh human follow-up.
+      await db.batch([update, taskRecoveryCancellationQuery(db, task, now)]);
+    } else {
+      await update;
+    }
   }
 
   await appendStatusEvent(
@@ -329,7 +351,10 @@ export async function setTaskStatus(
         completedAt: now,
         errorMessage: toStatus === 'failed' ? options.errorMessage?.trim() || 'Task failed' : null,
       })
-      .where(eq(schema.triggerExecutions.id, updatedTask.triggerExecutionId))
+      // Same guard as syncTriggerExecutionStatus: only a running (or hard-max
+      // backstop-failed) execution follows its task. A skipped/dropped/routed or
+      // already-final execution must not be overwritten.
+      .where(triggerExecutionSyncableWhere(updatedTask.triggerExecutionId))
       .catch((err: unknown) => {
         // Best-effort — don't fail the task status update if execution sync fails
         log.error('trigger_execution_sync_failed', {

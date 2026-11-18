@@ -1,0 +1,256 @@
+---
+/**
+ * Software-factory homepage hero: the promise, over the brand's glass node floor, then the real
+ * SAM screens as a 3D stack that assembles and comes alive (HeroStack.astro, hero-motion.ts).
+ * The motion runs while the hero is on screen, so the hero has a pause control (WCAG 2.2.2).
+ * The resting markup is the composed frame, which is what no-JS and reduced-motion visitors see.
+ */
+import Badge from '../../../../../packages/ui/src/brand/Badge.astro';
+import { SINGLE_VM_INSTALL_SHIPPED } from '../../data/factory-shots';
+import HeroStack from './HeroStack.astro';
+---
+
+<section class="fh-hero" aria-labelledby="fh-hero-title" data-fh-hero data-motion="rest">
+  <div class="fh-hero-light" aria-hidden="true"></div>
+  <div class="fh-hero-field" data-fh-field aria-hidden="true"></div>
+  <div class="fh-hero-haze" data-fh-haze aria-hidden="true"></div>
+  <div class="fh-hero-alert" aria-hidden="true"></div>
+  <div class="container fh-hero-inner">
+    <Badge>Open source · Your infrastructure</Badge>
+    <h1 class="fh-hero-title" id="fh-hero-title">
+      The open-source operating system for scalable <span class="gradient-text">software factories</span>
+    </h1>
+    <p class="fh-lede fh-hero-lede">
+      Simple Agent Manager is where your team plans, builds, reviews and ships with AI coding agents.
+      It runs on machines in your own cloud, so you set the rules and keep the code.
+    </p>
+    <div class="fh-actions fh-hero-actions">
+      <a href="/self-host/" class="sam-btn sam-btn--primary">Deploy SAM</a>
+      <a href="#how-work-moves" class="sam-btn sam-btn--glass">See how work moves</a>
+    </div>
+    <ul class="fh-proof" aria-label="At a glance">
+      <li>7 coding agents</li>
+      <li>7 cloud providers</li>
+      <li>AGPL-3.0 license</li>
+      <li>
+        Your Cloudflare account or one VM{!SINGLE_VM_INSTALL_SHIPPED && <span class="fh-soon">soon</span>}
+      </li>
+    </ul>
+
+    <HeroStack />
+    <div class="fh-hero-foot">
+      <p class="fh-note fh-hero-note">SAM’s interface · sample project</p>
+      <button type="button" class="fh-pause" data-fh-pause aria-pressed="false" aria-label="Pause animation">
+        <svg class="fh-pause-icon fh-pause-icon--pause" viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="3" width="3" height="10" rx="1"/><rect x="9" y="3" width="3" height="10" rx="1"/></svg>
+        <svg class="fh-pause-icon fh-pause-icon--play" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5v9l7.5-4.5z"/></svg>
+      </button>
+    </div>
+  </div>
+</section>
+
+<script>
+  import { initFactoryHero } from './hero-motion';
+
+  for (const hero of document.querySelectorAll<HTMLElement>('[data-fh-hero]')) initFactoryHero(hero);
+</script>
+
+<style>
+  .fh-hero {
+    position: relative;
+    isolation: isolate;
+    padding: calc(var(--header-height) + 20px) 0 24px;
+    text-align: center;
+  }
+
+  .fh-hero-light {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background:
+      radial-gradient(48% 36% at 50% 82%, rgb(34 197 94 / 0.22), transparent 70%),
+      radial-gradient(56% 50% at 50% 0%, rgb(6 78 59 / 0.45), transparent 72%);
+  }
+
+  :global(html[data-theme='light']) .fh-hero-light {
+    background:
+      radial-gradient(48% 36% at 50% 82%, rgb(34 197 94 / 0.16), transparent 70%),
+      radial-gradient(56% 50% at 50% 0%, rgb(187 247 208 / 0.6), transparent 72%);
+  }
+
+  .fh-hero-inner {
+    display: grid;
+    /* minmax(0, 1fr): the no-wrap proof items must not widen the column past a 320px screen. */
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    gap: 18px;
+  }
+
+  .fh-hero-title {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: clamp(2.25rem, 4.4vw, 3.5rem);
+    line-height: 1.04;
+    letter-spacing: -0.02em;
+    max-width: 23ch;
+    text-wrap: balance;
+  }
+
+  .fh-hero-lede {
+    max-width: 56ch;
+    text-wrap: pretty;
+  }
+
+  .fh-hero-actions {
+    justify-content: center;
+  }
+
+  .fh-proof {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px 26px;
+    font-family: var(--font-mono);
+    font-size: 0.78125rem;
+    color: var(--color-fg-dim);
+  }
+
+  .fh-proof li {
+    position: relative;
+    white-space: nowrap;
+  }
+
+  .fh-proof li + li::before {
+    content: '';
+    position: absolute;
+    left: -15px;
+    top: 50%;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    transform: translateY(-50%);
+  }
+
+  /* ---- The floor: brand glass nodes, fading out behind the copy ---- */
+  .fh-hero-field {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgb(0 0 0 / 0.35) 20%, #000 46%);
+    mask-image: linear-gradient(to bottom, transparent 0%, rgb(0 0 0 / 0.35) 20%, #000 46%);
+  }
+
+  /* Haze at the horizon, so the floor recedes instead of ending. */
+  .fh-hero-haze {
+    --haze: 7 13 11;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(var(--horizon, 520px) - 120px);
+    z-index: -1;
+    height: 180px;
+    pointer-events: none;
+    background: linear-gradient(to bottom, transparent, rgb(var(--haze) / 0.85) 50%, transparent);
+  }
+
+  :global(html[data-theme='light']) .fh-hero-haze {
+    --haze: 230 237 232;
+  }
+
+  /* Amber light while an agent needs a person. */
+  .fh-hero-alert {
+    position: absolute;
+    left: 10%;
+    bottom: 4%;
+    z-index: -1;
+    width: 50%;
+    height: 50%;
+    pointer-events: none;
+    background: radial-gradient(closest-side, rgb(245 158 11 / 0.18), transparent 75%);
+    opacity: 0;
+    transition: opacity 1600ms ease-in-out;
+  }
+
+  [data-alert] .fh-hero-alert {
+    opacity: 1;
+  }
+
+  .fh-hero-foot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    width: min(1080px, 100%);
+  }
+
+  /* The caption sits over the lit floor, so it gets a backdrop to stay readable. */
+  .fh-hero-note {
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-bg-body) 82%, transparent);
+  }
+
+  .fh-pause {
+    display: inline-grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    color: var(--color-fg-muted);
+    background: color-mix(in srgb, var(--color-bg-surface) 70%, transparent);
+    border: 1px solid var(--glass-border-hover);
+    cursor: pointer;
+  }
+
+  .fh-pause:hover {
+    color: var(--color-fg-primary);
+  }
+
+  .fh-pause:focus-visible {
+    outline: 2px solid var(--color-accent-strong);
+    outline-offset: 2px;
+  }
+
+  .fh-pause-icon {
+    width: 14px;
+    height: 14px;
+    fill: currentColor;
+  }
+
+  .fh-pause-icon--play,
+  .fh-pause[aria-pressed='true'] .fh-pause-icon--pause {
+    display: none;
+  }
+
+  .fh-pause[aria-pressed='true'] .fh-pause-icon--play {
+    display: block;
+  }
+
+  /* Nothing to pause with reduced motion. */
+  @media (prefers-reduced-motion: reduce) {
+    .fh-pause,
+    .fh-hero-alert {
+      display: none;
+    }
+  }
+
+  @media (max-width: 767px) {
+    .fh-hero {
+      padding-top: calc(var(--header-height) + 36px);
+    }
+
+    .fh-proof {
+      gap: 4px 18px;
+    }
+
+    .fh-proof li {
+      white-space: normal;
+    }
+
+    .fh-proof li + li::before {
+      display: none;
+    }
+  }
+</style>

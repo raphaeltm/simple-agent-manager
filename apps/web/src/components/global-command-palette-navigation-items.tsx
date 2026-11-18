@@ -10,14 +10,13 @@ import {
   Gauge,
   Github,
   Home,
+  Inbox,
   Key,
   KeyRound,
   LayoutDashboard,
   LineChart,
-  ListChecks,
   Map,
   MessageSquare,
-  Monitor,
   Radio,
   ScrollText,
   Server,
@@ -33,6 +32,7 @@ import type { NavItem } from './global-command-palette-types';
 export function buildNavigationItems(isSuperadmin: boolean): NavItem[] {
   const items: NavItem[] = [
     { id: 'nav-dashboard', label: 'Home', path: '/dashboard', icon: <Home size={14} /> },
+    { id: 'nav-inbox', label: 'Inbox', path: '/inbox', icon: <Inbox size={14} /> },
     { id: 'nav-chats', label: 'Chats', path: '/chats', icon: <MessageSquare size={14} /> },
     {
       id: 'nav-projects',
@@ -41,20 +41,20 @@ export function buildNavigationItems(isSuperadmin: boolean): NavItem[] {
       icon: <FolderKanban size={14} />,
     },
     { id: 'nav-nodes', label: 'Nodes', path: '/nodes', icon: <Server size={14} /> },
-    {
-      id: 'nav-workspaces',
-      label: 'Workspaces',
-      path: '/workspaces',
-      icon: <Monitor size={14} />,
-    },
     { id: 'nav-map', label: 'Map', path: '/account-map', icon: <Map size={14} /> },
     { id: 'nav-tools', label: 'Tools', path: '/tools', icon: <Wrench size={14} /> },
     { id: 'nav-settings', label: 'Settings', path: '/settings', icon: <Settings size={14} /> },
     // Settings deep-links (always available)
     {
-      id: 'nav-settings-cloud-provider',
-      label: 'Settings: Cloud Provider',
-      path: '/settings/cloud-provider',
+      id: 'nav-settings-agents',
+      label: 'Settings: Agents',
+      path: '/settings/agents',
+      icon: <Bot size={14} />,
+    },
+    {
+      id: 'nav-settings-infrastructure',
+      label: 'Settings: Infrastructure',
+      path: '/settings/infrastructure',
       icon: <Cloud size={14} />,
     },
     {
@@ -62,12 +62,6 @@ export function buildNavigationItems(isSuperadmin: boolean): NavItem[] {
       label: 'Settings: GitHub',
       path: '/settings/github',
       icon: <Github size={14} />,
-    },
-    {
-      id: 'nav-settings-agents',
-      label: 'Settings: Agents',
-      path: '/settings/agents',
-      icon: <Bot size={14} />,
     },
     {
       id: 'nav-settings-notifications',
@@ -110,10 +104,10 @@ export function buildNavigationItems(isSuperadmin: boolean): NavItem[] {
         icon: <Cpu size={14} />,
       },
       {
-        id: 'nav-admin-trials',
-        label: 'Admin: Trials',
-        path: '/admin/trials',
-        icon: <ListChecks size={14} />,
+        id: 'nav-admin-health-cost',
+        label: 'Admin: Health & cost',
+        path: '/admin/health-cost',
+        icon: <BarChart3 size={14} />,
       },
       {
         id: 'nav-admin-costs',

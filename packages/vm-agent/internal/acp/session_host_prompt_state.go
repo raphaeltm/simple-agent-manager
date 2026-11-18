@@ -45,15 +45,21 @@ func (h *SessionHost) beginPromptForDelivery(ctx context.Context, cancel context
 func (h *SessionHost) beginPromptForDeliveryWithMessageID(ctx context.Context, cancel context.CancelFunc, deliveryID, messageID string, observer PromptTerminalObserver) (*promptAttempt, bool) {
 	h.promptMu.Lock()
 	defer h.promptMu.Unlock()
-	if h.promptInFlight || h.evictionPending {
+	if h.promptInFlight || h.evictionPending || h.evictionReplayPending > 0 || h.guardedCancelPending {
 		return nil, false
 	}
 	h.promptInFlight = true
+	startedAt := h.now()
+	// Epochs used by guarded controls must differ even for consecutive turns
+	// accepted within one clock millisecond.
+	if h.promptAttempt != nil && startedAt.UnixMilli() <= h.promptAttempt.startedAt.UnixMilli() {
+		startedAt = h.promptAttempt.startedAt.Add(time.Millisecond)
+	}
 	promptID := atomic.AddUint64(&h.promptSeq, 1)
 	attempt := &promptAttempt{
 		id:         promptID,
 		ctx:        ctx,
-		startedAt:  h.now(),
+		startedAt:  startedAt,
 		cancel:     cancel,
 		deliveryID: deliveryID,
 		messageID:  messageID,
@@ -149,9 +155,22 @@ func (h *SessionHost) watchPromptTimeout(
 			return
 		}
 		msg := fmt.Sprintf("Prompt timed out after %s", timeout)
-		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32603, msg)
-		h.triggerPromptForceStopIfStuck(attempt, msg)
+		h.finishPromptTimeout(attempt, viewerID, reqID, msg)
 	}
+}
+
+// A viewer timeout is terminal too: park its notification with the force-stop.
+func (h *SessionHost) finishPromptTimeout(attempt *promptAttempt, viewerID string, reqID json.RawMessage, message string) {
+	h.evictionDecisionMu.Lock()
+	defer h.evictionDecisionMu.Unlock()
+	if attempt == nil || attempt.isTerminal() {
+		return
+	}
+	if h.parkPromptCrashForEviction("prompt_timeout", func() { h.finishPromptTimeout(attempt, viewerID, reqID, message) }, attempt) {
+		return
+	}
+	h.sendJSONRPCErrorToViewer(viewerID, reqID, -32603, message)
+	h.triggerPromptForceStopIfStuckLocked(attempt, message)
 }
 
 // triggerPromptForceStopIfStuck acts only on the exact attempt a watchdog was
@@ -159,6 +178,13 @@ func (h *SessionHost) watchPromptTimeout(
 // one. A watchdog outliving its attempt is a no-op: it must never touch a
 // later prompt (see idea 01M31M9G3T4SEWT9ZW1BM4QKZ3).
 func (h *SessionHost) triggerPromptForceStopIfStuck(attempt *promptAttempt, reason string) {
+	h.evictionDecisionMu.Lock()
+	defer h.evictionDecisionMu.Unlock()
+	h.triggerPromptForceStopIfStuckLocked(attempt, reason)
+}
+
+// Caller owns evictionDecisionMu, including the viewer-timeout path.
+func (h *SessionHost) triggerPromptForceStopIfStuckLocked(attempt *promptAttempt, reason string) {
 	if attempt == nil {
 		return
 	}
@@ -179,6 +205,11 @@ func (h *SessionHost) triggerPromptForceStopIfStuck(attempt *promptAttempt, reas
 	if current != attempt || attempt.isTerminal() {
 		slog.Info("ACP prompt force-stop skipped: attempt already settled",
 			"promptId", attempt.id, "currentPromptId", currentID, "reason", reason)
+		return
+	}
+	// Eviction owns watchdog completion, including cancellation grace expiry.
+	// A rollback or park deadline replays the ordinary cancellation/timeout path.
+	if h.parkPromptCrashForEviction("prompt_force_stop", func() { h.triggerPromptForceStopIfStuck(attempt, reason) }, attempt) {
 		return
 	}
 	if cancelRequested {

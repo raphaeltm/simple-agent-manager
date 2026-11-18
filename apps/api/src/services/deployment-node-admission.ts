@@ -1,3 +1,10 @@
+import {
+  aggregateWorkspaceReservationRows,
+  evaluateWorkspaceReservationCapacity,
+  resolveTrustedWorkspaceNodeCapacity,
+  resolveWorkspaceAdmissionPolicy,
+  type WorkspaceResourceNode,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPlacementSnapshot,
   ResolvedResourceReservation,
@@ -9,6 +16,11 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import { parsePositiveInt } from '../lib/route-helpers';
+import {
+  DEPLOYMENT_RELOCATION_CLAIM_FIELD,
+  NO_DEPLOYMENT_RELOCATION_CLAIM_SQL,
+  RECOVER_ERRORED_ENVIRONMENT_SET_SQL,
+} from './deployment-environment-state';
 import type { DeploymentPlacement } from './deployment-provisioning';
 import { buildPlacementAuthoritySqlPredicate } from './placement-authority';
 import {
@@ -16,19 +28,14 @@ import {
   resolveReusableNodeCapacitySnapshot,
 } from './placement-resolver';
 import {
-  aggregateWorkspaceReservationRows,
-  evaluateWorkspaceReservationCapacity,
-  resolveTrustedWorkspaceNodeCapacity,
-  resolveWorkspaceAdmissionPolicy,
-  RESOURCE_REQUIREMENTS_SOURCE_SQL,
   trustedWorkspaceNodeCapacityColumnsSql,
-  type WorkspaceResourceNode,
-} from './workspace-resource-capacity';
+} from './workspace-admission-sql';
+import {
+  RESOURCE_REQUIREMENTS_SOURCE_SQL,
+} from './workspace-reservation-usage';
 
 /** Default maximum number of deployment environments placed on one deployment node. */
 export const DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE = 5;
-/** Reservation JSON field that fences an environment during relocation. */
-export const DEPLOYMENT_RELOCATION_CLAIM_FIELD = 'samRelocationClaim';
 
 interface DeploymentNodeCandidate extends CapacityAwareNodePlacementRow, WorkspaceResourceNode {
   id: string;
@@ -277,6 +284,11 @@ export async function readEnvironmentNodeId(
   return rows[0]?.nodeId ?? null;
 }
 
+/**
+ * Atomically reserve `nodeId` for an environment. The same write moves an
+ * `error` environment to `active` so the heartbeat delivers the new release
+ * (see deployment-environment-state.ts).
+ */
 export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions): Promise<boolean> {
   const { env, envId, nodeId, placement, userId, expectedNodeStatus, nodeMode } = opts;
   if (typeof env.DATABASE.prepare !== 'function') return false;
@@ -320,6 +332,7 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
           env.MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE,
           DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE
         );
+  // Empty hosts may lack initial telemetry; reported pressure must still veto admission.
   const runningCapacitySql = `
        AND n.provider_instance_id IS NOT NULL
        AND n.observed_hardware_source = 'observed'
@@ -347,7 +360,8 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
          FROM (${otherReservationsSql}) existing
        ), 0) + ? <= (n.observed_provider_instance_disk_gb * 1024)
        AND (
-         NOT EXISTS (SELECT 1 FROM (${otherReservationsSql}) existing)
+         (NOT EXISTS (SELECT 1 FROM (${otherReservationsSql}) existing)
+           AND n.last_metrics IS NULL)
          OR (
            n.last_metrics IS NOT NULL
            AND json_valid(n.last_metrics)
@@ -406,7 +420,8 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
        ${authority.sql}
      )
      UPDATE deployment_environments AS de
-     SET node_id = ?, provider = ?, location = ?, resolved_reservation_json = ?, updated_at = ?
+     SET node_id = ?, provider = ?, location = ?, resolved_reservation_json = ?, updated_at = ?,
+            ${RECOVER_ERRORED_ENVIRONMENT_SET_SQL}
      FROM nodes n
      JOIN authorized_node authorized ON authorized.id = n.id
      WHERE de.id = ?
@@ -421,11 +436,7 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
            : ''
        }
        ${hasExpectedReservation ? 'AND de.resolved_reservation_json IS ?' : ''}
-       AND CASE
-         WHEN json_valid(de.resolved_reservation_json)
-         THEN COALESCE(json_extract(de.resolved_reservation_json, '$.${DEPLOYMENT_RELOCATION_CLAIM_FIELD}'), 0)
-         ELSE 0
-       END = 0
+       AND ${NO_DEPLOYMENT_RELOCATION_CLAIM_SQL}
        AND (de.node_id IS NULL OR de.node_id = n.id)
        AND n.id = ?
        AND n.status = ?
@@ -516,11 +527,7 @@ export async function claimDeploymentEnvironmentRelocation(params: {
         }
         AND de.node_id = ? AND de.resolved_reservation_json IS ?
         AND n.id = de.node_id
-        AND CASE
-          WHEN json_valid(de.resolved_reservation_json)
-          THEN COALESCE(json_extract(de.resolved_reservation_json, '$.${DEPLOYMENT_RELOCATION_CLAIM_FIELD}'), 0)
-          ELSE 0
-        END = 0
+        AND ${NO_DEPLOYMENT_RELOCATION_CLAIM_SQL}
         ${authority.sql}
       RETURNING id`
   )

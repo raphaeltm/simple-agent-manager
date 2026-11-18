@@ -1,5 +1,20 @@
 # Burn down clipped-overflow debt, then promote the guard to blocking everywhere
 
+> **Reconciliation 2026-11-02:** The four `settings-*-credential-audit` rows (Vultr, UpCloud,
+> Infomaniak, DigitalOcean) now point at a removed surface. #2474 (`09b7f3e08`) deleted
+> `SettingsCloudProvider.tsx`, and `/settings/cloud-provider` now redirects to Settings →
+> Infrastructure (`App.tsx:381`), where the provider forms open in `ConnectAccountSheet`. The
+> quarantined specs still expect inline per-provider sections, so they need rewriting against the
+> connect sheet (or deleting) before their overflow can be judged. The other rows are unchanged, and
+> `assertNoOverflow` still only reports (`audit-helpers.ts:218`).
+
+> **Reconciliation 2026-10-26:** One row is done: #2426 (`833ebc366`) replaced
+> `deployment-control-surface-audit` with `deployments-ui-audit`, which blocks on clipped overflow
+> (struck through in the table). #2389 (`0a0276390`) deleted `triggers-ui-audit.spec.ts`; the
+> trigger surface's blocking call is now in `automation-audit-helpers.ts:65`. `assertNoOverflow`
+> still only reports (`audit-helpers.ts:218`), and the other ten offender specs are still
+> quarantined.
+
 ## Problem
 
 `assertNoClippedOverflow` (added 2026-08-11 with the trigger-page mobile fix,
@@ -29,7 +44,7 @@ This matches the repo's progressive quality-tool rollout policy.
 | `settings-infomaniak-credential-audit`   | same                                                    |                                                                                        |
 | `settings-digitalocean-credential-audit` | same                                                    |                                                                                        |
 | `project-settings-subpages-audit`        | `<div class="min-h-screen min-w-0 overflow-x-hidden…">` | Project.tsx wrapper — same shape as the triggers bug, with a long project name         |
-| `deployment-control-surface-audit`       | same                                                    |                                                                                        |
+| ~~`deployment-control-surface-audit`~~   | same                                                    | Gone 2026-10-23: `deployments-ui-audit` replaced it and blocks on clipped overflow     |
 | `slice-e-theme-audit`                    | same                                                    | Agent Context page                                                                     |
 | `skills-ui-audit`                        | `<p class="…line-clamp-2 text-xs…">`                    | Same `line-clamp` + unbreakable-token bug fixed in `TriggerCard` — needs `break-words` |
 | `project-chat-composer-audit`            | `<div class="mb-3 overflow-hidden rounded-lg…">`        | Composer wizard step container; check whether it is an intentional slide               |

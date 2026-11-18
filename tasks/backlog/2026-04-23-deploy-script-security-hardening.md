@@ -1,5 +1,9 @@
 # Re-apply deploy script security hardening
 
+> **Reconciliation 2026-10-26:** still open. Item 2's `execSync` call is now
+> `scripts/deploy/sync-wrangler-config.ts:302-306`, still interpolating `${stack}`. Item 4 is
+> unchanged at `configure-r2-cors.sh:63-71`; #2370 only fixed the CORS field names.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

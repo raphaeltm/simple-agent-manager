@@ -481,7 +481,7 @@ interface WorkspaceUploadRow {
   agent_type: string | null;
 }
 
-const WORKSPACE_UPLOAD_CONTEXT_QUERY = `WITH target_workspace AS (
+export const WORKSPACE_UPLOAD_CONTEXT_QUERY = `WITH target_workspace AS (
   SELECT id, project_id, user_id, node_id, chat_session_id, agent_profile_hint
     FROM workspaces
    WHERE id = ? AND project_id = ?
@@ -489,8 +489,9 @@ const WORKSPACE_UPLOAD_CONTEXT_QUERY = `WITH target_workspace AS (
 ),
 resolved_task AS (
   SELECT t.id, t.agent_profile_hint, t.skill_id
-    FROM tasks t
-    JOIN target_workspace w
+    FROM target_workspace w
+    -- SQLite keeps CROSS JOIN order: seek tasks from the single scoped workspace.
+    CROSS JOIN tasks t
       ON t.project_id = w.project_id
      AND t.workspace_id = w.id
    WHERE (

@@ -1,247 +1,113 @@
-// FILE SIZE EXCEPTION: Pre-existing project chat state hook exceeds the 800-line gate on main; split as follow-up outside shared runtime fix scope.
-import type {
-  AgentProfileRuntime,
-  CreateAgentProfileRequest,
-  ProviderCatalog,
-  Task,
-  TaskMode,
-  UpdateAgentProfileRequest,
-  VMSize,
-  WorkspaceProfile,
-} from '@simple-agent-manager/shared';
-import { DEFAULT_WORKSPACE_PROFILE, hasByocComputeCredential } from '@simple-agent-manager/shared';
+import type { ProviderCatalog, Task } from '@simple-agent-manager/shared';
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router';
 
-import {
-  EMPTY_RESOURCE_STATE as EMPTY_RESOURCE_STATE_IMPORT,
-  hasAnyResourceValue,
-  hasValidationErrors,
-  serializeResourceRequirements,
-  toResourceRequirements,
-  validateResourceState,
-} from '../../components/resource-requirements';
-import { useAgentCatalog } from '../../hooks/useAgentCatalog';
-import { useAgentProfiles } from '../../hooks/useAgentProfiles';
 import { useAvailableCommands } from '../../hooks/useAvailableCommands';
 import { useBootLogStream } from '../../hooks/useBootLogStream';
-import { useCredentials } from '../../hooks/useCredentials';
 import { type RawSessionEvent, useProjectWebSocket } from '../../hooks/useProjectWebSocket';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { useQueryScope } from '../../hooks/useQueryScope';
-import { useTrialStatus } from '../../hooks/useTrialStatus';
 import { useVisibilityAwarePoll } from '../../hooks/useVisibilityAwarePoll';
-import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
-import {
-  closeConversationTask,
-  getProjectTask,
-  getTranscribeApiUrl,
-  linkSessionIdea,
-  listChatSessions,
-  listProjectTasks,
-  sleepWorkspace,
-  startInstantChatSession,
-  stopChatSession,
-  submitTask,
-} from '../../lib/api';
-import { getSessionState, isStaleSession } from '../../lib/chat-session-utils';
-import {
-  applyMessageCommentRealtimeEventToQueryCache,
-  chatQueryKeys,
-} from '../../lib/query-options';
+import type { ChatSessionResponse } from '../../lib/api';
+import { getProjectTask, listChatSessions, listProjectTasks } from '../../lib/api';
+import { CHAT_SESSION_LIST_LIMIT } from '../../lib/chat-query-config';
+import { getSessionState } from '../../lib/chat-session-utils';
+import { readInitialSessionList } from '../../lib/project-route-prefetch';
+import { applyMessageCommentRealtimeEventToQueryCache } from '../../lib/query-options';
 import { stripMarkdown } from '../../lib/text-utils';
 import { useProjectContext } from '../ProjectContext';
-import { isRetryOrFork } from './lineageUtils';
+import { buildForkMessage } from './profileWizardHelpers';
+import type { PendingDerived, ProvisioningState } from './types';
 import {
-  buildForkMessage,
-  resolveWizardRuntime,
-  resolveWizardTaskMode,
-  resolveWizardWorkspaceProfile,
-  selectProfileId,
-} from './profileWizardHelpers';
-import {
-  buildBaseSubmitRequest,
-  getCompletedAttachmentRefs,
-  withAttachmentRefs,
-} from './submitRequest';
-import type { ProvisioningState } from './types';
-import {
-  CHAT_SESSION_LIST_LIMIT,
   CHAT_TASK_LIST_LIMIT,
-  EXECUTE_IDEA_PROMPT_TEMPLATE,
   SESSION_RECONCILE_INTERVAL_MS,
   SESSION_SYNC_INTERVAL_MS,
 } from './types';
-import { DEFAULT_ATTACHMENT_MESSAGE, useAttachments } from './useAttachments';
-import { useProjectSkills } from './useProjectSkills';
+import { useComposerPrefill } from './useComposerPrefill';
+import { useConversationActions } from './useConversationActions';
+import { useNewChatComposer } from './useNewChatComposer';
 import { useProvisioningTracker } from './useProvisioningTracker';
 import { useSessionReducer } from './useSessionReducer';
 import { rawToSessionEvent } from './useSessionReducer';
+import { useSessionSections } from './useSessionSections';
 import { useStableTaskInfoMap } from './useStableTaskInfoMap';
 
-/** Pre-filled fork/retry context shown on the new chat screen. */
-export interface PendingDerived {
-  type: 'fork' | 'retry';
-  parentSessionId: string;
-  parentSessionLabel: string;
-  parentTaskId: string;
-  parentBranch?: string;
-  errorMessage?: string;
-  /** Retry only: true while the original prompt loads; Send stays disabled until it arrives. */
-  promptLoading: boolean;
-}
+export type { PendingDerived } from './types';
 
-export type ProfileWizardStep = 'agent' | 'work-type' | 'runtime' | 'resources' | 'name';
 export type SessionScope = 'my' | 'all';
-
-export interface ProfileWizardState {
-  open: boolean;
-  step: ProfileWizardStep;
-  selectedAgentType: string | null;
-  workType: TaskMode | null;
-  runtime: AgentProfileRuntime | null;
-  vmSize: VMSize | null;
-  resourceReqs: import('../../components/resource-requirements').ResourceRequirementsFormState;
-  profileName: string;
-  saving: boolean;
-  error: string | null;
-}
 
 const EMPTY_PROVIDER_CATALOGS: ProviderCatalog[] = [];
 
 export function useProjectChatState() {
   const navigate = useNavigate();
   const { sessionId } = useParams<{ sessionId: string }>();
-  const [searchParams, setSearchParams] = useSearchParams();
   const { projectId, project } = useProjectContext();
   const queryScope = useQueryScope();
   const queryClient = useQueryClient();
-
-  // Execute-idea flow: pre-fill message and track ideaId for auto-linking
-  const executeIdeaId = searchParams.get('executeIdea');
-  const executeIdeaIdRef = useRef<string | null>(null);
 
   const { sessions, dispatchEvent, resetSessions } = useSessionReducer();
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const hasLoadedRef = useRef(false);
-  // Credentials, trial status, provider catalog, agent catalog and agent profiles all
-  // come from shared TanStack queries. Before this migration each was fetched by a
-  // mount effect local to this hook, duplicating requests that the settings pages,
-  // onboarding wizards, task forms and workspace creation were already making.
-  const { credentials } = useCredentials(queryScope);
-  const { available: trialAvailable } = useTrialStatus(queryScope);
-  const hasUserCloudCredentials = hasByocComputeCredential(credentials);
-  const hasCloudCredentials = hasUserCloudCredentials || trialAvailable;
+  // A list read has succeeded: only then does an empty list mean "no chats".
+  const [listLoaded, setListLoaded] = useState(false);
+  // The read in flight when the page mounted, for handlers that need the selected session.
+  const initialLoadRef = useRef<Promise<ChatSessionResponse[]>>(Promise.resolve([]));
+  // The first list came from the route prefetch; see the first-socket-open refresh below.
+  const listFromPrefetchRef = useRef(false);
+  // The new-chat composer and its start path, shared with the Project Overview's task box.
+  const composer = useNewChatComposer();
+  const {
+    message,
+    setMessage,
+    submitting,
+    submitError,
+    setSubmitError,
+    configuredAgents,
+    selectedAgentType,
+    setSelectedAgentType,
+    agentProfiles,
+    selectedProfileId,
+    profileChoice,
+    skills,
+    selectedSkillId,
+    setSelectedSkillId,
+    attachments,
+    hasCloudCredentials,
+    hasUserCloudCredentials,
+    transcribeApiUrl,
+  } = composer;
+  const {
+    taskResourceReqs,
+    setTaskResourceReqs,
+    taskResourceErrors,
+    setTaskResourceErrors,
+    agentOverrides,
+    setAgentOverrides,
+    resetComposerOverrides,
+  } = composer.overrides;
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Sidebar filtering
   const [searchQuery, setSearchQuery] = useState('');
-  const [showStale, setShowStale] = useState(false);
   const [sessionScope, setSessionScope] = useState<SessionScope>('all');
   const multiplayerActive = Boolean(project?.multiplayerActive);
 
   // Track explicit "new chat" intent so auto-select doesn't override it
   const newChatIntentRef = useRef(false);
 
-  // New chat input state
-  const [message, setMessage] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-
-  // Agent type selection
-  const { agents: agentCatalog } = useAgentCatalog(queryScope);
-  const configuredAgents = useMemo(
-    () => agentCatalog.filter((agent) => agent.configured && agent.supportsAcp),
-    [agentCatalog]
-  );
-  const [selectedAgentType, setSelectedAgentType] = useState<string | null>(null);
-
-  // Agent profile selection
-  const {
-    profiles: agentProfiles,
-    createProfile: createProfileMutation,
-    updateProfile,
-  } = useAgentProfiles(projectId, queryScope);
-  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
-
-  // Auto-selection that previously lived inside the two removed mount effects. Both
-  // are strictly "fill in a default once something is available" — neither may
-  // override a choice the user has already made, so each is guarded on the current
-  // selection (`.claude/rules/06-technical-patterns.md`, interaction-effect analysis).
-  useEffect(() => {
-    const firstAgent = configuredAgents[0];
-    if (!firstAgent) return;
-    setSelectedAgentType((current) => current ?? firstAgent.id);
-  }, [configuredAgents]);
-
-  useEffect(() => {
-    setSelectedProfileId((current) => selectProfileId(current, agentProfiles));
-  }, [agentProfiles]);
-  const { skills, selectedSkillId, setSelectedSkillId } = useProjectSkills(projectId);
   // The catalog is only meaningful once the user can actually provision, matching the
   // previous behaviour where it was fetched inside the `hasCloud` branch.
   const { catalogs: allProviderCatalogs } = useProviderCatalog(
     hasCloudCredentials ? queryScope : ''
   );
   const providerCatalogs = hasCloudCredentials ? allProviderCatalogs : EMPTY_PROVIDER_CATALOGS;
-  const [profileWizard, setProfileWizard] = useState<ProfileWizardState>({
-    open: false,
-    step: 'agent',
-    selectedAgentType: null,
-    workType: null,
-    runtime: null,
-    vmSize: null,
-    resourceReqs: { ...EMPTY_RESOURCE_STATE_IMPORT },
-    profileName: '',
-    saving: false,
-    error: null,
-  });
 
   // Slash command cache for pre-session autocomplete
   // Pass sessionId as refreshKey so cached commands are re-fetched when switching sessions
   // (ensures commands persisted during session N are available in session N+1)
   const { commands: slashCommands } = useAvailableCommands(projectId, undefined, sessionId);
-
-  // File attachments (extracted hook)
-  const attachments = useAttachments(projectId, setSubmitError);
-
-  // Workspace profile selection — defaults to project setting or platform default
-  const [selectedWorkspaceProfile, setSelectedWorkspaceProfile] = useState<WorkspaceProfile>(
-    (project?.defaultWorkspaceProfile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE
-  );
-  // Devcontainer config name — empty string means auto-detect
-  const [selectedDevcontainerConfigName, setSelectedDevcontainerConfigName] = useState(
-    project?.defaultDevcontainerConfigName ?? ''
-  );
-
-  // Task mode selection — defaults based on workspace profile
-  const [selectedTaskMode, setSelectedTaskMode] = useState<TaskMode>(
-    ((project?.defaultWorkspaceProfile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE) ===
-      'lightweight'
-      ? 'conversation'
-      : 'task'
-  );
-  const userSetTaskModeRef = useRef(false);
-
-  // Per-task resource override — blank fields inherit from profile/project
-  const [taskResourceReqs, setTaskResourceReqs] = useState<
-    import('../../components/resource-requirements').ResourceRequirementsFormState
-  >({ ...EMPTY_RESOURCE_STATE_IMPORT });
-  const [taskResourceErrors, setTaskResourceErrors] = useState<
-    import('../../components/resource-requirements').ResourceValidationErrors
-  >({});
-
-  // Reset per-task resource overrides and errors on project switch
-  const prevProjectIdRef = useRef(projectId);
-  useEffect(() => {
-    if (prevProjectIdRef.current !== projectId) {
-      prevProjectIdRef.current = projectId;
-      setTaskResourceReqs({ ...EMPTY_RESOURCE_STATE_IMPORT });
-      setTaskResourceErrors({});
-    }
-  }, [projectId]);
 
   // Provisioning tracking
   const [provisioning, setProvisioning] = useState<ProvisioningState | null>(null);
@@ -273,73 +139,11 @@ export function useProjectChatState() {
   const [taskTitleMap, setTaskTitleMap] = useState<Map<string, string>>(new Map());
   const { taskInfoMap, replaceAll: replaceTaskInfoMap } = useStableTaskInfoMap();
 
-  const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
-
-  // Conversation lifecycle state
-  const [sleepingConversation, setSleepingConversation] = useState(false);
-  const [sleepError, setSleepError] = useState<string | null>(null);
-  const [closingConversation, setClosingConversation] = useState(false);
-  const [closeError, setCloseError] = useState<string | null>(null);
-
-  // ---------------------------------------------------------------------------
-  // Session filtering
-  // ---------------------------------------------------------------------------
-
-  const { recentSessions, staleSessions } = useMemo(() => {
-    const recent: ChatSessionListItem[] = [];
-    const stale: ChatSessionListItem[] = [];
-    for (const s of sessions) {
-      // Stopped retries/forks auto-collapse into the Older bucket.
-      // A stopped retry/fork is a terminated session whose task has a
-      // parentTaskId and was user-triggered (not agent-dispatched).
-      const isStoppedRetryOrFork = (() => {
-        if (s.status !== 'stopped' || !s.taskId) return false;
-        const info = taskInfoMap.get(s.taskId);
-        if (!info?.parentTaskId) return false;
-        return isRetryOrFork(info);
-      })();
-
-      if (isStaleSession(s) || isStoppedRetryOrFork) stale.push(s);
-      else recent.push(s);
-    }
-    return { recentSessions: recent, staleSessions: stale };
-  }, [sessions, taskInfoMap]);
-
-  const filteredRecent = useMemo(() => {
-    if (!searchQuery.trim()) return recentSessions;
-    const q = searchQuery.toLowerCase();
-    return recentSessions.filter(
-      (s) =>
-        (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q)) ||
-        s.id.includes(q) ||
-        (s.createdBy?.name?.toLowerCase().includes(q) ?? false) ||
-        (s.createdBy?.email?.toLowerCase().includes(q) ?? false)
-    );
-  }, [recentSessions, searchQuery]);
-
-  const filteredStale = useMemo(() => {
-    if (!searchQuery.trim()) return staleSessions;
-    const q = searchQuery.toLowerCase();
-    return staleSessions.filter(
-      (s) =>
-        (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q)) ||
-        s.id.includes(q) ||
-        (s.createdBy?.name?.toLowerCase().includes(q) ?? false) ||
-        (s.createdBy?.email?.toLowerCase().includes(q) ?? false)
-    );
-  }, [staleSessions, searchQuery]);
-
-  const effectiveShowStale = showStale || !!searchQuery.trim();
+  const sessionList = useSessionSections(sessions, taskInfoMap, searchQuery);
 
   // ---------------------------------------------------------------------------
   // Effects
   // ---------------------------------------------------------------------------
-
-  useEffect(() => {
-    if (!userSetTaskModeRef.current) {
-      setSelectedTaskMode(selectedWorkspaceProfile === 'lightweight' ? 'conversation' : 'task');
-    }
-  }, [selectedWorkspaceProfile]);
 
   useEffect(() => {
     if (!multiplayerActive) {
@@ -347,38 +151,32 @@ export function useProjectChatState() {
     }
   }, [multiplayerActive]);
 
-  const handleUpdateProfile = useCallback(
-    async (profileId: string, data: UpdateAgentProfileRequest) => {
-      await updateProfile(profileId, data);
-    },
-    [updateProfile]
-  );
-
-  useEffect(() => {
-    if (executeIdeaId && !sessionId) {
-      executeIdeaIdRef.current = executeIdeaId;
-      setMessage(EXECUTE_IDEA_PROMPT_TEMPLATE.replace('{ideaId}', executeIdeaId));
-      setSearchParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
-          next.delete('executeIdea');
-          return next;
-        },
-        { replace: true }
-      );
-    }
-  }, [executeIdeaId, sessionId, setSearchParams]);
+  // The Deployments page's "Ask an agent" link pre-fills the composer. The idea half of this
+  // hook is gone: an idea is now started from its own page through Start work, which links it
+  // on the server before the agent runs rather than from a query parameter afterwards.
+  useComposerPrefill(sessionId, setMessage);
 
   const loadSessions = useCallback(async () => {
     if (hasLoadedRef.current) setIsRefreshing(true);
     try {
       const scope = multiplayerActive ? sessionScope : 'all';
-      const sessionResult = await listChatSessions(projectId, {
-        limit: CHAT_SESSION_LIST_LIMIT,
-        scope,
-      });
-      resetSessions(sessionResult.sessions);
+      let sessions: ChatSessionResponse[];
+      if (!hasLoadedRef.current && scope === 'all') {
+        const initial = await readInitialSessionList(queryClient, queryScope, projectId);
+        sessions = initial.sessions;
+        listFromPrefetchRef.current = initial.prefetched;
+      } else {
+        sessions = (
+          await listChatSessions(projectId, {
+            limit: CHAT_SESSION_LIST_LIMIT,
+            scope,
+            includeLive: true,
+          })
+        ).sessions;
+      }
+      resetSessions(sessions);
       hasLoadedRef.current = true;
+      setListLoaded(true);
 
       listProjectTasks(projectId, { limit: CHAT_TASK_LIST_LIMIT })
         .then((tasksResult) => {
@@ -391,13 +189,21 @@ export function useProjectChatState() {
           /* task titles are cosmetic */
         });
 
-      return sessionResult.sessions;
+      return sessions;
     } catch {
       return [];
     } finally {
       setIsRefreshing(false);
     }
-  }, [projectId, sessionScope, multiplayerActive, resetSessions, replaceTaskInfoMap]);
+  }, [
+    projectId,
+    sessionScope,
+    multiplayerActive,
+    resetSessions,
+    replaceTaskInfoMap,
+    queryClient,
+    queryScope,
+  ]);
 
   const handleSessionEvent = useCallback(
     (raw: RawSessionEvent) => {
@@ -433,8 +239,21 @@ export function useProjectChatState() {
 
   useEffect(() => {
     setLoading(true);
-    void loadSessions().finally(() => setLoading(false));
+    const load = loadSessions();
+    initialLoadRef.current = load;
+    void load.finally(() => setLoading(false));
   }, [loadSessions]);
+
+  /**
+   * The selected session, waiting for the page's first list read when it has not landed.
+   * A deep link shows its conversation before the list arrives, so its actions must not
+   * read "not in the list yet" as "no such session".
+   */
+  const findSession = useCallback(
+    async (id: string) =>
+      sessions.find((s) => s.id === id) ?? (await initialLoadRef.current).find((s) => s.id === id),
+    [sessions]
+  );
 
   // Session-list freshness has two modes, and exactly one is active at a time.
   //
@@ -452,6 +271,13 @@ export function useProjectChatState() {
   // tabs. Reconnect catch-up is handled by `onReconnected` above; disconnect and
   // tab-return catch-up come from the hook's elapsed-gated refresh.
   const wsConnected = connectionState === 'connected';
+  // The route prefetch read the list before this socket subscribed, and the server replays
+  // nothing on subscribe: read it once more when the socket first opens.
+  useEffect(() => {
+    if (!wsConnected || !listLoaded || !listFromPrefetchRef.current) return;
+    listFromPrefetchRef.current = false;
+    void loadSessions();
+  }, [wsConnected, listLoaded, loadSessions]);
   useVisibilityAwarePoll(loadSessions, SESSION_SYNC_INTERVAL_MS, {
     enabled: !loading,
     paused: wsConnected,
@@ -476,209 +302,20 @@ export function useProjectChatState() {
   // Handlers
   // ---------------------------------------------------------------------------
 
-  const suggestProfileName = useCallback(
-    (agentType: string | null, workType: TaskMode | null) => {
-      const agent = configuredAgents.find((candidate) => candidate.id === agentType);
-      const agentName = agent?.name ?? 'Agent';
-      return workType === 'task' ? `${agentName} Tasks` : `${agentName} Chat`;
-    },
-    [configuredAgents]
-  );
-
-  const openProfileWizard = useCallback(() => {
-    const soleAgent = configuredAgents.length === 1 ? configuredAgents[0] : null;
-    const initialAgentType = soleAgent?.id ?? selectedAgentType ?? configuredAgents[0]?.id ?? null;
-    setProfileWizard({
-      open: true,
-      step: soleAgent ? 'work-type' : 'agent',
-      selectedAgentType: initialAgentType,
-      workType: null,
-      runtime: null,
-      vmSize: null,
-      resourceReqs: { ...EMPTY_RESOURCE_STATE_IMPORT },
-      profileName: '',
-      saving: false,
-      error: null,
-    });
-  }, [configuredAgents, selectedAgentType]);
-
-  const closeProfileWizard = useCallback(() => {
-    setProfileWizard((current) => ({ ...current, open: false, saving: false, error: null }));
-  }, []);
-
-  const updateProfileWizard = useCallback((patch: Partial<ProfileWizardState>) => {
-    setProfileWizard((current) => ({ ...current, ...patch, error: null }));
-  }, []);
-
-  const createProfile = useCallback(
-    async (data: CreateAgentProfileRequest) => {
-      // The mutation invalidates the shared `agentProfiles` entry, so the new profile
-      // reaches every consumer (profiles page, task forms, trigger form) rather than
-      // only this hook's local copy, which is what the previous manual splice did.
-      const profile = await createProfileMutation(data);
-      setSelectedProfileId(profile.id);
-      return profile;
-    },
-    [createProfileMutation]
-  );
-
-  const createProfileFromWizard = useCallback(async () => {
-    const name = profileWizard.profileName.trim();
-    if (!name) {
-      setProfileWizard((current) => ({ ...current, error: 'Profile name is required' }));
-      return null;
-    }
-    if (agentProfiles.some((profile) => profile.name.toLowerCase() === name.toLowerCase())) {
-      setProfileWizard((current) => ({ ...current, error: `Profile "${name}" already exists` }));
-      return null;
-    }
-    const agentType = profileWizard.selectedAgentType ?? configuredAgents[0]?.id;
-    if (!agentType) {
-      setProfileWizard((current) => ({
-        ...current,
-        error: 'Choose an agent before creating a profile',
-      }));
-      return null;
-    }
-    const workType = profileWizard.workType ?? 'conversation';
-    const runtime = resolveWizardRuntime(workType, profileWizard.runtime);
-    setProfileWizard((current) => ({ ...current, saving: true, error: null }));
-    try {
-      const resourceJson =
-        runtime === 'cf-container'
-          ? null
-          : serializeResourceRequirements(profileWizard.resourceReqs);
-      const profile = await createProfile({
-        name,
-        description:
-          workType === 'task'
-            ? 'Write code and open pull requests'
-            : 'Chat and explore with a lightweight workspace',
-        agentType,
-        runtime,
-        resourceRequirementsJson: resourceJson,
-        workspaceProfile: resolveWizardWorkspaceProfile(runtime, workType),
-        taskMode: resolveWizardTaskMode(runtime, workType),
-      });
-      setProfileWizard((current) => ({ ...current, open: false, saving: false, error: null }));
-      return profile;
-    } catch (err) {
-      setProfileWizard((current) => ({
-        ...current,
-        saving: false,
-        error: err instanceof Error ? err.message : 'Failed to create profile',
-      }));
-      return null;
-    }
-  }, [
-    agentProfiles,
-    configuredAgents,
-    createProfile,
-    profileWizard.profileName,
-    profileWizard.runtime,
-    profileWizard.selectedAgentType,
-    profileWizard.resourceReqs,
-    profileWizard.workType,
-  ]);
-
-  const resolveProfileIdForSubmit = useCallback(async () => {
-    if (selectedProfileId) return selectedProfileId;
-    if (configuredAgents.length === 0) {
-      setSubmitError('Add an agent in Settings before starting a chat.');
-      return null;
-    }
-    if (agentProfiles.length > 0) return agentProfiles[0]?.id ?? null;
-
-    openProfileWizard();
-    setSubmitError('Create a profile before sending your first message.');
-    return null;
-  }, [agentProfiles, configuredAgents.length, openProfileWizard, selectedProfileId]);
-
+  /**
+   * Start a chat from the new-chat composer and open it. The start itself is shared with the
+   * Overview's task box (`useNewChatComposer`); opening the chat and showing its provisioning
+   * belong to this page.
+   */
   const handleSubmit = async () => {
-    const trimmed =
-      message.trim() || (attachments.chatAttachments.length > 0 ? DEFAULT_ATTACHMENT_MESSAGE : '');
-    if (!trimmed) return;
-    if (attachments.chatAttachments.some((a) => a.status !== 'complete')) {
-      setSubmitError('Please wait for file uploads to complete');
-      return;
-    }
-    setSubmitError(null);
-
-    // Fix 4: validate resource overrides before dispatch and surface per-field errors
-    const hasResources = hasAnyResourceValue(taskResourceReqs);
-    if (hasResources) {
-      const resErrors = validateResourceState(taskResourceReqs);
-      if (hasValidationErrors(resErrors)) {
-        setTaskResourceErrors(resErrors);
-        setSubmitError('Fix resource requirement errors before sending');
-        return;
-      }
-    }
-    setTaskResourceErrors({});
-
-    setSubmitting(true);
-    try {
-      const submitProfileId = await resolveProfileIdForSubmit();
-      if (!submitProfileId) return;
-
-      const selectedProfile =
-        agentProfiles.find((profile) => profile.id === submitProfileId) ?? null;
-      const selectedSkill = selectedSkillId
-        ? (skills.find((skill) => skill.id === selectedSkillId) ?? null)
-        : null;
-      const attachmentRefs = getCompletedAttachmentRefs(attachments.chatAttachments);
-      const selectedRuntime = selectedSkill?.runtime ?? selectedProfile?.runtime ?? null;
-      const requiresTaskSubmission = attachmentRefs.length > 0 || executeIdeaIdRef.current !== null;
-      // Fix 2: when task has explicit resource overrides, route through submitTask
-      // so the backend can honor them; Instant cannot carry resource requirements.
-      const useInstantSession =
-        selectedRuntime === 'cf-container' && !requiresTaskSubmission && !hasResources;
-
-      if (useInstantSession) {
-        const result = await startInstantChatSession(projectId, {
-          message: trimmed,
-          agentProfileId: submitProfileId,
-          skillId: selectedSkillId ?? undefined,
-          parentTaskId: pendingDerived?.parentTaskId || undefined,
-        });
-        setMessage('');
-        setPendingDerived(null);
-        attachments.clearAttachments();
-        setTaskResourceReqs({ ...EMPTY_RESOURCE_STATE_IMPORT });
-        newChatIntentRef.current = false;
-        navigate(`/projects/${projectId}/chat/${result.sessionId}`, { replace: true });
-        loadSessions().catch(() => undefined);
-        return;
-      }
-
-      if (selectedRuntime !== 'cf-container' && !hasCloudCredentials) {
-        setSubmitError(
-          'Cloud credentials required. Connect a cloud provider in Settings, or ask your admin to enable platform trial.'
-        );
-        return;
-      }
-
-      const baseRequest = buildBaseSubmitRequest({
-        message: trimmed,
-        agentProfileId: submitProfileId,
-        skillId: selectedSkillId,
-        selectedAgentType,
-        selectedResourceRequirements: toResourceRequirements(taskResourceReqs),
-        selectedWorkspaceProfile,
-        selectedDevcontainerConfigName,
-        selectedTaskMode,
-        pendingDerived,
-      });
-      const result = await submitTask(projectId, withAttachmentRefs(baseRequest, attachmentRefs));
-      setMessage('');
-      setPendingDerived(null);
-      attachments.clearAttachments();
-      // Fix 3: reset per-task resource overrides after successful submit
-      setTaskResourceReqs({ ...EMPTY_RESOURCE_STATE_IMPORT });
+    const start = await composer.startNewChat(pendingDerived);
+    if (!start) return;
+    setPendingDerived(null);
+    if (start.kind === 'task') {
       setProvisioning({
-        taskId: result.taskId,
-        sessionId: result.sessionId,
-        branchName: result.branchName,
+        taskId: start.taskId,
+        sessionId: start.sessionId,
+        branchName: start.branchName,
         status: 'queued',
         executionStep: null,
         errorMessage: null,
@@ -688,39 +325,21 @@ export function useProjectChatState() {
         requestedVmSize: null,
         provisionedVmSize: null,
       });
-      if (executeIdeaIdRef.current) {
-        const ideaId = executeIdeaIdRef.current;
-        executeIdeaIdRef.current = null;
-        void linkSessionIdea(
-          projectId,
-          result.sessionId,
-          ideaId,
-          'Executed from idea detail page'
-        ).catch((err) => {
-          console.warn('Failed to auto-link idea to session:', err);
-        });
-      }
-      newChatIntentRef.current = false;
-      navigate(`/projects/${projectId}/chat/${result.sessionId}`, { replace: true });
-      void loadSessions();
-    } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : 'Failed to start task');
-    } finally {
-      setSubmitting(false);
     }
+    newChatIntentRef.current = false;
+    navigate(`/projects/${projectId}/chat/${start.sessionId}`, { replace: true });
+    void loadSessions().catch(() => undefined);
   };
 
   const handleNewChat = useCallback(() => {
     newChatIntentRef.current = true;
-    executeIdeaIdRef.current = null;
     setPendingDerived(null);
     navigate(`/projects/${projectId}/chat`, { replace: true });
     setMessage('');
     setSubmitError(null);
     setProvisioning(null);
-    setTaskResourceReqs({ ...EMPTY_RESOURCE_STATE_IMPORT });
-    setTaskResourceErrors({});
-  }, [navigate, projectId]);
+    resetComposerOverrides();
+  }, [navigate, projectId, resetComposerOverrides]);
 
   const handleSelect = useCallback(
     (id: string) => {
@@ -755,12 +374,13 @@ export function useProjectChatState() {
         buildForkMessage({ sessionLabel, projectId, sessionId: session.id, taskId: parentTaskId })
       );
       newChatIntentRef.current = true;
-      executeIdeaIdRef.current = null;
       setSubmitError(null);
       setProvisioning(null);
+      // A derived chat starts from its profile, not from an earlier draft's options.
+      resetComposerOverrides();
       navigate(`/projects/${projectId}/chat`, { replace: true });
     },
-    [navigate, projectId]
+    [navigate, projectId, resetComposerOverrides]
   );
 
   /** Open the new-chat composer with the original task prompt re-added. */
@@ -783,9 +403,9 @@ export function useProjectChatState() {
       };
       setPendingDerived(derived);
       newChatIntentRef.current = true;
-      executeIdeaIdRef.current = null;
       setSubmitError(null);
       setProvisioning(null);
+      resetComposerOverrides();
       navigate(`/projects/${projectId}/chat`, { replace: true });
 
       const isCurrent = () => pendingDerivedRef.current === derived;
@@ -804,66 +424,23 @@ export function useProjectChatState() {
           );
         });
     },
-    [navigate, projectId]
+    [navigate, projectId, resetComposerOverrides]
   );
 
-  const handleSleepConversation = useCallback(async () => {
-    const selectedSession = sessions.find((s) => s.id === sessionId);
-    if (!selectedSession) return;
-    const workspaceId = selectedSession.workspaceId;
-    if (!workspaceId) {
-      setSleepError('This session has no workspace to sleep.');
-      return;
-    }
-
-    setSleepingConversation(true);
-    setSleepError(null);
-    try {
-      await sleepWorkspace(workspaceId);
-      if (queryScope) {
-        await queryClient.invalidateQueries({
-          queryKey: chatQueryKeys.sessionMessages(queryScope, projectId, selectedSession.id),
-        });
-      }
-      void loadSessions();
-    } catch (err) {
-      console.warn('Failed to sleep conversation:', err);
-      setSleepError(err instanceof Error ? err.message : 'Failed to sleep conversation');
-    } finally {
-      setSleepingConversation(false);
-    }
-  }, [loadSessions, projectId, queryClient, queryScope, sessionId, sessions]);
-
-  const handleCloseConversation = useCallback(async () => {
-    const selectedSession = sessions.find((s) => s.id === sessionId);
-    if (!selectedSession) return;
-    setClosingConversation(true);
-    setCloseError(null);
-    try {
-      if (selectedSession.taskId) {
-        await closeConversationTask(projectId, selectedSession.taskId);
-      } else {
-        await stopChatSession(projectId, selectedSession.id);
-      }
-      void loadSessions();
-    } catch (err) {
-      console.warn('Failed to close conversation:', err);
-      setCloseError(err instanceof Error ? err.message : 'Failed to close conversation');
-    } finally {
-      setClosingConversation(false);
-    }
-  }, [projectId, sessionId, sessions, loadSessions]);
-
-  const handleTaskModeChange = useCallback((mode: TaskMode) => {
-    userSetTaskModeRef.current = true;
-    setSelectedTaskMode(mode);
-  }, []);
+  const conversationActions = useConversationActions({
+    projectId,
+    sessionId,
+    findSession,
+    loadSessions,
+  });
 
   // ---------------------------------------------------------------------------
   // Derived state
   // ---------------------------------------------------------------------------
 
-  const showNewChatInput = !sessionId || sessions.length === 0;
+  // Until a list read succeeds an empty list means "not loaded", not "no chats", so a
+  // deep-linked conversation stays on screen while it loads or after it fails.
+  const showNewChatInput = !sessionId || (listLoaded && !loading && sessions.length === 0);
   const hasSessions = sessions.length > 0;
 
   return {
@@ -877,18 +454,15 @@ export function useProjectChatState() {
     hasSessions,
     showNewChatInput,
     loadSessions,
+    findSession,
     realtimeDegraded,
     sidebarOpen,
     setSidebarOpen,
     searchQuery,
     setSearchQuery,
-    showStale,
-    setShowStale,
     sessionScope,
     setSessionScope,
-    filteredRecent,
-    filteredStale,
-    effectiveShowStale,
+    sessionList,
     taskTitleMap,
     taskInfoMap,
     message,
@@ -902,31 +476,39 @@ export function useProjectChatState() {
     selectedAgentType,
     setSelectedAgentType,
     agentProfiles,
+    profilesLoading: profileChoice.profilesLoading,
     selectedProfileId,
-    setSelectedProfileId,
+    setSelectedProfileId: profileChoice.setSelectedProfileId,
+    profilePicker: profileChoice.profilePicker,
+    profileSheet: profileChoice.profileSheet,
+    openProfileSheet: profileChoice.openProfileSheet,
+    closeProfileSheet: profileChoice.closeProfileSheet,
     skills,
     selectedSkillId,
     setSelectedSkillId,
     providerCatalogs,
     hasUserCloudCredentials,
-    profileWizard,
-    openProfileWizard,
-    closeProfileWizard,
-    updateProfileWizard,
-    createProfileFromWizard,
-    suggestProfileName,
-    handleUpdateProfile,
+    profileWizard: profileChoice.profileWizard,
+    openProfileWizard: profileChoice.openProfileWizard,
+    closeProfileWizard: profileChoice.closeProfileWizard,
+    updateProfileWizard: profileChoice.updateProfileWizard,
+    createProfileFromWizard: profileChoice.createProfileFromWizard,
+    createDefaultChatProfile: profileChoice.createDefaultChatProfile,
+    suggestProfileName: profileChoice.suggestProfileName,
+    handleUpdateProfile: profileChoice.handleUpdateProfile,
     slashCommands,
-    selectedWorkspaceProfile,
-    setSelectedWorkspaceProfile,
-    selectedDevcontainerConfigName,
-    setSelectedDevcontainerConfigName,
-    selectedTaskMode,
-    handleTaskModeChange,
+    selectedWorkspaceProfile: composer.selectedWorkspaceProfile,
+    setSelectedWorkspaceProfile: composer.setSelectedWorkspaceProfile,
+    selectedDevcontainerConfigName: composer.selectedDevcontainerConfigName,
+    setSelectedDevcontainerConfigName: composer.setSelectedDevcontainerConfigName,
+    selectedTaskMode: composer.selectedTaskMode,
+    handleTaskModeChange: composer.handleTaskModeChange,
     taskResourceReqs,
     setTaskResourceReqs,
     taskResourceErrors,
     setTaskResourceErrors,
+    agentOverrides,
+    setAgentOverrides,
     ...attachments,
     provisioning,
     bootLogs,
@@ -936,12 +518,7 @@ export function useProjectChatState() {
     setPendingDerived,
     handleFork,
     handleRetry,
-    sleepingConversation,
-    sleepError,
-    handleSleepConversation,
-    closingConversation,
-    closeError,
-    handleCloseConversation,
+    ...conversationActions,
     transcribeApiUrl,
     getSessionState,
   };

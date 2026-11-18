@@ -1,0 +1,111 @@
+---
+/**
+ * "Built for everyone in the factory": what SAM gives the person who designs the process, the
+ * developers who run it, and everyone else who takes part. Claims checked against the docs guides
+ * (concepts, secret-execution, workload-identity, notifications, cli, sam-connector, collaboration).
+ */
+const groups = [
+  {
+    who: 'Whoever designs the process',
+    items: [
+      'Profiles and skills for each kind of work',
+      'Project rules every session starts with',
+      'Triggers from GitHub, schedules, webhooks and email',
+      'Who may deploy where',
+      'Machine limits and monthly compute quotas',
+      'Secrets agents can use but never read',
+    ],
+  },
+  {
+    who: 'Developers',
+    items: [
+      'Start work from a chat, an idea, the CLI, or Claude and ChatGPT',
+      'Answer an agent’s question from your phone',
+      'Read an agent’s branch without starting a machine',
+      'Fork a teammate’s chat and carry on from there',
+      'Leave a session and come back to it days later',
+    ],
+  },
+  {
+    who: 'Product, design and reviewers',
+    items: [
+      'Comment on the exact words in a plan or a reply',
+      'Get a notification when an agent needs you',
+      'Mention a teammate, or send a thread to the agent',
+      'Take over a shared chat for up to an hour',
+    ],
+  },
+];
+---
+
+<section class="fh-section people" aria-labelledby="people-title">
+  <div class="container">
+    <div class="fh-head fh-head--center">
+      <p class="fh-kicker">For the people in it</p>
+      <h2 class="fh-h2" id="people-title">One place for everyone who touches the work</h2>
+    </div>
+    <div class="people-grid">
+      {groups.map((g, i) => (
+        <div class="people-card sam-glass sam-glass-rim" data-reveal style={`--delay:${i * 90}ms`}>
+          <h3 class="people-who">{g.who}</h3>
+          <ul class="people-list">
+            {g.items.map((item) => <li>{item}</li>)}
+          </ul>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .people-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 20px;
+  }
+
+  .people-card {
+    position: relative;
+    padding: 26px 24px 28px;
+    border-radius: var(--radius-xl);
+  }
+
+  .people-who {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 1.25rem;
+    color: var(--color-fg-primary);
+    margin-bottom: 16px;
+  }
+
+  .people-list {
+    list-style: none;
+    display: grid;
+    gap: 10px;
+  }
+
+  .people-list li {
+    position: relative;
+    padding-left: 20px;
+    color: var(--color-fg-muted);
+    font-size: 0.9375rem;
+    line-height: 1.5;
+  }
+
+  .people-list li::before {
+    content: '';
+    position: absolute;
+    left: 2px;
+    top: 0.6em;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    border: 1.5px solid var(--color-accent-strong);
+  }
+
+  @media (max-width: 900px) {
+    .people-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

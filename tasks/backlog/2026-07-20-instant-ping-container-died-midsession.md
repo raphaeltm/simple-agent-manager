@@ -1,5 +1,10 @@
 # Instant container died mid-session during production verification ping; no parent-side terminal path for dead-node children
 
+> **Reconciliation 2026-10-26:** Still open; the node-not-running refusal is unchanged at
+> `apps/api/src/routes/mcp/orchestration-target.ts:180-193`. Pointer correction: the sweep's
+> liveness-reason writes cited in the 2026-09-30 block (`stuck-tasks.ts:1366,1408`) are now
+> `apps/api/src/scheduled/stuck-tasks.ts:1412,1476` (#2317, #2318).
+
 > **Reconciliation 2026-10-12:** The `sleeping` refusal noted on 2026-10-05 is fixed. #2240
 > (`7300c003c`) lets `stop_subtask` cancel a sleeping child without contacting its released runtime
 > (`apps/api/src/routes/mcp/orchestration-stop.ts:98-108`; test

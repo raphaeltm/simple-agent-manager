@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { callMcpTool, createMcpApp, storeMcpToken, toolResult } from '../helpers/mcp-route';
-import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
+import { seedInstallation, seedMcpTokenWorkspace, seedProject, seedUser } from './helpers/seed-d1';
 
 it('finds canonical long PR URLs through the real MCP route and D1', async () => {
   const user = 'long-pr-owner-user';
@@ -32,6 +32,7 @@ it('finds canonical long PR URLs through the real MCP route and D1', async () =>
       .bind(id, projectId, user, id, status, outputUrl, description, user)
       .run();
   }
+  await seedMcpTokenWorkspace('long-url-workspace', user, project);
   await storeMcpToken(env.KV, token, {
     taskId: 'long-url-caller',
     projectId: project,

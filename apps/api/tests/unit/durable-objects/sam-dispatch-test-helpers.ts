@@ -92,6 +92,9 @@ export interface DispatchPlacementResolutionInput {
 export function selectRows(rows: unknown[]) {
   return {
     from: vi.fn(() => ({
+      innerJoin: vi.fn(() => ({
+        where: vi.fn(() => ({ limit: vi.fn(() => Promise.resolve(rows)) })),
+      })),
       where: vi.fn(() => ({
         limit: vi.fn(() => Promise.resolve(rows)),
       })),
@@ -135,14 +138,16 @@ export function buildDispatchPlacementResolution(input: DispatchPlacementResolut
 export function resetDispatchTaskMocks(options: { title?: string } = {}) {
   vi.clearAllMocks();
   dispatchTaskMocks.db.select.mockImplementation(() => selectRows([]));
-  dispatchTaskMocks.db.select.mockImplementationOnce(() => selectRows([dispatchProject]));
   dispatchTaskMocks.db.select.mockImplementationOnce(() =>
     selectRows([
       {
-        projectId: 'proj-1',
-        userId: 'user-1',
-        role: 'owner',
-        status: 'active',
+        project: dispatchProject,
+        membership: {
+          projectId: 'proj-1',
+          userId: 'user-1',
+          role: 'owner',
+          status: 'active',
+        },
       },
     ])
   );

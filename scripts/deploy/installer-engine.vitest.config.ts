@@ -1,0 +1,11 @@
+import { defineConfig } from 'vitest/config';
+export default defineConfig({
+  test: {
+    include: [
+      'scripts/deploy/installer-engine*.test.ts',
+      'scripts/deploy/installer-builder-proof.test.ts',
+      'scripts/deploy/container-rollout.test.ts',
+      'scripts/deploy/container-image-*.test.ts',
+    ],
+  },
+});

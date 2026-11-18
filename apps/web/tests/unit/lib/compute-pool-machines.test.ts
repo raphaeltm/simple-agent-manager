@@ -8,12 +8,10 @@ import { describe, expect, it } from 'vitest';
 import {
   buildMachineChanges,
   buildMachineGroups,
-  isCellAllowed,
   type MachineCell,
   type MachineGroup,
   rowPriceLabel,
   summarizeAllowedMachines,
-  toggleCell,
 } from '../../../src/lib/compute-pool-machines';
 
 const TS = '2026-10-01T00:00:00.000Z';
@@ -276,23 +274,19 @@ describe('buildMachineGroups', () => {
   });
 });
 
-describe('draft and update request', () => {
-  it('toggling twice returns to the server state', () => {
-    const target = cell(typicalGroups(), 'cx23', 'fsn1');
-    const once = toggleCell(new Map(), target);
-    expect(isCellAllowed(target, once)).toBe(false);
-    const twice = toggleCell(once, target);
-    expect(twice.size).toBe(0);
-    expect(isCellAllowed(target, twice)).toBe(true);
-  });
+/** The zone-level draft entry a region edit produces for one cell. */
+function flip(draft: Map<string, boolean>, target: MachineCell): Map<string, boolean> {
+  return new Map(draft).set(target.key, !target.allowed);
+}
 
+describe('draft and update request', () => {
   it('writes active, deleted, and catalog additions for changed cells only', () => {
     const groups = typicalGroups();
     let draft: Map<string, boolean> = new Map();
-    draft = toggleCell(draft, cell(groups, 'cx23', 'fsn1')); // allowed -> blocked
-    draft = toggleCell(draft, cell(groups, 'cx33', 'fsn1')); // deleted -> allowed
-    draft = toggleCell(draft, cell(groups, 'ccx63', 'ash')); // disabled -> allowed
-    draft = toggleCell(draft, cell(groups, 'ccx63', 'fsn1')); // catalog only -> allowed
+    draft = flip(draft, cell(groups, 'cx23', 'fsn1')); // allowed -> blocked
+    draft = flip(draft, cell(groups, 'cx33', 'fsn1')); // deleted -> allowed
+    draft = flip(draft, cell(groups, 'ccx63', 'ash')); // disabled -> allowed
+    draft = flip(draft, cell(groups, 'ccx63', 'fsn1')); // catalog only -> allowed
 
     expect(buildMachineChanges(groups, draft)).toEqual({
       candidates: [
@@ -343,7 +337,7 @@ describe('draft and update request', () => {
       'small-fsn1': false,
     });
     expect(target).toMatchObject({ allowed: false, canAllow: true, issue: null });
-    expect(buildMachineChanges(groups, toggleCell(new Map(), target)).candidates).toEqual([
+    expect(buildMachineChanges(groups, flip(new Map(), target)).candidates).toEqual([
       { id: 'cx23-fsn1', status: 'active' },
     ]);
   });
@@ -354,7 +348,7 @@ describe('draft and update request', () => {
       [LEGACY_CATALOG],
       [source()]
     );
-    const draft = toggleCell(new Map(), cell(groups, 'cx23', 'fsn1'));
+    const draft = flip(new Map(), cell(groups, 'cx23', 'fsn1'));
     expect(buildMachineChanges(groups, draft).candidates).toEqual([
       { id: 'dup-a', status: 'deleted' },
     ]);

@@ -17,12 +17,12 @@
  *
  * See: .claude/rules/35-vertical-slice-testing.md, .claude/rules/11-fail-fast-patterns.md
  */
+import { resetProjectDataEnsureMemo } from '@simple-agent-manager/project-data/internal/client/project-data-ensure-memo';
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { Env } from '../../src/env';
 import * as svc from '../../src/services/project-data';
-import { resetProjectDataEnsureMemo } from '../../src/services/project-data-ensure-memo';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 
 const testEnv = env as unknown as Env;

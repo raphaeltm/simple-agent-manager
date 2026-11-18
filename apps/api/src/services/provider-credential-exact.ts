@@ -1,11 +1,13 @@
 import type { Provider } from '@simple-agent-manager/providers';
+import {
+  timestampVersion,
+} from '@simple-agent-manager/scheduler-core';
 import type { CredentialProvider, CredentialSource } from '@simple-agent-manager/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { timestampVersion } from './default-capacity-pool-helpers';
 import { decrypt } from './encryption';
 import { extractCloudProviderToken } from './provider-credential-codecs';
 
@@ -136,6 +138,7 @@ function withCredentialFingerprint(
  * | --- | --- | --- |
  * | `routes/credentials.ts` (user connect/rotate) | `credentials`, cloud-provider | yes, `new Date().toISOString()` |
  * | `routes/projects/credentials.ts` (project rotate) | `credentials`, cloud-provider | yes, `new Date().toISOString()` |
+ * | `services/gcp-credential-store.ts` `replaceUserGcpCredential` (user GCP re-save, in place since idea 01M76T4X) | `credentials`, cloud-provider | yes, `new Date().toISOString()` |
  * | `durable-objects/codex-refresh-lock.ts` | `credentials`, `agent-api-key` | yes, but SQL `datetime('now')` — SECOND precision. Out of scope: the cloud-provider filter excludes it. A future cloud-provider writer using this pattern would silently coarsen the fence to one second. |
  * | `services/default-capacity-source-credentials.ts` | `credentials`, capacity-source type | yes, and also out of scope for the same reason |
  * | `composable-credentials/compute-sync.ts` | `cc_credentials`, compute | never mutates ciphertext in place — rotation inserts a NEW row with a new id, so an old reference's generation is frozen. Stronger than the legacy table. |

@@ -4,6 +4,7 @@ import type { MessageCommentAuthor } from '../../lib/api/comments';
 import type { ActivityEventResponse, ChatMessageResponse } from '../../lib/api/sessions';
 import { bucketForThread } from './comments/comment-inbox';
 import { authorDisplayName, type UiMessageCommentThread } from './comments/comment-utils';
+import { samNoticeForMessage } from './sam-notice/notice-items';
 import type { TimelineEntry } from './timeline-types';
 
 type Severity = Extract<TimelineEntry, { kind: 'system_event' }>['severity'];
@@ -81,7 +82,9 @@ export function buildSessionTimeline(
   // Add user messages
   for (const msg of messages) {
     if (msg.role !== 'user') continue;
-    const text = typeof msg.content === 'string' ? msg.content : '';
+    // A SAM notice is listed by its headline rather than the ID-heavy text the agent got.
+    const text =
+      samNoticeForMessage(msg)?.headline ?? (typeof msg.content === 'string' ? msg.content : '');
     if (!text.trim()) continue;
 
     entries.push({

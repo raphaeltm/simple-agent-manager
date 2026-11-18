@@ -1,5 +1,10 @@
 # Report Issue length env vars cannot raise the limits they document
 
+> **Reconciliation 2026-10-26:** Still open. Pointer corrections: the env declarations are now
+> `apps/api/src/env.ts:1559-1560` and the post-validation reads `report-issue.ts:183-190`;
+> validation still uses the shared constants (`schemas/report.ts:16-17`,
+> `ReportIssueDialog.tsx:128,140`).
+
 ## Problem
 
 `REPORT_ISSUE_TITLE_MAX_LENGTH` (default 200) and `REPORT_ISSUE_DESCRIPTION_MAX_LENGTH`
