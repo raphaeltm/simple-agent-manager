@@ -13,6 +13,7 @@ import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { errors } from '../../middleware/error';
 import { getBlockedTaskIds, isTaskBlocked } from '../../services/task-graph';
+import { taskRecoveryCancellationQuery } from '../../services/task-recovery-cancellation';
 import { triggerExecutionSyncableWhere } from '../../services/trigger-execution-sync';
 import {
   assertWorkspaceCallbackIdentityCurrent,
@@ -283,7 +284,7 @@ export async function setTaskStatus(
 
   let updatedTask: schema.Task | undefined;
   if (options.callbackFence) {
-    const rows = await db
+    const update = db
       .update(schema.tasks)
       .set(nextValues)
       .where(
@@ -297,15 +298,26 @@ export async function setTaskStatus(
         )
       )
       .returning();
+    const rows =
+      toStatus === 'cancelled'
+        ? (await db.batch([update, taskRecoveryCancellationQuery(db, task, now)]))[0]
+        : await update;
     updatedTask = rows[0];
     if (!updatedTask) return rejectChangedTaskCallbackFence(options.callbackFence);
   } else {
     // project_id is defence-in-depth (rule 11): callers already resolved `task` through
     // requireProjectTaskById, but the write predicate must not depend on that alone.
-    await db
+    const update = db
       .update(schema.tasks)
       .set(nextValues)
       .where(and(eq(schema.tasks.id, task.id), eq(schema.tasks.projectId, task.projectId)));
+    if (toStatus === 'cancelled') {
+      // Cancellation revokes this wake attempt in the SAME D1 transaction.
+      // Keep the snapshot available for a later, fresh human follow-up.
+      await db.batch([update, taskRecoveryCancellationQuery(db, task, now)]);
+    } else {
+      await update;
+    }
   }
 
   await appendStatusEvent(

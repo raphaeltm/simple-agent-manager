@@ -33,7 +33,34 @@ instance owns session replacement. Its Login plugin must apply the server-select
 with `unchange: false`, and every subsequent operation checks that session against the lease.
 Credential-key rotation recovery is tracked separately. Changing the root key rejects stale
 resume derivation and old session IDs, but a credential matching the stored lease hash can
-still log in and obtain the new session ID; root-key rotation alone does not revoke that lease. Full gateway, cloud-init and installer packaging follow this foundation.
+still log in and obtain the new session ID; root-key rotation alone does not revoke that lease. Cloud-init and installer packaging follow this foundation.
+
+The self-host entry wraps the shared Worker with `withReverseTunnel(worker, render)` from
+`apps/api/src/selfhost/reverse-tunnel/entry.ts`. That call installs the transport driver, serves
+the gateway endpoints under `/api/self-host/gateway/` before the shared app sees the request,
+and runs the lease backstop after the shared handler on the five-minute sweep cron. The
+backstop logs `cron.reverse_tunnel_lease_sweep` with its release count, or why it skipped, and
+it honours the operational cron switch. The gateway has two endpoints:
+
+- `POST /api/self-host/gateway/frps-plugin`: the frps server plugin. frps authenticates with
+  HTTP basic auth, user `frps`, password `REVERSE_TUNNEL_GATEWAY_SECRET`. A Login allow is
+  answered `{reject:false, unchange:false, content}`, so frps applies the server-selected
+  `run_id`. Every other allow is `{reject:false, unchange:true}`.
+- `GET /api/self-host/gateway/node-websocket`: Caddy `forward_auth` for node WebSockets,
+  authenticated with the `X-SAM-Gateway-Secret` header. The original request runs through the
+  normal ws-* or node log-stream authentication. The answer is either that handler's refusal or
+  `X-SAM-Upstream`/`X-SAM-Upstream-*` headers naming the loopback lease port and the credentials
+  Caddy forwards.
+
+Without a gateway secret of at least 32 characters, both endpoints answer 404; a wrong secret
+gets 401. The Cloudflare Worker never imports this entry.
+
+Control-plane requests, the task liveness probe and WebSocket decisions reach a reverse-tunnel
+node through the active lease of its current incarnation (`resolveNodeAgentRoute` in
+`apps/api/src/services/node-agent-route.ts`). A released or superseded lease is never routed to,
+so revocation applies to control-plane traffic on the next request. frps drops the node's
+control session within one heartbeat timeout, because a refused Ping does not refresh it. A
+reverse-tunnel node is never chosen as a snapshot-upload relay, since it has no public hostname.
 
 The self-host build supplies these bootstrap settings; they are not Cloudflare Worker bindings:
 
@@ -48,10 +75,66 @@ The self-host build supplies these bootstrap settings; they are not Cloudflare W
 Allocation considers the whole bounded port range in one atomic SQL statement, with indexed
 history lookups. Release checks all active leases in one local statement, without network calls
 or pagination. At the outer normal limit of 20,000 active leases, one backstop pass releases all
-eligible leases; the later gateway slice schedules that backstop every five minutes. A newly
+eligible leases; the self-host entry runs that backstop every five minutes. A newly
 freed port still waits for its cooling interval. A full range and a cooling range have distinct
 errors so operators can distinguish capacity exhaustion from a wait for safe reuse.
 
+
+## Speech endpoints on a single-box build
+
+This is a build integration foundation for the single-box runtime. Its entry must call
+`installSpeechEndpoints()` before serving requests and apply the shared database migrations,
+including `0259_speech_synthesis_rate_limits.sql`. The Cloudflare fork and browser-installer
+paths described below use Workers AI instead: they do not install these endpoint settings.
+A runtime without Workers AI or this installed backend cannot offer server speech.
+
+Once your single-box build includes that integration:
+
+1. Choose an OpenAI-compatible speech provider or run a compatible server reachable from SAM's
+   API process. It must support multipart `POST /audio/transcriptions` for voice input and/or
+   JSON `POST /audio/speech` returning real audio bytes for read-aloud. Check that provider's
+   documentation for its supported model IDs and synthesis voice IDs. Speech recordings and
+   read-aloud text leave SAM for the selected provider; configure only an endpoint you trust.
+2. Sign in as a superadmin and open [**Admin → Settings**](/docs/guides/admin-settings/),
+   category **AI models**. Configure either feature independently with the exact names below.
+   Use a base URL such as `https://speech.example.com/v1`; SAM appends the audio route, so do
+   not include `/audio/transcriptions` or `/audio/speech`, credentials, a query, or a fragment.
+
+   | Voice input setting | Read-aloud setting | Value |
+   | --- | --- | --- |
+   | `speech.transcription.baseUrl` | `speech.synthesis.baseUrl` | The provider's API base URL. |
+   | `speech.transcription.model` | `speech.synthesis.model` | A model ID supported by that endpoint. |
+   | — | `speech.synthesis.voice` | A voice ID supported by the synthesis model; required. |
+   | `speech.transcription.apiKey` | `speech.synthesis.apiKey` | Optional Bearer API key; required when the provider requires authentication. |
+   | `speech.transcription.allowPrivateNetwork` | `speech.synthesis.allowPrivateNetwork` | Defaults to `false`; opt in only for a trusted private endpoint. |
+
+3. Enter keys in the secret setting fields, never in the URL, repository, or GitHub Actions
+   logs. SAM stores them encrypted in its credential store and sends them as Bearer tokens.
+   An endpoint that requires no key can leave its key unset. Changing risky endpoint settings
+   requires the normal admin confirmation. HTTPS is required for public hosts. Plain HTTP is
+   allowed only for private hosts with that feature's `allowPrivateNetwork` enabled. Loopback
+   and Docker names resolve from the API process/container, so `localhost` must actually run
+   the provider there. Cloud metadata and link-local destinations remain refused after opt-in.
+4. Keep `TTS_ENCODING=mp3` in the runtime configuration for chunked read-aloud. Other supported
+   encodings work only for a single chunk; SAM refuses multi-chunk container formats before
+   spending provider calls. Raw `pcm` output is unsupported and refused before a provider call,
+   because the browser audio route cannot play it. Single-chunk Ogg Opus output is stored and
+   served as `audio/ogg`. Keep `TTS_ENABLED` enabled for read-aloud.
+5. Refresh the app after saving. Capability queries may remain fresh in the existing browser
+   query cache for up to five minutes. Check `/api/config/platform-capabilities` for
+   `speechToText` and `textToSpeech`, then record a short known sentence in project chat and
+   play read-aloud on a response. Verify the actual transcript and audible result: configured
+   capabilities indicate a complete configuration, not that provider credentials are valid.
+   Failed endpoint calls return a generic unavailable response; check server diagnostics without
+   publishing credentials. Clear that feature's base URL to disable its endpoint backend.
+
+The **AI models** category also exposes `speech.endpointTimeoutMs` (60,000 ms per provider call),
+`speech.transcription.maxResponseBytes` (1 MiB JSON), `speech.synthesis.maxAudioBytes` (8 MiB
+combined audio per read-aloud request), and `speech.synthesis.maxRequestsPerHour` (120 requests
+per user per clock hour). The hourly limit uses an atomic database counter and includes cache
+hits and failed requests; database-counter failures refuse synthesis. A 429 response includes
+`Retry-After` seconds until the next window. Provider billing, models, voices, availability and
+quotas remain the endpoint operator's responsibility.
 
 ## Prerequisites
 
@@ -429,7 +512,7 @@ GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot 
 :::
 
 :::note
-Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SIGNING_PRIVATE_KEY`, `DEPLOY_SIGNING_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`) are automatically generated during deployment. Pulumi persists the source key material, and the deployment workflow derives/copies the runtime Worker secrets. No manual setup required. Generated `RandomId` key encodings (`b64Std`, `b64Url`, `dec`, `hex`) are marked secret, but Pulumi cannot encrypt the special resource ID through secret-output annotations; that ID is the same key bytes encoded as unpadded base64url. Keep the state backend and backups private. Annotation updates preserve existing keys and do not rotate credentials.
+Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SIGNING_PRIVATE_KEY`, `DEPLOY_SIGNING_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`) are automatically generated during deployment. Pulumi persists the source key material, and the deployment workflow derives/copies the runtime Worker secrets (`scripts/deploy/configure-secrets.sh`), registering every value it reads from Pulumi with GitHub's log masking before any other use. No manual setup required. Generated `RandomId` key encodings (`b64Std`, `b64Url`, `dec`, `hex`) are marked secret, but Pulumi cannot encrypt the special resource ID through secret-output annotations; that ID is the same key bytes encoded as unpadded base64url. Keep the state backend and backups private. Annotation updates preserve existing keys and do not rotate credentials.
 :::
 
 :::note[Generated-key metadata preview]
@@ -977,3 +1060,16 @@ statement metadata; restrict access to observability data as you would for produ
 Instant sessions publish applications through a dedicated Cloudflare Container build executor. Cloudflare Containers are already part of SAM's supported setup, so this adds no separate cloud account or manual secret prerequisite. Deployment targets remain VMs. VM sessions retain the node executor by default; keep `deployments.buildExecutor=node` in **Admin → Settings** until a staging VM trial verifies a served release with unchanged source build/save counters. VM publishing through Cloudflare remains unverified. `DEPLOY_BUILDER_INSTANCE_TYPE` and `DEPLOY_BUILDER_MAX_INSTANCES` are deployment-time sizing controls; see the [configuration reference](/docs/reference/configuration/#cloudflare-application-build-executor).
 
 The builder runs one job per ephemeral container and can execute arbitrary Dockerfile steps as root inside DinD with host build networking and unrestricted internet access, just like VM workspaces. Context and image transfers use direct presigned URLs; no outbound proxy or HTTPS interception CA is installed. It receives no user or installation credentials, runtime secret values or workspace token. Its callback token stays in the Go supervisor's memory and authorizes only one job and attempt until that job's deadline or terminal state. Treat arbitrary root code as having that job's authority. The bootstrap listener closes before build steps run, and a durable alarm attempts to destroy the microVM at the hard deadline, independent of source-session liveness. If shutdown cannot be confirmed, cron force-releases the reservation after the stored deadline plus `deployments.builderReservationGraceMs` (five minutes by default), marks unfinished jobs `unknown` and records an alert. This permits deletion and new admissions without claiming physical shutdown; Cloudflare capacity can remain occupied until reclaimed. See the [build trust model](/docs/architecture/security/#application-build-executor) for the enforcing code paths.
+
+
+### Connect a repository sign-in to an email account
+
+A person who signs in by email or Google can open **Settings → GitHub** to connect GitHub or GitLab, if that provider is configured. Connecting adds a sign-in method and repository authorization to the same SAM account. Google cannot be linked to an existing account.
+
+Choose **Connect**, then open the confirmation email in the same browser. Choose **Confirm connection** to continue to the provider's consent screen. The email is a fresh, one-time sign-in check for that account, session and provider; an existing session alone cannot add a new sign-in method. Confirmation expires after five minutes by default. An administrator can change `security.accountLinkProofTtlSeconds` (60–900 seconds) in **Admin → Settings → Email**; new confirmation emails use the updated value and existing proofs keep their original deadline. A revoked session or expired confirmation must start again. Your account email must already be confirmed and the installation must support email delivery. If your provider has not confirmed it, sign in with that provider after confirming your email there, or contact the installation administrator.
+
+The existing OAuth application registration stays unchanged: GitHub uses `https://api.<your-domain>/api/auth/callback/github` and GitLab uses `https://api.<your-domain>/api/auth/callback/gitlab`. Flow context travels in protected OAuth state, never in per-user redirect URIs. GitLab retains its configured host and identity-trust restrictions.
+
+The connected provider may have a different email. Linking and later provider sign-ins preserve the already-verified SAM account email; name and avatar may refresh. SAM sends a linked-provider security notification to the account owner's stored email. Review the connected provider in **Settings → GitHub** and choose **Disconnect** if you do not recognize it. Disconnect requires a confirmed account email and available email sign-in, so removing a provider cannot remove your last sign-in method. An old session may require signing out and signing in again first.
+
+Accounts created by a provider with an unverified email receive a provider-sign-in reminder instead of a sign-in code. Their email-code redemption is refused so BetterAuth cannot remove their provider link while proving a previously unverified email. Existing verified email users can continue using email codes after connecting or disconnecting a provider.

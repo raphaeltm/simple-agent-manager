@@ -1,8 +1,8 @@
+import { cronToHumanReadable } from '@simple-agent-manager/cron';
 import { DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { cronToHumanReadable } from '../../services/cron-utils';
 import { INVALID_PARAMS, jsonRpcError, type JsonRpcResponse, type McpTokenData } from './_helpers';
 
 export interface TriggerDbRow {

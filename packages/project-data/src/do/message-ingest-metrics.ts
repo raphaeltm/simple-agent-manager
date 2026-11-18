@@ -37,6 +37,10 @@ function roleKey(role: string): IngestRole {
 }
 export interface MessageIngestMetrics {
   batches: number;
+  toolUpdatedRows: number;
+  toolSealedSessions: number;
+  toolHydratedRows: number;
+  toolRefused: Partial<Record<MergeRefusal | 'legacy_session_sealed' | 'missing_tool_id', number>>;
   received: RoleCounts;
   accepted: RoleCounts;
   inserted: RoleCounts;
@@ -53,6 +57,10 @@ export interface MessageIngestMetrics {
 export function emptyMessageIngestMetrics(): MessageIngestMetrics {
   return {
     batches: 0,
+    toolUpdatedRows: 0,
+    toolSealedSessions: 0,
+    toolHydratedRows: 0,
+    toolRefused: {},
     received: roles(),
     accepted: roles(),
     inserted: roles(),
@@ -85,6 +93,9 @@ export function addMessageIngestMetrics(
     for (const role of INGEST_ROLES) total[field][role] += batch[field][role];
   for (const field of [
     'batches',
+    'toolUpdatedRows',
+    'toolSealedSessions',
+    'toolHydratedRows',
     'eligible',
     'coalesced',
     'appendStatements',
@@ -92,6 +103,10 @@ export function addMessageIngestMetrics(
     'mergeReadyBatches',
   ] as const)
     total[field] += batch[field];
+  for (const [key, value] of Object.entries(batch.toolRefused)) {
+    const reason = key as MergeRefusal | 'legacy_session_sealed' | 'missing_tool_id';
+    total.toolRefused[reason] = (total.toolRefused[reason] ?? 0) + value;
+  }
   for (const [key, value] of Object.entries(batch.refused)) {
     const reason = key as MergeRefusal;
     total.refused[reason] = (total.refused[reason] ?? 0) + value;

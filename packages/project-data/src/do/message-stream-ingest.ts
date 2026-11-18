@@ -14,11 +14,14 @@ import {
 
 export const DEFAULT_MESSAGE_MERGE_CONFIG = {
   enabled: false,
+  toolUpdatesEnabled: false,
   maxRowBytes: 64 * 1024,
   recentIds: 200,
 } as const;
 export interface MessageMergeConfig {
   enabled: boolean;
+  toolUpdatesEnabled?: boolean;
+  toolLegacyClient?: boolean;
   maxRowBytes: number;
   recentIds: number;
 }
@@ -60,6 +63,10 @@ const IngestState = v.object({
   // outbox. Never evict them to make room for a new source: fall back instead.
   retired: v.optional(v.record(v.string(), v.number()), {}),
   open: v.nullable(OpenRow),
+  toolLegacySeen: v.optional(v.boolean(), false),
+  toolRevision: v.optional(v.number(), 0),
+  toolChangesFloor: v.optional(v.number(), 0),
+  toolChanges: v.optional(v.array(v.object({ id: v.string(), revision: v.number() })), []),
 });
 export type MessageIngestState = v.InferOutput<typeof IngestState>;
 
@@ -98,6 +105,9 @@ export class MessageStreamBatch {
   private readonly updates = new Map<string, ChatMessageAppend>();
   private readonly canSequence: boolean;
   private readonly canMerge: boolean;
+  canMergeTools: boolean;
+  toolMergeRefusal:
+    import('./message-ingest-metrics').MergeRefusal | 'legacy_session_sealed' | null;
   private readonly retiredSource: string | null;
   private latestPosition: MessagePosition | null;
   private messageCount: number;
@@ -144,6 +154,12 @@ export class MessageStreamBatch {
       retired,
       lastCreatedAt: previous?.lastCreatedAt ?? 0,
       open: sameSource ? (previous?.open ?? null) : null,
+      toolLegacySeen:
+        previous?.toolLegacySeen === true ||
+        (config.toolUpdatesEnabled === true && config.toolLegacyClient === true),
+      toolRevision: previous?.toolRevision ?? 0,
+      toolChangesFloor: previous?.toolChangesFloor ?? 0,
+      toolChanges: previous?.toolChanges ?? [],
     };
     const receipt = new Set(candidate.recent);
     for (const id of messageIds) {
@@ -175,6 +191,27 @@ export class MessageStreamBatch {
           ? (retired[this.retiredSource] ?? 0)
           : 0
       : 0;
+    this.canMergeTools =
+      config.toolUpdatesEnabled === true &&
+      this.canSequence &&
+      !this.retiredSource &&
+      receiptFits &&
+      !candidate.toolLegacySeen;
+    this.toolMergeRefusal = !config.toolUpdatesEnabled
+      ? 'setting_disabled'
+      : !sourceKey
+        ? 'missing_incarnation'
+        : !validSequence
+          ? 'invalid_sequence'
+          : this.retiredSource
+            ? 'retired_source'
+            : !receiptFits
+              ? 'receipt_cap'
+              : candidate.toolLegacySeen
+                ? 'legacy_session_sealed'
+                : null;
+    if (metrics && candidate.toolLegacySeen && !previous?.toolLegacySeen)
+      metrics.toolSealedSessions++;
     this.canMerge = config.enabled && this.canSequence && !this.retiredSource && receiptFits;
     if (!config.enabled) refuseMerge(metrics, 'setting_disabled');
     else if (!sourceKey) refuseMerge(metrics, 'missing_incarnation');
@@ -294,6 +331,44 @@ export class MessageStreamBatch {
     return message.id;
   }
 
+  /** Logical tool events reserve positions/counts even when they mutate an older row. */
+  reserveTool(message: StoredBatchMessage): void {
+    this.state.open = null;
+    this.messageCount++;
+    this.state.maxSequence = Math.max(this.state.maxSequence, message.sequence);
+    this.state.lastCreatedAt = Math.max(this.state.lastCreatedAt, message.createdAt);
+  }
+
+  /** A newer append row must never be followed by mutation of an older positioned card. */
+  sealToolFallback(): void {
+    if (this.state.toolRevision === 0 || this.state.toolLegacySeen) return;
+    this.state.toolLegacySeen = true;
+    this.canMergeTools = false;
+    this.toolMergeRefusal = 'legacy_session_sealed';
+    if (this.metrics) this.metrics.toolSealedSessions++;
+  }
+
+  recordToolChange(id: string): void {
+    const revision = ++this.state.toolRevision;
+    this.state.toolChanges = this.state.toolChanges.filter((entry) => entry.id !== id);
+    this.state.toolChanges.push({ id, revision });
+    this.trimToolChanges();
+  }
+
+  private trimToolChanges(): void {
+    // The journal shares the existing session write and byte budget with receipts.
+    // The floor forces a cache reset if a disconnected client missed evicted changes.
+    while (
+      this.state.toolChanges.length > this.config.recentIds ||
+      (this.state.toolChanges.length > 0 &&
+        new TextEncoder().encode(JSON.stringify(this.state)).byteLength > this.config.maxRowBytes)
+    ) {
+      const dropped = this.state.toolChanges.shift();
+      if (dropped)
+        this.state.toolChangesFloor = Math.max(this.state.toolChangesFloor, dropped.revision);
+    }
+  }
+
   private stageContentAppend(id: string, content: string, offset: number): void {
     const existing = this.inserts.get(id);
     if (existing) existing.content += content;
@@ -370,7 +445,7 @@ export class MessageStreamBatch {
     // alongside arbitrarily many newer batches. Keeping only NEW IDs loses it.
     const recent = new Set(this.state.recent);
     for (const id of this.consumed) {
-      if (this.canMerge || recent.has(id)) {
+      if (this.canMerge || this.canMergeTools || recent.has(id)) {
         recent.delete(id);
         recent.add(id);
       }
@@ -378,9 +453,10 @@ export class MessageStreamBatch {
     const retained = Math.max(
       this.config.recentIds,
       this.consumed.length,
-      this.canMerge ? 0 : this.state.recent.length
+      this.canMerge || this.canMergeTools ? 0 : this.state.recent.length
     );
     this.state.recent = [...recent].slice(-retained);
+    this.trimToolChanges();
     return {
       broadcastMessages: [...this.inserts.values()],
       appends: [...this.updates.values()],

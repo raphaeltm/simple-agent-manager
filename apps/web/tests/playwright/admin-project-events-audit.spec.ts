@@ -4,7 +4,13 @@ import type {
   ProjectSummary,
 } from '@simple-agent-manager/shared';
 
-import { assertNoOverflow, makeMockUser, screenshot, setupAuditRoutes } from './audit-helpers';
+import {
+  assertNoOverflow,
+  makeMockUser,
+  screenshot,
+  seedTheme,
+  setupAuditRoutes,
+} from './audit-helpers';
 
 const ADMIN = makeMockUser({
   email: 'eventing-admin@example.com',
@@ -71,6 +77,28 @@ const PROJECTS: ProjectSummary[] = [
 
 function emptyInspector(projectId: string): AdminProjectEventInspectorResponse {
   return {
+    admission: {
+      windowStart: NOW - 60_000,
+      windowEnd: NOW,
+      skipUnsubscribedGitHubCi: true,
+      counts: {
+        'github:check_run.completed': {
+          calls: 1250,
+          created: 3,
+          duplicate: 0,
+          conflict: 0,
+          skipped: 1247,
+        },
+        'github:workflow_run.completed': {
+          calls: 250,
+          created: 0,
+          duplicate: 0,
+          conflict: 0,
+          skipped: 250,
+        },
+      },
+      overflowCalls: 2,
+    },
     generatedAt: NOW,
     limit: 25,
     project: {
@@ -254,6 +282,28 @@ function manyInspector(): AdminProjectEventInspectorResponse {
   });
 
   return {
+    admission: {
+      windowStart: NOW - 60_000,
+      windowEnd: NOW,
+      skipUnsubscribedGitHubCi: true,
+      counts: {
+        'github:check_run.completed': {
+          calls: 1250,
+          created: 3,
+          duplicate: 0,
+          conflict: 0,
+          skipped: 1247,
+        },
+        'github:workflow_run.completed': {
+          calls: 250,
+          created: 0,
+          duplicate: 0,
+          conflict: 0,
+          skipped: 250,
+        },
+      },
+      overflowCalls: 2,
+    },
     generatedAt: NOW,
     limit: 25,
     project: {
@@ -387,9 +437,29 @@ test.describe('Admin project eventing inspector', () => {
       `/admin/project-events?projectId=${EMPTY_PROJECT_ID}`,
       'admin-project-events-empty'
     );
+    const disclosure = page.getByTestId('event-admission-disclosure');
+    await expect(disclosure).toContainText('github:check_run.completed: 1,247 skipped');
+    await disclosure.screenshot({
+      path: `../../.tmp/playwright-screenshots/ci-disclosure-${page.viewportSize()!.width}.png`,
+    });
     const emptyState = page.getByText('No eventing records yet');
     await expect(emptyState).toBeVisible();
     await captureScrolledState(page, emptyState, 'admin-project-events-empty-state');
+  });
+
+  test('CI storage disclosure in light theme', async ({ page }) => {
+    await seedTheme(page, 'light');
+    await visitCaptureAndAssert(
+      page,
+      `/admin/project-events?projectId=${EMPTY_PROJECT_ID}`,
+      'admin-project-events-light'
+    );
+    await expect(page.locator('html')).toHaveAttribute('data-ui-theme', 'sam-light');
+    const disclosure = page.getByTestId('event-admission-disclosure');
+    await expect(disclosure).toContainText('github:check_run.completed: 1,247 skipped');
+    await disclosure.screenshot({
+      path: `../../.tmp/playwright-screenshots/ci-disclosure-light-${page.viewportSize()!.width}.png`,
+    });
   });
 
   test('dense eventing status with long untrusted content', async ({ page }) => {

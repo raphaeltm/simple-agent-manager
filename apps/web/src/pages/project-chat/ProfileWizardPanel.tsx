@@ -1,6 +1,6 @@
 import type { AgentInfo, AgentProfileRuntime, TaskMode } from '@simple-agent-manager/shared';
 import { Check, ChevronRight, MessageSquare, Server, Wrench, Zap } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useId, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import {
@@ -10,6 +10,7 @@ import {
   ResourceRequirementsInput,
   validateResourceState,
 } from '../../components/resource-requirements';
+import type { NoProfilesQuickStart } from './profileWizardHelpers';
 import type { ProfileWizardState, ProfileWizardStep } from './useProfileChoice';
 
 const WIZARD_STEPS: ProfileWizardStep[] = ['agent', 'work-type', 'runtime', 'resources', 'name'];
@@ -100,6 +101,7 @@ export function ProfileWizardPanel({
   onCreateProfileFromWizard: () => Promise<unknown>;
   suggestProfileName: (agentType: string | null, workType: TaskMode | null) => string;
 }>) {
+  const instantNoteId = useId();
   const skipAgentStep = agents.length === 1;
   const canProceed = canAdvanceWizard(profileWizard);
   const selectedWizardAgent =
@@ -224,6 +226,7 @@ export function ProfileWizardPanel({
               icon={<Zap size={20} />}
               title="Instant container"
               description="Starts a chat workspace in a Cloudflare Container without a VM provisioning step."
+              describedBy={profileWizard.instantAvailable === true ? undefined : instantNoteId}
               onClick={() =>
                 onUpdateProfileWizard({
                   runtime: 'cf-container',
@@ -231,7 +234,7 @@ export function ProfileWizardPanel({
                   workType: 'conversation',
                 })
               }
-              disabled={profileWizard.saving}
+              disabled={profileWizard.saving || profileWizard.instantAvailable !== true}
             />
             <WorkTypeCard
               selected={profileWizard.runtime === 'vm'}
@@ -241,6 +244,14 @@ export function ProfileWizardPanel({
               onClick={() => onUpdateProfileWizard({ runtime: 'vm' })}
               disabled={profileWizard.saving}
             />
+            {profileWizard.instantAvailable !== true && (
+              // Outside the disabled card, so the reason keeps full contrast and is read in order.
+              <p id={instantNoteId} className="m-0 text-xs text-fg-muted sm:col-span-2">
+                {profileWizard.instantAvailable === false
+                  ? 'Instant is not available on this installation: it needs Cloudflare Containers.'
+                  : 'Checking whether this installation can run Instant…'}
+              </p>
+            )}
           </div>
         )}
 
@@ -338,23 +349,80 @@ export function NoAgentsNotice({ projectId }: Readonly<{ projectId: string }>) {
   );
 }
 
-export function NoProfilesGate({ onStartWizard }: Readonly<{ onStartWizard: () => void }>) {
+// 56px: primary actions on mobile (apps/web/AGENTS.md, UI Agent Rules).
+const GATE_PRIMARY_BUTTON =
+  'min-h-[56px] rounded-md border-0 bg-accent px-4 py-2 text-sm font-semibold text-white flex items-center justify-center gap-1.5 disabled:opacity-60';
+const GATE_SECONDARY_BUTTON =
+  'min-h-[56px] rounded-md border border-border-default bg-transparent px-4 py-2 text-sm font-medium text-fg-primary flex items-center justify-center gap-1.5 disabled:opacity-60';
+
+export function NoProfilesGate({
+  onStartWizard,
+  quickStart,
+}: Readonly<{ onStartWizard: () => void; quickStart?: NoProfilesQuickStart }>) {
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleQuickStart = async () => {
+    if (!quickStart || creating) return;
+    setCreating(true);
+    setError(null);
+    try {
+      await quickStart.onCreate();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create the profile');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  let description = 'Choose an agent and default runtime settings for this project chat.';
+  if (quickStart) {
+    const runtimeDescription = quickStart.runtimeLabel
+      ? ` that runs ${quickStart.runtimeLabel}`
+      : '';
+    description = `One click creates a profile named "${quickStart.profileName}"${runtimeDescription}. You can change it later.`;
+  }
+
   return (
-    <div className="mb-3 flex flex-col gap-3 rounded-lg border border-accent/20 bg-accent/5 p-3 sm:flex-row sm:items-center">
+    // With a quick start the agent's name sits in the button, so the text gets its own row
+    // instead of sharing one with buttons whose width depends on that name.
+    <div
+      className={`mb-3 flex flex-col gap-3 rounded-lg border border-accent/20 bg-accent/5 p-3 ${quickStart ? '' : 'sm:flex-row sm:items-center'}`}
+    >
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium text-fg-primary">Create a profile to start</div>
-        <div className="mt-1 text-xs text-fg-muted">
-          Choose an agent and default runtime settings for this project chat.
+        <div className="text-sm font-medium text-fg-primary">
+          {quickStart ? 'Ready to chat' : 'Create a profile to start'}
         </div>
+        <div className="mt-1 break-words text-xs text-fg-muted">{description}</div>
+        {error && (
+          <div role="alert" className="mt-1 break-words text-xs text-danger-fg">
+            {error}
+          </div>
+        )}
       </div>
-      <button
-        type="button"
-        onClick={onStartWizard}
-        className="min-h-[44px] rounded-md border-0 bg-accent px-4 py-2 text-sm font-semibold text-white flex items-center justify-center gap-1.5"
-      >
-        Create profile
-        <ChevronRight size={15} />
-      </button>
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap">
+        {quickStart && (
+          <button
+            type="button"
+            onClick={() => void handleQuickStart()}
+            disabled={creating}
+            aria-busy={creating}
+            className={`${GATE_PRIMARY_BUTTON} min-w-0 break-words text-center`}
+          >
+            {creating ? 'Creating profile…' : `Start chatting with ${quickStart.agentName}`}
+            <ChevronRight size={15} aria-hidden />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onStartWizard}
+          disabled={creating}
+          className={quickStart ? GATE_SECONDARY_BUTTON : GATE_PRIMARY_BUTTON}
+        >
+          {quickStart ? 'Customize' : 'Create profile'}
+          {!quickStart && <ChevronRight size={15} aria-hidden />}
+        </button>
+      </div>
     </div>
   );
 }
@@ -395,6 +463,7 @@ function WorkTypeCard({
   description,
   selected,
   disabled,
+  describedBy,
   onClick,
 }: Readonly<{
   icon: ReactNode;
@@ -402,6 +471,7 @@ function WorkTypeCard({
   description: string;
   selected: boolean;
   disabled?: boolean;
+  describedBy?: string;
   onClick: () => void;
 }>) {
   return (
@@ -409,6 +479,7 @@ function WorkTypeCard({
       type="button"
       onClick={onClick}
       disabled={disabled}
+      aria-describedby={describedBy}
       className={`min-h-[132px] rounded-md border p-3 text-left transition-colors disabled:opacity-50 ${
         selected
           ? 'border-accent bg-accent/10'

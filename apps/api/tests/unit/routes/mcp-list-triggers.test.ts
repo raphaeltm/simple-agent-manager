@@ -1,3 +1,4 @@
+import { cronToHumanReadable } from '@simple-agent-manager/cron';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -5,7 +6,6 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
 import { handleListTriggers } from '../../../src/routes/mcp/trigger-list-tool';
-import { cronToHumanReadable } from '../../../src/services/cron-utils';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 interface TriggerFixture {

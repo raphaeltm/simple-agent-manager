@@ -34,6 +34,22 @@ export const OVERVIEW_EVENT_REFRESH_MS = positiveInt(
   DEFAULT_OVERVIEW_EVENT_REFRESH_MS
 );
 
+/**
+ * A stale brief is being caught up in the background after the read that saw it: refetch a few
+ * times, this far apart, to pick up the new text without waiting for the backstop poll.
+ */
+export const DEFAULT_OVERVIEW_BRIEF_REFRESH_MS = 8_000;
+export const OVERVIEW_BRIEF_REFRESH_MS = positiveInt(
+  import.meta.env.VITE_OVERVIEW_BRIEF_REFRESH_MS,
+  DEFAULT_OVERVIEW_BRIEF_REFRESH_MS
+);
+/** Refetches per stale episode; after these the 60s backstop poll carries on alone. */
+export const DEFAULT_OVERVIEW_BRIEF_REFRESH_MAX = 3;
+export const OVERVIEW_BRIEF_REFRESH_MAX = positiveInt(
+  import.meta.env.VITE_OVERVIEW_BRIEF_REFRESH_MAX,
+  DEFAULT_OVERVIEW_BRIEF_REFRESH_MAX
+);
+
 export interface PendingStart {
   chat: OverviewRunningChat;
   addedAt: number;
@@ -99,6 +115,25 @@ export function useProjectOverview(projectId: string) {
   );
 
   const data = query.data;
+
+  // Brief catch-up: while the read says the brief is stale or being remade, refetch a bounded
+  // number of times. The count resets once a read shows a current brief (or none).
+  const briefRefreshes = useRef(0);
+  const briefBehind = Boolean(data?.brief && (data.brief.stale || data.brief.refreshing));
+  useEffect(() => {
+    if (!briefBehind) {
+      briefRefreshes.current = 0;
+      return;
+    }
+    if (briefRefreshes.current >= OVERVIEW_BRIEF_REFRESH_MAX) return;
+    const timer = setTimeout(() => {
+      if (document.hidden) return;
+      briefRefreshes.current += 1;
+      refresh();
+    }, OVERVIEW_BRIEF_REFRESH_MS);
+    return () => clearTimeout(timer);
+  }, [briefBehind, data, refresh]);
+
   const running = useMemo(() => mergeRunning(data, pending, Date.now()), [data, pending]);
 
   // Drop pending rows the read now includes, or that outlived their TTL (on a timer too, so a
@@ -133,6 +168,11 @@ export function useProjectOverview(projectId: string) {
     running,
     isPending: query.isPending,
     isError: query.isError && !data,
+    /**
+     * The latest read failed, even if an earlier one's data is still shown. Sections keep showing
+     * cached data; the generated brief does not, because it may no longer be true.
+     */
+    readFailed: query.isError,
     addPendingStart,
     refresh,
   };

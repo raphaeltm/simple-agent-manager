@@ -228,73 +228,73 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/raw', async (c) => {
   });
 });
 
+// Multipart is a CORS-simple request, so a same-site workspace page could post it with the
+// session cookie and no preflight. See lib/browser-write-origin.ts.
+const uploadOrigin = requireTrustedWriteOrigin('workspace file upload');
+
 /** POST /:id/sessions/:sessionId/files/upload — Proxy file upload to workspace */
-fileProxyRoutes.post(
-  '/:id/sessions/:sessionId/files/upload',
-  requireTrustedWriteOrigin('workspace file upload'),
-  async (c) => {
-    const userId = getUserId(c);
-    const projectId = c.req.param('id');
-    const sessionId = c.req.param('sessionId');
+fileProxyRoutes.post('/:id/sessions/:sessionId/files/upload', uploadOrigin, async (c) => {
+  const userId = getUserId(c);
+  const projectId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
 
-    // Writing into the workspace stays with its owner: no teammate path here.
-    const { workspaceUrl, workspaceId, nodeId, token } = await resolveSessionWorkspace(
-      c.env,
-      projectId,
-      sessionId,
-      userId
-    );
+  // Writing into the workspace stays with its owner: no teammate path here.
+  const { workspaceUrl, workspaceId, nodeId, token } = await resolveSessionWorkspace(
+    c.env,
+    projectId,
+    sessionId,
+    userId
+  );
 
-    const timeoutMs = parseInt(
-      c.env.FILE_UPLOAD_TIMEOUT_MS ?? String(DEFAULT_FILE_UPLOAD_TIMEOUT_MS)
-    );
-    const maxBatchBytes = parseInt(
-      c.env.FILE_UPLOAD_BATCH_MAX_BYTES ?? String(DEFAULT_FILE_UPLOAD_BATCH_MAX_BYTES)
-    );
+  const timeoutMs = parseInt(
+    c.env.FILE_UPLOAD_TIMEOUT_MS ?? String(DEFAULT_FILE_UPLOAD_TIMEOUT_MS)
+  );
+  const maxBatchBytes = parseInt(
+    c.env.FILE_UPLOAD_BATCH_MAX_BYTES ?? String(DEFAULT_FILE_UPLOAD_BATCH_MAX_BYTES)
+  );
 
-    // Pre-check Content-Length if present
-    const contentLength = parseInt(c.req.header('Content-Length') ?? '0');
-    if (contentLength > maxBatchBytes + 1024 * 1024) {
-      throw errors.badRequest(`Upload too large (${contentLength} bytes)`);
-    }
-
-    const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/upload?token=${encodeURIComponent(token)}`;
-
-    const res = await fetchNodeAgent(
-      nodeId,
-      c.env,
-      url,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': c.req.header('Content-Type') ?? 'multipart/form-data',
-        },
-        body: c.req.raw.body
-          ? createSizeLimitedStream(c.req.raw.body, maxBatchBytes + 1024 * 1024)
-          : undefined,
-        // @ts-expect-error duplex is required for streaming request bodies in fetch
-        duplex: 'half',
-      },
-      timeoutMs
-    );
-
-    if (!res.ok) {
-      const text = await res.text();
-      log.error('file_proxy.upload_error', {
-        workspaceId,
-        status: res.status,
-        body: text,
-      });
-      const clientStatus = res.status === 413 ? 413 : res.status >= 500 ? 502 : 400;
-      if (clientStatus === 502) throw errors.internal('Workspace agent unavailable');
-      throw errors.badRequest(clientStatus === 413 ? 'File too large' : 'Upload failed');
-    }
-
-    const headers = new Headers();
-    headers.set('Content-Type', 'application/json');
-    return new Response(res.body, { status: res.status, headers });
+  // Pre-check Content-Length if present
+  const contentLength = parseInt(c.req.header('Content-Length') ?? '0');
+  if (contentLength > maxBatchBytes + 1024 * 1024) {
+    throw errors.badRequest(`Upload too large (${contentLength} bytes)`);
   }
-);
+
+  const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/upload?token=${encodeURIComponent(token)}`;
+
+  const res = await fetchNodeAgent(
+    nodeId,
+    c.env,
+    url,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': c.req.header('Content-Type') ?? 'multipart/form-data',
+      },
+      body: c.req.raw.body
+        ? createSizeLimitedStream(c.req.raw.body, maxBatchBytes + 1024 * 1024)
+        : undefined,
+      // @ts-expect-error duplex is required for streaming request bodies in fetch
+      duplex: 'half',
+    },
+    timeoutMs
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    log.error('file_proxy.upload_error', {
+      workspaceId,
+      status: res.status,
+      body: text,
+    });
+    const clientStatus = res.status === 413 ? 413 : res.status >= 500 ? 502 : 400;
+    if (clientStatus === 502) throw errors.internal('Workspace agent unavailable');
+    throw errors.badRequest(clientStatus === 413 ? 'File too large' : 'Upload failed');
+  }
+
+  const headers = new Headers();
+  headers.set('Content-Type', 'application/json');
+  return new Response(res.body, { status: res.status, headers });
+});
 
 /** GET /:id/sessions/:sessionId/files/download — Proxy file download from workspace */
 fileProxyRoutes.get('/:id/sessions/:sessionId/files/download', async (c) => {

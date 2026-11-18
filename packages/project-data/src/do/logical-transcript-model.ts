@@ -110,6 +110,13 @@ function rowTime(row: Row): number {
   return typeof row.createdAt === 'number' ? row.createdAt : 0;
 }
 
+function rowUpdatedAt(row: Row): number {
+  const updated = toolMetadata(row)._samToolUpdatedAt;
+  return typeof updated === 'number' && Number.isFinite(updated)
+    ? Math.max(updated, rowTime(row))
+    : rowTime(row);
+}
+
 function rowId(row: Row): string {
   return typeof row.id === 'string' ? row.id : '';
 }
@@ -190,7 +197,7 @@ export function addRunToActivity(
   activity.firstRowId = rowId(oldest);
   activity.start = rowPosition(oldest);
   activity.createdAt = rowTime(oldest);
-  if (!activity.updatedAt) activity.updatedAt = rowTime(newest);
+  activity.updatedAt = Math.max(activity.updatedAt, rowTime(newest), ...run.rows.map(rowUpdatedAt));
   if (run.role === 'thinking') {
     activity.thinkingMessages += 1;
     return;
@@ -207,7 +214,15 @@ export function addRunToActivity(
   for (const row of run.rows) {
     const meta = toolMetadata(row);
     const callId = typeof meta.toolCallId === 'string' && meta.toolCallId ? meta.toolCallId : null;
-    const key = callId ?? `row:${rowId(row)}`;
+    const key =
+      typeof meta._samToolCanonicalId === 'string'
+        ? meta._samToolCanonicalId
+        : (callId ?? `row:${rowId(row)}`);
+    if (callId && key !== callId && calls.has(callId)) {
+      const legacy = calls.get(callId);
+      if (legacy) calls.set(key, legacy);
+      calls.delete(callId);
+    }
     const state = calls.get(key) ?? { status: null, kind: null };
     state.status ??= boundedText(meta.status);
     state.kind ??= boundedText(meta.kind);
@@ -286,7 +301,7 @@ export function assembleMessage(
     nextOffset: end < length ? end : null,
     rowCount: run.rows.length,
     createdAt: rowTime(first),
-    updatedAt: rowTime(last),
+    updatedAt: Math.max(rowTime(last), ...run.rows.map(rowUpdatedAt)),
     complete,
     continuesInNewerPage: false,
   };

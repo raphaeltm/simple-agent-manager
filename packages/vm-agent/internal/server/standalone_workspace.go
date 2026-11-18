@@ -297,6 +297,7 @@ func standaloneCloneSpecForURL(repositoryURL string, tokenResponse *gitTokenResp
 	}
 	if tokenResponse != nil {
 		spec.Token = strings.TrimSpace(tokenResponse.Token)
+		spec.Username = strings.TrimSpace(tokenResponse.Username)
 	}
 
 	if parsed.User != nil {

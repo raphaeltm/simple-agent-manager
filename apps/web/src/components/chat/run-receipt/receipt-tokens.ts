@@ -23,7 +23,7 @@ export function totalTokens(counts: RunTokenCounts): number {
   return counts.input + counts.output + counts.cacheRead + counts.cacheWrite;
 }
 
-function formatUsd(usd: number): string {
+export function formatUsd(usd: number): string {
   // Sub-cent spend reads as "<$0.01", never "$0.00", so a tiny run is not shown as free.
   return usd > 0 && usd < 0.01 ? '<$0.01' : USD.format(usd);
 }

@@ -35,6 +35,7 @@ function fixture() {
   const env = { KV: kv } as AiProxyEnv;
   return { rows, kv, env };
 }
+const NO_CEILING = { monthlyCostCeilingUsd: async () => 0 };
 afterEach(() => vi.useRealTimers());
 
 describe('direct-upstream metering, without forced include_usage', () => {
@@ -62,9 +63,14 @@ describe('direct-upstream metering, without forced include_usage', () => {
     );
     vi.setSystemTime(new Date('2026-10-31T23:59:00Z'));
     expect(await getLocalMonthlyAiCostUsd(kv, 'user', env)).toBe(firstCost);
-    expect(await checkMonthlyCostCap(kv, 'user', env)).toMatchObject({ allowed: false });
+    expect(await checkMonthlyCostCap(kv, 'user', env, NO_CEILING)).toMatchObject({
+      allowed: false,
+    });
     vi.setSystemTime(new Date('2026-11-01T00:00:00Z'));
-    expect(await checkMonthlyCostCap(kv, 'user', env)).toMatchObject({ allowed: true, costUsd: 0 });
+    expect(await checkMonthlyCostCap(kv, 'user', env, NO_CEILING)).toMatchObject({
+      allowed: true,
+      costUsd: 0,
+    });
   });
 
   it('meters a platform response into the same local store that the monthly cap reads', async () => {
@@ -78,7 +84,7 @@ describe('direct-upstream metering, without forced include_usage', () => {
       { usage: { prompt_tokens: 100, completion_tokens: 100 } },
       { env, userId: 'user', format: 'openai', costModelId: model.id, onMeasuredUsage: measured }
     );
-    expect(await checkMonthlyCostCap(kv, 'user', env)).toMatchObject({
+    expect(await checkMonthlyCostCap(kv, 'user', env, NO_CEILING)).toMatchObject({
       allowed: false,
       capUsd: 0.000001,
     });
@@ -148,5 +154,111 @@ describe('direct-upstream metering, without forced include_usage', () => {
     expect(
       isMonthlyCostCapAvailable({ ...env, CF_ACCOUNT_ID: 'account', CF_API_TOKEN: 'token' })
     ).toBe(true);
+  });
+});
+
+describe('legacy OpenAI function call estimation', () => {
+  it.each([false, true])('counts function_call output without usage, streaming=%s', async (streaming) => {
+    const { kv, env } = fixture();
+    const model = PLATFORM_AI_MODELS.find(
+      (m) => m.provider === 'openai' && m.costPer1kOutputTokens > 0
+    )!;
+    const measured = vi.fn();
+    const functionCall = { name: 'lookup', arguments: '{"query":"twelve bytes"}' };
+    const options = {
+      env,
+      userId: 'user',
+      format: 'openai' as const,
+      costModelId: model.id,
+      estimateMissingUsage: true,
+      onMeasuredUsage: measured,
+    };
+    if (streaming) {
+      const pending: Promise<unknown>[] = [];
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          for (const chunk of [{ name: functionCall.name }, { arguments: functionCall.arguments }]) {
+            c.enqueue(new TextEncoder().encode(
+              `data: ${JSON.stringify({ choices: [{ delta: { function_call: chunk } }] })}\n\n`
+            ));
+          }
+          c.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+          c.close();
+        },
+      });
+      accountTokenUsageFromStream(stream, {
+        ...options,
+        executionCtx: { waitUntil(p) { pending.push(p); } },
+      });
+      await Promise.all(pending);
+    } else {
+      await accountTokenUsageFromJson(
+        { choices: [{ message: { content: null, function_call: functionCall } }] }, options
+      );
+    }
+    expect(await getLocalMonthlyAiCostUsd(kv, 'user', env)).toBeGreaterThan(0);
+    expect(measured).not.toHaveBeenCalled();
+  });
+});
+
+describe('Anthropic missing usage estimation', () => {
+  const text = 'twelve bytes';
+  it.each([
+    { type: 'text', text },
+    { type: 'thinking', thinking: text },
+    { type: 'tool_use', input: { key: text } },
+  ])('prices JSON $type output without measured usage', async (block) => {
+    const { kv, env } = fixture();
+    const model = PLATFORM_AI_MODELS.find((m) => m.provider === 'anthropic')!;
+    const measured = vi.fn();
+    await accountTokenUsageFromJson(
+      { content: [block] },
+      {
+        env,
+        userId: 'user',
+        format: 'anthropic',
+        costModelId: model.id,
+        estimateMissingUsage: true,
+        onMeasuredUsage: measured,
+      }
+    );
+    expect(await getLocalMonthlyAiCostUsd(kv, 'user', env)).toBeGreaterThan(0);
+    expect(measured).not.toHaveBeenCalled();
+  });
+  it.each([
+    { type: 'text_delta', text },
+    { type: 'thinking_delta', thinking: text },
+    { type: 'input_json_delta', partial_json: text },
+  ])('prices streaming $type output without measured usage', async (delta) => {
+    const { kv, env } = fixture();
+    const pending: Promise<unknown>[] = [];
+    const measured = vi.fn();
+    const model = PLATFORM_AI_MODELS.find((m) => m.provider === 'anthropic')!;
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(
+          new TextEncoder().encode(
+            `data: ${JSON.stringify({ type: 'content_block_delta', delta })}\n\n`
+          )
+        );
+        c.close();
+      },
+    });
+    accountTokenUsageFromStream(stream, {
+      env,
+      userId: 'user',
+      format: 'anthropic',
+      costModelId: model.id,
+      estimateMissingUsage: true,
+      onMeasuredUsage: measured,
+      executionCtx: {
+        waitUntil(p) {
+          pending.push(p);
+        },
+      },
+    });
+    await Promise.all(pending);
+    expect(await getLocalMonthlyAiCostUsd(kv, 'user', env)).toBeGreaterThan(0);
+    expect(measured).not.toHaveBeenCalled();
   });
 });

@@ -24,8 +24,8 @@
  * given DO, the row survives DO eviction, hibernation and isolate recycling.
  *
  * This memo therefore records the durable fact "this DO has been ensured at least
- * once" so that only the first operation per (isolate, DO) pays the extra RPC
- * roundtrip instead of every single one.
+ * once" so that operations after a completed ensure avoid the extra RPC.
+ * Overlapping cold operations each keep their own request-scoped ensure RPC.
  *
  * See: tasks/archive/2026-08-18-do-roundtrip-ensure-project-id-and-chat-agent-state.md
  */
@@ -49,9 +49,6 @@ export interface ProjectDataEnsureMemoEnv {
  */
 const ensured = new Map<string, true>();
 
-/** In-flight ensure calls, so concurrent first-callers issue exactly one RPC. */
-const inFlight = new Map<string, Promise<void>>();
-
 export function getProjectDataEnsureMemoMaxEntries(env: ProjectDataEnsureMemoEnv): number {
   return parsePositiveInt(
     env.PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES,
@@ -60,10 +57,12 @@ export function getProjectDataEnsureMemoMaxEntries(env: ProjectDataEnsureMemoEnv
 }
 
 /**
- * Run `ensure` exactly once per DO id for the lifetime of this isolate.
+ * Remember successful ensures per DO id for the lifetime of this isolate.
  *
- * Concurrent callers for the same id share a single in-flight promise. A
- * rejected ensure is not memoized, so the next caller retries it.
+ * Cache only completed durable facts. A pending RPC belongs to its originating
+ * Workers request: if that request ends, sharing its promise can strand another
+ * request permanently. Concurrent cold callers each issue the idempotent ensure;
+ * warm calls still avoid the extra RPC. A failed ensure is never memoized.
  */
 export async function ensureOncePerIsolate(
   env: ProjectDataEnsureMemoEnv,
@@ -78,18 +77,8 @@ export async function ensureOncePerIsolate(
     return;
   }
 
-  const pending = inFlight.get(doId);
-  if (pending) return pending;
-
-  const run = (async () => {
-    await ensure();
-    remember(env, doId);
-  })().finally(() => {
-    inFlight.delete(doId);
-  });
-
-  inFlight.set(doId, run);
-  return run;
+  await ensure();
+  remember(env, doId);
 }
 
 function remember(env: ProjectDataEnsureMemoEnv, doId: string): void {
@@ -119,7 +108,6 @@ export function forgetEnsuredProjectData(doId: string): void {
 /** Test-only: reset isolate-local memo state between cases. */
 export function resetProjectDataEnsureMemo(): void {
   ensured.clear();
-  inFlight.clear();
 }
 
 /** Test-only: current memo size. */

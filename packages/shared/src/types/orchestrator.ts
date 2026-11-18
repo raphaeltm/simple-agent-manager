@@ -13,7 +13,7 @@ import type { SchedulerState } from './mission';
 /** State of a mission as tracked by the orchestrator */
 export interface OrchestratorMissionEntry {
   missionId: string;
-  status: 'active' | 'paused' | 'completing';
+  status: 'active' | 'paused' | 'completing' | 'cancelling' | 'cancel_blocked';
   lastCheckedAt: number;
   lastDispatchAt: number | null;
   registeredAt: number;
