@@ -6,7 +6,7 @@
  * Linux. A TLS terminator in front of a real frps stands in for the box's Caddy.
  *
  * Also records what frps 0.72.0 actually sends the server plugin, so the NewWorkConn
- * authorization in apps/api/src/services/node-reverse-tunnel-authz.ts rests on observed fields.
+ * authorization in apps/api/src/selfhost/reverse-tunnel/authz.ts rests on observed fields.
  */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer, type Server } from 'node:http';

@@ -2313,6 +2313,10 @@ func renderGitCredentialHelperScript(cfg *config.Config, exchangeToken string) (
 	// Hostnames are case-insensitive; normalize once here and lowercase the
 	// requested host in the shell so the comparison cannot fail on casing.
 	allowedGitLabHost := strings.ToLower(strings.TrimSpace(cfg.RepositoryHost))
+	// Hosted Artifacts authority checks have one owner: the authenticated local
+	// exchange validates both the workspace binding and the resolved credential.
+	// Forward the raw host rather than duplicating Go's port parser in POSIX sh.
+	delegateHostedArtifacts := isBoundHostedArtifactsHost(cfg, cfg.RepositoryHost)
 
 	// When TLS is enabled on the VM agent, the credential helper must use https://
 	// with -k (skip cert verification) because the TLS cert is issued for the
@@ -2337,14 +2341,20 @@ fi
 
 requested_host=""
 requested_path=""
+requested_protocol=""
 while IFS= read -r line; do
   [ -z "$line" ] && break
   case "$line" in
     host=*) requested_host="${line#host=}" ;;
     path=*) requested_path="${line#path=}" ;;
+    protocol=*) requested_protocol="${line#protocol=}" ;;
   esac
 done
 
+delegate_host_filter=%t
+if [ "$delegate_host_filter" = true ]; then
+  [ "$requested_protocol" = https ] || exit 0
+else
 case "$requested_host" in
   ""|github.com|api.github.com|artifacts.cloudflare.net|*.artifacts.cloudflare.net) ;;
   *)
@@ -2355,12 +2365,15 @@ case "$requested_host" in
     fi
     ;;
 esac
+fi
 
 credential_query="%s"
 exchange_token=%s
 url_encode_query_value() {
   printf '%%s' "$1" | sed 's/%%/%%25/g; s/&/%%26/g; s/=/%%3D/g; s/?/%%3F/g; s/#/%%23/g; s/+/%%2B/g; s/ /%%20/g'
 }
+encoded_protocol=$(url_encode_query_value "$requested_protocol")
+credential_query="${credential_query}&protocol=${encoded_protocol}"
 if [ -n "$requested_host" ]; then
   encoded_host=$(url_encode_query_value "$requested_host")
   if [ -n "$credential_query" ]; then
@@ -2398,7 +2411,7 @@ for target in host.docker.internal "$gateway" 172.17.0.1; do
 done
 
 exit 0
-`, shellSingleQuote(allowedGitLabHost), query, shellSingleQuote(exchangeToken), credentialTimeoutSeconds, curlTLSFlag, scheme, cfg.Port), nil
+`, delegateHostedArtifacts, shellSingleQuote(allowedGitLabHost), query, shellSingleQuote(exchangeToken), credentialTimeoutSeconds, curlTLSFlag, scheme, cfg.Port), nil
 }
 
 // sanitizeWorkspaceID strips characters that are not alphanumeric or hyphens
@@ -3425,18 +3438,6 @@ func needsCredentialHelper(repo string) bool {
 	return gitrepo.IsKnownGitHost(host)
 }
 
-// isBoundHostedArtifactsHost reports whether host is the repository host the
-// control plane bound to an artifacts-provider workspace. Cloudflare Artifacts
-// hosts are recognized by name; a self-hosted SAM install serves its own
-// repositories at api.<domain>, which the control plane passes as RepositoryHost.
-func isBoundHostedArtifactsHost(cfg *config.Config, host string) bool {
-	if cfg == nil || !strings.EqualFold(strings.TrimSpace(cfg.RepoProvider), "artifacts") {
-		return false
-	}
-	bound := strings.TrimSpace(cfg.RepositoryHost)
-	return bound != "" && strings.EqualFold(bound, strings.TrimSpace(host))
-}
-
 func needsCredentialHelperForConfig(cfg *config.Config) bool {
 	if cfg == nil {
 		return false
@@ -3444,7 +3445,7 @@ func needsCredentialHelperForConfig(cfg *config.Config) bool {
 	if strings.TrimSpace(cfg.RepositoryHost) != "" && strings.EqualFold(strings.TrimSpace(cfg.RepoProvider), "gitlab") {
 		return true
 	}
-	if strings.TrimSpace(cfg.RepositoryHost) != "" && strings.EqualFold(strings.TrimSpace(cfg.RepoProvider), "artifacts") {
+	if isBoundHostedArtifactsHost(cfg, cfg.RepositoryHost) {
 		return true
 	}
 	return needsCredentialHelper(firstNonEmptyString(cfg.CloneURL, cfg.Repository))

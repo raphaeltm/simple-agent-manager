@@ -1,4 +1,5 @@
-import type { TaskLifecyclePort } from '../durable-objects/project-data/ports';
+import type { TaskLifecyclePort } from '@simple-agent-manager/project-data';
+
 import { submitReservedTask } from '../services/reserved-task-submission';
 import { WAKEABLE_TASK_STATUSES } from '../services/task-status';
 import { transitionTaskToTerminal } from '../services/task-terminal-transition';

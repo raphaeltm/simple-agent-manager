@@ -79,6 +79,9 @@ beforeEach(async () => {
     DATABASE: createSqliteD1(sqlite),
     ENCRYPTION_KEY,
     BASE_DOMAIN: 'sammy.party',
+    // These custom endpoint account-pin controls exercise the available proxy path.
+    CF_ACCOUNT_ID: 'account-test',
+    AI_GATEWAY_ID: 'gateway-test',
     KV: { get: vi.fn(async () => null), put: vi.fn(async () => {}) },
     // Cloudflare: an addressable AI Gateway keeps the proxy on with no admin setting read.
     AI_GATEWAY_ID: 'sam',

@@ -1,15 +1,13 @@
 /**
- * Admin Cost Monitoring — aggregates LLM costs from AI Gateway and compute
- * costs from node usage into a unified cost dashboard.
+ * Admin Cost Monitoring — aggregates LLM costs from AI Gateway. Compute spend lives on
+ * Admin Health & cost (`GET /api/admin/health-cost`), which prices each machine at the provider
+ * price recorded on it rather than a flat vCPU-hour estimate.
  *
  * Mounts at /api/admin/costs (registered in index.ts).
  */
-import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
-import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { log } from '../lib/logger';
 import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import {
   type GatewayPeriod,
@@ -17,7 +15,6 @@ import {
   getPeriodLabel,
   iterateGatewayLogs,
 } from '../services/ai-gateway-logs';
-import { getAllUsersNodeUsageSummary } from '../services/node-usage';
 import { resolveAiGatewayId } from '../services/platform-capabilities';
 
 // ---------------------------------------------------------------------------
@@ -26,9 +23,6 @@ import { resolveAiGatewayId } from '../services/platform-capabilities';
 
 const VALID_PERIODS = ['current-month', '30d', '90d'] as const;
 type AdminCostPeriod = (typeof VALID_PERIODS)[number];
-
-/** Default estimated cost per vCPU-hour in USD. Override via COMPUTE_VCPU_HOUR_COST_USD. */
-const DEFAULT_COMPUTE_VCPU_HOUR_COST_USD = 0.003;
 
 function parsePeriod(raw: string | undefined): AdminCostPeriod {
   return (VALID_PERIODS as readonly string[]).includes(raw ?? '')
@@ -87,14 +81,6 @@ interface CostProjection {
   daysInMonth: number;
 }
 
-interface ComputeCostSummary {
-  totalNodeHours: number;
-  totalVcpuHours: number;
-  estimatedCostUsd: number;
-  activeNodes: number;
-  vcpuHourCostUsd: number;
-}
-
 export interface CostSummaryResponse {
   llm: {
     totalCostUsd: number;
@@ -108,7 +94,6 @@ export interface CostSummaryResponse {
     byUser: CostByUser[];
   };
   projection: CostProjection;
-  compute: ComputeCostSummary;
   period: string;
   periodLabel: string;
 }
@@ -145,12 +130,6 @@ adminCostRoutes.get('/', async (c) => {
   let cachedRequests = 0;
   let errorRequests = 0;
 
-  // Settle immediately so a compute failure cannot become an unhandled rejection
-  // while the independent gateway walk is in progress.
-  const nodeUsagePromise = getAllUsersNodeUsageSummary(drizzle(c.env.DATABASE, { schema })).then(
-    (value) => ({ value }),
-    (error: unknown) => ({ error })
-  );
   const gatewayId = resolveAiGatewayId(c.env);
   if (gatewayId) {
     await iterateGatewayLogs(c.env, gatewayId, periodBounds.startDate, (entry) => {
@@ -226,38 +205,6 @@ adminCostRoutes.get('/', async (c) => {
     daysInMonth: projectionInfo.daysInMonth,
   };
 
-  // --- Compute Costs ---
-  const vcpuHourCost =
-    parseFloat(c.env.COMPUTE_VCPU_HOUR_COST_USD || '') || DEFAULT_COMPUTE_VCPU_HOUR_COST_USD;
-
-  let compute: ComputeCostSummary = {
-    totalNodeHours: 0,
-    totalVcpuHours: 0,
-    estimatedCostUsd: 0,
-    activeNodes: 0,
-    vcpuHourCostUsd: vcpuHourCost,
-  };
-
-  try {
-    const nodeResult = await nodeUsagePromise;
-    if ('error' in nodeResult) throw nodeResult.error;
-    const nodeUsage = nodeResult.value;
-    const totalVcpuHours = nodeUsage.users.reduce((sum, u) => sum + u.totalVcpuHours, 0);
-    const totalNodeHours = nodeUsage.users.reduce((sum, u) => sum + u.totalNodeHours, 0);
-    const activeNodes = nodeUsage.users.reduce((sum, u) => sum + u.activeNodes, 0);
-    compute = {
-      totalNodeHours,
-      totalVcpuHours,
-      estimatedCostUsd: totalVcpuHours * vcpuHourCost,
-      activeNodes,
-      vcpuHourCostUsd: vcpuHourCost,
-    };
-  } catch (err) {
-    log.error('admin_costs.compute_error', {
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-
   const summary: CostSummaryResponse = {
     llm: {
       totalCostUsd,
@@ -271,7 +218,6 @@ adminCostRoutes.get('/', async (c) => {
       byUser: Array.from(userMap.values()).sort((a, b) => b.costUsd - a.costUsd),
     },
     projection,
-    compute,
     period,
     periodLabel: getPeriodLabel(period as GatewayPeriod),
   };

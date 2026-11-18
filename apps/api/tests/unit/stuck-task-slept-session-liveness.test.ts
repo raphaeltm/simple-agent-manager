@@ -194,7 +194,6 @@ beforeEach(() => {
     schema.nodes,
     schema.sessionSnapshots,
     schema.tasks,
-    schema.nodeReverseTunnelLeases,
   ]);
   env = { DATABASE: createSqliteD1(sqlite), BASE_DOMAIN: 'example.test' } as Env;
   vi.clearAllMocks();
@@ -625,71 +624,26 @@ describe('ProjectData idle-cleanup liveness for a stale VM node heartbeat', () =
   });
 
   it('uses the successful node health probe, then proves the task live from local ACP state', async () => {
-    const verdict = await getLocalTaskRuntimeLiveness(sqlWithLiveAcpSession(), doEnv(), doTask);
+    // Route resolution consumes the shared probe budget. This case models no elapsed
+    // time, so the exact fetch timeout must not depend on runner scheduling jitter.
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    try {
+      const verdict = await getLocalTaskRuntimeLiveness(sqlWithLiveAcpSession(), doEnv(), doTask);
 
-    expect(fetchWithTimeoutMock).toHaveBeenCalledWith(
-      'https://01m064tg56ecjw1d127h32brvj.vm.example.test:8443/health',
-      { method: 'GET', redirect: 'manual' },
-      5_000
-    );
-    expect(verdict).toMatchObject({
-      live: true,
-      conclusive: true,
-      reason: 'task_agent_host_running',
-      activeAcpSessionId: 'acp-live',
-    });
-  });
-
-  /** The node as reverse-tunnel provisioning leaves it: transport, incarnation, active lease. */
-  function makeReverseTunnelNode(port: number): void {
-    sqlite
-      .prepare(
-        `UPDATE nodes SET runtime = 'vm', node_class = 'managed', transport = 'reverse-tunnel',
-           runtime_incarnation_id = 'inc-live' WHERE id = ?`
-      )
-      .run(NODE_ID);
-    sqlite
-      .prepare(
-        `INSERT INTO node_reverse_tunnel_leases (id, node_id, user_id, runtime_incarnation_id,
-           port, credential_hash, status, created_at, updated_at)
-         VALUES ('lease-live', ?, 'user-1', 'inc-live', ?, 'hash', 'active', ?, ?)`
-      )
-      .run(NODE_ID, port, iso(-60_000), iso(-60_000));
-  }
-
-  // Both adapters must hand the snapshot's transport to the probe (`.claude/rules/61`): a
-  // reverse-tunnel node has no public hostname, so a dropped argument probes nothing real.
-  it.each([
-    [
-      'ProjectData adapter',
-      () => getLocalTaskRuntimeLiveness(sqlWithLiveAcpSession(), doEnv(), doTask),
-    ],
-    ['cron adapter', () => getTaskRuntimeLiveness(env, task)],
-  ] as const)(
-    '%s probes a stale reverse-tunnel node on its loopback lease',
-    async (_name, classify) => {
-      makeReverseTunnelNode(20017);
-      await classify();
       expect(fetchWithTimeoutMock).toHaveBeenCalledWith(
-        'http://127.0.0.1:20017/health',
+        'https://01m064tg56ecjw1d127h32brvj.vm.example.test:8443/health',
         { method: 'GET', redirect: 'manual' },
-        expect.any(Number)
+        5_000
       );
-      expect(fetchWithTimeoutMock).not.toHaveBeenCalledWith(
-        expect.stringContaining('.vm.example.test'),
-        expect.anything(),
-        expect.anything()
-      );
+      expect(verdict).toMatchObject({
+        live: true,
+        conclusive: true,
+        reason: 'task_agent_host_running',
+        activeAcpSessionId: 'acp-live',
+      });
+    } finally {
+      clock.mockRestore();
     }
-  );
-
-  it('cron adapter control: a public-DNS node keeps its public probe and full budget', async () => {
-    await getTaskRuntimeLiveness(env, task);
-    expect(fetchWithTimeoutMock).toHaveBeenCalledWith(
-      'https://01m064tg56ecjw1d127h32brvj.vm.example.test:8443/health',
-      { method: 'GET', redirect: 'manual' },
-      5_000
-    );
   });
 
   it('preserves the task after a failed node health probe response', async () => {

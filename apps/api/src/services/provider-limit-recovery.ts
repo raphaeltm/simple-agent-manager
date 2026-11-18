@@ -9,6 +9,10 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import * as projectData from './project-data';
+import {
+  canResumeProviderLimitTaskAnyway,
+  forceResumeSavedProviderLimitTask,
+} from './provider-limit-force-resume';
 import { ensureSessionRecovery } from './session-recovery';
 import { nudgeTaskRunnerDO } from './task-runner-do';
 
@@ -91,10 +95,10 @@ export async function resumeProviderLimitTask(env: Env, task: schema.Task, owner
     if (anySnapshot || wait.origin !== 'admission' || task.status !== 'queued')
       throw errors.conflict('The saved snapshot is unavailable or expired');
     const cleared = await env.DATABASE.prepare(
-      `UPDATE tasks SET provider_limit_wait_json=NULL,admission_state=NULL,admission_reason=NULL,admission_next_retry_at=NULL
+      `UPDATE tasks SET provider_limit_wait_json=NULL,admission_state=NULL,admission_reason=NULL,admission_next_retry_at=NULL,updated_at=?
        WHERE id=? AND project_id=? AND user_id=? AND status='queued' AND workspace_id IS NULL AND provider_limit_wait_json IS ?`
     )
-      .bind(task.id, task.projectId, ownerUserId, task.providerLimitWaitJson)
+      .bind(now, task.id, task.projectId, ownerUserId, task.providerLimitWaitJson)
       .run();
     if (!cleared.meta.changes)
       throw errors.conflict('Task changed while resuming; refresh and try again');
@@ -220,6 +224,8 @@ export async function startProviderLimitTaskAnyway(
     throw errors.forbidden('Only the task owner can start this task anyway');
   }
   const wait = parseProviderLimitWait(task.providerLimitWaitJson);
+  if (wait && canResumeProviderLimitTaskAnyway(task, wait))
+    return forceResumeSavedProviderLimitTask(env, task, ownerUserId, wait);
   const observed = wait; // un-narrowed copy for the rejection log
   if (!canStartProviderLimitTaskAnyway(task, wait)) {
     log.warn('provider_limit.start_anyway_rejected', {

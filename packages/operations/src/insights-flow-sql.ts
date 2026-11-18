@@ -32,30 +32,71 @@ const TERMINAL = `('completed', 'failed', 'cancelled')`;
 
 /**
  * Task-mode runs that ended since `?` or are still going and started since `?`, with the best
- * state among their pull requests. Binds: project ×4, since ×2, project ×2 (see `runsCte`).
+ * state among their pull requests. Binds, in order: project, project, since, since, project,
+ * project, project. Insights · Accounts reads the same runs, so both tabs count one population.
  *
  * `prs` holds the project's pull requests once (materialized) so each run's lookup by URL is a
  * join, not a scan per run.
+ *
+ * With `account`, each run also carries the agent session that ran it: the newest session of
+ * the run's workspace (same project), preferring one that recorded a credential. Production has
+ * one agent session per workspace, so this is the run's account. The columns are
+ * `account_ref`, `account_source`, `account_agent_type`, `account_user` and `started_day`; no
+ * binds are added.
+ *
+ * With `setup` (Insights · Agent setups), each run also carries what it ran with and when:
+ * `session_profile_id` (the agent session's resolved profile), `profile_hint` (the task's profile
+ * hint: a profile id, or a profile name the submitter typed), `skill_id`,
+ * `model` (the session's runtime contract model; NULL means the harness default),
+ * `agent_type`, `chat_session_id` (the task's, else its workspace's), the task's
+ * `created_at` / `completed_at`, and both stored reservations (`workspace_reservation`,
+ * `task_reservation`). It uses the same agent-session join as `account`; no binds are added.
  */
-function runsCte(): string {
+export function runsCte(options: { account?: boolean; setup?: boolean } = {}): string {
+  const sessionJoin = options.account || options.setup;
+  const accountColumns = options.account
+    ? `,
+           s.agent_credential_reference AS account_ref, s.agent_credential_source AS account_source,
+           s.agent_type AS account_agent_type, s.user_id AS account_user,
+           substr(t.created_at, 1, 10) AS started_day`
+    : '';
+  const setupColumns = options.setup
+    ? `,
+           s.agent_profile_id AS session_profile_id, t.agent_profile_hint AS profile_hint, t.skill_id,
+           CASE WHEN json_valid(s.runtime_contract_json)
+                THEN json_extract(s.runtime_contract_json, '$.model') END AS model,
+           s.agent_type AS agent_type, s.id AS agent_session_id,
+           coalesce(t.chat_session_id, w.chat_session_id) AS chat_session_id,
+           t.created_at, t.completed_at,
+           w.resolved_reservation_json AS workspace_reservation,
+           t.resolved_reservation_json AS task_reservation`
+    : '';
+  const accountJoins = sessionJoin
+    ? `
+      LEFT JOIN workspaces w ON w.id = t.workspace_id AND w.project_id = t.project_id
+      LEFT JOIN agent_sessions s ON s.id = (
+        SELECT s2.id FROM agent_sessions s2 WHERE s2.workspace_id = w.id
+         ORDER BY s2.agent_credential_reference IS NULL, s2.created_at DESC, s2.id DESC LIMIT 1)`
+    : '';
   return `WITH prs AS MATERIALIZED (
-    SELECT url, state, checks_state FROM pull_requests WHERE project_id = ?
+    SELECT url, state, checks_state, repository, number, head_ref, created_at, merged_at
+      FROM pull_requests WHERE project_id = ?
   ),
   run_rows AS MATERIALIZED (
     SELECT t.id, t.status, t.terminal_reason, t.output_pr_url,
            lower(coalesce(t.error_message, '')) AS err,
            (t.provider_limit_wait_json IS NOT NULL OR t.credential_blocked_reason IS NOT NULL) AS limit_flag,
            CASE WHEN t.status IN ${TERMINAL} THEN 0 ELSE 1 END AS running,
-           CASE WHEN t.status IN ${TERMINAL} THEN substr(coalesce(t.completed_at, t.updated_at), 1, 10) END AS ended_day
-      FROM tasks t
+           CASE WHEN t.status IN ${TERMINAL} THEN substr(coalesce(t.completed_at, t.updated_at), 1, 10) END AS ended_day${accountColumns}${setupColumns}
+      FROM tasks t${accountJoins}
      WHERE t.project_id = ? AND t.is_idea = 0 AND t.task_mode = 'task'
        AND ((t.status IN ${TERMINAL} AND coalesce(t.completed_at, t.updated_at) >= ?)
             OR (t.status NOT IN ${TERMINAL} AND t.created_at >= ?))
   ),
   run_prs AS (
-    SELECT r.id AS task_id, p.state, p.checks_state FROM run_rows r JOIN prs p ON p.url = r.output_pr_url
+    SELECT r.id AS task_id, p.url, p.state, p.checks_state FROM run_rows r JOIN prs p ON p.url = r.output_pr_url
     UNION
-    SELECT r.id, p.state, p.checks_state
+    SELECT r.id, p.url, p.state, p.checks_state
       FROM run_rows r
       JOIN task_pull_request_associations a
         ON a.task_id = r.id AND a.project_id = ? AND a.disposition = 'owned'
@@ -126,15 +167,37 @@ export function mergedStatement(w: FlowWindow): FlowStatement {
 }
 
 /**
- * CI first try, per period. A pull request counts when SAM recorded the commit it opened with
- * (`pull_request_heads.from_open = 1`) in the period. Its verdict comes from that commit's
- * checks:
+ * The first-try rule, shared by Flow and the run receipt so the two cannot disagree. Tallies are
+ * over the checks of a pull request's opening commit (`pull_request_heads.from_open = 1`), joined
+ * as `c`:
  * - failed: any check reported a failure on it (`state = 'failure'` now, or `first_failed_at`
  *   set, which also catches a failure a rerun turned green);
  * - passed: no failure, at least one success, and nothing still pending, or the pull request has
  *   moved on (closed, merged, or pushed again), so a check suite that never completes cannot
  *   hold the verdict open forever;
- * - otherwise undecided, and left out of the rate.
+ * - otherwise pending: checks still running, or none reported (a repository without CI).
+ */
+export const FIRST_TRY_FAILED_SQL =
+  "coalesce(sum(c.state = 'failure' OR c.first_failed_at IS NOT NULL), 0)";
+export const FIRST_TRY_PASSED_SQL = "coalesce(sum(c.state = 'success'), 0)";
+export const FIRST_TRY_PENDING_SQL = "coalesce(sum(c.state = 'pending'), 0)";
+
+/** `'failed' | 'passed' | 'pending'` from the tallies above and a "moved on" flag. */
+export function firstTryVerdictSql(t: {
+  failed: string;
+  passed: string;
+  pending: string;
+  movedOn: string;
+}): string {
+  return `CASE WHEN ${t.failed} > 0 THEN 'failed'
+               WHEN ${t.passed} > 0 AND (${t.pending} = 0 OR ${t.movedOn}) THEN 'passed'
+               ELSE 'pending' END`;
+}
+
+/**
+ * CI first try, per period. A pull request counts when SAM recorded the commit it opened with
+ * (`pull_request_heads.from_open = 1`) in the period, and its verdict follows
+ * `firstTryVerdictSql`; a pending verdict is left out of the rate.
  */
 export function ciFirstTryStatement(w: FlowWindow): FlowStatement {
   return {
@@ -146,10 +209,9 @@ export function ciFirstTryStatement(w: FlowWindow): FlowStatement {
       ),
       verdicts AS (
         SELECT o.opened_at,
-               count(c.check_key) AS checks,
-               coalesce(sum(c.state = 'failure' OR c.first_failed_at IS NOT NULL), 0) AS failed,
-               coalesce(sum(c.state = 'success'), 0) AS passed,
-               coalesce(sum(c.state = 'pending'), 0) AS pending,
+               ${FIRST_TRY_FAILED_SQL} AS failed,
+               ${FIRST_TRY_PASSED_SQL} AS passed,
+               ${FIRST_TRY_PENDING_SQL} AS pending,
                (p.state IS NOT NULL AND (p.state <> 'open' OR p.head_sha IS NOT o.head_sha)) AS moved_on
           FROM opening o
           LEFT JOIN pull_request_checks c
@@ -159,9 +221,11 @@ export function ciFirstTryStatement(w: FlowWindow): FlowStatement {
          GROUP BY o.repository, o.pr_number
       ),
       decided AS (
-        SELECT opened_at >= ? AS current, failed = 0 AS ok
-          FROM verdicts
-         WHERE failed > 0 OR (passed > 0 AND (pending = 0 OR moved_on))
+        SELECT opened_at >= ? AS current, verdict = 'passed' AS ok
+          FROM (SELECT opened_at,
+                       ${firstTryVerdictSql({ failed: 'failed', passed: 'passed', pending: 'pending', movedOn: 'moved_on' })} AS verdict
+                  FROM verdicts)
+         WHERE verdict <> 'pending'
       )
       SELECT (SELECT count(*) FROM verdicts WHERE opened_at >= ?) AS recorded,
              coalesce(sum(current AND ok), 0) AS passed,
@@ -260,6 +324,20 @@ export function ideaSampleStatement(w: FlowWindow, cap: number): FlowStatement {
 }
 
 /**
+ * The same-branch half of the rework rule, shared by Flow (`reworkStatement`) and Agent setups
+ * (`setupRunsStatement`) so the two cannot drift: pull request `b` is a follow-up of merged pull
+ * request `m` when it is a different pull request in the same repository, on the same head branch,
+ * opened after the merge and within the window. Both aliases need `repository`, `number`,
+ * `head_ref`; `m` needs `merged_jd` and `b` needs `created_jd` (Julian days); `window` is the SQL
+ * for the window in days (a bind placeholder).
+ */
+export function sameBranchFollowUpSql(m: string, b: string, window: string): string {
+  return `${b}.repository = ${m}.repository AND ${b}.number <> ${m}.number
+         AND ${m}.head_ref IS NOT NULL AND ${b}.head_ref = ${m}.head_ref
+         AND ${b}.created_jd > ${m}.merged_jd AND ${b}.created_jd <= ${m}.merged_jd + ${window}`;
+}
+
+/**
  * Rework: a merged pull request followed, within `windowDays` of its merge, by another pull
  * request in the same project and repository that is either
  * - on the same head branch (the branch was reused for a follow-up), or
@@ -291,9 +369,7 @@ export function reworkStatement(
       ),
       reworked AS (
         SELECT m.url FROM merged m JOIN later b
-          ON b.repository = m.repository AND b.number <> m.number
-         AND m.head_ref IS NOT NULL AND b.head_ref = m.head_ref
-         AND b.created_jd > m.merged_jd AND b.created_jd <= m.merged_jd + ?
+          ON ${sameBranchFollowUpSql('m', 'b', '?')}
         UNION
         SELECT m.url FROM merged m
           JOIN links la ON la.url = m.url

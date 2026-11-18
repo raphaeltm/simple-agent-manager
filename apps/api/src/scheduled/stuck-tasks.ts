@@ -316,7 +316,8 @@ export async function selectStuckTaskCandidates(
     const forward = await env.DATABASE.prepare(
       `SELECT ${STUCK_TASK_CANDIDATE_COLUMNS}
        FROM tasks
-       WHERE status IN ('queued', 'delegated', 'in_progress')
+       WHERE (status IN ('queued', 'delegated', 'in_progress')
+         OR (status='sleeping' AND admission_state='provider_limit_recovery_pending'))
          AND (updated_at, id) > (?, ?)
        ORDER BY updated_at ASC, id ASC
        LIMIT ?`
@@ -333,7 +334,8 @@ export async function selectStuckTaskCandidates(
        FROM (
          SELECT ${STUCK_TASK_CANDIDATE_COLUMNS}
          FROM tasks
-         WHERE status IN ('queued', 'delegated', 'in_progress')
+         WHERE (status IN ('queued', 'delegated', 'in_progress')
+         OR (status='sleeping' AND admission_state='provider_limit_recovery_pending'))
          ORDER BY updated_at DESC, id DESC
          LIMIT ?
        )
@@ -350,7 +352,8 @@ export async function selectStuckTaskCandidates(
     const wrap = await env.DATABASE.prepare(
       `SELECT ${STUCK_TASK_CANDIDATE_COLUMNS}
        FROM tasks
-       WHERE status IN ('queued', 'delegated', 'in_progress')
+       WHERE (status IN ('queued', 'delegated', 'in_progress')
+         OR (status='sleeping' AND admission_state='provider_limit_recovery_pending'))
          AND (updated_at, id) <= (?, ?)
        ORDER BY updated_at ASC, id ASC
        LIMIT ?`
@@ -1314,7 +1317,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
             reason = `Instant session start accepted but still queued for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(instantStartStaleTimeoutMs / 1000)}s).${stepInfo} Background container launch may not have completed.`;
           } else if (elapsedMs > queuedTimeoutMs) {
             isStuck = true;
-            reason = `Task stuck in 'queued' for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(queuedTimeoutMs / 1000)}s).${stepInfo} Node provisioning may have failed silently.`;
+            reason = `Task stuck in 'queued' without recorded orchestration progress for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(queuedTimeoutMs / 1000)}s).${stepInfo}`;
           }
           break;
         case 'delegated':
@@ -1639,6 +1642,14 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         taskId: task.id,
         projectId: task.project_id,
         status: terminalStatus,
+        // holdTaskForProviderLimit release and placement may advance this row
+        // across any await above. The verdict belongs to this exact observation,
+        // never the newer status loaded by transitionTaskToTerminal (rule 58).
+        expectedTaskVersion: {
+          status: task.status,
+          workspaceId: task.workspace_id,
+          updatedAt: task.updated_at,
+        },
         reason,
         source: compactionLoopRecovery
           ? 'scheduled.stuck_tasks.compaction_loop'

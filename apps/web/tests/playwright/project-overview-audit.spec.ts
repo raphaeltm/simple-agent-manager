@@ -7,6 +7,11 @@
  * busy one under stress (12 running, an account at 6% of its week, two failing automations,
  * very long titles and names), an empty quiet project, a sent task (receipt, new row, no
  * navigation), a failed start, and the phone composer unfolded on focus.
+ *
+ * Inbox slice F2: the Overview is the landing page and Needs you is its first section, fed by
+ * the inbox routes (`/api/projects/:id/inbox`, `/count`, item reads and answers). Scenes add
+ * 40 open items with long titles, a stack from one chat, an expiring permission and a failed
+ * start; nothing needs you; and a brand-new empty project.
  */
 import { expect, type Page, type Route, test, type TestInfo } from '@playwright/test';
 import type {
@@ -18,13 +23,16 @@ import type {
 } from '@simple-agent-manager/shared';
 
 import { accountRows, mergeRows } from '../unit/components/accounts/fixtures';
+import { acmeBillingProject, acmeBillingUser } from './acme-billing-fixtures';
 import {
   assertNoClippedOverflow,
   assertNoOverflow,
-  makeMockUser,
   screenshot,
+  seedTheme,
 } from './audit-helpers';
 import { RUNS, SCHEDULES, TRIGGERS } from './automation-fixtures';
+import { docsShot } from './docs-shot';
+import { KIND_ITEMS, MANY_ITEMS } from './inbox-fixtures';
 import { makeFlow } from './insights-fixtures';
 
 const PROJECT_ID = 'proj-overview';
@@ -38,34 +46,9 @@ const LONG_TITLE =
   'Migrate the invoicing pipeline from the legacy cron worker to durable queues, backfill three years of historical invoices, and verify every tax total against the accounting export before switching traffic';
 const LONG_TOKEN = `refactor-${'unbroken-identifier-'.repeat(8)}end`;
 
-const MOCK_USER = makeMockUser({
-  email: 'raph@example.com',
-  name: 'Raph',
-  sessionId: 'session-overview',
-  userId: USER_ID,
-});
+const MOCK_USER = acmeBillingUser(USER_ID, 'session-overview');
 
-const MOCK_PROJECT = {
-  id: PROJECT_ID,
-  name: 'Acme Billing',
-  repository: 'acme/billing',
-  repoProvider: 'github',
-  defaultBranch: 'main',
-  userId: USER_ID,
-  installationId: 'inst-1',
-  defaultWorkspaceProfile: 'full',
-  defaultDevcontainerConfigName: '',
-  createdAt: '2026-10-01T00:00:00Z',
-  updatedAt: '2026-11-15T00:00:00Z',
-  multiplayerActive: false,
-  summary: {
-    activeWorkspaceCount: 0,
-    activeSessionCount: 0,
-    lastActivityAt: null,
-    taskCountsByStatus: {},
-    linkedWorkspaces: 0,
-  },
-};
+const MOCK_PROJECT = acmeBillingProject(PROJECT_ID, USER_ID);
 
 function profile(id: string, name: string, agentType: string, model: string | null = null) {
   return {
@@ -265,6 +248,7 @@ function overviewBody(scene: 'normal' | 'busy' | 'quiet'): ProjectOverviewRespon
       projectId: PROJECT_ID,
       running: { items: [], total: 0, waitingOnViewerTotal: 0 },
       recent: { ideas: [], mergedPullRequests: [] },
+      brief: null,
       unavailable: [],
       generatedAt: new Date().toISOString(),
     };
@@ -320,17 +304,55 @@ function overviewBody(scene: 'normal' | 'busy' | 'quiet'): ProjectOverviewRespon
         },
       ],
     },
+    brief: null,
     unavailable: [],
     generatedAt: new Date().toISOString(),
   };
 }
 
+type InboxFixture = Record<string, unknown> & { ref: string };
+
+/** Inbox items for this project: the fixtures' items, all moved into the audited project. */
+function projectItems(items: InboxFixture[]): InboxFixture[] {
+  return items.map((item) => ({
+    ...item,
+    projectId: PROJECT_ID,
+    projectName: 'Acme Billing',
+    // The three-item stack is the "Ship billing" chat, which Running now lists as paused.
+    ...(item.stackKey === 'stack-ship' ? { sessionId: 'sess-0' } : {}),
+  }));
+}
+
+/** A few items for a normal day: the expiring permission, the approval, a stack of three. */
+const NORMAL_INBOX = projectItems(KIND_ITEMS.slice(0, 5) as InboxFixture[]);
+/** 40 open items: every kind, a three-item stack, a failed start, long titles, fillers. */
+const STRESS_INBOX = projectItems(MANY_ITEMS as InboxFixture[]);
+/** Two questions from one chat and a review: answerable without any secondary read. */
+const ROUND_TRIP_INBOX = projectItems(
+  KIND_ITEMS.filter((item) =>
+    ['ask:q-vat', 'ask:q-regions', 'ask:review-1'].includes(item.ref)
+  ) as InboxFixture[]
+);
+/** A start that failed (slice E's `error` item with Retry) first, then a normal day. */
+const FAILED_START_INBOX = [
+  ...projectItems(KIND_ITEMS.filter((item) => item.kind === 'error') as InboxFixture[]),
+  ...NORMAL_INBOX,
+];
+
 interface SceneOptions {
   scene: 'normal' | 'busy' | 'quiet';
+  /** This project's open inbox items for the viewer (Needs you). Default: none. */
+  inbox?: InboxFixture[];
+  /** A brand-new project: no profiles, accounts, automations or items. */
+  brandNew?: boolean;
   budget: Budget;
   /** Which automations exist: the normal set, two failing ones, or none. */
   automations: 'normal' | 'failing' | 'none';
   submit?: 'ok' | 'fail' | 'reauth';
+  /** The generated brief the read returns (inbox slice I). Default: none. */
+  brief?: ProjectOverviewResponse['brief'];
+  /** The read reports the brief section as failed. */
+  briefUnavailable?: boolean;
 }
 
 async function setupScene(page: Page, options: SceneOptions) {
@@ -349,6 +371,8 @@ async function setupScene(page: Page, options: SceneOptions) {
         : Object.values(TRIGGERS);
   const runs: Record<string, unknown[]> = { ...RUNS, 'trg-deps-2': RUNS['trg-deps'] ?? [] };
   let submitted = false;
+  const answered = new Set<string>();
+  const openItems = () => (options.inbox ?? []).filter((item) => !answered.has(item.ref));
 
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route: Route) => {
     const url = new URL(route.request().url());
@@ -358,7 +382,8 @@ async function setupScene(page: Page, options: SceneOptions) {
       route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
-    if (path === '/api/cc/credentials') return respond(200, { credentials: ROWS.credentials });
+    if (path === '/api/cc/credentials')
+      return respond(200, { credentials: options.brandNew ? [] : ROWS.credentials });
     if (path === '/api/cc/configurations')
       return respond(200, { configurations: ROWS.configurations });
     if (path === '/api/cc/attachments') return respond(200, { attachments: ROWS.attachments });
@@ -383,12 +408,38 @@ async function setupScene(page: Page, options: SceneOptions) {
       });
     if (path === '/api/projects')
       return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
+    const inbox = path.match(/^\/api(?:\/projects\/[^/]+)?\/inbox(\/count)?$/);
+    if (inbox && method === 'GET') {
+      const items = openItems();
+      if (inbox[1])
+        return respond(200, {
+          needsYou: items.length,
+          blocking: items.filter((item) => item.blocking).length,
+        });
+      return respond(200, { items, nextCursor: null, skipped: 0 });
+    }
+    const inboxItem = path.match(/^\/api\/projects\/[^/]+\/inbox\/items\/([^/]+)(\/answer)?$/);
+    if (inboxItem) {
+      const ref = decodeURIComponent(inboxItem[1] ?? '');
+      const item = (options.inbox ?? []).find((candidate) => candidate.ref === ref);
+      if (!item) return respond(404, { error: 'NOT_FOUND', message: 'Inbox item not found' });
+      if (inboxItem[2]) {
+        answered.add(ref);
+        return respond(200, { ref, outcome: 'answered', agentNotified: true });
+      }
+      return respond(200, {
+        item: answered.has(ref) ? { ...item, status: 'answered' } : item,
+        context: { before: [], since: { messages: [], activityCount: 0, truncated: false } },
+      });
+    }
     const match = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (match) {
       const sub = match[2] ?? '';
       if (sub === '') return respond(200, MOCK_PROJECT);
       if (sub === '/overview') {
         const body = overviewBody(options.scene);
+        body.brief = options.brief ?? null;
+        if (options.briefUnavailable) body.unavailable = ['brief'];
         if (submitted && options.submit === 'ok') {
           // The chat index has caught up with the new task.
           body.running.items = [
@@ -432,7 +483,8 @@ async function setupScene(page: Page, options: SceneOptions) {
             options.scene === 'quiet' ? 'empty' : options.scene === 'busy' ? 'stress' : 'realistic'
           )
         );
-      if (sub === '/agent-profiles') return respond(200, { items: PROFILES });
+      if (sub === '/agent-profiles')
+        return respond(200, { items: options.brandNew ? [] : PROFILES });
       if (sub === '/agent-profiles/picker')
         return respond(200, { usageWindowDays: 30, usage: [], hiddenProfileIds: [] });
       if (sub === '/skills') return respond(200, { items: [] });
@@ -442,8 +494,8 @@ async function setupScene(page: Page, options: SceneOptions) {
           members: [
             {
               userId: USER_ID,
-              name: 'Raph',
-              email: 'raph@example.com',
+              name: 'Dana Reyes',
+              email: 'dana@example.com',
               avatarUrl: null,
               role: 'owner',
               status: 'active',
@@ -524,12 +576,18 @@ async function expectTaskBoxPinned(page: Page) {
 }
 
 test.describe('Project Overview', () => {
-  test('normal project', async ({ page }) => {
-    await setupScene(page, { scene: 'normal', budget: 'normal', automations: 'normal' });
+  test('normal project', async ({ page }, testInfo) => {
+    await setupScene(page, {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      inbox: NORMAL_INBOX,
+    });
     await page.goto(BASE);
     const running = page.getByRole('region', { name: 'Running now' });
     await expect(running.getByRole('link', { name: /Ship billing/ })).toBeVisible();
-    await expect(running.getByText('Waiting on you')).toBeVisible();
+    // The inbox's own phrase: its item is in Needs you.
+    await expect(running.getByText('Paused on this')).toBeVisible();
     await expect(page.getByTestId('overview-budgets')).toBeVisible();
     await expect(page.getByTestId('overview-budget-exceptions')).toContainText('5-hour window');
     await expect(page.getByTestId('overview-automation-failing')).toBeVisible();
@@ -547,11 +605,18 @@ test.describe('Project Overview', () => {
       `/projects/${PROJECT_ID}/insights/flow?range=7d`
     );
     await expectTaskBoxPinned(page);
+    // Docs image (project-overview.md): the first screen, before capture() grows the scrollers.
+    await docsShot(page, isPhone(testInfo) ? 'project-overview-mobile' : 'project-overview');
     await capture(page, 'overview-normal');
   });
 
   test('busy project under stress', async ({ page }) => {
-    await setupScene(page, { scene: 'busy', budget: 'stressed', automations: 'failing' });
+    await setupScene(page, {
+      scene: 'busy',
+      budget: 'stressed',
+      automations: 'failing',
+      inbox: STRESS_INBOX,
+    });
     await page.goto(BASE);
     const running = page.getByRole('region', { name: 'Running now' });
     await expect(running.getByTestId('overview-running-row')).toHaveCount(5);
@@ -589,6 +654,7 @@ test.describe('Project Overview', () => {
       budget: 'normal',
       automations: 'normal',
       submit: 'ok',
+      inbox: NORMAL_INBOX,
     });
     await page.goto(BASE);
     await expect(page.getByRole('link', { name: /Ship billing/ })).toBeVisible();
@@ -686,5 +752,664 @@ test.describe('Project Overview', () => {
     await page.getByPlaceholder('Start a task…').click();
     await expect(page.getByRole('button', { name: /^To / })).toBeVisible();
     await capture(page, 'overview-composer-focused');
+  });
+});
+
+/** The rows of Needs you, once the list (not the quiet "checking" line) has rendered. */
+async function needsYouRows(page: Page) {
+  await expect(page.getByTestId('overview-needs-you-list')).toBeVisible();
+  return page.getByTestId('overview-needs-you-list').getByTestId('inbox-row');
+}
+
+test.describe('Project Overview as the landing page, with Needs you (slice F2)', () => {
+  test('opening a project lands on the Overview, Needs you first', async ({ page }, testInfo) => {
+    await setupScene(page, {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      inbox: NORMAL_INBOX,
+    });
+    await page.goto(`/projects/${PROJECT_ID}`);
+    await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}/overview$`));
+    const rows = await needsYouRows(page);
+    // Five items, one a stack of three: three rows on either size.
+    await expect(rows).toHaveCount(3);
+    await expect(
+      page.getByRole('region', { name: 'Needs you' }).getByRole('link', { name: /All 5/ })
+    ).toHaveAttribute('href', `/projects/${PROJECT_ID}/inbox`);
+    if (isPhone(testInfo)) {
+      // Needs you comes before Running now in the phone column.
+      const needs = await page.getByRole('region', { name: 'Needs you' }).boundingBox();
+      const running = await page.getByRole('region', { name: 'Running now' }).boundingBox();
+      expect(needs!.y).toBeLessThan(running!.y);
+    } else {
+      // Desktop: Needs you in the main column, Running now in the rail to its right.
+      const needs = await page.getByRole('region', { name: 'Needs you' }).boundingBox();
+      const running = await page.getByRole('region', { name: 'Running now' }).boundingBox();
+      expect(needs!.x + needs!.width).toBeLessThanOrEqual(running!.x);
+    }
+    // Settled, not bounced: still on the Overview after the page has finished loading.
+    await page.waitForTimeout(600);
+    expect(new URL(page.url()).pathname).toBe(BASE);
+    await expect(page.getByRole('region', { name: 'Running now' })).toBeVisible();
+    await expect(page.getByPlaceholder('Start a task…')).toBeVisible();
+  });
+
+  test('40 open items: the first screen shows Needs you and the start of Running now', async ({
+    page,
+  }, testInfo) => {
+    await setupScene(page, {
+      scene: 'busy',
+      budget: 'stressed',
+      automations: 'failing',
+      inbox: STRESS_INBOX,
+    });
+    await page.goto(BASE);
+    const rows = await needsYouRows(page);
+    await expect(rows).toHaveCount(isPhone(testInfo) ? 3 : 5);
+    await expect(
+      page.getByRole('region', { name: 'Needs you' }).getByRole('link', { name: /All 40/ })
+    ).toBeVisible();
+    // The stack from one chat reads as one row.
+    await expect(page.getByText(/3 from Ship billing/)).toBeVisible();
+    if (isPhone(testInfo)) {
+      // 375x667: three rows and the Running now heading above the pinned task box, and no
+      // title-only strip above Needs you.
+      const box = await page.locator('[data-testid="project-overview"] > div').last().boundingBox();
+      for (let i = 0; i < 3; i += 1) {
+        const row = await rows.nth(i).boundingBox();
+        expect(row!.y + row!.height).toBeLessThanOrEqual(box!.y);
+      }
+      const runningHead = await page
+        .getByRole('region', { name: 'Running now' })
+        .getByRole('heading', { name: /Running now/ })
+        .boundingBox();
+      expect(runningHead!.y + runningHead!.height).toBeLessThanOrEqual(box!.y);
+      const needs = await page.getByRole('region', { name: 'Needs you' }).boundingBox();
+      const appBar = await page.locator('header').first().boundingBox();
+      expect(needs!.y - (appBar!.y + appBar!.height)).toBeLessThanOrEqual(16);
+    }
+    await expectTaskBoxPinned(page);
+    await capture(page, 'overview-f2-stress-40-items');
+  });
+
+  test('a failed start waits in Needs you with its Retry', async ({ page }) => {
+    await setupScene(page, {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      inbox: FAILED_START_INBOX,
+    });
+    await page.goto(BASE);
+    const rows = await needsYouRows(page);
+    await expect(rows.first()).toContainText('“Fix rounding in tax totals” couldn’t start');
+    await expect(rows.first()).toContainText('never started');
+    await capture(page, 'overview-f2-failed-start-item');
+    await rows.first().getByRole('button').click();
+    await expect(page).toHaveURL(/from=overview/);
+    await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
+  });
+
+  test('nothing needs you: one quiet line', async ({ page }) => {
+    await setupScene(page, { scene: 'normal', budget: 'normal', automations: 'normal', inbox: [] });
+    await page.goto(BASE);
+    const quiet = page.getByTestId('overview-needs-you-quiet');
+    await expect(quiet).toContainText('Nothing needs you.');
+    const height = (await quiet.boundingBox())!.height;
+    expect(height).toBeLessThanOrEqual(56);
+    // Liveness: the rest of the page is there.
+    await expect(page.getByRole('region', { name: 'Running now' })).toBeVisible();
+    await capture(page, 'overview-f2-nothing-needs-you');
+  });
+
+  test('a brand-new empty project', async ({ page }) => {
+    await setupScene(page, {
+      scene: 'quiet',
+      budget: 'healthy',
+      automations: 'none',
+      inbox: [],
+      brandNew: true,
+    });
+    await page.goto(`/projects/${PROJECT_ID}`);
+    await expect(page).toHaveURL(new RegExp(`/overview$`));
+    await expect(page.getByTestId('overview-needs-you-quiet')).toContainText('Nothing needs you.');
+    await expect(page.getByText('Nothing is running.')).toBeVisible();
+    await expectTaskBoxPinned(page);
+    await capture(page, 'overview-f2-brand-new');
+  });
+
+  test('answer from Needs you, then back: the count is lower and the page did not reload', async ({
+    page,
+  }, testInfo) => {
+    await setupScene(page, {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      inbox: ROUND_TRIP_INBOX,
+    });
+    await page.goto(BASE);
+    await needsYouRows(page);
+    await expect(
+      page.getByRole('region', { name: 'Needs you' }).getByRole('link', { name: /All 3/ })
+    ).toBeVisible();
+    // A marker survives only if the page is not reloaded.
+    await page.evaluate(() => {
+      (window as unknown as { __noReload: boolean }).__noReload = true;
+    });
+    await page.getByRole('button', { name: /Should EU prices include VAT/ }).click();
+    await expect(page).toHaveURL(/\/inbox\?/);
+    await expect(page).toHaveURL(/from=overview/);
+    const pane = page.getByRole('region', { name: 'Inbox item' });
+    await expect(
+      pane.getByRole('heading', { name: 'Should EU prices include VAT?' })
+    ).toBeVisible();
+    await screenshot(page, 'overview-f2-item-from-overview');
+    await pane.getByRole('button', { name: 'Include VAT' }).click();
+    await expect(page.getByTestId('inbox-receipt')).toContainText('Include VAT');
+    // Straight to the next item in the stack.
+    await expect(
+      pane.getByRole('heading', { name: 'Which region should new staging nodes default to?' })
+    ).toBeVisible();
+    await screenshot(page, 'overview-f2-after-answer-receipt');
+    const back = isPhone(testInfo)
+      ? pane.getByRole('button', { name: 'Back to Overview' })
+      : page.getByRole('button', { name: 'Back to Overview' }).first();
+    await back.click();
+    await expect(page).toHaveURL(new RegExp(`${BASE}$`));
+    // Back popped the Overview's own entry rather than pushing a second one.
+    expect(await page.evaluate(() => (history.state as { idx?: number } | null)?.idx)).toBe(0);
+    await expect(
+      page.getByRole('region', { name: 'Needs you' }).getByRole('link', { name: /All 2/ })
+    ).toBeVisible();
+    expect(
+      await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload)
+    ).toBe(true);
+    await capture(page, 'overview-f2-back-count-reduced');
+  });
+
+  test('chat is one tap away', async ({ page }, testInfo) => {
+    await setupScene(page, { scene: 'normal', budget: 'normal', automations: 'normal', inbox: [] });
+    await page.goto(BASE);
+    await expect(page.getByTestId('overview-needs-you-quiet')).toBeVisible();
+    if (isPhone(testInfo)) {
+      await page
+        .locator('header')
+        .first()
+        .getByRole('button', { name: 'Chat', exact: true })
+        .click();
+    } else {
+      await page.getByRole('link', { name: 'Chat', exact: true }).first().click();
+    }
+    await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}/chat`));
+  });
+
+  test('desktop: after opening a second row, Back still goes to the Overview', async ({
+    page,
+  }, testInfo) => {
+    test.skip(isPhone(testInfo), 'the list sits beside the item on desktop only');
+    await setupScene(page, {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      inbox: ROUND_TRIP_INBOX,
+    });
+    await page.goto(BASE);
+    await needsYouRows(page);
+    await page.getByRole('button', { name: /Should EU prices include VAT/ }).click();
+    const pane = page.getByRole('region', { name: 'Inbox item' });
+    await expect(
+      pane.getByRole('heading', { name: 'Should EU prices include VAT?' })
+    ).toBeVisible();
+    await page
+      .getByRole('region', { name: 'Inbox list' })
+      .getByRole('button', { name: /Please check the new pricing page/ })
+      .click();
+    await expect(
+      pane.getByRole('heading', { name: 'Please check the new pricing page before I open the PR' })
+    ).toBeVisible();
+    await page.getByRole('button', { name: 'Back to Overview' }).first().click();
+    await expect(page).toHaveURL(new RegExp(`${BASE}$`));
+    await expect(page.getByTestId('overview-needs-you-list')).toBeVisible();
+  });
+});
+
+/**
+ * Every clipping box between a pane and the void: the pane must sit inside it with room for its
+ * shadow on both sides and below. Measured in page coordinates (rule 17), at the top of every
+ * scroller and again scrolled to the end, where the last pane's bottom shadow matters.
+ */
+async function expectPaneShadowsUnclipped(page: Page, room: number) {
+  const cuts = await page.evaluate((min) => {
+    const root = document.querySelector('[data-testid="project-overview"]');
+    const found: string[] = [];
+    for (const pane of root?.querySelectorAll<HTMLElement>('section.sam-glass') ?? []) {
+      const box = pane.getBoundingClientRect();
+      for (
+        let node = pane.parentElement;
+        node && node !== document.body;
+        node = node.parentElement
+      ) {
+        const style = getComputedStyle(node);
+        if (style.display === 'contents') continue;
+        if (style.overflowX === 'visible' && style.overflowY === 'visible') continue;
+        const clip = node.getBoundingClientRect();
+        // Edges a pane is scrolled past are not checked: only a pane in full view must clear them.
+        const inView = box.top >= clip.top && box.bottom <= clip.bottom;
+        const label = `${pane.getAttribute('aria-label')} in ${node.dataset.testid ?? node.tagName}`;
+        // The screen edge is the last clip: a pane may meet it like any other page edge.
+        if (node === document.documentElement) continue;
+        if (box.left - clip.left < min) found.push(`${label}: left ${box.left - clip.left}`);
+        if (clip.right - box.right < min) found.push(`${label}: right ${clip.right - box.right}`);
+        if (inView && clip.bottom - box.bottom < min)
+          found.push(`${label}: bottom ${clip.bottom - box.bottom}`);
+      }
+    }
+    return found;
+  }, room);
+  expect(cuts, 'a scroller cuts a pane shadow off at its edge').toEqual([]);
+}
+
+async function scrollOverviewToEnd(page: Page) {
+  for (const id of ['overview-scroll', 'overview-main', 'overview-rail']) {
+    await page.getByTestId(id).evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+  }
+  await page.waitForTimeout(200);
+}
+
+test.describe('Project Overview layering and spacing', () => {
+  test('pane shadows are never cut off by a scroller', async ({ page }, testInfo) => {
+    await setupScene(page, {
+      scene: 'busy',
+      budget: 'stressed',
+      automations: 'failing',
+      inbox: STRESS_INBOX,
+    });
+    await page.goto(BASE);
+    await expect(page.getByRole('region', { name: 'Recently' })).toBeAttached();
+    await expect(page.getByRole('region', { name: 'Needs you' })).toBeVisible();
+    // Room for the shadow: the phone frame is 10px, the desktop gutter 14px.
+    const room = isPhone(testInfo) ? 10 : 14;
+    await expectPaneShadowsUnclipped(page, room);
+    await scrollOverviewToEnd(page);
+    await expectPaneShadowsUnclipped(page, room);
+    // The bleed pads back what it takes: the first pane still starts a gap under the app bar
+    // (phone) or at the frame (desktop), and the task box stays pinned.
+    const first = await page.getByRole('region', { name: 'Needs you' }).boundingBox();
+    if (isPhone(testInfo)) {
+      const appBar = await page.locator('header').first().boundingBox();
+      await page.getByTestId('overview-scroll').evaluate((el) => {
+        el.scrollTop = 0;
+      });
+      const top = await page.getByRole('region', { name: 'Needs you' }).boundingBox();
+      expect(top!.y - (appBar!.y + appBar!.height)).toBeGreaterThanOrEqual(8);
+      expect(top!.x).toBeGreaterThanOrEqual(8);
+      // Panes leave at real edges: the scroller meets the app bar and the task box.
+      const scroller = await page.getByTestId('overview-scroll').boundingBox();
+      const taskBox = await page
+        .locator('[data-testid="project-overview"] > div')
+        .last()
+        .boundingBox();
+      expect(Math.abs(scroller!.y - (appBar!.y + appBar!.height))).toBeLessThanOrEqual(1);
+      expect(Math.abs(scroller!.y + scroller!.height - taskBox!.y)).toBeLessThanOrEqual(1);
+    } else {
+      expect(first!.y).toBeGreaterThanOrEqual(14);
+      // The two columns' boxes overlap in the gutter; the main column's scrollbar lives there,
+      // so the main column, not the rail, must own that strip.
+      const owner = await page.getByTestId('overview-main').evaluate((el) => {
+        const box = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.right - 3, box.top + box.height / 2);
+        return hit?.closest('[data-testid^="overview-"]')?.getAttribute('data-testid');
+      });
+      expect(owner).toBe('overview-main');
+    }
+    await expectTaskBoxPinned(page);
+    await assertNoOverflow(page);
+    await page.screenshot({
+      path: `../../.codex/tmp/playwright-screenshots/overview-layering-end-${page.viewportSize()?.width}.png`,
+    });
+  });
+
+  for (const mode of ['focus', 'zen'] as const) {
+    test(`desktop ${mode} mode: pane shadows are not cut off either`, async ({
+      page,
+    }, testInfo) => {
+      test.skip(isPhone(testInfo), 'focus modes are desktop-only');
+      await page.addInitScript((value) => {
+        localStorage.setItem('sam:focus-mode', value);
+      }, mode);
+      await setupScene(page, {
+        scene: 'busy',
+        budget: 'stressed',
+        automations: 'failing',
+        inbox: STRESS_INBOX,
+      });
+      await page.goto(BASE);
+      await expect(page.getByRole('region', { name: 'Needs you' })).toBeVisible();
+      // Liveness: the mode really applied (Zen hides the nav; Focus narrows it).
+      const needs = await page.getByRole('region', { name: 'Needs you' }).boundingBox();
+      expect(needs!.x).toBeLessThan(mode === 'zen' ? 40 : 120);
+      await expectPaneShadowsUnclipped(page, 14);
+      await scrollOverviewToEnd(page);
+      await expectPaneShadowsUnclipped(page, 14);
+    });
+  }
+
+  test('light theme: pane shadows are not cut off either', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('sam-theme', 'light');
+    });
+    await setupScene(page, {
+      scene: 'busy',
+      budget: 'stressed',
+      automations: 'failing',
+      inbox: STRESS_INBOX,
+    });
+    await page.goto(BASE);
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.getAttribute('data-ui-theme')))
+      .toBe('sam-light');
+    await expect(page.getByRole('region', { name: 'Needs you' })).toBeVisible();
+    await expectPaneShadowsUnclipped(page, 10);
+    await page.waitForTimeout(400);
+    await page.screenshot({
+      path: `../../.codex/tmp/playwright-screenshots/overview-layering-light-top-${page.viewportSize()?.width}.png`,
+    });
+    await scrollOverviewToEnd(page);
+    await expectPaneShadowsUnclipped(page, 10);
+    await page.screenshot({
+      path: `../../.codex/tmp/playwright-screenshots/overview-layering-light-end-${page.viewportSize()?.width}.png`,
+    });
+  });
+
+  test('a stacked Needs you row shows its back cards only below the front card', async ({
+    page,
+  }) => {
+    await setupScene(page, {
+      scene: 'busy',
+      budget: 'stressed',
+      automations: 'failing',
+      inbox: STRESS_INBOX,
+    });
+    await page.goto(BASE);
+    const stack = page.getByTestId('inbox-row').filter({ hasText: /3 from Ship billing/ });
+    await expect(stack).toBeVisible();
+    // Hit-testing honours clip-path: inside the front card, no back card may be under the point
+    // (it would show through the translucent card); below it, each back card is still there.
+    const result = await stack.evaluate((li) => {
+      const front = li.querySelector<HTMLElement>(':scope > div')!.getBoundingClientRect();
+      const backs = [...li.querySelectorAll<HTMLElement>(':scope > span[aria-hidden="true"]')];
+      const inside = backs.flatMap((back) => {
+        const box = back.getBoundingClientRect();
+        const x = box.left + box.width / 2;
+        return [front.bottom - 2, front.bottom - 6].map((y) =>
+          document.elementsFromPoint(x, y).includes(back)
+        );
+      });
+      const below = backs.map((back) => {
+        const box = back.getBoundingClientRect();
+        return document.elementsFromPoint(box.left + box.width / 2, box.bottom - 1).includes(back);
+      });
+      return { count: backs.length, inside, below };
+    });
+    expect(result.count).toBe(2);
+    expect(result.inside.every((hit) => !hit)).toBe(true);
+    expect(result.below).toEqual([true, true]);
+  });
+
+  test('Recently lines its ideas up with its pull requests', async ({ page }) => {
+    await setupScene(page, { scene: 'normal', budget: 'normal', automations: 'normal' });
+    await page.goto(BASE);
+    const idea = page.getByTestId('overview-recent-idea').first();
+    const pr = page.getByTestId('overview-merged-pr').first();
+    await expect(idea).toContainText('Pause subscriptions');
+    await expect(pr).toContainText('Round tax totals per line');
+    const measure = (row: typeof idea) =>
+      row.evaluate((el) => {
+        const icon = el.querySelector('svg')!.getBoundingClientRect();
+        const title = el.querySelector(':scope > span:nth-of-type(2)')!.getBoundingClientRect();
+        return { icon: icon.left, title: title.left, row: el.getBoundingClientRect().left };
+      });
+    const ideaBox = await measure(idea);
+    const prBox = await measure(pr);
+    expect(Math.abs(ideaBox.row - prBox.row)).toBeLessThanOrEqual(1);
+    expect(Math.abs(ideaBox.icon - prBox.icon)).toBeLessThanOrEqual(1);
+    expect(Math.abs(ideaBox.title - prBox.title)).toBeLessThanOrEqual(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The generated brief (inbox slice I)
+// ---------------------------------------------------------------------------
+
+type Brief = NonNullable<ProjectOverviewResponse['brief']>;
+type BriefRef = Extract<Brief['sentences'][number]['parts'][number], { ref: unknown }>['ref'];
+
+const ref = (kind: BriefRef['kind'], id: string, label: string, url?: string) => ({
+  ref: url ? { kind, id, label, url } : { kind, id, label },
+});
+const text = (value: string) => ({ text: value });
+
+function briefFixture(overrides: Partial<Brief> = {}, long = false): Brief {
+  return {
+    sentences: [
+      {
+        parts: [
+          ref('ask', 'ask-deploy', long ? LONG_TITLE : 'Pick a deploy target for the billing fix'),
+          text(' is holding up '),
+          ref('chat', 'sess-1', long ? LONG_TOKEN : 'Ship billing'),
+          text(', which is paused on it.'),
+        ],
+      },
+      {
+        parts: [
+          ref('automation', 'trg-deps', long ? `Weekly ${LONG_TOKEN}` : 'Weekly dependency bump'),
+          text(' keeps failing, and '),
+          ref('account', 'cc_credentials:team', "the project's anthropic account"),
+          text(' is almost out of usage.'),
+        ],
+      },
+      {
+        parts: [
+          ref(
+            'pullRequest',
+            '2771',
+            long ? LONG_TITLE : 'Round tax totals per line',
+            'https://github.com/acme/billing/pull/2771'
+          ),
+          text(' landed and '),
+          ref('idea', 'idea-1', 'Pause subscriptions'),
+          text(' is new.'),
+        ],
+      },
+    ],
+    generatedAt: new Date(Date.now() - 25 * MIN).toISOString(),
+    stale: false,
+    refreshing: false,
+    ...overrides,
+  };
+}
+
+/** Phone: the first screen still shows three Needs you rows above the pinned task box. */
+async function expectThreeRowsOnFirstPhoneScreen(page: Page) {
+  const rows = await needsYouRows(page);
+  await expect(rows).toHaveCount(3);
+  const box = await page.locator('[data-testid="project-overview"] > div').last().boundingBox();
+  for (let i = 0; i < 3; i += 1) {
+    const row = await rows.nth(i).boundingBox();
+    expect(row!.y + row!.height).toBeLessThanOrEqual(box!.y);
+  }
+}
+
+test.describe('Project Overview brief (inbox slice I)', () => {
+  test('fresh brief: one line under Needs you on a phone, above Needs you on desktop', async ({
+    page,
+  }, testInfo) => {
+    await setupScene(page, {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      inbox: STRESS_INBOX,
+      brief: briefFixture(),
+    });
+    await page.goto(BASE);
+    const brief = page.getByRole('region', { name: 'Project brief' });
+    await expect(brief).toBeVisible();
+    const needs = await page.getByRole('region', { name: 'Needs you' }).boundingBox();
+    const briefBox = await brief.boundingBox();
+    if (isPhone(testInfo)) {
+      expect(briefBox!.y).toBeGreaterThanOrEqual(needs!.y + needs!.height);
+      // One line: the paragraph is one line tall, and only the first sentence is rendered.
+      await expect(brief.getByRole('link', { name: /Weekly dependency bump/ })).toHaveCount(0);
+      const textBox = await page.getByTestId('overview-brief-text').boundingBox();
+      expect(textBox!.height).toBeLessThanOrEqual(30);
+      await expectThreeRowsOnFirstPhoneScreen(page);
+    } else {
+      expect(briefBox!.y + briefBox!.height).toBeLessThanOrEqual(needs!.y);
+      expect(Math.abs(briefBox!.x - needs!.x)).toBeLessThanOrEqual(1);
+      await expect(brief.getByRole('link', { name: 'Pause subscriptions' })).toBeVisible();
+    }
+    if (isPhone(testInfo)) {
+      // Folded, the names are not links yet: the line is the control that opens it.
+      await expect(brief.getByRole('link')).toHaveCount(0);
+    } else {
+      await expect(brief.getByRole('link', { name: /Pick a deploy target/ })).toHaveAttribute(
+        'href',
+        `/projects/${PROJECT_ID}/inbox?item=ask%3Aask-deploy&from=overview`
+      );
+    }
+    await expect(brief.getByTestId('overview-brief-age')).toHaveText('Written 25 min ago');
+    // The brief is a pane like the others: no scroller may cut its shadow (#2816).
+    await expectPaneShadowsUnclipped(page, isPhone(testInfo) ? 10 : 14);
+    await capture(page, 'overview-brief-fresh');
+  });
+
+  test('phone: the brief expands in place to two sentences', async ({ page }, testInfo) => {
+    // Phone-only on purpose: desktop shows the brief open, so there is nothing to expand there.
+    test.skip(!isPhone(testInfo), 'the brief folds only on a phone');
+    await setupScene(page, {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      inbox: NORMAL_INBOX,
+      brief: briefFixture(),
+    });
+    await page.goto(BASE);
+    const brief = page.getByRole('region', { name: 'Project brief' });
+    const needsBefore = await page.getByRole('region', { name: 'Needs you' }).boundingBox();
+    // The folded line is the control: tapping its text opens it (a 44px target), not a link.
+    const line = brief.getByRole('button', { name: /Pick a deploy target/ });
+    const lineBox = await line.boundingBox();
+    expect(lineBox!.height).toBeGreaterThanOrEqual(44);
+    await brief.getByText('Pick a deploy target for the billing fix').click();
+    await expect(page).toHaveURL(new RegExp(`${BASE}$`));
+    await expect(brief.getByRole('button', { name: 'Project brief details' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
+    const needsAfter = await page.getByRole('region', { name: 'Needs you' }).boundingBox();
+    expect(needsAfter!.y).toBe(needsBefore!.y);
+    await expect(brief.getByRole('link', { name: /Weekly dependency bump/ })).toBeVisible();
+    await expect(brief.getByRole('link', { name: /Round tax totals/ })).toHaveCount(0);
+    // Expanding happens in place: Needs you above did not move.
+    await capture(page, 'overview-brief-phone-expanded');
+  });
+
+  test('going stale does not change the brief pane height (no layout jump)', async ({ page }) => {
+    // setupScene reads `brief` from these options on every request, so a reload sees the change.
+    const options: SceneOptions = {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      inbox: NORMAL_INBOX,
+      brief: briefFixture(),
+    };
+    await setupScene(page, options);
+    await page.goto(BASE);
+    const brief = page.getByRole('region', { name: 'Project brief' });
+    await expect(page.getByTestId('overview-brief-text')).toHaveAttribute('data-stale', 'false');
+    const fresh = await brief.boundingBox();
+    options.brief = briefFixture({ stale: true });
+    await page.reload();
+    await expect(page.getByTestId('overview-brief-text')).toHaveAttribute('data-stale', 'true');
+    const dimmed = await brief.boundingBox();
+    expect(dimmed!.height).toBe(fresh!.height);
+  });
+
+  test('light theme: the dimmed brief stays readable', async ({ page }) => {
+    await seedTheme(page, 'light');
+    await setupScene(page, {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      inbox: NORMAL_INBOX,
+      brief: briefFixture({ stale: true }),
+    });
+    await page.goto(BASE);
+    await expect(page.getByTestId('overview-brief-text')).toHaveAttribute('data-stale', 'true');
+    await capture(page, 'overview-brief-stale-light');
+  });
+
+  test('stale and refreshing: the old text stays, dimmed with its age', async ({ page }) => {
+    await setupScene(page, {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      inbox: NORMAL_INBOX,
+      brief: briefFixture({ stale: true, refreshing: true }),
+    });
+    await page.goto(BASE);
+    await expect(page.getByTestId('overview-brief-text')).toHaveAttribute('data-stale', 'true');
+    await expect(page.getByTestId('overview-brief-age')).toHaveText(
+      /Updating · written 25 min ago/
+    );
+    await capture(page, 'overview-brief-stale-refreshing');
+  });
+
+  test('long brief: long names and unbroken tokens wrap inside the pane', async ({
+    page,
+  }, testInfo) => {
+    await setupScene(page, {
+      scene: 'busy',
+      budget: 'stressed',
+      automations: 'failing',
+      inbox: STRESS_INBOX,
+      brief: briefFixture({ stale: true }, true),
+    });
+    await page.goto(BASE);
+    const brief = page.getByRole('region', { name: 'Project brief' });
+    await expect(brief).toBeVisible();
+    if (isPhone(testInfo)) {
+      await expectThreeRowsOnFirstPhoneScreen(page);
+      await brief.getByTestId('overview-brief-toggle').click();
+    }
+    const paneBox = await brief.boundingBox();
+    expect(paneBox!.x + paneBox!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    await capture(page, 'overview-brief-long');
+  });
+
+  test('quiet project: no brief, nothing else changes', async ({ page }) => {
+    await setupScene(page, { scene: 'quiet', budget: 'normal', automations: 'none', brief: null });
+    await page.goto(BASE);
+    await expect(page.getByRole('region', { name: 'Running now' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Project brief' })).toHaveCount(0);
+    await capture(page, 'overview-brief-hidden-quiet');
+  });
+
+  test('brief unavailable: the page is just its tiles', async ({ page }) => {
+    await setupScene(page, {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      inbox: NORMAL_INBOX,
+      brief: briefFixture(),
+      briefUnavailable: true,
+    });
+    await page.goto(BASE);
+    await expect(page.getByRole('region', { name: 'Running now' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Needs you' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Project brief' })).toHaveCount(0);
+    await capture(page, 'overview-brief-unavailable');
   });
 });

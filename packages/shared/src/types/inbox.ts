@@ -4,12 +4,14 @@
  * inbox keeps no copy (`packages/operations/src/inbox-list-core.ts`).
  *
  * Stores:
- * - `ask`: D1 `asks` (questions since slice G, reviews, human tasks, errors)
+ * - `ask`: D1 `asks` (questions since slice G, reviews, results, human tasks, errors)
  * - `attention`: a permission (until slice J), or a question asked before slice G, held as a
  *   ProjectData attention marker and read from the `session_summaries.attention_json` index
  * - `secret`: D1 `runtime_secret_requests`
  * - `approval`: D1 `operations_action_approvals`
  */
+
+import type { InboxTaskDetail } from './inbox-tasks';
 
 export const INBOX_STORES = ['ask', 'attention', 'secret', 'approval'] as const;
 export type InboxStore = (typeof INBOX_STORES)[number];
@@ -22,13 +24,14 @@ export const INBOX_ITEM_KINDS = [
   'secret',
   'approval',
   'review',
+  'result',
   'task',
   'error',
 ] as const;
 export type InboxItemKind = (typeof INBOX_ITEM_KINDS)[number];
 
 /** Kinds an `asks` row may hold. */
-export const ASK_KINDS = ['question', 'review', 'task', 'error'] as const;
+export const ASK_KINDS = ['question', 'review', 'result', 'task', 'error'] as const;
 export type AskKind = (typeof ASK_KINDS)[number];
 
 export const ASK_STATUSES = [
@@ -74,6 +77,19 @@ export interface InboxLink {
   label: string | null;
 }
 
+/**
+ * Fixes an `error` item can offer (inbox slice E). `retry`, `wake` and `resume` run the existing
+ * retry / wake / resume operation with the answering person's authority; `open_chat` is handled
+ * by the client (navigate to the item's chat) and the answer route refuses it.
+ */
+export const INBOX_ERROR_ACTIONS = ['retry', 'wake', 'resume', 'open_chat'] as const;
+export type InboxErrorAction = (typeof INBOX_ERROR_ACTIONS)[number];
+
+export interface InboxErrorActionOption {
+  id: InboxErrorAction;
+  label: string;
+}
+
 /** How the item is answered. The shape of the `answer` request follows from `type`. */
 export type InboxAnswerSpec =
   /** Pick one of `options` (`answer`), or type text when `allowText`. */
@@ -91,7 +107,9 @@ export type InboxAnswerSpec =
   /** `decision: 'approve' | 'deny'` with an optional `note`. */
   | { type: 'approval'; action: string; targetType: string; targetId: string }
   /** "Looks good" / "Mark done": no fields, or an optional `answer` comment. */
-  | { type: 'acknowledge' };
+  | { type: 'acknowledge' }
+  /** A system error: run one of `actions` (`action`), first is primary. Archive dismisses it. */
+  | { type: 'actions'; actions: InboxErrorActionOption[] };
 
 export interface InboxItem {
   /** Stable reference: `ask:<id>`, `attention:<sessionId>:<markerId>`, `secret:<id>`, `approval:<id>`. */
@@ -114,6 +132,10 @@ export interface InboxItem {
   /** Open items are `open`; `asks` rows carry their own status. */
   status: AskStatus;
   createdAt: string;
+  /** Last change; for an `error` item, when it last failed. */
+  updatedAt: string;
+  /** `error` items: how many times the thing failed while the item was open. Null otherwise. */
+  failureCount: number | null;
   expiresAt: string | null;
   dueAt: string | null;
   answerSpec: InboxAnswerSpec;
@@ -161,6 +183,8 @@ export interface InboxItemContext {
 
 export interface InboxItemResponse {
   item: InboxItem;
+  /** Steps, assignee, claim, activity and discussion; set for kind `task` only (slice H1). */
+  task?: InboxTaskDetail | null;
   /** Null when not requested or the reader has no access to the source chat. */
   context: InboxItemContext | null;
 }
@@ -173,6 +197,8 @@ export interface InboxAnswerRequest {
   formContent?: Record<string, unknown>;
   decision?: 'approve' | 'deny';
   note?: string;
+  /** `actions` items: the fix to run (`retry`, `wake`, `resume`). */
+  action?: InboxErrorAction;
   /** Secret value: accepted from the app's own pages only, never logged or returned. */
   secret?: { value: string; replaceExisting?: boolean; expectedExistingVersion?: string };
 }
@@ -217,7 +243,7 @@ export function formatInboxRef(ref: ParsedInboxRef): string {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Agent inbox tools (slice D): `inbox_write` (ask, review, update, cancel) and `inbox_read`
+// Agent inbox tools (slice D): `inbox_write` (ask, review, result, update, cancel) and `inbox_read`
 // (list, get), thin MCP adapters over `packages/operations/src/inbox-agent-*.ts`.
 // ---------------------------------------------------------------------------------------------
 
@@ -276,5 +302,7 @@ export interface InboxAgentItem {
   answer: string | null;
   /** Why the filing agent cancelled it. */
   cancelReason: string | null;
+  /** Kind `task` only: steps, assignee, claim, activity and discussion (slice H1). */
+  task?: InboxTaskDetail;
   untrustedContent: true;
 }

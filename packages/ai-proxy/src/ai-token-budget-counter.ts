@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 
-import type { AiModelUsageRow } from './ai-model-usage';
+import { type AiModelUsageRow, parseModelUsageRow } from './ai-model-usage';
 import type {
   AiProviderUsageAttribution,
   AiProviderUsageEntry,
@@ -38,7 +38,7 @@ export class AiTokenBudgetCounter extends DurableObject<AiProxyEnv> {
         )`
       );
       // Per-model spend SAM priced itself, for usage breakdowns without AI Gateway
-      // (./ai-model-usage.ts). Additive.
+      // (./ai-model-usage.ts). Additive; one row per user, day and model.
       this.sql.exec(
         `CREATE TABLE IF NOT EXISTS ai_model_usage (
           budget_date        TEXT NOT NULL,
@@ -53,66 +53,6 @@ export class AiTokenBudgetCounter extends DurableObject<AiProxyEnv> {
         )`
       );
     });
-  }
-
-  async incrementModelUsage(
-    dateKey: string,
-    modelId: string,
-    providerId: string,
-    inputTokens: number,
-    outputTokens: number,
-    estimatedCostUsd: number,
-  ): Promise<void> {
-    this.sql.exec(
-      `INSERT INTO ai_model_usage (
-         budget_date, model_id, provider_id, requests, input_tokens, output_tokens,
-         estimated_cost_usd, updated_at
-       )
-       VALUES (?, ?, ?, 1, ?, ?, ?, ?)
-       ON CONFLICT(budget_date, model_id) DO UPDATE SET
-         provider_id = excluded.provider_id,
-         requests = ai_model_usage.requests + 1,
-         input_tokens = ai_model_usage.input_tokens + excluded.input_tokens,
-         output_tokens = ai_model_usage.output_tokens + excluded.output_tokens,
-         estimated_cost_usd = ai_model_usage.estimated_cost_usd + excluded.estimated_cost_usd,
-         updated_at = excluded.updated_at`,
-      dateKey,
-      modelId,
-      providerId,
-      inputTokens,
-      outputTokens,
-      estimatedCostUsd,
-      Date.now(),
-    );
-  }
-
-  async getModelUsage(startDateKey: string): Promise<AiModelUsageRow[]> {
-    return this.sql
-      .exec<{
-        budget_date: string;
-        model_id: string;
-        provider_id: string;
-        requests: number;
-        input_tokens: number;
-        output_tokens: number;
-        estimated_cost_usd: number;
-      }>(
-        `SELECT budget_date, model_id, provider_id, requests, input_tokens, output_tokens,
-                estimated_cost_usd
-         FROM ai_model_usage
-         WHERE budget_date >= ?`,
-        startDateKey,
-      )
-      .toArray()
-      .map((row) => ({
-        date: row.budget_date,
-        modelId: row.model_id,
-        providerId: row.provider_id,
-        requests: row.requests,
-        inputTokens: row.input_tokens,
-        outputTokens: row.output_tokens,
-        estimatedCostUsd: row.estimated_cost_usd,
-      }));
   }
 
   async get(dateKey: string): Promise<TokenBudget> {
@@ -193,8 +133,11 @@ export class AiTokenBudgetCounter extends DurableObject<AiProxyEnv> {
     attribution: AiProviderUsageAttribution,
     inputTokens: number,
     outputTokens: number,
-    estimatedCostUsd: number
+    estimatedCostUsd: number,
+    modelId?: string
   ): Promise<void> {
+    // One synchronous transaction, no await inside: provider and model rows move together and no
+    // concurrent call on this object can interleave (rule 45).
     this.ctx.storage.transactionSync(() => {
       this.sql.exec(
         `INSERT INTO ai_provider_usage (
@@ -218,7 +161,43 @@ export class AiTokenBudgetCounter extends DurableObject<AiProxyEnv> {
         estimatedCostUsd,
         Date.now()
       );
+      if (!modelId) return;
+      this.sql.exec(
+        `INSERT INTO ai_model_usage (
+           budget_date, model_id, provider_id, requests, input_tokens, output_tokens,
+           estimated_cost_usd, updated_at
+         )
+         VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+         ON CONFLICT(budget_date, model_id) DO UPDATE SET
+           provider_id = excluded.provider_id,
+           requests = ai_model_usage.requests + 1,
+           input_tokens = ai_model_usage.input_tokens + excluded.input_tokens,
+           output_tokens = ai_model_usage.output_tokens + excluded.output_tokens,
+           estimated_cost_usd = ai_model_usage.estimated_cost_usd + excluded.estimated_cost_usd,
+           updated_at = excluded.updated_at`,
+        dateKey,
+        modelId,
+        attribution.providerId,
+        inputTokens,
+        outputTokens,
+        estimatedCostUsd,
+        Date.now()
+      );
     });
+  }
+
+  /** Per-day, per-model rows since `startDateKey`: days in the period (≤ 90) x priced models used. */
+  async getModelUsage(startDateKey: string): Promise<AiModelUsageRow[]> {
+    return this.sql
+      .exec(
+        `SELECT budget_date, model_id, provider_id, requests, input_tokens, output_tokens,
+                estimated_cost_usd
+         FROM ai_model_usage
+         WHERE budget_date >= ?`,
+        startDateKey
+      )
+      .toArray()
+      .flatMap((row) => parseModelUsageRow(row) ?? []);
   }
 
   async getProviderUsage(startDateKey: string): Promise<AiProviderUsageEntry[]> {

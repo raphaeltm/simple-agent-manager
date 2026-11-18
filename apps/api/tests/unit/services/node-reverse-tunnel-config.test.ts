@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { generateCloudInit } from '@simple-agent-manager/cloud-init';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import {
   deriveReverseTunnelCredential,
@@ -7,12 +8,16 @@ import {
   resolveReverseTunnelHeartbeatTimeoutSeconds,
   resolveReverseTunnelPortRange,
   resolveReverseTunnelPortReuseMinAgeSeconds,
-} from '../../../src/services/node-reverse-tunnel-config';
+} from '../../../src/selfhost/reverse-tunnel/config';
+import { installReverseTunnelTransport } from '../../../src/selfhost/reverse-tunnel/transport';
 import { resolveManagedNodeTransport } from '../../../src/services/node-tunnel-config';
 
 const managedVm = { nodeRole: 'workspace', runtime: 'vm', nodeClass: 'managed' };
 
 describe('transport selection', () => {
+  // A self-host box installs the reverse-tunnel driver at entry (selfhost/build.ts, L17a/b).
+  beforeAll(() => installReverseTunnelTransport(generateCloudInit));
+
   it('selects reverse-tunnel only when explicitly configured', () => {
     expect(resolveManagedNodeTransport({ VM_AGENT_TRANSPORT: 'reverse-tunnel' }, managedVm)).toBe(
       'reverse-tunnel'

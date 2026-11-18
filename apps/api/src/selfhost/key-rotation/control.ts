@@ -64,7 +64,7 @@ function rotatingRoles(env: KeyRotationEnv): Record<AesKeyRole, boolean> {
 
 /**
  * Active reverse-tunnel leases created before `before` (the switch to the new key): their frp
- * credential is an HMAC under the old ENCRYPTION_KEY (node-reverse-tunnel-config.ts), so whoever
+ * credential is an HMAC under the old ENCRYPTION_KEY (selfhost/reverse-tunnel/config.ts), so whoever
  * holds that key and the lease ids can still log in to frps as those nodes until they are
  * replaced. Reported, not fixed: re-credentialing a live node needs the VM agent. Null when
  * unknown (no `before`, or the table cannot be read).

@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   getGitHubUserAccessToken: vi.fn(),
   getUserInstallationRepositories: vi.fn(),
   resolveCredentialSource: vi.fn(),
+  retireTaskCancellationPrompts: vi.fn(),
 }));
 
 vi.mock('drizzle-orm/d1');
@@ -54,6 +55,10 @@ vi.mock('../../../src/services/task-runner', () => ({
 }));
 vi.mock('../../../src/services/task-terminal-cleanup', () => ({
   cleanupTerminalTaskResourcesOrThrow: mocks.cleanupTerminalTaskResourcesOrThrow,
+}));
+// Delivery retirement has its own real D1/DO coverage; this suite observes route authorization.
+vi.mock('../../../src/services/task-cancellation-prompts', () => ({
+  retireTaskCancellationPrompts: mocks.retireTaskCancellationPrompts,
 }));
 vi.mock('../../../src/services/project-data', () => ({
   recordActivityEvent: mocks.recordActivityEvent,
@@ -106,7 +111,9 @@ function buildDb(selectResults: unknown[][]) {
     values: vi.fn(() => Promise.resolve()),
   }));
 
-  return { select, update, insert, updateSets };
+  const batch = vi.fn((queries: Promise<unknown>[]) => Promise.all(queries));
+
+  return { select, update, insert, batch, updateSets };
 }
 
 function createRunApp() {
@@ -154,6 +161,12 @@ describe('shared project task authorization — behavioral IDOR tests', () => {
     mocks.startTaskRunnerDO.mockResolvedValue(undefined);
     mocks.cleanupTaskRun.mockResolvedValue(undefined);
     mocks.cleanupTerminalTaskResourcesOrThrow.mockResolvedValue(undefined);
+    mocks.retireTaskCancellationPrompts.mockResolvedValue({
+      matched: false,
+      reason: 'missing',
+      cancelled: 0,
+      sessionId: null,
+    });
     mocks.recordActivityEvent.mockResolvedValue(undefined);
     mocks.cleanupWorkspaceForDeletion.mockResolvedValue(undefined);
     mocks.createSession.mockResolvedValue('sess-1');
@@ -192,7 +205,7 @@ describe('shared project task authorization — behavioral IDOR tests', () => {
           body: JSON.stringify({}),
         }),
         mockEnv,
-        mockCtx,
+        mockCtx
       );
 
       expect(response.status).toBe(404);
@@ -221,7 +234,7 @@ describe('shared project task authorization — behavioral IDOR tests', () => {
           method: 'POST',
         }),
         mockEnv,
-        mockCtx,
+        mockCtx
       );
 
       expect(response.status).toBe(404);
@@ -249,7 +262,7 @@ describe('shared project task authorization — behavioral IDOR tests', () => {
           method: 'POST',
         }),
         mockEnv,
-        mockCtx,
+        mockCtx
       );
 
       expect(response.status).toBe(200);
@@ -259,7 +272,7 @@ describe('shared project task authorization — behavioral IDOR tests', () => {
         'task-cleanup-1',
         mockEnv,
         undefined,
-        'caller-user',
+        'caller-user'
       );
     });
   });
@@ -293,7 +306,7 @@ describe('shared project task authorization — behavioral IDOR tests', () => {
           body: JSON.stringify({ workspaceId: 'ws-in-B' }),
         }),
         mockEnv,
-        mockCtx,
+        mockCtx
       );
 
       expect(response.status).toBe(404);
@@ -329,10 +342,11 @@ describe('shared project task authorization — behavioral IDOR tests', () => {
           body: JSON.stringify({ toStatus: 'cancelled' }),
         }),
         mockEnv,
-        mockCtx,
+        mockCtx
       );
 
       expect(response.status).toBe(200);
+      expect(db.batch).toHaveBeenCalledWith([expect.any(Promise), expect.any(Promise)]);
       expect(mocks.cleanupTerminalTaskResourcesOrThrow).toHaveBeenCalledWith(
         mockEnv,
         'task-owned-by-other',
@@ -340,7 +354,7 @@ describe('shared project task authorization — behavioral IDOR tests', () => {
           status: 'cancelled',
           requiredUserId: 'caller-user',
           projectId: 'project-A',
-        }),
+        })
       );
     });
   });
@@ -360,13 +374,16 @@ describe('shared project task authorization — behavioral IDOR tests', () => {
       vi.mocked(drizzle).mockReturnValue(db as never);
 
       const response = await createCrudApp().fetch(
-        new Request('https://api.test/api/projects/project-A/tasks/task-in-victim-project/delegate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ workspaceId: 'ws-1' }),
-        }),
+        new Request(
+          'https://api.test/api/projects/project-A/tasks/task-in-victim-project/delegate',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ workspaceId: 'ws-1' }),
+          }
+        ),
         mockEnv,
-        mockCtx,
+        mockCtx
       );
 
       expect(response.status).toBe(404);
@@ -396,7 +413,7 @@ describe('shared project task authorization — behavioral IDOR tests', () => {
           method: 'POST',
         }),
         mockEnv,
-        mockCtx,
+        mockCtx
       );
 
       expect(response.status).toBe(404);

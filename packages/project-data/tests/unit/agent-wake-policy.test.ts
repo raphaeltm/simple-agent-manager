@@ -96,6 +96,62 @@ describe('agent wake policy (trusted_project)', () => {
       'user_followup',
       'comment_directive',
       'attention_answer',
+      'inbox_task_comment',
     ]);
+  });
+});
+
+describe('agent wake policy: a comment on a human task (inbox slice H1)', () => {
+  const task = (assigneeUserId: string | null, claimedByUserId: string | null) => ({
+    sessionId: 'session-1',
+    trigger: 'inbox_task_comment' as const,
+    inboxTask: { assigneeUserId, claimedByUserId },
+  });
+  const none = { role: 'none' as const, ownerUserId: 'owner-1', grantId: null };
+
+  it('wakes for the assignee, labelled teammate input', () => {
+    expect(
+      decideAgentWake({ ...task('maya', null), actorUserId: 'maya', access: none })
+    ).toMatchObject({ allowed: true, actorRole: 'assignee', teammateInput: true });
+  });
+
+  it('wakes for the member who took a team task', () => {
+    expect(
+      decideAgentWake({ ...task(null, 'jonas'), actorUserId: 'jonas', access: none })
+    ).toMatchObject({ allowed: true, actorRole: 'assignee', onBehalfOfUserId: 'owner-1' });
+  });
+
+  it('records only for any other member with no rights on the chat', () => {
+    expect(
+      decideAgentWake({ ...task('maya', 'jonas'), actorUserId: 'lee', access: none })
+    ).toMatchObject({ allowed: false, reason: 'not_session_writer' });
+  });
+
+  it('never matches a null assignee or claimer', () => {
+    expect(
+      decideAgentWake({ ...task(null, null), actorUserId: 'lee', access: none })
+    ).toMatchObject({ allowed: false });
+  });
+
+  it('still wakes for the chat owner, not as teammate input', () => {
+    expect(
+      decideAgentWake({
+        ...task('maya', null),
+        actorUserId: 'owner-1',
+        access: { role: 'owner', ownerUserId: 'owner-1', grantId: null },
+      })
+    ).toMatchObject({ allowed: true, actorRole: 'owner', teammateInput: false });
+  });
+
+  it('ignores the task fields for every other trigger', () => {
+    expect(
+      decideAgentWake({
+        sessionId: 'session-1',
+        trigger: 'comment_directive',
+        inboxTask: { assigneeUserId: 'maya', claimedByUserId: null },
+        actorUserId: 'maya',
+        access: none,
+      })
+    ).toMatchObject({ allowed: false });
   });
 });

@@ -10,27 +10,6 @@ vi.mock('../../../src/middleware/auth', () => ({
   requireSuperadmin: () => async (_c: unknown, next: () => Promise<void>) => next(),
 }));
 
-// Mock node-usage service
-vi.mock('../../../src/services/node-usage', () => ({
-  getAllUsersNodeUsageSummary: vi.fn().mockResolvedValue({
-    period: { start: '2026-04-01T00:00:00Z', end: '2026-04-30T23:59:59Z' },
-    users: [
-      {
-        userId: 'user-1',
-        totalNodeHours: 10,
-        totalVcpuHours: 40,
-        platformNodeHours: 5,
-        activeNodes: 1,
-      },
-    ],
-  }),
-}));
-
-// Mock drizzle
-vi.mock('drizzle-orm/d1', () => ({
-  drizzle: vi.fn().mockReturnValue({}),
-}));
-
 describe('admin-costs routes', () => {
   let mockFetch: ReturnType<typeof vi.fn>;
   const CF_ACCOUNT_ID = 'test-account-123';
@@ -95,7 +74,7 @@ describe('admin-costs routes', () => {
     vi.stubGlobal('fetch', mockFetch);
   });
 
-  it('returns cost summary with LLM and compute data', async () => {
+  it('returns the LLM cost summary and no compute estimate', async () => {
     mockFetch.mockResolvedValue(
       makeGatewayResponse([
         makeLogEntry({ cost: 0.05, tokens_in: 1000, tokens_out: 500 }),
@@ -136,11 +115,8 @@ describe('admin-costs routes', () => {
     expect(body.projection.daysElapsed).toBeGreaterThan(0);
     expect(body.projection.projectedMonthlyCostUsd).toBeGreaterThan(0);
 
-    // Compute
-    expect(body.compute.totalNodeHours).toBe(10);
-    expect(body.compute.totalVcpuHours).toBe(40);
-    expect(body.compute.estimatedCostUsd).toBeCloseTo(40 * 0.003);
-    expect(body.compute.activeNodes).toBe(1);
+    // Compute spend moved to Admin Health & cost (real node prices); no flat estimate here.
+    expect(body).not.toHaveProperty('compute');
 
     // Period
     expect(body.period).toBe('current-month');
@@ -197,8 +173,6 @@ describe('admin-costs routes', () => {
     expect(body.llm.totalCostUsd).toBe(0);
     expect(body.llm.byModel).toHaveLength(0);
     expect(body.llm.byUser).toHaveLength(0);
-    // Compute data should still be present
-    expect(body.compute).toBeDefined();
   });
 
   it('with a gateway id but no Cloudflare account returns 200 with empty LLM data and never calls the gateway', async () => {
@@ -212,7 +186,6 @@ describe('admin-costs routes', () => {
     expect(body.llm.totalRequests).toBe(0);
     expect(body.llm.totalCostUsd).toBe(0);
     expect(body.llm.byModel).toHaveLength(0);
-    expect(body.compute.totalNodeHours).toBe(10);
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -277,18 +250,6 @@ describe('admin-costs routes', () => {
     expect(body.llm.totalRequests).toBe(2);
   });
 
-  it('uses configurable compute vCPU hour cost', async () => {
-    mockFetch.mockResolvedValue(makeGatewayResponse([]));
-
-    const app = createApp({ COMPUTE_VCPU_HOUR_COST_USD: '0.01' });
-    const res = await app.request('/api/admin/costs');
-    const body = await res.json();
-
-    // 40 vCPU-hrs * $0.01 = $0.40
-    expect(body.compute.estimatedCostUsd).toBeCloseTo(0.4);
-    expect(body.compute.vcpuHourCostUsd).toBe(0.01);
-  });
-
   it('aggregates across multiple pages', async () => {
     const page1Entries = Array.from({ length: 50 }, (_, i) =>
       makeLogEntry({ id: `log-p1-${i}`, cost: 0.01 })
@@ -334,26 +295,6 @@ describe('admin-costs routes', () => {
     const app = createApp();
     const res = await app.request('/api/admin/costs');
     expect(res.status).toBe(500);
-  });
-
-  it('returns LLM data even when compute query fails', async () => {
-    const { getAllUsersNodeUsageSummary } = await import('../../../src/services/node-usage');
-    (getAllUsersNodeUsageSummary as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new Error('D1 unavailable')
-    );
-
-    mockFetch.mockResolvedValue(makeGatewayResponse([makeLogEntry({ cost: 0.05 })]));
-
-    const app = createApp();
-    const res = await app.request('/api/admin/costs');
-
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.llm.totalRequests).toBe(1);
-    expect(body.llm.totalCostUsd).toBeCloseTo(0.05);
-    expect(body.compute.totalNodeHours).toBe(0);
-    expect(body.compute.totalVcpuHours).toBe(0);
-    expect(body.compute.estimatedCostUsd).toBe(0);
   });
 
   it('handles entries with null metadata gracefully', async () => {

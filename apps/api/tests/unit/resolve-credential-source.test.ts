@@ -287,7 +287,9 @@ describe('userHasOwnCloudCredentials with targetProvider', () => {
 });
 
 describe('quota enforcement pattern: credential source, not existence', () => {
-  const submitSource = readFileSync(resolve(process.cwd(), 'src/services/submit-task-implementation.ts'), 'utf8');
+  const submitSource = ['src/services/submit-vm-task-effects.ts', 'src/services/submit-vm-task.ts']
+    .map((path) => readFileSync(resolve(process.cwd(), path), 'utf8'))
+    .join('\n');
   const nodeStepsSource = readFileSync(
     resolve(process.cwd(), 'src/durable-objects/task-runner/node-provisioning-gates.ts'),
     'utf8'
@@ -510,13 +512,24 @@ describe('quota enforcement pattern: credential source, not existence', () => {
     });
 
     it('dispatch-tool.ts checks quota before task INSERT', () => {
-      const quotaIdx = dispatchSource.indexOf(
-        'resolveTaskStartPlacementCredentialAttributionFromPlacement'
+      const resolveIdx = dispatchSource.indexOf(
+        'await resolveTaskStartPlacementCredentialAttributionFromPlacement('
       );
-      const insertIdx = dispatchSource.indexOf('INSERT INTO tasks');
-      expect(quotaIdx).toBeGreaterThan(0);
-      expect(insertIdx).toBeGreaterThan(0);
-      expect(quotaIdx).toBeLessThan(insertIdx);
+      const quotaIdx = dispatchSource.indexOf('await checkQuotaForUser(');
+      const denialIdx = dispatchSource.indexOf('if (!quotaCheck.allowed)');
+      const insertIdx = dispatchSource.indexOf('await insertDispatchedTask(');
+      expect(resolveIdx).toBeGreaterThan(0);
+      expect(quotaIdx).toBeGreaterThan(resolveIdx);
+      expect(denialIdx).toBeGreaterThan(quotaIdx);
+      expect(insertIdx).toBeGreaterThan(denialIdx);
+      const storage = readFileSync(
+        resolve(process.cwd(), 'src/routes/mcp/dispatch-task-storage.ts'),
+        'utf8'
+      );
+      expect(dispatchSource).toContain("from './dispatch-task-storage'");
+      expect(storage).toContain('export function insertDispatchedTask(');
+      expect(storage).toContain('INSERT INTO tasks');
+      expect(storage).toContain('...values,');
     });
   });
 });

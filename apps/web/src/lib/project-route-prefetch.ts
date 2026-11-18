@@ -5,10 +5,12 @@ import { type ChatSessionListItem, listChatSessions } from './api';
 import { CHAT_SESSION_LIST_LIMIT } from './chat-query-config';
 import {
   chatSessionMessagesQueryOptions,
+  inboxListQueryOptions,
   projectChatSessionsQueryOptions,
   projectDetailQueryOptions,
+  projectOverviewQueryOptions,
 } from './query-options';
-import { platformCapabilitiesQueryOptions } from './query-options/platform-capabilities';
+import { isProjectOverviewRoute } from './shell-routes';
 
 /**
  * The project chat sidebar's first session-list read.
@@ -91,16 +93,19 @@ export function prefetchProjectRoute(
   if (!projectId) return;
 
   void queryClient.prefetchQuery(projectDetailQueryOptions(queryScope, projectId));
-  // Decides whether the composer offers voice input; fetched early so it rarely changes after
-  // the composer first renders.
-  void queryClient.prefetchQuery(platformCapabilitiesQueryOptions());
+
+  // The project index lands on the Overview (inbox slice F2): its aggregated read and the
+  // first page of Needs you, the same entries the page reads.
+  if (isProjectOverviewRoute(pathname)) {
+    void queryClient.prefetchQuery(projectOverviewQueryOptions(queryScope, projectId));
+    void queryClient.prefetchInfiniteQuery(
+      inboxListQueryOptions(queryScope, projectId, 'needs_you')
+    );
+    return;
+  }
 
   const selected = matchPath('/projects/:id/chat/:sessionId', pathname);
-  const chatRoute =
-    selected ??
-    matchPath('/projects/:id/chat', pathname) ??
-    // The project index redirects to its chat.
-    matchPath('/projects/:id', pathname);
+  const chatRoute = selected ?? matchPath('/projects/:id/chat', pathname);
   if (!chatRoute) return;
 
   void queryClient.prefetchQuery(initialChatSessionListQueryOptions(queryScope, projectId));

@@ -1,7 +1,7 @@
 /**
  * What an agent files in the inbox (slice D, idea 01M7G03ZCQ6TM6CMEYDRKQ8ST9, spec section 5):
- * an `ask` (one question, one answer shape) or a `review` ("please evaluate this"), and edits or
- * cancels its own open item. `inbox_write` and `request_human_input` (an alias of a blocking ask)
+ * an `ask` (one question, one answer shape), a `review` ("please evaluate this") or a `result`
+ * ("here is what you asked for"), and edits or cancels its own open item. `inbox_write` and `request_human_input` (an alias of a blocking ask)
  * are thin MCP adapters over these; nothing here knows about MCP.
  *
  * Every write binds `project_id`, and update/cancel also bind the filing chat and the kinds an
@@ -31,6 +31,7 @@ import { createAsk } from './inbox-ask-create-core';
 import { questionSchedule } from './inbox-question-schedule';
 import { inboxTitle } from './inbox-rows';
 import { getInboxLimits, type InboxLimits } from './inbox-settings';
+import { recordActivity } from './inbox-task-rows';
 import { sanitizeUserInput } from './sanitize-user-input';
 import type { OperationContext } from './types';
 
@@ -71,11 +72,17 @@ export const AgentReviewInputSchema = v.object({
 });
 export type AgentReviewInput = v.InferInput<typeof AgentReviewInputSchema>;
 
+/** A result takes the same fields as a review: the outcome in `title`, the details in `why`. */
+export type AgentResultInput = AgentReviewInput;
+
+/** Kinds an agent files through `file`; a human task is filed by `assignAgentTask`. */
+type AgentFiledKind = 'question' | 'review' | 'result';
+
 export interface AgentFileResult {
   ref: string;
   id: string;
   sessionId: string;
-  kind: 'question' | 'review';
+  kind: AgentFiledKind;
   blocking: boolean;
   /** False when the idempotency key named an item filed before: nothing new was filed. */
   created: boolean;
@@ -108,7 +115,7 @@ const isUrlKind = (kind: InboxAgentLinkKind) => INBOX_AGENT_URL_LINK_KINDS.inclu
  * Links as stored references, each checked as this project's. A URL kind keeps its URL in `id`,
  * which is what the inbox's link chips read (`linkTarget`, `apps/web`).
  */
-async function checkedLinks(
+export async function checkedLinks(
   ctx: OperationContext,
   projectId: string,
   raw: AgentLinkInput[],
@@ -162,7 +169,7 @@ async function file(
   source: AgentInboxSource,
   limits: InboxLimits,
   item: {
-    kind: 'question' | 'review';
+    kind: AgentFiledKind;
     blocking: boolean;
     title: string;
     why: string;
@@ -278,10 +285,11 @@ export async function fileAgentAsk(
   });
 }
 
-/** File a request to evaluate something: non-blocking, answered "Looks good" or with a reply. */
-export async function fileAgentReview(
+/** An item the person acknowledges ("Looks good" / "Got it") or replies to; never blocking. */
+async function fileAcknowledged(
   ctx: OperationContext,
   source: AgentInboxSource,
+  kind: 'review' | 'result',
   rawInput: AgentReviewInput
 ): Promise<AgentFileResult> {
   const input = v.parse(AgentReviewInputSchema, rawInput);
@@ -289,7 +297,7 @@ export async function fileAgentReview(
   const title = checkedTitle(input.title, limits);
   const links = await checkedLinks(ctx, source.projectId, input.links, limits);
   return file(ctx, source, limits, {
-    kind: 'review',
+    kind,
     blocking: false,
     title,
     why: clean(input.why),
@@ -301,8 +309,29 @@ export async function fileAgentReview(
   });
 }
 
+/** File a request to evaluate something: non-blocking, answered "Looks good" or with a reply. */
+export function fileAgentReview(
+  ctx: OperationContext,
+  source: AgentInboxSource,
+  rawInput: AgentReviewInput
+): Promise<AgentFileResult> {
+  return fileAcknowledged(ctx, source, 'review', rawInput);
+}
+
+/**
+ * File what the person asked for (an answer, a finding, a finished piece of work): non-blocking,
+ * never expires. "Got it" closes it without waking the agent; a reply wakes it with the reply.
+ */
+export function fileAgentResult(
+  ctx: OperationContext,
+  source: AgentInboxSource,
+  rawInput: AgentResultInput
+): Promise<AgentFileResult> {
+  return fileAcknowledged(ctx, source, 'result', rawInput);
+}
+
 /** The kinds an agent files; it may only edit or cancel these (never a SAM `error` item). */
-const AGENT_KINDS_SQL = `kind IN ('question', 'review')`;
+const AGENT_KINDS_SQL = `kind IN ('question', 'review', 'result', 'task')`;
 
 /** Report why an update or cancel matched nothing: missing (or not this chat's) vs. closed. */
 async function explainNoMatch(
@@ -408,6 +437,23 @@ export async function cancelAgentAsk(
     )
     .first<{ kind: string; blocking: number }>();
   if (!closed) return explainNoMatch(ctx, source, askId);
+  if (closed.kind === 'task') {
+    // A moot human task leaves the person's list; its history says why, and its watches wind
+    // down like a closed task's.
+    await ctx.ports.inboxTasks.closeWatches(
+      source.projectId,
+      askId,
+      (await getInboxLimits(ctx)).closedTaskWatchHours
+    );
+    await recordActivity(ctx, {
+      projectId: source.projectId,
+      askId,
+      kind: 'cancelled',
+      actorKind: 'agent',
+      actorId: source.sessionId,
+      at: now,
+    });
+  }
   if (closed.kind === 'question' && closed.blocking === 1) {
     await ctx.ports.inbox.withdrawQuestion({
       projectId: source.projectId,

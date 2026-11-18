@@ -164,7 +164,8 @@ describe('D1 analytics sink (self-host)', () => {
     const eventBody = JSON.stringify(await events.json());
     expect(eventBody).toContain('page_view');
 
-    for (const route of ['funnel', 'feature-adoption', 'geo', 'retention', 'website-traffic']) {
+    // Funnel, geo and retention were retired on main (Insights H2, #2822).
+    for (const route of ['feature-adoption', 'website-traffic']) {
       const res = await call(`/api/admin/analytics/${route}`);
       expect(res.status, route).toBe(200);
     }

@@ -38,9 +38,8 @@ export function EmailTriggerFields({
       />
       <p id={HINT_ID} className="text-xs text-fg-muted mt-1 mb-0">
         One address per line. Mail whose From address is on this list starts this automation, and
-        the agent can reply to it. The mail server also checks that the sender&rsquo;s domain really
-        sent it (SPF or DKIM). Keep the automation&rsquo;s address private anyway: it works like a
-        key.
+        the agent can reply to it. SAM checks only that the From address is on this list. It cannot
+        confirm the sender really sent the mail, so keep the automation&rsquo;s address private.
       </p>
       {error && (
         <p id={ERROR_ID} role="alert" className="mt-2 mb-0 text-[13px] font-medium text-danger-fg">

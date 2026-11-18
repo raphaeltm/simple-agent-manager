@@ -9,7 +9,7 @@ import { log, serializeError } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { errors } from '../middleware/error';
 import { type OperatorAbsenceProof, proveOperatorRetirement } from './node-operator-retirement';
-import { releaseNodeTunnels } from './node-tunnel-cleanup';
+import { releaseTerminatedNodeIngress } from './node-provisioning-ingress';
 import {
   createProviderForUser,
   exactProviderCredentialBindingFromPlacementSnapshot,
@@ -166,9 +166,7 @@ export async function recordManualNodeDeletion(
   const runtimeTerminationConfirmedAt = await recordOwnerAttestedRuntimeTermination(db, node);
   // The proof makes this incarnation non-live: release its Cloudflare tunnel now, as strict
   // deletion does, rather than waiting for the sweep's non-live scan. Never throws.
-  if (node.runtime === 'vm' && node.transport === 'cloudflare-tunnel') {
-    await releaseNodeTunnels(env, node.id, 'owner_attested_termination');
-  }
+  await releaseTerminatedNodeIngress(env, node, 'owner_attested_termination');
   log.info('node_manual_deletion.attested', {
     nodeId,
     userId,

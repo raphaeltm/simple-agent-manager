@@ -211,11 +211,21 @@ describe('API token routes', () => {
 
     const res = await buildApp().request('/api/auth/token-login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'CF-Connecting-IP': '203.0.113.7',
+        'X-Forwarded-For': '198.51.100.66',
+      },
       body: JSON.stringify({ token: 'sam_pat_validtoken123' }),
     });
 
     expect(res.status).toBe(200);
+    expect(mockCreateSession).toHaveBeenCalledWith(
+      'user-1',
+      false,
+      { ipAddress: '203.0.113.7' },
+      false
+    );
     const body = await res.json();
     expect(body.sessionCookie).toMatch(/better-auth\.session_token=/);
     expect(body.user.email).toBe('test@example.com');

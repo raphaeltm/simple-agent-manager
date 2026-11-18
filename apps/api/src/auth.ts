@@ -11,6 +11,7 @@ import { betterAuthSecretOptions } from './lib/better-auth-secrets';
 import { CLIENT_IP_HEADER } from './lib/client-ip';
 import { createModuleLogger } from './lib/logger';
 import { readResponseJson } from './lib/runtime-validation';
+import { accountLinkingPlugin, validateLinkUserInfo } from './services/account-linking';
 import { clampSessionRefresh, HARD_EXPIRES_AT_FIELD } from './services/agent-sign-in/session-cap';
 import {
   bootstrapOwnerEmail,
@@ -151,6 +152,8 @@ export function selectPrimaryGitHubEmail(
  * Create BetterAuth instance with Cloudflare D1 + KV configuration.
  */
 export interface CreateAuthOptions {
+  /** Preserve refresh failure category across BetterAuth's generic token-error wrapper. */
+  onGitHubRefreshError?: (error: unknown) => void;
   /**
    * Keeps work BetterAuth runs in the background alive after the response (the request's
    * `executionCtx.waitUntil`). Email sign-in codes are sent this way, so the response time does
@@ -180,7 +183,10 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
       clientId: githubOAuth.clientId,
       clientSecret: githubOAuth.clientSecret,
       scope: ['read:user', 'user:email', 'read:org'],
-      refreshAccessToken: (refreshToken: string) => refreshGitHubAccessToken(env, refreshToken),
+      refreshAccessToken: async (refreshToken: string) => {
+        try { return await refreshGitHubAccessToken(env, refreshToken); }
+        catch (error) { options.onGitHubRefreshError?.(error); throw error; }
+      },
       // Ensure existing linked users are refreshed with latest provider profile data on sign-in.
       overrideUserInfoOnSignIn: true,
       // Custom getUserInfo to ensure we persist the account's primary email when available.
@@ -249,12 +255,7 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
           return null;
         }
 
-        // A linked account keeps its own verified SAM email (see the helper).
-        const identity = await keepLinkedAccountEmail(env, 'github', user.id, {
-          email,
-          emailVerified,
-        });
-
+        const identity = await keepLinkedAccountEmail(env, 'github', user.id, { email, emailVerified });
         return {
           user: {
             email: identity.email ?? email,
@@ -284,14 +285,12 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
     };
   }
 
-  // Not registered when the admin's GitLab host may not be called (gitlab-login-provider.ts).
-  const gitlabProvider = gitlabOAuth ? gitLabLoginProvider(env, gitlabOAuth) : null;
-  if (gitlabOAuth && gitlabProvider) {
-    // better-auth links a sign-in to the existing user with that email when the provider is
-    // trusted OR the provider says the email is verified, so an untrusted host must lose both
-    // (its `getUserInfo` reports emails unverified and host-scopes its account ids).
-    if (gitlabOAuth.identityTrusted) trustedProviders.push('gitlab');
-    socialProviders.gitlab = gitlabProvider;
+  if (gitlabOAuth) {
+    const provider = gitLabLoginProvider(env, gitlabOAuth);
+    if (provider) {
+      if (gitlabOAuth.identityTrusted) trustedProviders.push('gitlab');
+      socialProviders.gitlab = provider;
+    }
   }
 
   return betterAuth({
@@ -340,15 +339,14 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
       },
     },
     socialProviders,
-    plugins: emailSignInPlugins(env),
+    plugins: [...emailSignInPlugins(env), accountLinkingPlugin(env)],
     advanced: {
-      // One client-IP rule for the whole API (`lib/client-ip.ts`): only the ingress-set
-      // CF-Connecting-IP is trusted for BetterAuth's session IPs and rate limits. Its default,
-      // X-Forwarded-For, carries whatever a client prepends.
+      // Ingress owns this header. BetterAuth's X-Forwarded-For default is client-controlled.
       ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] },
       ...(options.waitUntil ? { backgroundTasks: { handler: options.waitUntil } } : {}),
     },
     user: {
+      validateUserInfo: validateLinkUserInfo,
       additionalFields: {
         githubId: {
           type: 'string',
@@ -373,7 +371,7 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
       },
     },
     databaseHooks: {
-      // Owner alert when a social sign-in is linked to an admin or superadmin (best-effort).
+      // Notify the affected account owner when a social sign-in is linked (best-effort).
       account: {
         create: {
           after: (account) => {
@@ -487,16 +485,9 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
       accountLinking: {
         enabled: true,
         trustedProviders,
-        // "Connect GitHub" / "Connect GitLab" in Settings: an account that signed in by email
-        // links a provider through BetterAuth's own `/link-social` flow. The provider account's
-        // email usually differs from the SAM one (a GitHub-created account may only expose its
-        // noreply address). better-auth 1.7 reads this flag only on the explicit, signed-in link
-        // paths (`linkOAuthAccount` in `oauth2/link-account.mjs` for the redirect callback, and
-        // the `/link-social` idToken branch); implicit linking at sign-in still requires the
-        // email to match. `routes/auth.ts` limits linking to GitHub and GitLab, whose
-        // `getUserInfo` keeps the linked account's own email (`keepLinkedAccountEmail`), and
-        // refuses every BetterAuth write for agent sign-in sessions.
         allowDifferentEmails: true,
+        // The plugin permits removing the last provider only with usable verified email login.
+        allowUnlinkingAll: true,
       },
     },
   });

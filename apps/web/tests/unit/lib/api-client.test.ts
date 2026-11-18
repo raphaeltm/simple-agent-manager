@@ -114,28 +114,33 @@ describe('request() — content type handling', () => {
     expect(onReauth).toHaveBeenCalledTimes(1);
     const event = onReauth.mock.calls[0][0] as CustomEvent;
     expect(event.detail).toEqual({
-      message: 'Your GitHub authorization has expired — please sign out and back in',
       code: 'GITHUB_REAUTH_REQUIRED',
+      message: 'Your GitHub authorization has expired — please sign out and back in',
     });
     window.removeEventListener(GITHUB_REAUTH_REQUIRED_EVENT, onReauth);
   });
-
-  it('emits the same event, with its code, for GITHUB_NOT_CONNECTED errors', async () => {
-    const onReauth = vi.fn();
-    window.addEventListener(GITHUB_REAUTH_REQUIRED_EVENT, onReauth);
-    mockResponse(
-      JSON.stringify({ error: 'GITHUB_NOT_CONNECTED', message: 'Connect GitHub in Settings.' }),
-      { status: 403, headers: { 'Content-Type': 'application/json' } }
-    );
-
-    await expect(request('/api/projects/proj-1/tasks/submit', { method: 'POST' })).rejects.toThrow(
-      ApiClientError
-    );
-    const event = onReauth.mock.calls[0]?.[0] as CustomEvent;
-    expect(event.detail).toEqual({
-      message: 'Connect GitHub in Settings.',
-      code: 'GITHUB_NOT_CONNECTED',
-    });
-    window.removeEventListener(GITHUB_REAUTH_REQUIRED_EVENT, onReauth);
-  });
+  it.each([
+    { code: 'GITHUB_NOT_CONNECTED', status: 403, notify: true },
+    { code: 'GITHUB_UNAVAILABLE', status: 503, notify: false },
+    { code: 'GITHUB_APP_NOT_CONFIGURED', status: 409, notify: false },
+    { code: 'FEATURE_UNAVAILABLE', status: 404, notify: false },
+  ])(
+    'only asks for connection on $code when recovery requires it',
+    async ({ code, status, notify }) => {
+      const listener = vi.fn();
+      window.addEventListener(GITHUB_REAUTH_REQUIRED_EVENT, listener);
+      mockResponse(JSON.stringify({ error: code, message: 'Recovery guidance' }), {
+        status,
+        headers: { 'Content-Type': 'application/json' },
+      });
+      await expect(request('/api/github/installations')).rejects.toMatchObject({ code, status });
+      expect(listener).toHaveBeenCalledTimes(notify ? 1 : 0);
+      if (notify)
+        expect((listener.mock.calls[0][0] as CustomEvent).detail).toEqual({
+          code,
+          message: 'Recovery guidance',
+        });
+      window.removeEventListener(GITHUB_REAUTH_REQUIRED_EVENT, listener);
+    }
+  );
 });

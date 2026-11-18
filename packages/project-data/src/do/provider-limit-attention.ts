@@ -6,6 +6,7 @@ import {
   listActiveAttentionMarkers,
   resolveAttentionMarkersByKind,
 } from './attention';
+import { closeWakeErrorAskForProviderLimit } from './question-asks';
 import { sleepSession } from './sessions';
 
 export interface ProviderLimitAttentionResult {
@@ -56,11 +57,22 @@ export async function syncProviderLimitAttention(
     'system',
     'provider_limit_blocked'
   );
+  // Since inbox slice E a failed wake is a D1 error item, not only a marker: close it too.
+  const wakeAsksClosed = await closeWakeErrorAskForProviderLimit(database, {
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+  });
   const existing = listActiveAttentionMarkers(sql, input.sessionId).find(
     (marker) => marker.kind === 'provider_limit_blocked'
   );
+  // A closed wake item is a visible change too: the chat list re-reads its attention.
   if (existing)
-    return { blocked: true, changed: false, markerId: existing.id, reason: wait.reason };
+    return {
+      blocked: true,
+      changed: wakeAsksClosed > 0,
+      markerId: existing.id,
+      reason: wait.reason,
+    };
   const marker = createAttentionMarker(sql, {
     sessionId: input.sessionId,
     taskId: input.taskId,

@@ -3,6 +3,7 @@ import { Check, ChevronDown, CircleAlert, Undo2, X } from 'lucide-react';
 import { type ReactNode, type Ref, useState } from 'react';
 import { Link } from 'react-router';
 
+import { RenderedMarkdown } from '../MarkdownRenderer';
 import {
   agentStateLong,
   contextSummary,
@@ -262,10 +263,11 @@ export function InboxItemBody({
         {item.title}
       </h2>
       {item.body && (
-        // Agent-written: plain text, never markup.
-        <p className="m-0 text-[15px] leading-relaxed whitespace-pre-wrap break-words text-fg-secondary [overflow-wrap:anywhere]">
-          {item.body}
-        </p>
+        // Agent-written markdown (agents are told to write `why` in markdown). The renderer
+        // never renders raw HTML and sanitizes link targets.
+        <div className="min-w-0 text-[15px] text-fg-secondary">
+          <RenderedMarkdown content={item.body} inline />
+        </div>
       )}
       {item.answerSpec.type === 'secret' && (
         <code className="w-fit max-w-full rounded-sm bg-inset px-1.5 py-0.5 text-[0.8125rem] font-semibold text-fg-primary [overflow-wrap:anywhere]">

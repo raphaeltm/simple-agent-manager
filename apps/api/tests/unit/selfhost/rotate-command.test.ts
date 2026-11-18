@@ -54,12 +54,12 @@ import {
   signKeyRotationRequest,
 } from '../../../src/selfhost/key-rotation/control-auth';
 import { previousKeyPairs } from '../../../src/selfhost/key-rotation/keys';
+import { isAcceptedGatewaySecret } from '../../../src/selfhost/reverse-tunnel/config';
 import { getDecryptedAgentKey } from '../../../src/services/agent-key-resolution';
 import { decryptWithKeyOnly, encrypt } from '../../../src/services/encryption';
 import { setPreviousEncryptionKeys } from '../../../src/services/encryption-key-fallback';
 import { signNodeCallbackToken } from '../../../src/services/jwt';
 import { getJWKS, verifyCallbackToken } from '../../../src/services/jwt-verify';
-import { isAcceptedGatewaySecret } from '../../../src/services/node-reverse-tunnel-config';
 import { ConditionalR2 } from '../../helpers/conditional-r2';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -163,6 +163,13 @@ beforeEach(async () => {
   stateDir = mkdtempSync(join(tmpdir(), 'sam-rotate-'));
   sqlite = new Database(':memory:');
   createSchemaTables(sqlite, ALL_TABLES);
+  // The lease table exists only on a self-host box (self-host migration, not the shared schema).
+  sqlite.exec(
+    readFileSync(
+      new URL('../../../src/selfhost/migrations/0255_node_reverse_tunnel_leases.sql', import.meta.url),
+      'utf8'
+    )
+  );
   sqlite
     .prepare(`INSERT INTO users (id, email, status) VALUES ('u1', 'u1@example.com', 'active')`)
     .run();

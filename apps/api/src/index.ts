@@ -59,6 +59,7 @@ import { adminCcBackfillRoutes } from './routes/admin-cc-backfill';
 import { adminCostRoutes } from './routes/admin-costs';
 import { adminGithubInstallationLeakSweepRoutes } from './routes/admin-github-installation-leak-sweep';
 import { adminGithubRepoIdBackfillRoutes } from './routes/admin-github-repo-id-backfill';
+import { adminHealthCostRoutes } from './routes/admin-health-cost';
 import { adminOperationsApprovalRoutes } from './routes/admin-operations-approvals';
 import { adminPlatformConfigRoutes } from './routes/admin-platform-config';
 import { adminPlatformCredentialRoutes } from './routes/admin-platform-credentials';
@@ -80,6 +81,7 @@ import { aiProxyAnthropicRoutes } from './routes/ai-proxy-anthropic';
 import { aiProxyPassthroughRoutes } from './routes/ai-proxy-passthrough';
 import { analyticsIngestRoutes } from './routes/analytics-ingest';
 import { apiTokenRoutes } from './routes/api-tokens';
+import { artifactsConfigRoutes } from './routes/artifacts-config';
 import { authRoutes } from './routes/auth';
 import { bootstrapRoutes } from './routes/bootstrap';
 import { cachedCommandRoutes } from './routes/cached-commands';
@@ -114,6 +116,7 @@ import { googleAuthRoutes } from './routes/google-auth';
 import { ideaUpdateRoutes } from './routes/idea-updates';
 import { ideaRoutes } from './routes/ideas';
 import { inboxRoutes, projectInboxRoutes } from './routes/inbox';
+import { projectInboxTaskRoutes } from './routes/inbox-tasks';
 import {
   handleInteractivePreviewRequest,
   isInteractivePreviewRequest,
@@ -132,6 +135,7 @@ import { nodesRoutes } from './routes/nodes';
 import { notificationRoutes } from './routes/notifications';
 import { observabilityIngestRoutes } from './routes/observability-ingest';
 import { orchestratorRoutes } from './routes/orchestrator';
+import { platformCapabilitiesRoutes } from './routes/platform-capabilities';
 import { policyRoutes } from './routes/policies';
 import { profileRuntimeRoutes } from './routes/profile-runtime';
 import { projectAgentRoutes } from './routes/project-agent';
@@ -163,7 +167,6 @@ import { reportIssueRoutes } from './routes/report-issue';
 import { resolutionStatusRoute } from './routes/resolution-status';
 import { resourceLinkRoutes } from './routes/resource-links';
 import { samRoutes } from './routes/sam';
-import { createSelfHostGatewayRoutes } from './routes/self-host-gateway';
 import { setupRoutes } from './routes/setup';
 import { skillRuntimeRoutes } from './routes/skill-runtime';
 import { skillRoutes } from './routes/skills';
@@ -184,8 +187,6 @@ import { scheduled } from './scheduled/handler';
 import { handleInboundAgentEmail } from './services/agent-email/inbound';
 import { agentEmailConfig } from './services/agent-email/setup-state';
 import { isAgentSignInEnabled } from './services/agent-sign-in/config';
-import { isArtifactsAvailable } from './services/platform-capabilities';
-import { resolvePublicPlatformCapabilities } from './services/speech-endpoints';
 import { isInstantRuntimeAvailable } from './services/vm-agent-container';
 
 // Global error handler — catches errors from all routes including subrouters.
@@ -278,17 +279,9 @@ app.get('/health', (c) => {
 });
 
 // Public config — exposes feature flags the UI needs before auth
-app.get('/api/config/artifacts-enabled', (c) => {
-  applyCacheHeaders(c, 'public-config');
-  return c.json({ enabled: isArtifactsAvailable(c.env) });
-});
+app.route('/api/config', artifactsConfigRoutes);
 
-// Public config — which platform services this installation has, so the UI can hide entry
-// points that cannot work here (services/platform-capabilities.ts). Booleans only.
-app.get('/api/config/platform-capabilities', async (c) => {
-  applyCacheHeaders(c, 'public-config');
-  return c.json(await resolvePublicPlatformCapabilities(c.env));
-});
+app.route('/api/config', platformCapabilitiesRoutes);
 
 // Public config — whether agents can run on Instant (Cloudflare Containers) with no cloud account.
 app.get('/api/config/instant-runtime', (c) => {
@@ -380,12 +373,6 @@ app.route('/api/auth', agentSignInRoutes);
 app.route('/api/auth', deviceFlowRoutes);
 app.route('/api/auth', authRoutes);
 app.route('/api/setup', setupRoutes);
-// Self-hosted box gateway (frps plugin, Caddy forward_auth). Own secret auth, no session
-// middleware; 404 unless REVERSE_TUNNEL_GATEWAY_SECRET is configured (routes/self-host-gateway.ts).
-app.route(
-  '/api/self-host/gateway',
-  createSelfHostGatewayRoutes((request, env, ctx) => app.fetch(request, env, ctx))
-);
 app.route('/api/credentials', resolutionStatusRoute);
 app.route('/api/credentials', credentialLimitsRoute);
 app.route('/api/credentials', credentialsRoutes);
@@ -446,6 +433,8 @@ app.route('/api/projects/:projectId/ideas', ideaRoutes);
 app.route('/api/projects/:projectId/overview', projectOverviewRoutes);
 app.route('/api/projects/:projectId/insights', projectInsightsRoutes);
 app.route('/api/projects/:projectId/inbox', projectInboxRoutes);
+// Human tasks (inbox slice H1): steps, comments, claim, reassign, done, reopen.
+app.route('/api/projects/:projectId/inbox', projectInboxTaskRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/operation-receipts', cliOperationReceiptRoutes);
 app.route('/api/projects/:projectId/cli', cliProjectMetadataRoutes);
@@ -500,6 +489,7 @@ app.route('/api/admin/operations/approvals', adminOperationsApprovalRoutes);
 app.route('/api/admin/settings', adminSettingsRoutes);
 app.route('/api/admin/usage', adminUsageRoutes);
 app.route('/api/admin/costs', adminCostRoutes);
+app.route('/api/admin/health-cost', adminHealthCostRoutes);
 app.route('/api/admin/cc-backfill', adminCcBackfillRoutes);
 app.route('/api/admin/github-repo-id-backfill', adminGithubRepoIdBackfillRoutes);
 app.route('/api/admin/github-installation-leak-sweep', adminGithubInstallationLeakSweepRoutes);

@@ -24,7 +24,7 @@ export interface GitLabOAuthConfig {
   clientSecret: string;
   /**
    * `integration.gitlab.allowPrivateNetwork`. A host on the private network is refused unless
-   * this is on (gitlab-host-policy.ts); it is never inferred from the host itself.
+   * this is on (`gitlabFetch` in gitlab.ts passes it to the outbound guard); it is never inferred from the host itself.
    */
   allowPrivateNetwork: boolean;
 }
@@ -34,7 +34,6 @@ export interface PlatformConfigPort {
   githubApp(env: Env): Promise<GitHubAppConfig | null>;
   githubOAuth(env: Env): Promise<GitHubOAuthConfig | null>;
   gitlabOAuth(env: Env): Promise<GitLabOAuthConfig | null>;
-  /** Admin setting `outbound.maxRedirects`: redirect hops a guarded outbound fetch may follow. */
   outboundMaxRedirects(env: Env): Promise<number>;
 }
 
@@ -50,17 +49,17 @@ export interface AuthPort {
 }
 
 /**
- * The SAM-native repository backend (`ARTIFACTS`). On Cloudflare it is the Artifacts binding; on
- * a self-hosted install it can be SAM's own git server (the worker's `hosted-git/backend.ts`).
+ * The SAM-native repository backend (`ARTIFACTS`). On Cloudflare it is the Artifacts binding; a
+ * self-hosted install may register its own (the worker's `services/hosted-git/backend.ts`).
  */
 export interface ArtifactsBackendPort {
   /** The backend this install uses for SAM-native repositories, or null when it has none. */
   resolve(env: Env): ArtifactsBinding | null;
   /**
-   * A fetch that serves this install's own hosted repositories in-process, or null when
-   * repositories are read over the network (Cloudflare Artifacts).
+   * A fetch that serves this install's own hosted repositories in-process, or null (or absent)
+   * when repositories are read over the network (Cloudflare Artifacts).
    */
-  localRemoteFetch(env: Env): typeof fetch | null;
+  localRemoteFetch?(env: Env): typeof fetch | null;
 }
 
 export interface RepoHostingPorts {

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
+import type { Env } from '../../../../src/env';
 import {
-  createDurableObjectArtifactsBackend,
-  isLocalHostedGitActive,
+  isArtifactsAvailable,
+  registerArtifactsBackendFallback,
   resolveArtifactsBackend,
 } from '../../../../src/services/hosted-git/backend';
 import { parseHostedGitPath } from '../../../../src/services/hosted-git/http';
@@ -13,12 +14,16 @@ import {
   hostedGitPushRefusal,
 } from '../../../../src/services/hosted-git/limits';
 import {
+  createDurableObjectArtifactsBackend,
+  isLocalHostedGitActive,
+  localHostedGitBackendFallback,
+} from '../../../../src/services/hosted-git/local-backend';
+import {
   clampHostedGitTokenTtl,
   MAX_HOSTED_GIT_TOKEN_TTL_SECONDS,
   mintHostedGitToken,
   verifyHostedGitToken,
 } from '../../../../src/services/hosted-git/tokens';
-import { isArtifactsAvailable } from '../../../../src/services/platform-capabilities';
 
 const env = { ENCRYPTION_KEY: 'test-encryption-key-for-hosted-git' };
 const otherEnv = { ENCRYPTION_KEY: 'a-different-installation-key' };
@@ -155,10 +160,17 @@ describe('backend resolution', () => {
       HOSTED_GIT_BACKEND: 'durable-object',
       BASE_DOMAIN: 'box.example',
     };
-    expect(isArtifactsAvailable(selfhost)).toBe(true);
-    expect(isLocalHostedGitActive(selfhost)).toBe(true);
-    expect(resolveArtifactsBackend(selfhost)).not.toBeNull();
-    expect(typeof createDurableObjectArtifactsBackend(selfhost).get).toBe('function');
+    // Only the self-host build registers the local backend (selfhost/hosted-git.ts).
+    expect(isArtifactsAvailable(selfhost as unknown as Env)).toBe(false);
+    registerArtifactsBackendFallback(localHostedGitBackendFallback);
+    try {
+      expect(isArtifactsAvailable(selfhost as unknown as Env)).toBe(true);
+      expect(isLocalHostedGitActive(selfhost)).toBe(true);
+      expect(resolveArtifactsBackend(selfhost as unknown as Env)).not.toBeNull();
+      expect(typeof createDurableObjectArtifactsBackend(selfhost).get).toBe('function');
+    } finally {
+      registerArtifactsBackendFallback(null);
+    }
   });
 });
 

@@ -1,8 +1,8 @@
+import { cronToNextFire } from '@simple-agent-manager/cron';
 import type { TriggerStatus } from '@simple-agent-manager/shared';
 import { type SQL, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
-import { cronToNextFire } from './cron-utils';
 
 /** The trigger columns a status change rewrites. An absent key leaves the column alone. */
 export interface TriggerStatusUpdates {

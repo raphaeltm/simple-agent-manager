@@ -1,3 +1,5 @@
+import { hasLocalAiCostMetering } from '@simple-agent-manager/ai-proxy';
+import { guardedFetch } from '@simple-agent-manager/worker-core';
 /**
  * AI proxy passthrough routes — URL-path-based workspace auth.
  *
@@ -12,36 +14,98 @@
  *
  * The wstoken is verified as a workspace callback token to extract userId,
  * workspaceId, and projectId. Upstream provider credentials are never accepted
- * from, or returned to, tenant workspaces. The upstream URL can be user-chosen, so
- * every upstream request goes through `fetchProxyUpstream` (guarded fetch).
+ * from, or returned to, tenant workspaces.
  */
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import {
   attachUpstreamTokenUsageAccounting,
   estimateInputTokensFromMessages,
+  estimateInputTokensFromRequest,
   optionalExecutionContext,
 } from '../services/ai-token-usage-accounting';
 import { copyCredentialLimitHeaders } from '../services/credential-limit-events';
+import { resolveOutboundMaxRedirects } from '../services/outbound-fetch-settings';
 import { anthropicError, credentialErrorHeaders, openaiError } from './ai-proxy-passthrough-errors';
 import {
-  addAnthropicRequestHeaders,
   anthropicProxyOptions,
-  buildJsonUpstreamHeaders,
-  buildUpstreamAuthHeaders,
-  fetchProxyUpstream,
-  joinUpstreamUrl,
   openaiProxyOptions,
   prepareProxyRequest,
   retryAfterSeconds,
-  upstreamFetchErrorMeta,
 } from './ai-proxy-passthrough-prepare';
 import { schedulePassthroughLimitHeaders } from './ai-proxy-passthrough-telemetry';
-import { resolveProxyUpstream } from './ai-proxy-passthrough-upstream';
+import { type ResolvedProxyUpstream, trimTrailingSlashes } from './ai-proxy-passthrough-upstream';
 
 const aiProxyPassthroughRoutes = new Hono<{ Bindings: Env }>();
+type ProxyContext = Context<{ Bindings: Env }>;
+
+// =============================================================================
+// Error Helpers
+// =============================================================================
+
+// =============================================================================
+// Shared: verify workspace token from URL path + rate limit + budget
+// =============================================================================
+
+function trimLeadingSlashes(value: string): string {
+  let start = 0;
+  while (start < value.length && value.charCodeAt(start) === 47) start++;
+  return value.slice(start);
+}
+
+function joinUpstreamUrl(baseUrl: string, path: string): string {
+  return `${trimTrailingSlashes(baseUrl)}/${trimLeadingSlashes(path)}`;
+}
+
+/**
+ * A passthrough call served by a platform-owned credential spends the installation's money, so
+ * where SAM prices spend itself (no AI Gateway) it is priced into the monthly cap and ceiling like
+ * every other platform-billed call. A user's or project's own credential is their own spend.
+ */
+function platformCostModelId(upstream: ResolvedProxyUpstream, modelId: string): string | undefined {
+  return upstream.credentialSource === 'platform' ? modelId : undefined;
+}
+
+function buildUpstreamAuthHeaders(upstream: ResolvedProxyUpstream): Record<string, string> {
+  if (
+    upstream.capability.authStyle === 'bearer-token' ||
+    upstream.dialect === 'openai-compatible'
+  ) {
+    return { Authorization: `Bearer ${upstream.apiKey}` };
+  }
+  if (upstream.capability.authStyle === 'api-key' && upstream.dialect === 'anthropic') {
+    return { 'x-api-key': upstream.apiKey };
+  }
+  return {};
+}
+
+function buildJsonUpstreamHeaders(upstream: ResolvedProxyUpstream): Record<string, string> {
+  return {
+    ...buildUpstreamAuthHeaders(upstream),
+    'Content-Type': 'application/json',
+  };
+}
+
+function upstreamFetchErrorMeta(err: unknown): Record<string, string> {
+  if (err instanceof Error) {
+    return { errorName: err.name };
+  }
+  return { errorType: typeof err };
+}
+
+function addAnthropicRequestHeaders(
+  headers: Record<string, string>,
+  c: ProxyContext
+): Record<string, string> {
+  // Anthropic-compatible Messages calls require an API version header.
+  // https://docs.anthropic.com/en/api/versioning
+  headers['anthropic-version'] = c.req.header('anthropic-version') || '2023-06-01';
+  const anthropicBeta = c.req.header('anthropic-beta');
+  if (anthropicBeta) headers['anthropic-beta'] = anthropicBeta;
+  return headers;
+}
 
 // =============================================================================
 // Anthropic Passthrough: POST /:wstoken/anthropic/v1/messages
@@ -84,7 +148,15 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
   const upstreamUrl = joinUpstreamUrl(upstream.baseUrl, 'v1/messages');
 
   try {
-    const upstreamResponse = await fetchProxyUpstream(c.env, upstreamUrl, upstreamHeaders, body);
+    const upstreamResponse = await guardedFetch(
+      upstreamUrl,
+      {
+        method: 'POST',
+        headers: upstreamHeaders,
+        body: JSON.stringify(body),
+      },
+      { maxRedirects: await resolveOutboundMaxRedirects(c.env) }
+    );
 
     log.info('ai_proxy_passthrough.anthropic.response', {
       userId,
@@ -134,8 +206,15 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
       env: c.env,
       userId,
       format: 'anthropic',
-      fallbackInputTokens: estimateInputTokensFromMessages(body.messages),
+      fallbackInputTokens:
+        upstream.credentialSource === 'platform' && hasLocalAiCostMetering(c.env)
+          ? estimateInputTokensFromRequest(body)
+          : estimateInputTokensFromMessages(body.messages),
       provider: upstream.provider,
+      costModelId: platformCostModelId(upstream, modelId),
+      estimateMissingUsage:
+        upstream.credentialSource === 'platform' && hasLocalAiCostMetering(c.env),
+      onMeasuredUsage: prepared.value.recordRunUsage,
       executionCtx: optionalExecutionContext(() => c.executionCtx),
       headers: responseHeaders,
     });
@@ -169,7 +248,15 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages/count_tokens', as
   const countTokensUrl = joinUpstreamUrl(upstream.baseUrl, 'v1/messages/count_tokens');
 
   try {
-    const upstreamResponse = await fetchProxyUpstream(c.env, countTokensUrl, upstreamHeaders, body);
+    const upstreamResponse = await guardedFetch(
+      countTokensUrl,
+      {
+        method: 'POST',
+        headers: upstreamHeaders,
+        body: JSON.stringify(body),
+      },
+      { maxRedirects: await resolveOutboundMaxRedirects(c.env) }
+    );
 
     if (!upstreamResponse.ok) {
       log.error('ai_proxy_passthrough.anthropic.count_tokens_error', {
@@ -247,7 +334,15 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
   });
 
   try {
-    const upstreamResponse = await fetchProxyUpstream(c.env, upstreamUrl, upstreamHeaders, body);
+    const upstreamResponse = await guardedFetch(
+      upstreamUrl,
+      {
+        method: 'POST',
+        headers: upstreamHeaders,
+        body: JSON.stringify(body),
+      },
+      { maxRedirects: await resolveOutboundMaxRedirects(c.env) }
+    );
 
     log.info('ai_proxy_passthrough.openai.response', {
       userId,
@@ -301,8 +396,15 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
       env: c.env,
       userId,
       format: 'openai',
-      fallbackInputTokens: estimateInputTokensFromMessages(body.messages),
+      fallbackInputTokens:
+        upstream.credentialSource === 'platform' && hasLocalAiCostMetering(c.env)
+          ? estimateInputTokensFromRequest(body)
+          : estimateInputTokensFromMessages(body.messages),
       provider: upstream.provider,
+      costModelId: platformCostModelId(upstream, modelId),
+      estimateMissingUsage:
+        upstream.credentialSource === 'platform' && hasLocalAiCostMetering(c.env),
+      onMeasuredUsage: prepared.value.recordRunUsage,
       executionCtx: optionalExecutionContext(() => c.executionCtx),
       headers: responseHeaders,
     });
@@ -317,9 +419,6 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
   }
 });
 
-export {
-  aiProxyPassthroughRoutes,
-  buildUpstreamAuthHeaders,
-  joinUpstreamUrl,
-  resolveProxyUpstream,
-};
+export { aiProxyPassthroughRoutes, buildUpstreamAuthHeaders, joinUpstreamUrl };
+
+export { resolveProxyUpstream } from './ai-proxy-passthrough-upstream';

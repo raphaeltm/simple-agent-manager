@@ -26,6 +26,8 @@ import {
   applyPromptDeliveryResult,
   markPromptDeliverySubmitting,
   type PromptDeliveryClaim,
+  promptDeliveryClaimIsCurrent,
+  promptDeliveryClaimSubmissionCheckpoint,
   type PromptDeliveryResult,
 } from './prompt-delivery';
 import {
@@ -40,6 +42,7 @@ import {
   sourceValidationReadFailure,
 } from './prompt-delivery-source-guards';
 import { labelSteerOutcomeOnTranscript } from './prompt-delivery-steer';
+import { applyProviderLimitDeliveryHold } from './provider-limit-delivery-hold';
 import * as sessionState from './session-state';
 import type { Env } from './types';
 import { raiseSessionWakeFailure } from './wake-failure';
@@ -184,12 +187,53 @@ export async function runPromptDeliveryClaim(
         );
       }
     };
-    const validateDeliveryTarget = async (): Promise<PromptDeliveryResult | null> =>
-      invalidSessionWriterSenderResult(sql, claim) ??
-      (await validateParentWakeTarget()) ??
-      (await validateProjectEventWakeTarget()) ??
-      (await invalidScheduledDeliveryTarget(sql, env, hooks.projectId, claim)) ??
-      (await invalidCheckpointContinuationTarget(sql, env, hooks.projectId, claim));
+    const validateClaim = (): PromptDeliveryResult | null => {
+      if (promptDeliveryClaimIsCurrent(sql, claim)) return null;
+      return claim.mode === 'reconcile'
+        ? {
+            kind: 'ambiguous',
+            reason: 'runtime_changed',
+            error: 'Prompt reconciliation claim is no longer current',
+            runtimeIdentity: claim.message.runtimeIdentity,
+            capabilities: null,
+            receipt: null,
+          }
+        : {
+            kind: 'failed',
+            reason: 'terminal_target',
+            error: 'Prompt preparation claim is no longer current',
+            runtimeIdentity: claim.message.runtimeIdentity,
+            capabilities: null,
+          };
+    };
+    const validateDeliveryTarget = async (): Promise<PromptDeliveryResult | null> => {
+      const denied =
+        validateClaim() ??
+        invalidSessionWriterSenderResult(sql, claim) ??
+        (await validateParentWakeTarget()) ??
+        (await validateProjectEventWakeTarget()) ??
+        (await invalidScheduledDeliveryTarget(sql, env, hooks.projectId, claim)) ??
+        (await invalidCheckpointContinuationTarget(sql, env, hooks.projectId, claim));
+      // Source checks await D1. Cancellation can retire this exact preparation
+      // while they run, so re-read the local claim immediately before returning.
+      const stale = validateClaim();
+      if (stale) return stale;
+      const submission =
+        denied && (denied.kind === 'retry' || denied.kind === 'failed')
+          ? promptDeliveryClaimSubmissionCheckpoint(sql, claim)
+          : null;
+      if (denied && (denied.kind === 'retry' || denied.kind === 'failed') && submission) {
+        return {
+          kind: 'ambiguous',
+          reason: 'receipt_unavailable',
+          error: `Authority check denied or unavailable after possible prompt submission: ${denied.error}`,
+          runtimeIdentity: denied.runtimeIdentity ?? submission.runtimeIdentity,
+          capabilities: denied.capabilities,
+          receipt: null,
+        };
+      }
+      return denied;
+    };
     // Stop-and-deliver: an urgent class rejected because the target is
     // mid-turn may cancel that turn so this delivery becomes the next
     // prompt. Informational classes never stop anything — for them the
@@ -294,9 +338,23 @@ export async function runPromptDeliveryClaim(
       result.promptEpoch
     );
   }
+  if (applied && result.kind === 'retry' && result.reason === 'not_ready' && hooks.projectId) {
+    // A sleeping chat whose task is held by a provider usage limit cannot wake before the hold
+    // ends: keep the person's message past its TTL and park retries until the hold's retry time
+    // (`provider-limit-delivery-hold.ts`). Never throws. An awake chat costs one local read; a
+    // sleeping one adds one D1 read per retry, and a held one is then parked.
+    const held = await applyProviderLimitDeliveryHold(sql, env.DATABASE, {
+      projectId: hooks.projectId,
+      sessionId: claim.message.targetSessionId,
+      ttlMs: config.ttlMs,
+    });
+    if (held && held.closedWakeAsks > 0) hooks.scheduleSummarySync();
+  }
   if (applied && result.kind === 'failed' && result.reason === 'wake_refused') {
-    raiseSessionWakeFailure(
+    await raiseSessionWakeFailure(
       sql,
+      env,
+      hooks.projectId,
       {
         sessionId: claim.message.targetSessionId,
         taskId: claim.message.sourceTaskId,

@@ -14,8 +14,8 @@ import {
  * hands over its narrow env; the full worker env is what reached it.
  */
 export const platformConfigPort: PlatformConfigPort = {
+  outboundMaxRedirects: (env) => resolveOutboundMaxRedirects(env as Env),
   githubApp: (env) => getGitHubAppConfig(env as Env),
   githubOAuth: (env) => getGitHubOAuthConfig(env as Env),
   gitlabOAuth: (env) => getGitLabOAuthConfig(env as Env),
-  outboundMaxRedirects: (env) => resolveOutboundMaxRedirects(env as Env),
 };

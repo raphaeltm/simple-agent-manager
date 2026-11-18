@@ -1,3 +1,4 @@
+import { hasLocalAiCostMetering } from '@simple-agent-manager/ai-proxy';
 /**
  * AI inference proxy — routes to Workers AI, Anthropic, or OpenAI via Cloudflare AI Gateway.
  *
@@ -18,6 +19,7 @@ import { Hono } from 'hono';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { readRequestJsonRecord } from '../lib/runtime-validation';
+import { proxyRunUsageRecorder } from '../services/agent-run-usage';
 import type { UpstreamAuth } from '../services/ai-billing';
 import { resolveUpstreamAuth } from '../services/ai-billing';
 import { isAnthropicModel } from '../services/ai-proxy-shared';
@@ -47,6 +49,7 @@ import {
   schedulePlatformProxyLimitHeaders,
 } from './ai-proxy-platform-billing';
 import {
+  customEndpointResponses,
   forwardToAnthropic,
   forwardToOpenAI,
   forwardToOpenAIResponses,
@@ -167,7 +170,6 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
 
   try {
     let response: Response;
-    let estimateMissingUsage = false;
     if (provider === 'anthropic') {
       if (!anthropicAuth) {
         // provider === 'anthropic' guarantees anthropicAuth was resolved above
@@ -181,12 +183,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       }
       response = await forwardToOpenAI(c.env, body, modelId, aigMetadata, openaiCredential.apiKey);
     } else {
-      ({ response, estimateMissingUsage } = await forwardToWorkersAI(
-        c.env,
-        body,
-        modelId,
-        aigMetadata
-      ));
+      response = await forwardToWorkersAI(c.env, body, modelId, aigMetadata);
     }
 
     log.info('ai_proxy.response', {
@@ -217,11 +214,23 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       });
     }
 
-    return accountingResponse(c, response, prepared.userId, estimatedInputTokens, {
-      estimateMissingUsage,
-      // An admin's OpenAI-compatible endpoint serves its own model, which has no catalog price.
-      costModelId: estimateMissingUsage ? undefined : modelId,
-    });
+    const attribution = provider === 'anthropic' ? anthropicAuth : openaiCredential;
+    return accountingResponse(
+      c,
+      response,
+      prepared.userId,
+      estimatedInputTokens,
+      proxyRunUsageRecorder(c.env, prepared, {
+        model: modelId,
+        credentialReference: attribution?.credentialReference ?? null,
+        credentialSource: attribution?.credentialSource ?? null,
+      }),
+      {
+        costModelId: customEndpointResponses.has(response) ? undefined : modelId,
+        estimateMissingUsage:
+          customEndpointResponses.has(response) || hasLocalAiCostMetering(c.env),
+      }
+    );
   } catch (err) {
     log.error('ai_proxy.fetch_error', {
       userId: prepared.userId,
@@ -335,9 +344,18 @@ aiProxyRoutes.post('/responses', async (c) => {
       source: 'ai-proxy.openai.responses',
     });
 
-    return accountingResponse(c, response, prepared.userId, estimatedInputTokens, {
-      costModelId: modelId,
-    });
+    return accountingResponse(
+      c,
+      response,
+      prepared.userId,
+      estimatedInputTokens,
+      proxyRunUsageRecorder(c.env, prepared, {
+        model: modelId,
+        credentialReference: openaiCredential.credentialReference,
+        credentialSource: openaiCredential.credentialSource,
+      }),
+      { costModelId: modelId, estimateMissingUsage: hasLocalAiCostMetering(c.env) }
+    );
   } catch (err) {
     log.error('ai_proxy.responses.fetch_error', {
       userId: prepared.userId,

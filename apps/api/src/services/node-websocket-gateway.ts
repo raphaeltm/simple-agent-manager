@@ -1,27 +1,21 @@
 /**
- * Gateway decisions: how the Worker answers Caddy's forward_auth for node WebSockets on a
- * self-hosted box (routes/self-host-gateway.ts).
+ * Gateway decisions for node WebSockets on the self-hosted box.
  *
- * celld cannot hand a WebSocket obtained from an outbound `fetch()` back to the browser, so on
- * the reverse-tunnel transport Caddy carries the socket. The Worker must still make every auth
- * decision. To guarantee it makes EXACTLY the decision it makes today, the gateway re-dispatches
- * the original request through the normal SAM app with an in-process marker; the existing
- * handlers (ws-* proxy, logs stream) run their unchanged authentication and authorization and,
- * at the point where they would `fetch` the node, return a decision naming the upstream and the
- * request headers they would have sent instead.
+ * celld cannot hand a WebSocket from an outbound `fetch()` back to the browser, so on the
+ * reverse-tunnel transport the box's Caddy carries the socket and asks the API (forward_auth)
+ * whether to. The self-host gateway route (`selfhost/reverse-tunnel/gateway.ts`) re-dispatches
+ * the original request through the normal app with an in-process marker. The existing ws-*
+ * proxy and logs-stream handlers then run their unchanged authentication and, where they would
+ * `fetch` the node, return a decision naming the upstream and the headers they would have sent.
  *
- * The marker is a WeakMap entry keyed by the Request object, so no HTTP input can set it. The
- * decision response carries a per-request random nonce so the gateway can tell a decision from
- * any other 2xx the inner dispatch might produce (which it then refuses).
+ * The marker is a WeakMap entry keyed by the Request object, so no HTTP input can set it, and
+ * the decision carries a per-request random nonce, so the gateway can tell it from any other
+ * 2xx. Only the self-host gateway marks requests: on Cloudflare `isGatewayAuthorizationRequest`
+ * is one WeakMap lookup that is always false.
  */
 import type { NodeAgentRoute } from './node-agent-route';
-import {
-  assertReverseTunnelUpstreamPort,
-  REVERSE_TUNNEL_UPSTREAM_HOST,
-  type ReverseTunnelRangeEnv,
-} from './node-reverse-tunnel-config';
 
-/** Response headers Caddy copies into the upstream request (deploy/selfhost/caddy/sam.d/). */
+/** Response headers the box's Caddy copies into the upstream request. */
 export const GATEWAY_HEADER = {
   decision: 'X-SAM-Gateway-Decision',
   upstream: 'X-SAM-Upstream',
@@ -45,11 +39,10 @@ export function isGatewayAuthorizationRequest(request: Request): boolean {
   return gatewayRequestNonces.has(request);
 }
 
-/** The handler's upstream request, as it would have been sent to the node. */
-export interface GatewayUpstreamRequest {
-  /** Path and query on the node agent (e.g. `/terminal/ws?token=...`). */
-  url: URL;
-  headers: Headers;
+/** True when `response` is the decision minted for `request` (and not some other 2xx). */
+export function isGatewayDecisionFor(request: Request, response: Response): boolean {
+  const nonce = gatewayRequestNonces.get(request);
+  return !!nonce && response.headers.get(GATEWAY_HEADER.decision) === nonce;
 }
 
 function unsupported(message: string): Response {
@@ -60,33 +53,26 @@ function unsupported(message: string): Response {
 }
 
 /**
- * Build the forward_auth decision for an authorized request. Only reverse-tunnel nodes can be
- * reached through the gateway (their upstream is a loopback lease port on this box); any other
- * route is refused rather than guessed, so a misrouted socket never reaches a public hostname.
+ * The forward_auth decision for an authorized request. Only a node on a build-extension route
+ * (a loopback lease port on this box) can be carried by the gateway; any other route is
+ * refused rather than guessed, so a misrouted socket never reaches a public hostname.
  */
 export function gatewayDecisionResponse(
   request: Request,
-  route: NodeAgentRoute | null,
-  upstream: GatewayUpstreamRequest,
-  env: ReverseTunnelRangeEnv
+  route: NodeAgentRoute,
+  upstream: { url: URL; headers: Headers }
 ): Response {
   const nonce = gatewayRequestNonces.get(request);
   if (!nonce) throw new Error('gatewayDecisionResponse called for a non-gateway request');
-  if (!route || route.kind !== 'reverse-tunnel') {
+  if (route.kind !== 'extension') {
     return unsupported('Node is not reachable through the self-hosted WebSocket gateway');
-  }
-  // Re-checked where X-SAM-Upstream is minted: Caddy proxies to exactly this address.
-  try {
-    assertReverseTunnelUpstreamPort(env, route.port);
-  } catch {
-    return unsupported('Node lease port is outside the reverse-tunnel range');
   }
   const headers = new Headers({ 'Cache-Control': 'no-store' });
   headers.set(GATEWAY_HEADER.decision, nonce);
-  headers.set(GATEWAY_HEADER.upstream, `${REVERSE_TUNNEL_UPSTREAM_HOST}:${route.port}`);
+  headers.set(GATEWAY_HEADER.upstream, new URL(route.origin).host);
   headers.set(GATEWAY_HEADER.upstreamUri, `${upstream.url.pathname}${upstream.url.search}`);
-  // Always present (possibly empty): Caddy replaces the client's Authorization and Cookie
-  // with exactly what the Worker would have forwarded, so a stripped credential stays stripped.
+  // Always present (possibly empty): Caddy replaces the client's Authorization and Cookie with
+  // exactly what the Worker would have forwarded, so a stripped credential stays stripped.
   headers.set(GATEWAY_HEADER.upstreamAuthorization, upstream.headers.get('authorization') ?? '');
   headers.set(GATEWAY_HEADER.upstreamCookie, upstream.headers.get('cookie') ?? '');
   headers.set(GATEWAY_HEADER.nodeId, upstream.headers.get('x-sam-node-id') ?? '');
@@ -97,10 +83,4 @@ export function gatewayDecisionResponse(
 /** The handler reached a runtime the gateway can never carry (an Instant container). */
 export function gatewayUnsupportedRuntimeResponse(): Response {
   return unsupported('Instant workspaces are not reachable through the self-hosted gateway');
-}
-
-/** True when `response` is the decision minted for `request` (and not some other 2xx). */
-export function isGatewayDecisionFor(request: Request, response: Response): boolean {
-  const nonce = gatewayRequestNonces.get(request);
-  return !!nonce && response.headers.get(GATEWAY_HEADER.decision) === nonce;
 }

@@ -51,10 +51,7 @@ export {
   type HumanPromptDeliveryTrigger,
   isHumanPromptDeliveryTrigger,
 } from './do/agent-wake-policy';
-export {
-  ATTENTION_ARCHIVE_CLAIM,
-  parseAttentionOptions,
-} from './do/attention';
+export { ATTENTION_ARCHIVE_CLAIM, parseAttentionOptions } from './do/attention';
 export { CommentNotFoundError } from './do/comment-contracts';
 export { resolveDurableExecutionConfig } from './do/durable-execution-config';
 export {
@@ -75,6 +72,7 @@ export {
   configureProjectDataPort,
   configureProjectDataPorts,
   type CredentialsPort,
+  type InboxErrorsPort,
   type NoticesPort,
   type NotificationsPort,
   type ObservabilityPort,
@@ -151,4 +149,5 @@ export { type ProjectDataEnv } from './do/types';
 // Resolves where a session's rows live (root object or an archive shard). Worker services that
 // must not mistake an archived session for a missing one use it (services/session-expiry.ts).
 export { resolveProjectDataSessionLocation } from './client/project-data-archive-routing';
+export { getToolChanges } from './client/tool-call-changes';
 export { DEFAULT_ROW_USAGE_INTERVAL_MS } from './do/row-usage-config';

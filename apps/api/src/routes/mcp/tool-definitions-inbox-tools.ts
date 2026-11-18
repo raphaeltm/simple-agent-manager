@@ -1,6 +1,7 @@
 /**
  * Agent inbox tools (slice D, idea 01M7G03ZCQ6TM6CMEYDRKQ8ST9). Listed to agents as the domain
- * groups `inbox_read` (list, get) and `inbox_write` (ask, review, update, cancel) in
+ * groups `inbox_read` (list, get) and `inbox_write` (ask, review, result, assign, comment, attach,
+ * update, cancel) in
  * `tool-groups.ts`; these members stay callable by name. Properties shared by several members are
  * one object each, because a group merges same-named properties and they must agree.
  */
@@ -13,11 +14,12 @@ import {
 const title = {
   type: 'string',
   description:
-    'One sentence the person reads in their inbox, on one line. State exactly what you need.',
+    'One plain sentence (no markdown) the person reads in their inbox, on one line: the outcome, or exactly what you need.',
 };
 const why = {
   type: 'string',
-  description: 'Short reason and the context the person needs to act without opening the chat.',
+  description:
+    'Always give it: brief, easy-to-read context in markdown (short paragraphs, bullet lists, bold for what matters) and clear, simple language, so the person can understand and act without opening the chat.',
 };
 const links = {
   type: 'array',
@@ -45,6 +47,11 @@ const idempotencyKey = {
     'Any unique string; a retried call with the same key returns the item already filed.',
 };
 const ref = { type: 'string', description: 'Item reference, `ask:<id>`, as returned when filed.' };
+const wakeOnSteps = {
+  type: 'boolean',
+  description:
+    'Default false: step ticks are recorded and you read them at your next wake. true: also wake on each tick (ticks close together arrive together).',
+};
 
 export const INBOX_TOOLS = [
   {
@@ -92,6 +99,84 @@ export const INBOX_TOOLS = [
     },
   },
   {
+    name: 'inbox_result',
+    description:
+      'Hand the person what they asked for: an answer, a finding, finished work. Title: the outcome in one plain sentence. why: the details, written as a short note to a colleague. Non-blocking; they mark it "Got it" (you are not woken) or reply (you are woken with the reply).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { title, why, links, groupKey, idempotencyKey },
+      required: ['title'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'inbox_assign',
+    description:
+      'Hand a person non-blocking work only a person can do (add a production secret, decide a price, record a demo). It goes to their inbox under Tasks; you keep working. You are woken in this chat when they comment, take it, hand it on, finish, reopen or archive it. It never expires.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        title,
+        why,
+        steps: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional ordered steps, one line each. The person ticks them off.',
+        },
+        assignee: {
+          type: 'object',
+          description:
+            '`{ "userId": "<id>" }` for one active project member, or `{ "team": true }` for anyone in the project (one member takes it).',
+          properties: {
+            userId: { type: 'string' },
+            team: { type: 'boolean', description: 'true for the team.' },
+          },
+          additionalProperties: false,
+        },
+        dueHint: {
+          type: 'string',
+          description:
+            'Optional soft due date in words ("before Friday\'s launch"). Sorts and highlights only.',
+        },
+        links,
+        wakeOnSteps,
+        groupKey,
+        idempotencyKey,
+      },
+      required: ['title', 'assignee'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'inbox_comment',
+    description:
+      "Reply in a task's discussion (a task this chat assigned or watches, or one addressed to your person or the team). The person is notified.",
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        ref,
+        body: { type: 'string', description: 'Your reply.' },
+        threadId: {
+          type: 'string',
+          description: 'Reply in this discussion thread (from inbox_read get); omit to start one.',
+        },
+      },
+      required: ['ref', 'body'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'inbox_attach',
+    description:
+      'Watch an open task another of your chats assigned instead of assigning a duplicate: this chat is woken when it is taken, handed on, finished, reopened or archived (comments wake the assigning chat; read them with inbox_read get).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { ref, wakeOnSteps },
+      required: ['ref'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'inbox_update_item',
     description: 'Edit the title, reason or links of an open item this chat filed.',
     inputSchema: {
@@ -129,7 +214,8 @@ export const INBOX_TOOLS = [
   },
   {
     name: 'inbox_get_item',
-    description: "One item of this project with its status, the person's answer and the outcome.",
+    description:
+      "One item of this project with its status, the person's answer and the outcome; for a task also its steps, assignee, who took it, activity and discussion.",
     inputSchema: {
       type: 'object' as const,
       properties: { ref },

@@ -26,7 +26,7 @@ Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB
 | Variable | `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | No (default: `50`; range: 0–100)                                   |
 | Variable | `D1_MIGRATION_READ_ATTEMPTS`                       | No (default: `3`; range: 1–5; verification reads only)             |
 | Variable | `D1_MIGRATION_READ_RETRY_DELAY_MS`                 | No (default: `10000`; range: 0–60000)                              |
-| Secret   | `CF_API_TOKEN`                                     | Yes (requires Account → SSL and Certificates → Edit for Origin CA) |
+| Secret   | `CF_API_TOKEN`                                     | Yes (requires Account → SSL and Certificates → Edit for Origin CA; optional Account Analytics → Read for Admin Analytics and the Cloudflare cost snapshot) |
 | Secret   | `CF_ACCOUNT_ID`                                    | Yes                                                                |
 | Secret   | `CF_ZONE_ID`                                       | Yes                                                                |
 | Secret   | `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN`          | No (falls back to `CF_API_TOKEN`)                                  |
@@ -103,7 +103,7 @@ Admin setting overrides take precedence over registry defaults. The disabled set
 
 Sources: `apps/api/src/services/operator-settings.ts`, `admin-settings-registry.ts`, and `apps/api/src/durable-objects/sam-session/operator/work.ts`.
 
-The assistant reuses existing `SAM_MODEL` (the deployed `wrangler.toml` value is `@cf/zai-org/glm-5.3-flash`, which needs the Workers Paid plan or prepaid AI Gateway credits, like the rest of SAM; code default `claude-sonnet-5`), context/window, tool-result and model-step limits from `resolveSamConfig`, plus `SAM_LLM_TIMEOUT_MS` (operator fallback `120000`). Operator turn admission uses `SAM_MESSAGE_MAX_LENGTH` with a `16000`-character fallback; legacy subtask-message readers can have a different fallback. No new provider API key is required specifically for enabling the assistant: it uses the installation's supported platform AI configuration and usage gate.
+The assistant reuses existing `SAM_MODEL` (code default `@cf/deepseek-ai/deepseek-v4.1-flash-1017` in `resolveSamConfig`; omitted from Wrangler bindings unless explicitly overridden through the GitHub Environment variable `SAM_MODEL`; this model requires the Workers Paid plan or prepaid AI Gateway credits, like the rest of SAM), context/window, tool-result and model-step limits from `resolveSamConfig`, plus `SAM_LLM_TIMEOUT_MS` (operator fallback `120000`). Operator turn admission uses `SAM_MESSAGE_MAX_LENGTH` with a `16000`-character fallback; legacy subtask-message readers can have a different fallback. No new provider API key is required specifically for enabling the assistant: it uses the installation's supported platform AI configuration and usage gate.
 
 ### How Worker variables are set
 
@@ -271,6 +271,7 @@ Activity coalescing and binding caches are per Worker isolate. Delayed flushes c
 - `WORKSPACE_IDLE_BACKOFF_MAX_MS` — Maximum workspace-idle retry delay; the delay doubles from the base and resets on new activity or when the session wakes (default: `21600000`)
 - `DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS` — Minimum re-arm delay for completed diagnosis steps (default: `1000`)
 - `ORCHESTRATOR_ZERO_TASK_GRACE_MS` — Grace before a zero-task mission terminalizes (default: `600000`)
+- Mission cancellation bounds use `orchestrator.cancellation*` runtime settings under Admin Settings → Operations; they are not environment variables.
 - `ORCHESTRATOR_MAX_MISSION_LIFETIME_MS` — Mission lifetime backstop (default: `86400000`)
 - `ORCHESTRATOR_WAIT_RECONCILE_INTERVAL_MS` — ProjectData D1 reconciliation backstop interval for active parent waits (default: `30000`)
 - `ORCHESTRATOR_WAIT_MAX_CHILDREN` — Maximum same-project task IDs selected by one durable wait (default: `20`, hard ceiling: `90`)
@@ -642,6 +643,7 @@ by the read-only cron-liveness check.
 - `SESSION_ACTIVITY_STALE_THRESHOLD_MS` — Threshold before stale working activity is checked against authoritative SessionHost inventory (default: 300000)
 - `NODE_HEARTBEAT_STALE_SECONDS` — Staleness threshold for node health
 - `TASK_LIVENESS_PROBE_TIMEOUT_MS` — Per-candidate timeout for ACP and Instant lifecycle probes used by ProjectData heartbeat deferral, idle cleanup, and stuck-task reconciliation; timeout is inconclusive (default: 5000)
+- `PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS` — Background prompt target/recovery preparation and owner-approved recovery repair wait budget, also used for VM submit/receipt calls (default: `5000`). Owner repair timeout retains the pending consent/claim; late completion stays fenced and cannot acknowledge the timed-out sweep.
 - `TASK_LIVENESS_MAX_ACP_SESSIONS` — Maximum task-scoped ACP sessions inspected per liveness probe (default: 5)
 - `TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS` — Timeout for stale-VM-node health probes used by ProjectData idle cleanup and stuck-task reconciliation; a timeout is inconclusive and preserves the task/workspace (default: 5000)
 - `NODE_PROVISIONING_REQUEST_TIMEOUT_MS` — Durable direct provisioning per-request budget for Cloudflare calls during allocation/reconciliation, also used for background readiness and workspace dispatch (default: 5000). The attempt's cancellation budget is the admin setting `operations.nodeProvisioningAttemptDeadlineMs` (default 60000, range 5000–180000, never below this value); it cuts pre-create steps and the node DNS record only, not a started create, its publish, readiness or dispatch.

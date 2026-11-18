@@ -28,6 +28,8 @@ function mockEnv(overrides: Partial<{
   KV: KVNamespace;
 }> = {}) {
   return {
+    AI_GATEWAY_ID: 'test-gateway',
+    CF_ACCOUNT_ID: 'test-account',
     CF_AIG_TOKEN: overrides.CF_AIG_TOKEN ?? 'test-cf-token',
     CF_API_TOKEN: overrides.CF_API_TOKEN ?? 'test-cf-api-token',
     AI_PROXY_BILLING_MODE: overrides.AI_PROXY_BILLING_MODE,

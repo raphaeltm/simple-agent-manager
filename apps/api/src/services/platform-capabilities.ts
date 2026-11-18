@@ -17,16 +17,21 @@ import {
   hasCloudflareAccountApi,
   hasLocalAiCostMetering,
   isMonthlyCostCapAvailable,
+  LlmUnavailableError,
   resolveAiGatewayId,
 } from '@simple-agent-manager/ai-proxy';
 
 import type { Env } from '../env';
+import { resolveD1BindingIdentity } from '../lib/d1-session';
 import { errors } from '../middleware/error';
+import { cache } from './admin-settings-resolution';
 import { emailTransportKind } from './agent-email/provider';
 import { hasInboundAgentEmail } from './agent-email/self-host-inbound';
 import { isAnalyticsD1SinkEnabled } from './analytics-d1-sink';
-import { resolveArtifactsBackend } from './hosted-git/backend';
+import { isArtifactsAvailable } from './hosted-git/backend';
+import { validLlmBaseUrl } from './llm-endpoint-settings';
 import { resolveR2PresignConfig } from './r2-presign-config';
+import { getTTSConfig } from './tts-config';
 
 /** One platform service. The name is also the `feature` field of a FEATURE_UNAVAILABLE error. */
 export type PlatformCapability =
@@ -51,46 +56,11 @@ export type PlatformCapability =
 
 export type PlatformCapabilities = Readonly<Record<PlatformCapability, boolean>>;
 
-type CapabilityEnv = Pick<
-  Env,
-  | 'AI'
-  | 'AI_GATEWAY_ID'
-  | 'CF_ACCOUNT_ID'
-  | 'CF_API_TOKEN'
-  | 'CF_ZONE_ID'
-  | 'ANALYTICS'
-  | 'ANALYTICS_SINK'
-  | 'OBSERVABILITY_DATABASE'
-  | 'ARTIFACTS'
-  | 'ARTIFACTS_ENABLED'
-  | 'HOSTED_GIT'
-  | 'HOSTED_GIT_BACKEND'
-  | 'CONTAINER_RUNTIME_AVAILABLE'
-  | 'SANDBOX_CONTAINER_RUNTIME_AVAILABLE'
-  | 'LOG_TAIL_AVAILABLE'
-  | 'SANDBOX'
-  | 'CREDENTIAL_SETUP_SESSION'
-  | 'SETUP_SESSION_POOL'
-  | 'AGENT_EMAIL'
-  | 'BASE_DOMAIN'
-  | 'SMTP_HOST'
-  | 'SMTP_PORT'
-  | 'SMTP_TLS'
-  | 'SMTP_USERNAME'
-  | 'SMTP_PASSWORD'
-  | 'SMTP_FROM'
-  | 'AGENT_EMAIL_INBOUND_SMTP'
-  | 'REVERSE_TUNNEL_GATEWAY_SECRET'
-  | 'TTS_ENABLED'
-  | 'R2_ACCESS_KEY_ID'
-  | 'R2_SECRET_ACCESS_KEY'
-  | 'R2_BUCKET_NAME'
-  | 'R2_S3_ENDPOINT'
-  | 'R2_S3_BUCKET'
-  | 'R2_S3_KEY_PREFIX'
-  | 'R2_S3_REGION'
-  | 'R2_S3_FORCE_PATH_STYLE'
->;
+/**
+ * The Worker environment. Artifacts availability (`hosted-git/backend.ts`) can consult a backend
+ * the self-host build registers, which reads its own bindings, so this takes the whole Env.
+ */
+type CapabilityEnv = Env;
 
 // The AI Gateway helpers are pure functions of the environment and live in the AI proxy
 // package, which needs them too. Re-exported so this module stays the one place to ask.
@@ -182,19 +152,6 @@ export function isGuidedCredentialSetupAvailable(
   );
 }
 
-/**
- * SAM-native Git repositories: Cloudflare Artifacts, or on self-host the local Durable Object git
- * server (`services/hosted-git/backend.ts`, the one resolver for both).
- */
-export function isArtifactsAvailable(
-  env: Pick<
-    Env,
-    'ARTIFACTS' | 'ARTIFACTS_ENABLED' | 'HOSTED_GIT' | 'HOSTED_GIT_BACKEND' | 'BASE_DOMAIN'
-  >
-): boolean {
-  return resolveArtifactsBackend(env) !== null;
-}
-
 /** Resolve every capability from bindings and settings. Pure and synchronous. */
 export function resolvePlatformCapabilities(env: CapabilityEnv): PlatformCapabilities {
   const workersAi = getWorkersAiBindingOrNull(env) !== null;
@@ -224,8 +181,10 @@ export function resolvePlatformCapabilities(env: CapabilityEnv): PlatformCapabil
     appDeployments: cloudflareDns,
     workersObservability: cloudflareAccountApi,
     r2Presign: resolveR2PresignConfig(env) !== null,
+    // Whisper runs on Workers AI (routes/transcribe.ts).
     speechToText: workersAi,
-    textToSpeech: workersAi && env.TTS_ENABLED !== 'false',
+    // Synthesis runs on Workers AI, and the operator can switch it off (routes/tts.ts).
+    textToSpeech: workersAi && getTTSConfig(env).enabled === true,
     liveLogStream: hasLiveLogStream(env),
   };
 }
@@ -254,27 +213,11 @@ export interface PublicPlatformCapabilities {
   agentModelCalls: boolean;
 }
 
-/**
- * Which speech services an admin pointed at an OpenAI-compatible endpoint (`speech.*` settings,
- * read by `resolveSpeechEndpoint()` in speech-endpoints.ts). Only consulted without the Workers AI
- * binding, so a Cloudflare deployment never reads them.
- */
-export interface SpeechEndpointAvailability {
-  transcription: boolean;
-  synthesis: boolean;
-}
-
-const NO_SPEECH_ENDPOINTS: SpeechEndpointAvailability = { transcription: false, synthesis: false };
-
-export function publicPlatformCapabilities(
-  env: CapabilityEnv,
-  speechEndpoints: SpeechEndpointAvailability = NO_SPEECH_ENDPOINTS
-): PublicPlatformCapabilities {
+export function publicPlatformCapabilities(env: CapabilityEnv): PublicPlatformCapabilities {
   const capabilities = resolvePlatformCapabilities(env);
-  const ttsAllowed = env.TTS_ENABLED !== 'false';
   return {
-    speechToText: capabilities.speechToText || speechEndpoints.transcription,
-    textToSpeech: capabilities.textToSpeech || (ttsAllowed && speechEndpoints.synthesis),
+    speechToText: capabilities.speechToText,
+    textToSpeech: capabilities.textToSpeech,
     monthlyCostCap: capabilities.monthlyCostCap,
     logSearch: capabilities.workersObservability,
     liveLogStream: capabilities.liveLogStream,
@@ -292,5 +235,28 @@ export const APP_DEPLOYMENTS_UNAVAILABLE_MESSAGE =
 export function assertAppDeploymentsAvailable(env: CapabilityEnv): void {
   if (!resolvePlatformCapabilities(env).appDeployments) {
     throw errors.featureUnavailable('appDeployments', APP_DEPLOYMENTS_UNAVAILABLE_MESSAGE);
+  }
+}
+
+/**
+ * Endpoint capability is the configured base URL itself, from the existing module-scope TTL
+ * snapshot. Cloudflare's unconfigured path does one snapshot read per isolate TTL, zero key
+ * reads, and zero additional D1 reads per call. No second cache can outlive admin invalidation.
+ * Remember configuration across expired snapshots: an outage must not reroute private prompts.
+ */
+export async function resolveLlmEndpointCapability(env: Env): Promise<string | null> {
+  const db = resolveD1BindingIdentity(env.DATABASE);
+  try {
+    const rows = await cache.read(db);
+    const row = rows.find((row) => row.key === 'llm.openAICompatible.baseUrl');
+    if (!row) {
+      return null;
+    }
+    const value: unknown = row.value;
+    if (!validLlmBaseUrl(value)) throw new Error('Invalid endpoint configuration');
+    return String(value);
+  } catch {
+    // Unknown configuration must not send prompts to a provider the operator may have replaced.
+    throw new LlmUnavailableError('aiProxy', 'settings_unreadable');
   }
 }

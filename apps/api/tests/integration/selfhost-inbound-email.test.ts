@@ -24,7 +24,7 @@ import type { Env } from '../../src/env';
 import { handleAppError } from '../../src/middleware/app-error-handler';
 import { adminAgentEmailRoutes } from '../../src/routes/admin-agent-email';
 import { mcpRoutes } from '../../src/routes/mcp';
-import { createSelfHostGatewayRoutes } from '../../src/routes/self-host-gateway';
+import { createSelfHostGatewayRoutes } from '../../src/selfhost/reverse-tunnel/gateway';
 import { __resetAdminSettingsCacheForTest } from '../../src/services/admin-settings';
 import { agentEmailConfig } from '../../src/services/agent-email/setup-state';
 import { type McpTokenData, storeMcpToken } from '../../src/services/mcp-token';
@@ -215,8 +215,9 @@ describe('self-hosted inbound agent email', () => {
     });
     app = new Hono<{ Bindings: Env }>();
     app.onError(handleAppError);
+    // The gateway routes carry their own base path (SELF_HOST_GATEWAY_PATH_PREFIX).
     app.route(
-      '/api/self-host/gateway',
+      '/',
       createSelfHostGatewayRoutes(() => new Response('not used', { status: 500 }), {
         inboundEmailDeps: { submitter },
       })

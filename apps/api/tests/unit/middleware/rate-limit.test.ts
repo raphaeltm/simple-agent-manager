@@ -173,6 +173,44 @@ describe('rateLimit middleware (behavioral)', () => {
     return app;
   }
 
+  it.each([undefined, 'malformed'])(
+    'shares one unknown bucket when the ingress IP is %s despite rotating spoofed headers',
+    async (trusted) => {
+      const app = createApp({ useIp: true, limit: 1 });
+      const request = (spoof: string) =>
+        app.request(
+          '/test',
+          {
+            headers: {
+              ...(trusted ? { 'CF-Connecting-IP': trusted } : {}),
+              'X-Forwarded-For': spoof,
+              'X-Real-IP': spoof,
+            },
+          },
+          mockEnv
+        );
+      expect((await request('198.51.100.1')).status).toBe(200);
+      expect((await request('198.51.100.2')).status).toBe(429);
+      expect([...store.keys()].every((key) => key.includes(':unknown:'))).toBe(true);
+    }
+  );
+
+  it('keys on the Cloudflare IP despite rotating spoofed forwarding headers', async () => {
+    const app = createApp({ useIp: true, limit: 1 });
+    const request = (trusted: string, spoof: string) =>
+      app.request(
+        '/test',
+        {
+          headers: { 'CF-Connecting-IP': trusted, 'X-Forwarded-For': spoof, 'X-Real-IP': spoof },
+        },
+        mockEnv
+      );
+    expect((await request('203.0.113.7', '198.51.100.1')).status).toBe(200);
+    expect((await request('203.0.113.7', '198.51.100.2')).status).toBe(429);
+    expect((await request('203.0.113.8', '198.51.100.1')).status).toBe(200);
+    expect([...store.keys()].every((key) => !key.includes('198.51.100.'))).toBe(true);
+  });
+
   it('rate limits authenticated users by user ID when useIp is false', async () => {
     const app = createApp({
       useIp: false,

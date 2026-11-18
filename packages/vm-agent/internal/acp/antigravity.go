@@ -63,6 +63,23 @@ var antigravitySessionModes = map[string]string{
 // acpSessionModeID translates a SAM permission mode to the agent's mode id.
 // ok is false when no SetSessionMode request should be sent.
 func acpSessionModeID(agentType, permissionMode string) (modeID string, ok bool) {
+	if agentType == "mistral-vibe" {
+		// Vibe 2.25.8 uses agent names as mode IDs and silently ignores unknown
+		// IDs (vibe/core/agents/models.py, vibe/acp/agent.py:set_session_mode).
+		switch permissionMode {
+		case "bypassPermissions":
+			return "auto-approve", true
+		case "acceptEdits":
+			return "accept-edits", true
+		case "plan":
+			return "plan", true
+		default:
+			// Explicitly reset unset/default/unknown modes: a restored session
+			// may retain auto-approve. dontAsk has no native equivalent; ask
+			// preserves approval checks, but can prompt if interactions are on.
+			return "ask", true
+		}
+	}
 	if agentType == "google-antigravity" {
 		modeID, ok = antigravitySessionModes[permissionMode]
 		return modeID, ok

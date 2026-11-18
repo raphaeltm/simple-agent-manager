@@ -13,8 +13,7 @@ export const GITHUB_NOT_CONNECTED_MESSAGE =
  *   (BetterAuth `/link-social`, Settings → GitHub) can.
  * - `GITHUB_REAUTH_REQUIRED` (401): a link exists but its token is missing, expired or could not
  *   be refreshed.
- * Runs only on the failure path (one D1 read). If the read fails, it answers the reauth error,
- * which is what every caller answered before.
+ * Runs only on the failure path (one D1 read). A failed read returns a retryable availability error; it cannot prove expiry.
  */
 export async function githubUserTokenUnavailableError(
   env: Pick<Env, 'DATABASE'>,
@@ -29,7 +28,11 @@ export async function githubUserTokenUnavailableError(
       .first<{ present: number }>();
     linked = row !== null && row !== undefined;
   } catch {
-    linked = true;
+    return new AppError(
+      503,
+      'GITHUB_UNAVAILABLE',
+      'GitHub account status could not be checked. Please try again later.'
+    );
   }
   return linked
     ? new AppError(401, 'GITHUB_REAUTH_REQUIRED', GITHUB_REAUTH_REQUIRED_MESSAGE)

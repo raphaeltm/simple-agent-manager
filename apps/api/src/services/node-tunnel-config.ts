@@ -3,13 +3,9 @@
  *
  * `VM_AGENT_TRANSPORT='cloudflare-tunnel'` opts NEW managed VM nodes, workspace and deployment
  * role alike, into an outbound-only Cloudflare named tunnel for the VM agent's control channel
- * (`{nodeId}.vm.{BASE_DOMAIN}`). `VM_AGENT_TRANSPORT='reverse-tunnel'` (self-hosted control
- * plane) gives NEW managed workspace VM nodes a pinned frpc that dials the control-plane box
- * instead (services/node-reverse-tunnel-*.ts); deployment nodes stay on public-IP transport
- * there, because the reverse-tunnel path has only been built and verified for workspace nodes.
- * An unset transport keeps legacy public-IP transport unchanged; unsupported values fail
- * provisioning. Instant (cf-container) runtimes are excluded: a container runtime has no VM to
- * run a tunnel client on.
+ * (`{nodeId}.vm.{BASE_DOMAIN}`). An unset transport keeps legacy public-IP transport
+ * unchanged; unsupported values fail provisioning. Instant (cf-container) runtimes are
+ * excluded: a container runtime has no VM to run cloudflared on.
  *
  * Deployment nodes keep their public app ingress: app routes stay grey-cloud A records to the
  * node IP, with Caddy terminating TLS by ACME (services/dns-app-routes.ts). Routing app
@@ -34,6 +30,7 @@ import {
   type NodeTunnelSettingName,
 } from './admin-settings-node-tunnel-definitions';
 import { getNodeBackendHostname } from './dns-core';
+import { nodeTransportExtension } from './node-transport-extension';
 
 /** Worker configuration is canonical; no separate pre-integration environment contract. */
 export type TunnelEnv = Env;
@@ -142,8 +139,7 @@ export function nodeTunnelBootVariables(env: TunnelBootConfigEnv) {
 export interface ManagedNodeTransportInput {
   runtime: string;
   nodeClass: string;
-  /** The node row's own `node_role` ('workspace' | 'deployment'); required so no caller can omit it. */
-  nodeRole: string;
+  nodeRole?: string;
 }
 
 /**
@@ -156,27 +152,16 @@ export function resolveManagedNodeTransport(
 ): NodeTransport | null {
   const configured = env.VM_AGENT_TRANSPORT?.trim() ?? '';
   if (configured === '' || configured === 'vm-public-dns') return null;
-  if (configured !== 'cloudflare-tunnel' && configured !== 'reverse-tunnel') {
+  const adapter = nodeTransportExtension(configured);
+  if (adapter) return adapter.select(node);
+  if (configured !== 'cloudflare-tunnel') {
     throw new Error(`Unsupported VM_AGENT_TRANSPORT ${JSON.stringify(configured)}`);
   }
   if (node.runtime !== 'vm' || node.nodeClass !== 'managed') return null;
-  if (configured === 'reverse-tunnel') {
-    // Self-hosted box: only workspace nodes have a reverse-tunnel path (lease, frpc
-    // cloud-init, node-agent route seam). Deployment nodes keep public-IP transport.
-    return node.nodeRole === 'deployment' ? null : 'reverse-tunnel';
-  }
   // Deployment nodes are included: the tunnel carries only their agent control channel, and
-  // their app routes keep using the public IP.
+  // their app routes keep using the public IP. A future tunnel transport must decide this
+  // separately for deployment nodes (their app ingress is not tunnelled).
   return 'cloudflare-tunnel';
-}
-
-/**
- * True when this installation provisions reverse-tunnel nodes (a self-hosted box). Used by
- * paths that must not hand a node's URL to another VM: a reverse-tunnel node is reachable only
- * from the box's loopback.
- */
-export function isReverseTunnelInstallation(env: Pick<Env, 'VM_AGENT_TRANSPORT'>): boolean {
-  return env.VM_AGENT_TRANSPORT?.trim() === 'reverse-tunnel';
 }
 
 export function resolveVmAgentTunnelPort(env: TunnelTransportEnv): string {

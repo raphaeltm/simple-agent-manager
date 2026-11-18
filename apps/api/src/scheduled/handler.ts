@@ -11,37 +11,29 @@ import { reconcileDiagnosisRuns } from '../services/diagnosis-runner';
 import { reconcileDiagnosticIncidents } from '../services/diagnostic-incident-reconciliation';
 import { refreshGcpPriceTableIfDue } from '../services/gcp-price-table';
 import { runGitHubTriggerRecovery } from '../services/github-trigger-recovery';
+import { runInboxAutomationErrorSweep } from '../services/inbox/automation-errors';
 import { runInboxAskSweep } from '../services/inbox/sweep';
-import {
-  runLifecycleLatencyDailyEvaluation,
-  runLifecycleLatencyWatchdog,
-} from '../services/lifecycle-latency';
-import { runReverseTunnelLeaseSweep } from '../services/node-reverse-tunnel-leases';
+import { runInboxSystemErrorSweep } from '../services/inbox/system-errors';
+import { runLifecycleLatencyWatchdog } from '../services/lifecycle-latency';
 import { runNodeTunnelCleanupSweep } from '../services/node-tunnel-cleanup';
 import { isOperationalLoopEnabled } from '../services/operational-kill-switch';
-import {
-  purgeRuntimeSecretMaterial,
-  runRuntimeSecretRequestSweep,
-} from '../services/runtime-secret-request-maintenance';
+import { runRuntimeSecretRequestSweep } from '../services/runtime-secret-request-maintenance';
 import { checkProvisioningTimeouts } from '../services/timeout';
 import { migrateOrphanedWorkspaces } from '../services/workspace-migration';
 import { runWorkspaceResourceHistoryCleanup } from '../services/workspace-resource-history';
-import { runAnalyticsForwardJob } from './analytics-forward';
 import { runScheduledCapacityPoolContinuations } from './capacity-pool-continuation';
 import { runScheduledCapacityPoolReconciliation } from './capacity-pool-reconciliation';
 import { runScheduledComposeImageArtifactCleanup } from './compose-image-artifact-cleanup';
 import { runComputeUsageCleanup } from './compute-usage-cleanup';
 import { runCronTriggerSweep } from './cron-triggers';
 import { runScheduledDeploymentReleaseRetention } from './d1-retention';
-import { runDebugPackagePurge } from './debug-package-purge';
+import { DAILY_CRON, scheduleDailyJobs } from './daily-jobs';
 import { runDeploymentNodeCleanup } from './deployment-node-cleanup';
 import { runDeploymentPublishJobSweep } from './deployment-publish-jobs';
 import { notifyFailedSweeps } from './failed-sweep-notifications';
 import { runIncidentTriggerSweep } from './incident-triggers';
 import { runNodeCleanupSweep } from './node-cleanup';
 import { runObservabilityPurge } from './observability-purge';
-import { runOperationsAuditPurge } from './operations-audit-purge';
-import { runOperationsTelemetryRetention } from './operations-telemetry-retention';
 import {
   isHourlyPlatformMaintenanceCron,
   scheduleHourlyPlatformMaintenance,
@@ -95,7 +87,7 @@ export async function scheduled(
     }
     return;
   }
-  const isDailyForward = controller.cron === '0 3 * * *';
+  const isDailyForward = controller.cron === DAILY_CRON;
   const isMonthlyCostAggregation = isHourlyPlatformMaintenanceCron(controller.cron);
 
   const cronType = isDailyForward
@@ -109,41 +101,7 @@ export async function scheduled(
   if (scheduleHourlyPlatformMaintenance(controller.cron, env, ctx.waitUntil.bind(ctx))) return;
 
   if (isDailyForward) {
-    ctx.waitUntil(
-      (async () => {
-        const forward = await runAnalyticsForwardJob(env);
-        log.info('cron.completed', {
-          cron: controller.cron,
-          type: 'daily-forward',
-          forwardEnabled: forward.enabled,
-          forwardSkipReason: forward.skipReason ?? null,
-          forwardEventsQueried: forward.eventsQueried,
-          forwardSegmentSent: forward.segment.sent,
-          forwardGA4Sent: forward.ga4.sent,
-          forwardCursorUpdated: forward.cursorUpdated,
-        });
-      })()
-    );
-    // Separate promise: an analytics failure must not skip the audit retention purge.
-    ctx.waitUntil(runOperationsAuditPurge(env, controller.cron));
-    ctx.waitUntil(runDebugPackagePurge(env, controller.cron));
-    ctx.waitUntil(runOperationsTelemetryRetention(env, controller.cron));
-    // Expired collected secret values are already refused at read time; this deletes them.
-    ctx.waitUntil(
-      purgeRuntimeSecretMaterial(env).catch((err) => {
-        log.error('cron.runtime_secret_purge_failed', {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      })
-    );
-    // Separate promise again, so none of the jobs above can suppress the latency check.
-    ctx.waitUntil(
-      runLifecycleLatencyDailyEvaluation(env).catch((err) => {
-        log.error('cron.lifecycle_latency_daily_failed', {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      })
-    );
+    scheduleDailyJobs(env, controller.cron, ctx.waitUntil.bind(ctx));
     return;
   }
 
@@ -200,12 +158,6 @@ export async function scheduled(
   const nodeTunnelCleanup = await sweeps.isolate('node_tunnel_cleanup', () =>
     runNodeTunnelCleanupSweep(env)
   );
-  // Backstop for every reverse-tunnel lease whose incarnation is no longer live (node row
-  // hard-deleted, incarnation replaced, termination proof): one D1 statement, no external I/O.
-  // A no-op without a D1 call unless VM_AGENT_TRANSPORT='reverse-tunnel' (skip reason logged).
-  const reverseTunnelLeases = await sweeps.isolate('reverse_tunnel_lease_release', () =>
-    runReverseTunnelLeaseSweep(env)
-  );
   let providerOrphans: Awaited<ReturnType<typeof runProviderOrphanReconciliation>> | undefined;
   await sweeps.isolate('provider_orphan_reconciliation', async () => {
     const result = await runProviderOrphanReconciliation(env);
@@ -240,6 +192,16 @@ export async function scheduled(
   );
   // Two indexed reads per idle tick; work is capped by inbox.sweepBatchSize.
   const inboxAskSweep = await sweeps.isolate('inbox_ask_sweep', () => runInboxAskSweep(env));
+  // One indexed scan of recently failed tasks plus one UPDATE per idle tick; filings capped by
+  // inbox.errorSweepBatchSize (`services/inbox/system-errors.ts`).
+  const inboxSystemErrorSweep = await sweeps.isolate('inbox_system_error_sweep', () =>
+    runInboxSystemErrorSweep(env)
+  );
+  // Failing or auto-paused automations: bounded by inbox.errorSweepBatchSize
+  // (`services/inbox/automation-errors.ts`).
+  const inboxAutomationErrorSweep = await sweeps.isolate('inbox_automation_error_sweep', () =>
+    runInboxAutomationErrorSweep(env)
+  );
   const sessionTaskRepair = await sweeps.isolate('session_task_reconciliation', () =>
     runSessionTaskReconciliation(env)
   );
@@ -351,11 +313,6 @@ export async function scheduled(
     nodeTunnelsReleased: nodeTunnelCleanup?.released,
     nodeTunnelCleanupsAttempted: nodeTunnelCleanup?.attempted,
     nodeTunnelsCleaned: nodeTunnelCleanup?.cleaned,
-    reverseTunnelLeasesReleased: reverseTunnelLeases?.released,
-    reverseTunnelLeaseSweepSkipReason:
-      reverseTunnelLeases && 'skipReason' in reverseTunnelLeases
-        ? reverseTunnelLeases.skipReason
-        : undefined,
     orphanedWorkspacesFlagged: nodeCleanup?.orphanedWorkspacesFlagged,
     orphanedNodesDestroyed: nodeCleanup?.orphanedNodesDestroyed,
     orphanedNodesSkipped: nodeCleanup?.orphanedNodesSkipped,
@@ -424,6 +381,10 @@ export async function scheduled(
     secretRequestNoticesRetried: secretRequestSweep?.noticesRetried,
     inboxAsksExpired: inboxAskSweep?.expired,
     inboxAskNoticesRetried: inboxAskSweep?.noticesRetried,
+    inboxSystemErrorsFiled: inboxSystemErrorSweep?.filed,
+    inboxSystemErrorsClosed: inboxSystemErrorSweep?.closed,
+    inboxAutomationErrorsFiled: inboxAutomationErrorSweep?.filed,
+    inboxAutomationErrorsClosed: inboxAutomationErrorSweep?.closed,
     sessionTaskRepairScanned: sessionTaskRepair?.scanned,
     sessionTaskRepairRepaired: sessionTaskRepair?.repaired,
     sessionTaskRepairReused: sessionTaskRepair?.reused,

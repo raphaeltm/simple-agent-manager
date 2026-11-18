@@ -1,3 +1,4 @@
+import { monthlyCostCapMessage } from '@simple-agent-manager/ai-proxy';
 /**
  * Request admission for the platform AI proxy (`routes/ai-proxy.ts`): authentication, request-size
  * limits, and every gate a request must pass before it may spend platform credentials.
@@ -24,11 +25,7 @@ import {
   getCurrentWindowStart,
 } from '../middleware/rate-limit';
 import { checkModelTierAllowance, describeModelTierDenial } from '../services/ai-model-tier-gate';
-import {
-  aiProxyDisabledMessage,
-  isAiProxyKillSwitchEngaged,
-  resolveAiProxyAvailability,
-} from '../services/ai-proxy-availability';
+import { isAiProxyEnabled } from '../services/ai-proxy-availability';
 import {
   AIProxyAuthError,
   extractCallbackToken,
@@ -76,11 +73,6 @@ export function aiProxyBodyParseError(c: AIProxyContext, error: unknown): Respon
 export async function prepareAIProxyRequest(
   c: AIProxyContext
 ): Promise<Response | AIProxyRequestContext> {
-  // Kill switch first; the no-gateway gate runs after auth (resolveAiProxyAvailability).
-  if (isAiProxyKillSwitchEngaged(c.env)) {
-    return proxyJsonError(c, 'AI proxy is disabled', 'service_unavailable', 503);
-  }
-
   const token = extractCallbackToken(c.req.header('Authorization'), undefined);
   if (!token) {
     return proxyJsonError(
@@ -92,14 +84,9 @@ export async function prepareAIProxyRequest(
   }
 
   const db = drizzle(c.env.DATABASE, { schema });
+  let auth;
   try {
-    const auth = await verifyAIProxyAuth(token, c.env, db);
-    // No AI Gateway and the admin has not enabled the direct upstream.
-    const availability = await resolveAiProxyAvailability(c.env);
-    if (!availability.enabled) {
-      return proxyJsonError(c, aiProxyDisabledMessage(availability), 'service_unavailable', 503);
-    }
-    return { ...auth, db };
+    auth = await verifyAIProxyAuth(token, c.env, db);
   } catch (err) {
     if (err instanceof AIProxyAuthError) {
       return proxyJsonError(
@@ -111,6 +98,9 @@ export async function prepareAIProxyRequest(
     }
     return proxyJsonError(c, 'Invalid or expired token', 'invalid_request_error', 401);
   }
+  if (!(await isAiProxyEnabled(c.env)))
+    return proxyJsonError(c, 'AI proxy is disabled', 'service_unavailable', 503);
+  return { ...auth, db };
 }
 
 export async function enforceRateLimit(
@@ -165,18 +155,12 @@ export async function enforceUsageGate(
     );
   }
 
-  return proxyJsonError(
-    c,
-    'Monthly cost cap exceeded. Adjust your cap in Settings > Usage.',
-    'rate_limit_error',
-    429,
-    {
-      monthlyCost: {
-        used: usageGate.monthlyCap.costUsd,
-        cap: usageGate.monthlyCap.capUsd,
-      },
-    }
-  );
+  return proxyJsonError(c, monthlyCostCapMessage(usageGate.monthlyCap), 'rate_limit_error', 429, {
+    monthlyCost: {
+      used: usageGate.monthlyCap.costUsd,
+      cap: usageGate.monthlyCap.capUsd,
+    },
+  });
 }
 
 export function validateAllowedModel(c: AIProxyContext, modelId: string): Response | null {

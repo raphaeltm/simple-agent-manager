@@ -306,6 +306,37 @@ describe('task summary read-aloud', () => {
   });
 });
 
+describe('while the capabilities read is in flight', () => {
+  it('keeps the mic visible, so nothing flickers away on Cloudflare', async () => {
+    let release!: (response: Response) => void;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          release = resolve;
+        })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    render(composer());
+
+    // Hold the response: the query is pending, and the control is already on screen.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(client.getQueryCache().getAll()[0]?.state.status).toBe('pending');
+    expect(screen.getByTestId('voice-button')).toBeInTheDocument();
+
+    // Cloudflare's answer (all present) arrives: still there, never removed in between.
+    await act(async () => {
+      release(
+        new Response(JSON.stringify(ASSUMED_PLATFORM_CAPABILITIES), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+    });
+    await capabilitiesSettled();
+    expect(screen.getByTestId('voice-button')).toBeInTheDocument();
+  });
+});
+
 describe('after a failed capabilities read', () => {
   it('keeps every service offered, then follows the real answer once a refetch succeeds', async () => {
     serveCapabilities({ error: 'INTERNAL_ERROR' }, 500);

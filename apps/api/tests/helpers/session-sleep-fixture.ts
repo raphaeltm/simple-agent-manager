@@ -16,6 +16,7 @@ const sleepBoundaryMocks = vi.hoisted(() => ({
   cleanupTaskRun: vi.fn(),
   acceptPromptDelivery: vi.fn(),
   stopSession: vi.fn(),
+  cancelUnissuedSessionPrompts: vi.fn(),
   sendPrompt: vi.fn(),
   nodeAgentRequest: vi.fn(),
   cancelAgentSession: vi.fn(),
@@ -72,6 +73,8 @@ vi.mock('../../src/services/project-data', () => ({
   recordSessionTurnEnd: (...args: unknown[]) => sleepBoundaryMocks.recordSessionTurnEnd(...args),
   sleepSession: (...args: unknown[]) => sleepBoundaryMocks.sleepSession(...args),
   stopSession: (...args: unknown[]) => sleepBoundaryMocks.stopSession(...args),
+  cancelUnissuedSessionPrompts: (...args: unknown[]) =>
+    sleepBoundaryMocks.cancelUnissuedSessionPrompts(...args),
   acceptPromptDelivery: (...args: unknown[]) => sleepBoundaryMocks.acceptPromptDelivery(...args),
   transitionAcpSession: (...args: unknown[]) => sleepBoundaryMocks.transitionAcpSession(...args),
 }));
@@ -210,6 +213,16 @@ export function createSessionSleepFixture(taskStatus: string, getActivity: () =>
     sessionStatus = 'stopped';
     return Promise.resolve();
   });
+  mocks.cancelUnissuedSessionPrompts.mockImplementation(
+    async (_env, projectId, sessionId, taskId) => {
+      const task = sqlite
+        .prepare('SELECT project_id, chat_session_id FROM tasks WHERE id = ?')
+        .get(taskId) as { project_id: string; chat_session_id: string | null } | undefined;
+      return task?.project_id === projectId && task.chat_session_id === sessionId
+        ? { matched: true, cancelled: 0 }
+        : { matched: false, reason: 'task_mismatch', cancelled: 0 };
+    }
+  );
   mocks.getAcpSession.mockResolvedValue(null);
   mocks.recordSessionTurnEnd.mockResolvedValue(true);
   mocks.cancelAgentSession.mockResolvedValue({ success: true, status: 200 });

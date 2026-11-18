@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const mockUseAuth = vi.fn(() => ({ isSuperadmin: false }));
@@ -159,8 +159,12 @@ vi.mock('../../src/pages/Project', async () => {
   };
 });
 
-vi.mock('../../src/pages/ProjectOverview', () => ({
+vi.mock('../../src/pages/project-overview', () => ({
   ProjectOverview: () => <div data-testid="project-overview-page" />,
+}));
+
+vi.mock('../../src/pages/project-chat', () => ({
+  ProjectChat: () => <div data-testid="project-chat-page" />,
 }));
 
 vi.mock('../../src/pages/ProjectTasks', () => ({
@@ -307,6 +311,44 @@ describe('App routes', () => {
     });
   });
 
+  // Router-major guard (react-router 8): drive the real BrowserRouter through the
+  // browser History API — a deep link, an index `<Navigate replace>`, a later
+  // navigation, then Back/Forward — the way a user's browser does.
+  it('keeps deep links, replace redirects and Back/Forward coherent', async () => {
+    const popTo = async (move: () => void) => {
+      const popped = new Promise<void>((resolve) =>
+        window.addEventListener('popstate', () => resolve(), { once: true })
+      );
+      move();
+      await popped;
+    };
+
+    window.history.pushState({}, '', '/dashboard');
+    renderAt('/projects/proj-1');
+    expect(await screen.findByTestId('project-overview-page')).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/projects/proj-1/overview');
+
+    await act(async () => {
+      window.history.pushState({}, '', '/projects/proj-1/chat');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    expect(await screen.findByTestId('project-chat-page')).toBeInTheDocument();
+
+    await act(() => popTo(() => window.history.back()));
+    expect(await screen.findByTestId('project-overview-page')).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/projects/proj-1/overview');
+
+    // The index redirect replaced its entry, so one more Back leaves the project
+    // instead of bouncing through `/projects/proj-1` back to Overview.
+    await act(() => popTo(() => window.history.back()));
+    expect(await screen.findByTestId('dashboard-page')).toBeInTheDocument();
+    expect(screen.queryByTestId('project-overview-page')).not.toBeInTheDocument();
+
+    await act(() => popTo(() => window.history.forward()));
+    expect(await screen.findByTestId('project-overview-page')).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/projects/proj-1/overview');
+  });
+
   it('redirects the removed /workspaces/new form to Nodes', async () => {
     renderAt('/workspaces/new');
     expect(await screen.findByTestId('nodes-page')).toBeInTheDocument();
@@ -321,6 +363,20 @@ describe('App routes', () => {
   it('routes /tools/cli to the CLI download page', async () => {
     renderAt('/tools/cli');
     expect(await screen.findByTestId('tools-cli-page')).toBeInTheDocument();
+  });
+
+  it('lands a project on its Overview, not on chat (inbox slice F2)', async () => {
+    renderAt('/projects/proj-1');
+
+    expect(await screen.findByTestId('project-overview-page')).toBeInTheDocument();
+    await waitFor(() => expect(window.location.pathname).toBe('/projects/proj-1/overview'));
+    expect(screen.queryByTestId('project-chat-page')).not.toBeInTheDocument();
+  });
+
+  it('still routes the project chat, one tap from the Overview', async () => {
+    renderAt('/projects/proj-1/chat');
+    expect(await screen.findByTestId('project-chat-page')).toBeInTheDocument();
+    expect(screen.queryByTestId('project-overview-page')).not.toBeInTheDocument();
   });
 
   it('routes /projects/:id/tasks/:taskId to the task redirect (redirects to chat session)', async () => {

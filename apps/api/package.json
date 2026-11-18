@@ -36,6 +36,7 @@
     "@simple-agent-manager/ai-proxy": "workspace:*",
     "@simple-agent-manager/app-deployment": "workspace:*",
     "@simple-agent-manager/cloud-init": "workspace:*",
+    "@simple-agent-manager/cron": "workspace:*",
     "@simple-agent-manager/operations": "workspace:*",
     "@simple-agent-manager/project-data": "workspace:*",
     "@simple-agent-manager/providers": "workspace:*",

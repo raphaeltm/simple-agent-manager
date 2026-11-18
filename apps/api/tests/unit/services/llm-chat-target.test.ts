@@ -1,3 +1,4 @@
+import { buildBudgetKey } from '@simple-agent-manager/ai-proxy/internal/ai-token-budget';
 import type { SamConfig } from '@simple-agent-manager/shared';
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,8 +9,6 @@ import {
   __resetAdminSettingsCacheForTest,
   updateAdminSettings,
 } from '../../../src/services/admin-settings';
-import { buildBudgetKey } from '../../../src/services/ai-token-budget';
-import { estimateTokensFromText } from '../../../src/services/ai-token-usage-accounting';
 import {
   chatTargetHeaders,
   LlmUnavailableError,
@@ -213,26 +212,8 @@ describe('resolveWorkersAiChatTarget', () => {
     expect((outcome as LlmUnavailableError).message).toContain('could not be read');
   });
 
-  it('keeps the pre-endpoint Cloudflare route when an isolate that never read the setting hits an outage', async () => {
-    Object.assign(env, CLOUDFLARE);
-    breakSettingsReads();
-    expect((await resolveWorkersAiChatTarget(env, 'taskTitle', '@cf/m/x'))?.kind).toBe(
-      'cloudflare-gateway'
-    );
-  });
-
-  it('keeps the Cloudflare route through an outage when the last read found no endpoint', async () => {
-    Object.assign(env, CLOUDFLARE);
-    expect((await resolveWorkersAiChatTarget(env, 'taskTitle', '@cf/m/x'))?.kind).toBe(
-      'cloudflare-gateway'
-    );
-    breakSettingsReads();
-    const target = await resolveWorkersAiChatTarget(env, 'taskTitle', '@cf/m/x');
-    expect(target?.url).toBe(
-      'https://gateway.ai.cloudflare.com/v1/account-1/sam/workers-ai/v1/chat/completions'
-    );
-  });
-
+  // Main's L12 fails closed on unreadable settings for every caller (resolveLlmEndpointCapability);
+  // the branch's keep-the-Cloudflare-route-through-an-outage cases were dropped with it.
   it('tells the agent the settings are unreadable, without calling any model', async () => {
     Object.assign(env, CLOUDFLARE);
     await configureEndpoint({ baseUrl: 'https://llm.example.com/v1', apiKey: 'sk-endpoint-key' });
@@ -413,29 +394,6 @@ describe('SAM and project agents through the real loop', () => {
     expect(JSON.parse(String(init.body))).toMatchObject({ model: 'agent-model', stream: true });
   });
 
-  it('ask the endpoint for usage and charge an output estimate when none arrives', async () => {
-    Object.assign(env, CLOUDFLARE);
-    await configureEndpoint({ baseUrl: 'https://llm.example.com/v1', model: 'default-model' });
-    const output = 'an answer from the operator endpoint';
-    const fetchMock = vi.fn(async () =>
-      sseResponse([JSON.stringify({ choices: [{ delta: { content: output } }] }), '[DONE]'])
-    );
-    vi.stubGlobal('fetch', fetchMock);
-    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-
-    await runAgentLoop('conv-1', [], 'hi', config, env, 'user-1', writer(), vi.fn());
-
-    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(JSON.parse(String(init.body))).toMatchObject({
-      stream: true,
-      stream_options: { include_usage: true },
-    });
-    const key = buildBudgetKey('user-1');
-    await vi.waitFor(async () => expect(await env.KV.get(key)).not.toBeNull());
-    const charged = JSON.parse(String(await env.KV.get(key))) as { outputTokens: number };
-    expect(charged.outputTokens).toBe(estimateTokensFromText(output));
-  });
-
   it('keep the Workers AI gateway route for @cf models when no endpoint is configured', async () => {
     Object.assign(env, CLOUDFLARE);
     const fetchMock = vi.fn(async () =>
@@ -466,33 +424,4 @@ describe('SAM and project agents through the real loop', () => {
     expect(await env.KV.get(buildBudgetKey('user-1'))).toBeNull();
   });
 
-  it('tell the user no model is configured, without an error log, when nothing can serve the turn', async () => {
-    Object.assign(env, { AI_GATEWAY_ID: 'sam' });
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const chunks: string[] = [];
-    const sink = new WritableStream<Uint8Array>({
-      write(chunk) {
-        chunks.push(new TextDecoder().decode(chunk));
-      },
-    }).getWriter();
-
-    await runAgentLoop(
-      'conv-1',
-      [],
-      'hi',
-      { ...config, model: '@cf/test/model' },
-      env,
-      'user-1',
-      sink,
-      vi.fn()
-    );
-
-    expect(fetchMock).not.toHaveBeenCalled();
-    const stream = chunks.join('');
-    expect(stream).toContain('No language model is available on this installation');
-    expect(stream).toContain('"type":"done"');
-    expect(errors.mock.calls.flat().join(' ')).not.toContain('sam.llm_fetch_error');
-  });
 });

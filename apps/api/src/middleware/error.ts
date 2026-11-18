@@ -14,9 +14,9 @@ export const errors = {
   ...coreErrors,
 
   /**
-   * A platform service this installation does not have (for example Workers AI off
-   * Cloudflare). A designed 4xx: the request was valid, the installation cannot serve it,
-   * and retrying will not help. `feature` names the capability in
+   * A platform service this installation does not have (for example Workers AI on a
+   * runtime without it). A designed 4xx: the request was valid, the installation cannot
+   * serve it, and retrying will not help. `feature` names the capability in
    * services/platform-capabilities.ts.
    */
   featureUnavailable: (feature: PlatformCapability, message: string) =>

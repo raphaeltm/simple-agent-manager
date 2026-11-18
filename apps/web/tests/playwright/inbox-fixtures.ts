@@ -157,13 +157,31 @@ export const KIND_ITEMS: Item[] = [
     answerSpec: { type: 'acknowledge' },
   }),
   base({
+    ref: 'ask:result-1',
+    kind: 'result',
+    blocking: false,
+    agentState: 'finished',
+    topic: 'Hosting cost comparison',
+    title: 'Hetzner is the cheapest place for the staging nodes, by about two thirds',
+    // A result's context is markdown, as agents are told to write it; long to stress the layout.
+    body:
+      'Same 4 vCPU / 8 GB machine, per month:\n\n' +
+      '- **Hetzner**: €7.90\n- Scaleway: €21.50\n- DigitalOcean: $48\n\n' +
+      'Hetzner placement failed twice in Falkenstein last week, so I would **keep the fallback chain**. ' +
+      'The full table with every region is in the linked file. '.repeat(3),
+    createdAt: new Date(NOW - 30 * MIN).toISOString(),
+    answerSpec: { type: 'acknowledge' },
+  }),
+  base({
     ref: 'ask:err-1',
     kind: 'error',
     blocking: false,
     agentState: 'not_started',
     topic: 'Fix rounding in tax totals',
-    title: 'Couldn’t start: the GitHub App no longer has access to acme/billing',
-    body: 'Each run stopped at "clone repository".',
+    // The shape SAM files (`taskFailureError`): the quoted task name, never the error text, and
+    // the classified explanation as the body.
+    title: '“Fix rounding in tax totals” couldn’t start',
+    body: 'The workspace or VM did not finish starting up.',
     // Slice E's error actions (first is primary; Open chat only navigates).
     answerSpec: {
       type: 'actions',

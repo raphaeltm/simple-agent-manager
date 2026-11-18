@@ -83,7 +83,8 @@ export function inboxItemsSql(
   const member = (column: string) =>
     `JOIN project_members pm ON pm.project_id = ${column} AND pm.user_id = ? AND pm.status = 'active'`;
 
-  // asks: assigned to me, or a team item nobody else has claimed.
+  // asks: assigned to me, or a team item. A team task another member took stays listed for
+  // everyone (slice H1) but is not actionable, so it leaves "needs you" and the count.
   {
     const scope = projectScope('a.project_id');
     const status =
@@ -104,15 +105,17 @@ export function inboxItemsSql(
           a.source_session_id AS session_id, a.source_task_id AS task_id, a.kind AS kind,
           a.blocking AS blocking, a.title AS title, a.body_md AS body, a.status AS status,
           a.created_at AS created_at, a.expires_at AS expires_at, a.due_at AS due_at,
+          a.updated_at AS updated_at, a.failure_count AS failure_count,
           a.answer_spec_json AS extra_json, a.links_json AS links_json,
-          CASE WHEN a.status = 'open' AND pm.role IN (${taskWriters.sql}) THEN 1 ELSE 0 END AS can_act,
+          CASE WHEN a.status = 'open' AND pm.role IN (${taskWriters.sql})
+            AND (a.assignee_kind = 'user' OR a.claimed_by_user_id IS NULL OR a.claimed_by_user_id = ?)
+            THEN 1 ELSE 0 END AS can_act,
           CASE WHEN a.due_at IS NOT NULL THEN 0 WHEN a.blocking = 1 THEN 1 ELSE 2 END AS tier,
           COALESCE(a.project_id || ':' || a.group_key, a.source_session_id, 'ask:' || a.id) AS stack_key
         FROM asks a ${member('a.project_id')}
         WHERE ${status}${kind}${scope.sql}
-          AND ((a.assignee_kind = 'user' AND a.assignee_user_id = ?)
-            OR (a.assignee_kind = 'team' AND (a.claimed_by_user_id IS NULL OR a.claimed_by_user_id = ?)))`,
-      params: [...taskWriters.params, me, ...statusParams, ...scope.params, me, me],
+          AND ((a.assignee_kind = 'user' AND a.assignee_user_id = ?) OR a.assignee_kind = 'team')`,
+      params: [...taskWriters.params, me, me, ...statusParams, ...scope.params, me],
     });
   }
 
@@ -130,7 +133,7 @@ export function inboxItemsSql(
           ss.id AS session_id, ss.task_id AS task_id, NULL AS kind, 1 AS blocking,
           NULL AS title, NULL AS body, 'open' AS status,
           COALESCE(CASE WHEN ${valid} THEN ${field('createdAt')} END, ss.updated_at) AS created_at,
-          CASE WHEN ${valid} THEN ${field('expiresAt')} END AS expires_at, NULL AS due_at,
+          CASE WHEN ${valid} THEN ${field('expiresAt')} END AS expires_at, NULL AS due_at, NULL AS updated_at, NULL AS failure_count,
           ss.attention_json AS extra_json, NULL AS links_json,
           CASE WHEN pm.role IN (${taskWriters.sql}) THEN 1 ELSE 0 END AS can_act,
           CASE WHEN ${valid} AND ${isInteraction} THEN 0 ELSE 1 END AS tier,
@@ -148,7 +151,7 @@ export function inboxItemsSql(
       sql: `SELECT 'secret' AS store, r.id AS item_id, NULL AS marker_id, r.project_id AS project_id,
           r.requesting_chat_session_id AS session_id, r.requesting_task_id AS task_id,
           'secret' AS kind, 1 AS blocking, r.env_key AS title, r.reason AS body, 'open' AS status,
-          r.created_at AS created_at, r.expires_at AS expires_at, NULL AS due_at,
+          r.created_at AS created_at, r.expires_at AS expires_at, NULL AS due_at, NULL AS updated_at, NULL AS failure_count,
           NULL AS extra_json, NULL AS links_json,
           CASE WHEN pm.role IN (${secretWriters.sql}) THEN 1 ELSE 0 END AS can_act,
           1 AS tier, r.requesting_chat_session_id AS stack_key
@@ -176,7 +179,7 @@ export function inboxItemsSql(
           ap.action AS title, ap.reason AS body, 'open' AS status,
           COALESCE(CAST(ROUND((julianday(ap.created_at) - 2440587.5) * 86400000) AS INTEGER), 0) AS created_at,
           CAST(ROUND((julianday(ap.expires_at) - 2440587.5) * 86400000) AS INTEGER) AS expires_at,
-          NULL AS due_at,
+          NULL AS due_at, NULL AS updated_at, NULL AS failure_count,
           json_object('targetType', ap.target_type, 'targetId', ap.target_id) AS extra_json,
           NULL AS links_json,
           CASE WHEN pm.role IN (${taskWriters.sql}) THEN 1 ELSE 0 END AS can_act, 1 AS tier,

@@ -11,6 +11,7 @@ import { toTaskResponse } from '../../lib/mappers';
 import { requireRouteParam } from '../../lib/route-helpers';
 import { errors } from '../../middleware/error';
 import { jsonValidator, UpdateTaskStatusSchema } from '../../schemas';
+import { fileTaskFailure } from '../../services/inbox/system-errors';
 import { verifyCallbackToken } from '../../services/jwt';
 import * as notificationService from '../../services/notification';
 import * as projectDataService from '../../services/project-data';
@@ -18,6 +19,7 @@ import {
   isLifecycleTaskStatus,
   recordTaskLifecycleEventBestEffort,
 } from '../../services/project-lifecycle-events';
+import { retireTaskCancellationPrompts } from '../../services/task-cancellation-prompts';
 import {
   canTransitionTaskStatus,
   getAllowedTaskTransitions,
@@ -373,6 +375,10 @@ taskCallbackRoute.post(
     }
 
     const prUpdate = await callbackPr.prepareStatusCallbackPullRequest(db, projectId, task, body);
+    if (body.toStatus === 'cancelled') {
+      await retireTaskCancellationPrompts(c.env, task, revalidateWorkspace);
+      await revalidateWorkspace();
+    }
     const updatedTask = await setTaskStatus(
       db,
       task,
@@ -475,6 +481,11 @@ taskCallbackRoute.post(
                 outputBranch: updatedTask.outputBranch,
               });
             } else if (body.toStatus === 'failed') {
+              // File the inbox error item first so the notification opens it (slice E). Filing
+              // never throws; a normal ending files nothing and keeps the chat link.
+              const filed = await fileTaskFailure(c.env, projectId, taskId);
+              // The sweep filed it first and already told the person: one notification per item.
+              if (filed && !filed.created) return;
               await notificationService.notifyTaskFailed(c.env, task.userId, {
                 projectId,
                 projectName,
@@ -482,6 +493,7 @@ taskCallbackRoute.post(
                 taskTitle: task.title,
                 errorMessage: body.errorMessage,
                 sessionId,
+                inboxRef: filed?.ref ?? null,
               });
             }
           })().catch((e) => {

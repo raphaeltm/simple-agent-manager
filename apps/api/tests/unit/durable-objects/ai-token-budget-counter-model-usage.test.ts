@@ -1,65 +1,171 @@
 /**
- * The per-model usage table in `AiTokenBudgetCounter` (overnight B3 A2), against real SQLite:
- * increments accumulate per (day, model), the date filter applies, and the provider rows the
- * monthly cap reads are unaffected. Then `getLocalUsageBreakdown` through the Durable Object path.
+ * L13 local metering, through the real `AiTokenBudgetCounter` over SQLite: priced calls recorded by
+ * the real accounting path land in provider and per-model rows in one transaction, the usage page
+ * breakdown reads them, and the worker's usage gate blocks at the installation ceiling.
  */
-import { getLocalUsageBreakdown, incrementModelUsage } from '@simple-agent-manager/ai-proxy';
+import { getLocalMonthlyAiCostUsd, getLocalUsageBreakdown } from '@simple-agent-manager/ai-proxy';
+import { PLATFORM_AI_MODELS } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({ resolveAdminSettingDetails: vi.fn() }));
+vi.mock('../../../src/services/admin-settings-resolution', () => ({
+  resolveAdminSetting: vi.fn(),
+  resolveAdminSettingDetails: mocks.resolveAdminSettingDetails,
+}));
 
 import { AiTokenBudgetCounter } from '../../../src/durable-objects/ai-token-budget-counter';
 import type { Env } from '../../../src/env';
+import { checkAiUsageGate, incrementProviderUsage } from '../../../src/services/ai-token-budget';
+import { attachTokenUsageAccounting } from '../../../src/services/ai-token-usage-accounting';
 import { createSqlStorage } from './sql-storage-test-utils';
 
-function counter(): AiTokenBudgetCounter {
-  const sql = createSqlStorage(new Database(':memory:'));
-  const ctx = {
-    storage: { sql, transactionSync: <T>(fn: () => T): T => fn() },
-    blockConcurrencyWhile: async (fn: () => Promise<void>) => fn(),
-  };
-  return new AiTokenBudgetCounter(ctx as never, {} as Env);
+const PRICED = PLATFORM_AI_MODELS.find(
+  (m) => m.provider === 'openai' && m.costPer1kOutputTokens > 0
+)!;
+const OPENAI = { providerId: 'openai', providerName: 'OpenAI', dialect: 'openai' };
+
+let db: Database.Database;
+let counter: AiTokenBudgetCounter;
+let env: Env;
+
+function makeKv(): KVNamespace {
+  const rows = new Map<string, string>();
+  return {
+    get: vi.fn(async (key: string, type?: string) => {
+      const value = rows.get(key);
+      return value === undefined ? null : type === 'json' ? JSON.parse(value) : value;
+    }),
+    put: vi.fn(async (key: string, value: string) => void rows.set(key, value)),
+  } as unknown as KVNamespace;
 }
 
-describe('AiTokenBudgetCounter per-model usage', () => {
-  it('accumulates per day and model and filters by start date', async () => {
-    const stub = counter();
-    await stub.incrementModelUsage('2026-11-01', 'claude-a', 'anthropic', 100, 10, 0.5);
-    await stub.incrementModelUsage('2026-11-12', 'claude-a', 'anthropic', 200, 20, 1);
-    await stub.incrementModelUsage('2026-11-12', 'claude-a', 'anthropic', 300, 30, 2);
-    await stub.incrementModelUsage('2026-11-12', 'gpt-b', 'openai', 50, 5, 0.25);
+beforeEach(() => {
+  db = new Database(':memory:');
+  const ctx = {
+    storage: {
+      sql: createSqlStorage(db),
+      transactionSync: <T>(fn: () => T) => db.transaction(fn)(),
+    },
+    blockConcurrencyWhile: async (fn: () => Promise<unknown>) => fn(),
+  };
+  counter = new AiTokenBudgetCounter(ctx as never, {} as never);
+  // No AI_GATEWAY_ID / CF_ACCOUNT_ID: an installation without an addressable gateway.
+  env = {
+    KV: makeKv(),
+    DATABASE: {},
+    AI_TOKEN_BUDGET_COUNTER: { idFromName: (name: string) => name, get: () => counter },
+  } as unknown as Env;
+  mocks.resolveAdminSettingDetails.mockReset();
+});
+afterEach(() => db.close());
 
-    const rows = await stub.getModelUsage('2026-11-10');
-    expect(rows).toHaveLength(2);
-    expect(rows.find((row) => row.modelId === 'claude-a')).toEqual({
-      date: '2026-11-12',
-      modelId: 'claude-a',
-      providerId: 'anthropic',
-      requests: 2,
-      inputTokens: 500,
-      outputTokens: 50,
-      estimatedCostUsd: 3,
-    });
-    // Provider rows (the monthly cap's source) are a separate table.
-    expect(await stub.getProviderUsage('2026-11-01')).toEqual([]);
+async function pricedResponse(userId: string) {
+  const response = new Response(
+    JSON.stringify({ usage: { prompt_tokens: 100_000, completion_tokens: 100_000 } }),
+    { headers: { 'content-type': 'application/json' } }
+  );
+  await attachTokenUsageAccounting(response, {
+    env,
+    userId,
+    format: 'openai',
+    costModelId: PRICED.id,
+  });
+}
+
+describe('AiTokenBudgetCounter per-model rows', () => {
+  it('counts every concurrent priced call once, in provider and model rows alike', async () => {
+    await Promise.all(Array.from({ length: 25 }, () => pricedResponse('user')));
+
+    const monthCost = await getLocalMonthlyAiCostUsd(env.KV, 'user', env);
+    const { byModel, byDay } = await getLocalUsageBreakdown(env, 'user', new Date(0));
+    expect(byModel).toHaveLength(1);
+    expect(byModel[0]).toMatchObject({ model: PRICED.id, provider: 'openai', requests: 25 });
+    expect(byModel[0]!.inputTokens).toBe(25 * 100_000);
+    expect(byModel[0]!.costUsd).toBeCloseTo(monthCost, 9);
+    expect(monthCost).toBeGreaterThan(0);
+    expect(byDay).toHaveLength(1);
+    expect(byDay[0]!.requests).toBe(25);
   });
 
-  it('serves the usage page breakdown through the Durable Object binding', async () => {
-    const stub = counter();
-    const env = {
-      AI_TOKEN_BUDGET_COUNTER: { idFromName: (name: string) => name, get: () => stub },
+  it('records no model row for an unpriced (BYO or custom endpoint) call', async () => {
+    await incrementProviderUsage(env.KV, 'user', OPENAI, 10, 10, env);
+    const { byModel } = await getLocalUsageBreakdown(env, 'user', new Date(0));
+    expect(byModel).toEqual([]);
+    const provider = await counter.getProviderUsage('1970-01-01');
+    expect(provider).toHaveLength(1);
+  });
+
+  it('skips a malformed model row and keeps the good ones', async () => {
+    await pricedResponse('user');
+    db.prepare(
+      `INSERT INTO ai_model_usage (budget_date, model_id, provider_id, requests, input_tokens,
+         output_tokens, estimated_cost_usd, updated_at) VALUES ('2026-01-01', 'bad', 'x', 1, 1, 1, 'NaN?', 0)`
+    ).run();
+    const rows = await counter.getModelUsage('1970-01-01');
+    expect(rows.map((row) => row.modelId)).toEqual([PRICED.id]);
+  });
+
+  it('returns no breakdown, without throwing, where the counter binding is absent', async () => {
+    const bare = { ...env, AI_TOKEN_BUDGET_COUNTER: undefined } as Env;
+    await expect(getLocalUsageBreakdown(bare, 'user', new Date(0))).resolves.toEqual({
+      byModel: [],
+      byDay: [],
+    });
+  });
+});
+
+describe("the worker's usage gate reads the installation ceiling (F2)", () => {
+  it('refuses platform-funded admission while the strict ceiling snapshot is unreadable', async () => {
+    mocks.resolveAdminSettingDetails.mockRejectedValue(new Error('settings unavailable'));
+    await expect(checkAiUsageGate(env.KV, 'user', env)).rejects.toMatchObject({
+      statusCode: 503,
+      error: 'SERVICE_UNAVAILABLE',
+    });
+    // No accounted call or model row is produced while admission is unknown.
+    expect(await getLocalMonthlyAiCostUsd(env.KV, 'user', env)).toBe(0);
+  });
+
+  it('blocks a user who never set a cap once spend reaches the ceiling', async () => {
+    await pricedResponse('user');
+    const spent = await getLocalMonthlyAiCostUsd(env.KV, 'user', env);
+    mocks.resolveAdminSettingDetails.mockResolvedValue({ value: Math.max(1, Math.floor(spent)) });
+    expect(spent).toBeGreaterThanOrEqual(1);
+
+    await expect(checkAiUsageGate(env.KV, 'user', env)).resolves.toMatchObject({
+      allowed: false,
+      reason: 'monthly-cost-cap',
+    });
+    expect(mocks.resolveAdminSettingDetails).toHaveBeenCalledWith(
+      env,
+      'aiProxy.perUserMonthlyCostCeilingUsd'
+    );
+  });
+
+  it('lets the same user through with no ceiling set (control)', async () => {
+    await pricedResponse('user');
+    mocks.resolveAdminSettingDetails.mockResolvedValue({ value: 0 });
+    await expect(checkAiUsageGate(env.KV, 'user', env)).resolves.toEqual({ allowed: true });
+  });
+});
+
+describe('gateway install: the worker gate never reads the ceiling (rule 60)', () => {
+  it('makes no admin-settings read and the same KV reads as before', async () => {
+    const gatewayEnv = {
+      ...env,
+      AI_GATEWAY_ID: 'gw',
+      CF_ACCOUNT_ID: 'acct',
+      CF_API_TOKEN: 'tok',
     } as unknown as Env;
-
-    await incrementModelUsage(env, 'user-1', 'claude-a', 'anthropic', 100, 10, 0.5);
-    await incrementModelUsage(env, 'user-1', 'gpt-b', 'openai', 100, 10, 1.5);
-
-    const today = new Date().toISOString().slice(0, 10);
-    const { byModel, byDay } = await getLocalUsageBreakdown(env, 'user-1', new Date(today));
-    expect(byModel.map((model) => [model.model, model.costUsd])).toEqual([
-      ['gpt-b', 1.5],
-      ['claude-a', 0.5],
-    ]);
-    expect(byDay).toEqual([
-      { date: today, requests: 2, inputTokens: 200, outputTokens: 20, costUsd: 2 },
-    ]);
+    const getProviderUsage = vi.spyOn(counter, 'getProviderUsage');
+    await expect(checkAiUsageGate(gatewayEnv.KV, 'user', gatewayEnv)).resolves.toEqual({
+      allowed: true,
+    });
+    expect(mocks.resolveAdminSettingDetails).not.toHaveBeenCalled();
+    expect(getProviderUsage).not.toHaveBeenCalled();
+    // settings (token budget), settings (monthly cap); daily usage goes to the DO counter.
+    expect(
+      vi.mocked(gatewayEnv.KV.get).mock.calls.map(([key]) => String(key).split(':')[0])
+    ).toEqual(['ai-budget-settings', 'ai-budget-settings']);
   });
 });

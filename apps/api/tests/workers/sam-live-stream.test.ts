@@ -283,14 +283,14 @@ describe('SAM live answer stream in workerd', () => {
     expect(modelRequests[1]?.body.tool_choice).toBe('required');
   });
 
-  it('runs GLM 5.3 Flash at low reasoning effort, previews its reasoning, and bills cached input at the cached price', async () => {
-    const glm = '@cf/zai-org/glm-5.3-flash';
+  it('runs the DeepSeek default at low reasoning effort, previews its reasoning, and bills cached input at the cached price', async () => {
+    const model = '@cf/deepseek-ai/deepseek-v4.1-flash-1017';
     const { userId, stub, request, start } = await setup();
-    await stub.testEnvironment({ SAM_MODEL: glm });
+    await stub.testEnvironment({ SAM_MODEL: '' });
     const thought = deferred();
     const reasoning = (text: string) => ({
       ...base,
-      model: glm,
+      model,
       choices: [{ index: 0, delta: { reasoning_content: text }, finish_reason: null }],
     });
     reply = () =>
@@ -321,7 +321,7 @@ describe('SAM live answer stream in workerd', () => {
     await live.done;
     expect(live.text()).toBe('Nothing new yet today.');
     expect(modelRequests[0]?.body).toMatchObject({
-      model: glm,
+      model,
       stream: true,
       reasoning_effort: 'low',
     });
@@ -333,7 +333,7 @@ describe('SAM live answer stream in workerd', () => {
     expect(entry?.inputTokens).toBe(1_000);
     // 200 uncached + 800 cached input tokens, 100 output tokens, at the catalog's per-1K prices.
     expect(entry?.estimatedCostUsd).toBeCloseTo(
-      (200 * 0.00015 + 800 * 0.00003 + 100 * 0.0005) / 1000,
+      (200 * 0.0003 + 800 * 0.000006 + 100 * 0.0012) / 1000,
       12
     );
   });

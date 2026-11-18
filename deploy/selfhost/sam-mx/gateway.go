@@ -13,7 +13,7 @@ import (
 )
 
 // Headers of the Worker's inbound-email gateway route
-// (apps/api/src/routes/self-host-gateway-inbound-email.ts). Keep the two in step.
+// (apps/api/src/selfhost/reverse-tunnel/inbound-email.ts). Keep the two in step.
 const (
 	headerGatewaySecret = "X-SAM-Gateway-Secret"
 	headerMailFrom      = "X-SAM-Mail-From"

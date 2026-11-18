@@ -168,6 +168,7 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
   private async info(): Promise<ArtifactsRepoInfo> {
     if (!this.infoPromise) {
       this.infoPromise = (async () => {
+        // The binding as before; otherwise the backend a self-host build registered.
         const binding = this.env.ARTIFACTS ?? repoHostingPorts().artifacts.resolve(this.env);
         if (!binding) throw errors.badRequest('Artifacts is not enabled on this deployment');
         const repo = await binding.get(this.repoId);
@@ -181,7 +182,7 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
           throw errors.badRequest('Artifacts repository has no resolvable clone URL');
         }
         // SAM-hosted repositories are read in-process, not through the public ingress.
-        const localFetch = repoHostingPorts().artifacts.localRemoteFetch(this.env);
+        const localFetch = repoHostingPorts().artifacts.localRemoteFetch?.(this.env) ?? null;
         const http = localFetch ? createFetchHttpClient(localFetch) : webHttp;
         return { remote, onAuth, http };
       })();

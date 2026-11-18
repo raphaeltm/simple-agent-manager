@@ -1,6 +1,9 @@
 // FILE SIZE EXCEPTION: Cross-boundary node-agent request layer marginally over the limit; interactive/background timeout tiers and cf-container interruption classification are one cohesive concern. Split candidate if it grows further. See .claude/rules/18-file-size-limits.md
 import type { McpServerEntry } from '@simple-agent-manager/shared';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
 
+import * as schema from '../db/schema';
 import type { VmAgentContainerRequestGuard } from '../durable-objects/vm-agent-container';
 import {
   getRuntimeRecoveryMessage,
@@ -18,11 +21,7 @@ import {
   getNodeBackendBaseUrl,
   waitForNodeAgentReadyWith,
 } from './node-agent-readiness';
-import {
-  nodeAgentRequestInit,
-  resolveNodeAgentRoute,
-  retargetNodeAgentUrl,
-} from './node-agent-route';
+import { resolveNodeAgentRoute, retargetNodeAgentUrl } from './node-agent-route';
 import { recordNodeRoutingMetric } from './telemetry';
 import {
   fetchVmAgentContainer,
@@ -57,6 +56,8 @@ interface NodeAgentRequestOptions extends RequestInit {
 }
 
 interface FetchNodeAgentControls {
+  /** Only the authenticated local port-forward adapter may return app redirects. */
+  allowApplicationRedirects?: boolean;
   sourceTaskGuard?: VmAgentContainerRequestGuard;
   beforeExternalMutation?: () => Promise<void>;
   recoverContainerOnTimeout?: boolean;
@@ -269,6 +270,22 @@ export async function nodeAgentRequest(
   }
 }
 
+/** A node redirect is a failed control response. Discard its Location and body:
+ * Go's mux can echo a query JWT into both before the route consumes it.
+ */
+function nodeResponse(response: Response, allowApplicationRedirects = false): Response {
+  // 304 is cache revalidation, not a followable hop; retain confinement/ETag headers.
+  if (
+    allowApplicationRedirects ||
+    response.status === 304 ||
+    response.status < 300 ||
+    response.status >= 400
+  )
+    return response;
+  void response.body?.cancel().catch(() => undefined);
+  return new Response('Node redirect refused', { status: response.status });
+}
+
 export async function fetchNodeAgent(
   nodeId: string,
   env: Env,
@@ -277,26 +294,37 @@ export async function fetchNodeAgent(
   requestTimeoutMs: number,
   controls: FetchNodeAgentControls = {}
 ): Promise<Response> {
+  // Node URLs come from SAM routing, never a redirect chosen by the node.
+  options = { ...options, redirect: 'manual' };
   const {
     sourceTaskGuard,
     beforeExternalMutation,
     recoverContainerOnTimeout = true,
     noWakeContainer = false,
+    allowApplicationRedirects = false,
   } = controls;
   if (!env.DATABASE || typeof env.DATABASE.prepare !== 'function') {
     await beforeExternalMutation?.();
-    return fetchWithTimeout(url, nodeAgentRequestInit(options), requestTimeoutMs);
+    return nodeResponse(
+      await fetchWithTimeout(url, options, requestTimeoutMs),
+      allowApplicationRedirects
+    );
   }
 
-  // Single seam for control plane -> node HTTP: the node row decides container, reverse
-  // tunnel (loopback lease port on this box) or the public backend hostname.
-  const route = await resolveNodeAgentRoute(env, nodeId);
+  const db = drizzle(env.DATABASE, { schema });
+  const node = await db
+    .select({ runtime: schema.nodes.runtime, transport: schema.nodes.transport })
+    .from(schema.nodes)
+    .where(eq(schema.nodes.id, nodeId))
+    .get();
+
+  // Same single node read as before; only an installed build transport adds its own lookup.
+  const route = await resolveNodeAgentRoute(env, nodeId, node);
   if (route.kind !== 'container') {
     await beforeExternalMutation?.();
-    return fetchWithTimeout(
-      retargetNodeAgentUrl(url, route),
-      nodeAgentRequestInit(options),
-      requestTimeoutMs
+    return nodeResponse(
+      await fetchWithTimeout(retargetNodeAgentUrl(url, route), options, requestTimeoutMs),
+      allowApplicationRedirects
     );
   }
 
@@ -334,19 +362,13 @@ export async function fetchNodeAgent(
         ? fetchVmAgentContainerNoWake(
             env,
             nodeId,
-            new Request(
-              containerUrl.toString(),
-              requestInitWithoutSignal(nodeAgentRequestInit(options))
-            ),
+            new Request(containerUrl.toString(), requestInitWithoutSignal(options)),
             vmAgentPort
           )
         : fetchVmAgentContainer(
             env,
             nodeId,
-            new Request(
-              containerUrl.toString(),
-              requestInitWithoutSignal(nodeAgentRequestInit(options))
-            ),
+            new Request(containerUrl.toString(), requestInitWithoutSignal(options)),
             vmAgentPort,
             sourceTaskGuard
           ),
@@ -357,7 +379,7 @@ export async function fetchNodeAgent(
         );
       }),
     ]);
-    return response;
+    return nodeResponse(response, allowApplicationRedirects);
   } catch (error) {
     const timedOut = error instanceof Error && error.message.startsWith('Request timed out after ');
     if (!timedOut) throw error;

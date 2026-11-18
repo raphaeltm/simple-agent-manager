@@ -8,7 +8,7 @@ import { OPERATOR_DEFAULTS } from '../../../services/admin-settings-registry';
 import { LlmUnavailableError } from '../../../services/llm-chat-target';
 import { getOperatorSettings, type OperatorSettings } from '../../../services/operator-settings';
 import { handleActionRoute } from './action-routes';
-import { runOperatorAgent } from './agent';
+import { OperatorMonthlyCostCapError, runOperatorAgent } from './agent';
 import { OperatorLive } from './live';
 import { assertOperatorAccount, assertOperatorExecution } from './operations';
 import { actionProjection, projectAccessCache } from './projection';
@@ -321,8 +321,8 @@ export class OperatorController {
           turn.id,
           'interrupted',
           null,
-          // No model on this installation: say what an admin must configure, not "retry".
-          error instanceof LlmUnavailableError
+          // A spent monthly cap, or no model on this installation: say what must change, not "retry".
+          error instanceof OperatorMonthlyCostCapError || error instanceof LlmUnavailableError
             ? error.message
             : 'SAM could not finish this turn. Review recorded actions before continuing; uncertain actions are not automatically repeated.'
         );

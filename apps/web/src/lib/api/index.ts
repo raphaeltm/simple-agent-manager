@@ -34,9 +34,6 @@ export type {
   AnalyticsEventsResponse,
   AnalyticsFeatureAdoptionResponse,
   AnalyticsForwardStatusResponse,
-  AnalyticsFunnelResponse,
-  AnalyticsGeoResponse,
-  AnalyticsRetentionResponse,
   AnalyticsWebsiteTrafficResponse,
   WebsiteTrafficHost,
   WebsiteTrafficSection,
@@ -79,9 +76,6 @@ export {
   fetchAnalyticsEvents,
   fetchAnalyticsFeatureAdoption,
   fetchAnalyticsForwardStatus,
-  fetchAnalyticsFunnel,
-  fetchAnalyticsGeo,
-  fetchAnalyticsRetention,
   fetchAnalyticsWebsiteTraffic,
   fetchSignupApprovalConfig,
   getAdminLogStreamUrl,
@@ -104,6 +98,7 @@ export {
   updatePlatformCredential,
   updateSignupApprovalConfig,
 } from './admin';
+export { getInstallationHealth, refreshCloudflareCost } from './admin-health-cost';
 export {
   decideOperationsApproval,
   fetchOperationsApproval,
@@ -384,8 +379,15 @@ export {
   listProjectIdeas,
   setProjectIdeaStatus,
 } from './ideas';
-export { answerInboxItem, archiveInboxItem, getInboxCount, getInboxItem, listInbox } from './inbox';
-export { getProjectFlow } from './insights';
+export {
+  answerInboxItem,
+  archiveInboxItem,
+  getInboxCount,
+  getInboxItem,
+  listInbox,
+  reassignInboxTask,
+} from './inbox';
+export { getProjectAccounts, getProjectFlow, getProjectPeople, getProjectSetups } from './insights';
 export { getRunReceipt } from './insights-receipt';
 export {
   addObservation,

@@ -120,7 +120,6 @@ vi.mock('../../src/services/notification', () => ({
   getProjectName: vi.fn().mockResolvedValue('Test Project'),
   notifyTaskComplete: vi.fn().mockResolvedValue(undefined),
   notifyTaskFailed: vi.fn().mockResolvedValue(undefined),
-  notifySessionEnded: vi.fn().mockResolvedValue(undefined),
   notifyPrCreated: vi.fn().mockResolvedValue(undefined),
 }));
 

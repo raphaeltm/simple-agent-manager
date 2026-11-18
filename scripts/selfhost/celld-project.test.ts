@@ -53,7 +53,8 @@ describe('prepareCelldProject', () => {
       prepareCelldProject({ apiDir: API_DIR, projectDir, plan: plan(), runtimeSecrets });
       const main = readFileSync(join(projectDir, CELLD_MAIN), 'utf8');
       expect(main).toContain('resumeSharedFlightJoinsOnOwnTimer();');
-      expect(main.includes('wrapWorker(worker)')).toBe(runtimeSecrets);
+      expect(main.includes('wrapWorker(withSelfHostBuild(worker))')).toBe(runtimeSecrets);
+      expect(main).toContain('withSelfHostBuild(worker)');
     }
   });
 
@@ -71,7 +72,14 @@ describe('prepareCelldProject', () => {
     const [mainDir, obsDir] = p.config.d1_databases.map((db) =>
       join(projectDir, db.migrations_dir)
     );
-    expect(readdirSync(mainDir!).sort()).toEqual(main);
+    // The primary database also carries the self-host-only reverse-tunnel lease migration, the
+    // only source of node_reverse_tunnel_leases since the shared 0232 copy was removed.
+    const leases = '0255_node_reverse_tunnel_leases.sql';
+    expect(main).not.toContain(leases);
+    expect(readdirSync(mainDir!).sort()).toEqual([...main, leases].sort());
+    expect(readlinkSync(join(mainDir!, leases))).toBe(
+      join(API_DIR, 'src/selfhost/migrations', leases)
+    );
     expect(readdirSync(obsDir!).sort()).toEqual(observability);
     // Flat: no subdirectory holding .sql files (celld refuses that), and links, not copies.
     for (const dir of [mainDir!, obsDir!]) {

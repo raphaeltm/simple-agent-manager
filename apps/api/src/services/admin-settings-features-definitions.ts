@@ -1,5 +1,8 @@
 import {
-  INSIGHTS_FLOW_SETTINGS,
+  INSIGHTS_AGENT_SETTINGS,
+  INSIGHTS_CLOUDFLARE_COST_SETTINGS,
+  INSIGHTS_INSTALLATION_SETTINGS,
+  INSIGHTS_PAGE_SETTINGS,
   INSIGHTS_RECEIPT_SETTINGS,
 } from '@simple-agent-manager/operations';
 import { DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS } from '@simple-agent-manager/shared';
@@ -160,7 +163,34 @@ export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
       setting.range
     )
   ),
-  ...INSIGHTS_FLOW_SETTINGS.map((setting) =>
+  ...INSIGHTS_PAGE_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Operations',
+      setting.description,
+      setting.range
+    )
+  ),
+  ...INSIGHTS_INSTALLATION_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Operations',
+      setting.description,
+      setting.range
+    )
+  ),
+  ...INSIGHTS_AGENT_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Operations',
+      setting.description,
+      setting.range
+    )
+  ),
+  ...INSIGHTS_CLOUDFLARE_COST_SETTINGS.map((setting) =>
     integerDefinition(
       setting.name,
       setting.defaultValue,
@@ -353,6 +383,7 @@ export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
     OPERATOR_DEFAULTS.disabled,
     'Operations',
     'Disable the private SAM assistant for every account. Does not opt users in.',
-    {}
+    // Inverse polarity: containment requires the disabled switch to be true.
+    { unavailableValue: true }
   ),
 ];

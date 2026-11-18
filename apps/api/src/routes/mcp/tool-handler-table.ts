@@ -28,9 +28,13 @@ import {
 } from './idea-tools';
 import {
   handleInboxAsk,
+  handleInboxAssign,
+  handleInboxAttach,
   handleInboxCancelItem,
+  handleInboxComment,
   handleInboxGetItem,
   handleInboxListItems,
+  handleInboxResult,
   handleInboxReview,
   handleInboxUpdateItem,
 } from './inbox-tools';
@@ -128,6 +132,7 @@ import {
   handleUpdateAgentProfile,
 } from './profile-tools';
 import { handleAckEventDelivery, handleGetEvent } from './project-event-tools';
+import { handleProjectInsights } from './project-insights-tool';
 import { handleListRuntimeEnv, handleRequestSecret } from './secret-request-tools';
 import {
   handleGetResourceHistory,
@@ -209,8 +214,12 @@ export const MCP_TOOL_HANDLERS: ReadonlyMap<string, McpToolHandler> = new Map<
   ['request_human_input', handleRequestHumanInput],
   ['inbox_ask', handleInboxAsk],
   ['inbox_review', handleInboxReview],
+  ['inbox_result', handleInboxResult],
   ['inbox_update_item', handleInboxUpdateItem],
   ['inbox_cancel_item', handleInboxCancelItem],
+  ['inbox_assign', handleInboxAssign],
+  ['inbox_comment', handleInboxComment],
+  ['inbox_attach', handleInboxAttach],
   ['inbox_list_items', handleInboxListItems],
   ['inbox_get_item', handleInboxGetItem],
   ['request_secret', handleRequestSecret],
@@ -229,6 +238,7 @@ export const MCP_TOOL_HANDLERS: ReadonlyMap<string, McpToolHandler> = new Map<
   ['list_tasks', handleListTasks],
   ['get_task_details', handleGetTaskDetails],
   ['search_tasks', handleSearchTasks],
+  ['project_insights', handleProjectInsights],
   ['list_sessions', handleListSessions],
   ['get_session_messages', handleGetSessionMessages],
   ['get_resource_history', handleGetResourceHistory],

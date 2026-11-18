@@ -17,7 +17,7 @@ import {
 } from '../hooks/useQueryCachePersistence';
 import { setUserId } from '../lib/analytics';
 import { GITHUB_REAUTH_REQUIRED_EVENT } from '../lib/api/client';
-import { connectProvider, signOut, useSession } from '../lib/auth';
+import { signOut, useSession } from '../lib/auth';
 import {
   buildLibraryCacheNamespace,
   clearLegacyLibraryCache,
@@ -91,7 +91,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const isPending = sessionRequestPending && !confirmedSignedOutRef.current;
   const [githubReauthMessage, setGitHubReauthMessage] = useState<string | null>(null);
   // True when the account has no GitHub link at all: signing out cannot fix that, connecting can.
-  const [githubNotConnected, setGitHubNotConnected] = useState(false);
+  const [githubNotConnected, setGithubNotConnected] = useState(false);
   const [activeCacheNamespace, setActiveCacheNamespace] = useState<string | null | undefined>(
     undefined
   );
@@ -200,7 +200,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
         event instanceof CustomEvent
           ? (event.detail as { message?: unknown; code?: unknown })
           : null;
-      setGitHubNotConnected(detail?.code === 'GITHUB_NOT_CONNECTED');
+      // Settings already owns the canonical connection controls.
+      if (
+        detail?.code === 'GITHUB_NOT_CONNECTED' &&
+        window.location.pathname === '/settings/github'
+      )
+        return;
+      setGithubNotConnected(detail?.code === 'GITHUB_NOT_CONNECTED');
       setGitHubReauthMessage(
         typeof detail?.message === 'string' && detail.message.length > 0
           ? detail.message
@@ -215,7 +221,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const handleGitHubReauth = async () => {
     if (githubNotConnected) {
       try {
-        await connectProvider('github');
+        window.location.assign('/settings/github');
       } catch (err) {
         setGitHubReauthMessage(err instanceof Error ? err.message : 'Could not connect GitHub');
       }
@@ -274,7 +280,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       )}
       {githubReauthMessage && (
         <div
-          className="glass-surface fixed inset-x-4 bottom-4 z-50 mx-auto max-w-md rounded-lg p-4 shadow-dropdown"
+          className="sam-glass sam-glass-rim sam-glass-live fixed inset-x-4 bottom-4 z-50 mx-auto max-w-md rounded-[var(--sam-radius-pane)] p-4 shadow-dropdown break-words"
           role="alert"
         >
           <p className="text-sm font-medium text-fg-primary">
@@ -284,14 +290,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
           <div className="mt-3 flex justify-end gap-2">
             <button
               type="button"
-              className="rounded-md border border-border px-3 py-2 text-sm text-fg-secondary hover:bg-surface-hover"
+              className="sam-raised min-h-11 rounded-md border border-border px-3 py-2 text-sm text-fg-secondary hover:bg-surface-hover"
               onClick={() => setGitHubReauthMessage(null)}
             >
               Dismiss
             </button>
             <button
               type="button"
-              className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-fg-on-accent hover:opacity-90"
+              className="min-h-11 rounded-md bg-accent px-3 py-2 text-sm font-medium text-fg-on-accent hover:opacity-90"
               onClick={() => void handleGitHubReauth()}
             >
               {githubNotConnected ? 'Connect GitHub' : 'Sign out and reconnect'}

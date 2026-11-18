@@ -153,6 +153,25 @@ describe('RunReceiptView', () => {
     expect(screen.getByText('2.3× this skill’s usual 82s (12 runs)')).toBeInTheDocument();
   });
 
+  it('says how the first push did, and nothing while it is pending or not recorded', () => {
+    const outcome = receipt().outcome;
+    const line = (ciFirstTry: RunReceipt['outcome']['ciFirstTry']) => {
+      const { unmount } = render(
+        <RunReceiptView
+          receipt={receipt({ outcome: { ...outcome, ciFirstTry } })}
+          resourceIndex={undefined}
+        />
+      );
+      const text = screen.getByText(/^PR #2771 · /).textContent;
+      unmount();
+      return text;
+    };
+    expect(line('failed')).toBe('PR #2771 · CI passed · first push failed · 40m');
+    expect(line('passed')).toBe('PR #2771 · CI passed · first push passed · 40m');
+    expect(line('pending')).toBe('PR #2771 · CI passed · 40m');
+    expect(line('not_recorded')).toBe('PR #2771 · CI passed · 40m');
+  });
+
   it('shows a teammate the kind of account, never its name', () => {
     render(
       <RunReceiptView
@@ -282,5 +301,208 @@ describe('RunReceiptView — disclosures and loading', () => {
     expect(screen.queryByText('No CPU history was recorded for this run.')).not.toBeInTheDocument();
     rerender(<RunReceiptView receipt={receipt()} resourceIndex={undefined} cpuHistory="error" />);
     expect(screen.getByText("Couldn't load CPU history just now.")).toBeInTheDocument();
+  });
+
+  // Slice U: measured tokens per model; money only as a labelled estimate for API-key accounts.
+  it('shows measured tokens per model and an API-key spend estimate', () => {
+    render(
+      <RunReceiptView
+        receipt={receipt({
+          tokens: {
+            state: 'reported',
+            source: 'harness',
+            limited: false,
+            total: {
+              input: 320_000,
+              output: 41_000,
+              cacheRead: 2_100_000,
+              cacheWrite: 0,
+              reasoning: null,
+            },
+            spend: { state: 'estimate', usd: 4.12, unpricedModels: [] },
+            models: [
+              {
+                model: 'claude-opus-5-5',
+                input: 300_000,
+                output: 40_000,
+                cacheRead: 2_100_000,
+                cacheWrite: 0,
+                reasoning: null,
+                estimatedSpendUsd: 4.0,
+              },
+              {
+                model: null,
+                input: 20_000,
+                output: 1_000,
+                cacheRead: 0,
+                cacheWrite: 0,
+                reasoning: 500,
+                estimatedSpendUsd: null,
+              },
+            ],
+          },
+        })}
+        resourceIndex={undefined}
+      />
+    );
+    expect(screen.getByText('2.5M')).toBeInTheDocument();
+    expect(screen.getByText('Incl. 2.1M cache · Reported by the agent')).toBeInTheDocument();
+    const models = screen.getByTestId('receipt-token-models');
+    const rows = within(models).getAllByRole('listitem');
+    expect(rows[0]).toHaveTextContent('claude-opus-5-5300K in· 40K out· 2.1M cache~$4.00');
+    expect(rows[1]).toHaveTextContent('Model not reported20K in· 1K out· 500 reasoningno price');
+    expect(screen.getByTestId('receipt-token-spend')).toHaveTextContent(
+      '~$4.12 estimated at SAM’s model prices'
+    );
+    expect(screen.queryByText('Not reported')).not.toBeInTheDocument();
+  });
+
+  it('discloses rejected usage even when no usage rows were accepted', () => {
+    render(
+      <RunReceiptView
+        receipt={receipt({ tokens: { state: 'not_reported', limited: true } })}
+        resourceIndex={undefined}
+      />
+    );
+    expect(screen.getByText('Incomplete')).toBeInTheDocument();
+    expect(screen.getByText('Usage rows could not be recorded')).toBeInTheDocument();
+    expect(screen.queryByText('Not reported')).not.toBeInTheDocument();
+  });
+
+  it('labels priced incomplete usage as a spend floor', () => {
+    render(
+      <RunReceiptView
+        receipt={receipt({
+          tokens: {
+            state: 'reported',
+            source: 'harness',
+            limited: true,
+            total: { input: 10, output: 1, cacheRead: 0, cacheWrite: 0, reasoning: null },
+            spend: { state: 'estimate', usd: 4.12, unpricedModels: [] },
+            models: [
+              {
+                model: 'claude-opus-5-5',
+                input: 10,
+                output: 1,
+                cacheRead: 0,
+                cacheWrite: 0,
+                reasoning: null,
+                estimatedSpendUsd: 4.12,
+              },
+            ],
+          },
+        })}
+        resourceIndex={undefined}
+      />
+    );
+    expect(screen.getByTestId('receipt-token-spend')).toHaveTextContent('At least ~$4.12');
+  });
+
+  it('shows tokens without money for a subscription account', () => {
+    render(
+      <RunReceiptView
+        receipt={receipt({
+          tokens: {
+            state: 'reported',
+            source: 'ai_proxy',
+            limited: true,
+            total: { input: 900, output: 100, cacheRead: 0, cacheWrite: 0, reasoning: null },
+            spend: { state: 'not_applicable' },
+            models: [
+              {
+                model: 'gpt-5.5',
+                input: 900,
+                output: 100,
+                cacheRead: 0,
+                cacheWrite: 0,
+                reasoning: null,
+                estimatedSpendUsd: null,
+              },
+            ],
+          },
+        })}
+        resourceIndex={undefined}
+      />
+    );
+    expect(screen.getByText('1K+')).toBeInTheDocument();
+    expect(screen.getByText('Measured by SAM’s AI proxy')).toBeInTheDocument();
+    expect(screen.queryByText(/estimated/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('receipt-token-spend')).not.toBeInTheDocument();
+  });
+
+  it('says a failed token read could not be read, not that the agent reported nothing', () => {
+    render(
+      <RunReceiptView
+        receipt={receipt({ tokens: { state: 'not_reported' }, unavailable: ['tokens'] })}
+        resourceIndex={undefined}
+      />
+    );
+    expect(screen.queryByText('This agent did not report token counts')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Could not be read just now').length).toBeGreaterThan(0);
+    expect(screen.getByText('Could not read token usage just now.')).toBeInTheDocument();
+  });
+
+  it('says tokens are not reported yet while the run is live', () => {
+    render(
+      <RunReceiptView
+        receipt={receipt({ live: true, status: 'in_progress' })}
+        resourceIndex={undefined}
+      />
+    );
+    expect(screen.getByText('Not reported yet')).toBeInTheDocument();
+  });
+
+  it('shows no money for another member’s personal key, and a floor when a model is unpriced', () => {
+    const tokens = (spend: RunReceipt['tokens'] extends infer T ? T : never) => spend;
+    const base = {
+      state: 'reported' as const,
+      source: 'harness' as const,
+      limited: false,
+      total: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, reasoning: null },
+      models: [
+        {
+          model: 'a',
+          input: 5,
+          output: 2,
+          cacheRead: 0,
+          cacheWrite: 0,
+          reasoning: null,
+          estimatedSpendUsd: 0.004,
+        },
+        {
+          model: 'b',
+          input: 5,
+          output: 3,
+          cacheRead: 0,
+          cacheWrite: 0,
+          reasoning: null,
+          estimatedSpendUsd: null,
+        },
+      ],
+    };
+    const { unmount } = render(
+      <RunReceiptView
+        receipt={receipt({ tokens: tokens({ ...base, spend: { state: 'private' } }) })}
+        resourceIndex={undefined}
+      />
+    );
+    expect(screen.queryByTestId('receipt-token-spend')).not.toBeInTheDocument();
+    expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
+    unmount();
+    render(
+      <RunReceiptView
+        receipt={receipt({
+          tokens: tokens({
+            ...base,
+            spend: { state: 'estimate', usd: 0.004, unpricedModels: ['b'] },
+          }),
+        })}
+        resourceIndex={undefined}
+      />
+    );
+    expect(screen.getByTestId('receipt-token-spend')).toHaveTextContent(
+      'At least ~<$0.01 estimated at SAM’s model prices'
+    );
+    expect(screen.getByText('no price')).toBeInTheDocument();
   });
 });

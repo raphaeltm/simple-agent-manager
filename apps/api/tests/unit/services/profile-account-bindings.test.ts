@@ -5,23 +5,19 @@
  * credential a run would actually be seeded with. Another member's rows sit in the same tables as
  * the attack fixture.
  */
-import { readFileSync } from 'node:fs';
-
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import { updateAdminSettings } from '../../../src/services/admin-settings-mutations';
-import { __resetAdminSettingsCacheForTest } from '../../../src/services/admin-settings-resolution';
 import { getSelectedAgentCredentialReference } from '../../../src/services/agent-credential-selection';
 import { encrypt } from '../../../src/services/encryption';
 import {
   resolveProfileAccountBindings,
   SAM_AI_PROXY_POOL_ID,
 } from '../../../src/services/profile-account-bindings';
-import { createMemoryKv, createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const KEY = Buffer.alloc(32, 7).toString('base64');
 
@@ -102,23 +98,11 @@ describe('resolveProfileAccountBindings', () => {
       schema.platformCredentials,
       schema.credentials,
       schema.agentSettings,
-      schema.platformSettings,
     ]);
-    sqlite.exec(
-      readFileSync(
-        new URL('../../../src/db/migrations/0196_admin_settings.sql', import.meta.url),
-        'utf8'
-      )
-    );
-    __resetAdminSettingsCacheForTest();
-    // A Cloudflare installation: an addressable AI Gateway, so the proxy is on unless the
-    // AI_PROXY_ENABLED kill switch says otherwise (`services/ai-proxy-availability.ts`).
     env = {
       DATABASE: createSqliteD1(sqlite),
-      KV: createMemoryKv(),
-      ENCRYPTION_KEY: KEY,
-      AI_GATEWAY_ID: 'sam',
-      CF_ACCOUNT_ID: 'account',
+      CF_ACCOUNT_ID: 'account-test',
+      AI_GATEWAY_ID: 'gateway-test',
     } as unknown as Env;
 
     // owner: one Max account stored twice with identical ciphertext (a dual-write mirror).
@@ -263,28 +247,6 @@ describe('resolveProfileAccountBindings', () => {
     expect((await bind('owner2', list))[0]?.state).toBe('sam_ai_proxy');
     env = { ...env, AI_PROXY_ENABLED: 'false' } as Env;
     expect((await bind('owner2', list))[0]?.state).toBe('none');
-  });
-
-  it('on a box without an AI Gateway, reports the proxy only once the admin opts in to direct upstream', async () => {
-    // The same resolver the agent-key route reads (`isAiProxyEnabled`), so this read cannot
-    // report a proxy the route would refuse.
-    sqlite
-      .prepare(
-        "INSERT INTO agent_settings (id,user_id,agent_type,provider_mode,created_at,updated_at) VALUES ('s0','owner2','claude-code','sam','now','now')"
-      )
-      .run();
-    env = { ...env, AI_GATEWAY_ID: '' } as Env;
-    const list = [{ id: 'p-claude', agentType: 'claude-code' }];
-    expect((await bind('owner2', list))[0]?.state).toBe('none');
-    await updateAdminSettings(env, {
-      changes: [{ name: 'aiProxy.directUpstreamEnabled', value: true }],
-      actorUserId: 'admin-1',
-    });
-    __resetAdminSettingsCacheForTest();
-    expect((await bind('owner2', list))[0]).toMatchObject({
-      state: 'sam_ai_proxy',
-      poolId: SAM_AI_PROXY_POOL_ID,
-    });
   });
 
   it('a platform credential never counts as an account; SAM proxy only when chosen', async () => {

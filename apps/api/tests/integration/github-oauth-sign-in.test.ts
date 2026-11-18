@@ -152,7 +152,7 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
   async function signInWithGitHub(
     code?: string,
     onBeforeCallback?: (state: string, authorizeUrl: URL) => void,
-    callbackHeaders: Record<string, string> = {}
+    clientHeaders: Record<string, string> = {}
   ): Promise<Response> {
     const authorizeUrl = await startSocialSignIn(app, env, jar, {
       apiOrigin: API_ORIGIN,
@@ -171,7 +171,7 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
     callback.searchParams.set('iss', 'https://github.com/login/oauth');
     const response = await app.request(
       callback.toString(),
-      { headers: { cookie: jar.header(), ...callbackHeaders } },
+      { headers: { cookie: jar.header(), ...clientHeaders } },
       env
     );
     jar.store(response);
@@ -196,6 +196,40 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
     }>;
     return rows.map((row) => row.id);
   }
+
+  // BetterAuth retains its existing IPv6 /64 normalization and test-mode localhost fallback.
+  it.each([
+    [
+      'Cloudflare',
+      {
+        'CF-Connecting-IP': '203.0.113.7',
+        'X-Forwarded-For': '198.51.100.66',
+        'X-Real-IP': '198.51.100.67',
+      },
+      '203.0.113.7',
+    ],
+    [
+      'trusted proxy overwriting the ingress header',
+      { 'CF-Connecting-IP': '2001:db8::7', 'X-Forwarded-For': '198.51.100.66, 10.0.0.1' },
+      '2001:0db8:0000:0000:0000:0000:0000:0000',
+    ],
+    [
+      'missing trusted ingress',
+      { 'X-Forwarded-For': '198.51.100.66', 'X-Real-IP': '198.51.100.67' },
+      '127.0.0.1',
+    ],
+  ] as const)(
+    'stores the ingress IP for %s, ignoring spoofed forwarding headers',
+    async (_mode, headers, expectedIp) => {
+      const callback = await signInWithGitHub(undefined, undefined, headers);
+      expect(callback.status).toBe(302);
+      expect(callback.headers.get('location')).toBe(CALLBACK_URL);
+      expect((await currentUser()).status).toBe(200);
+      const sessions = sqlite.prepare('SELECT ip_address FROM sessions').all();
+      expect(sessions).toEqual([{ ip_address: expectedIp }]);
+      expect(githubAccounts()).toHaveLength(1);
+    }
+  );
 
   it('signs a first-time GitHub user in and starts a session', async () => {
     const callback = await signInWithGitHub();
@@ -298,51 +332,34 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
     expect(verificationIdentifiers()).toEqual([]);
   });
 
-  it.each([
-    { role: 'superadmin', alerted: true },
-    { role: 'admin', alerted: true },
-    { role: 'user', alerted: false },
-  ])(
-    'linking a GitHub sign-in to an existing $role account alerts the owners: $alerted',
-    async ({ role, alerted }) => {
+  it.each(['superadmin', 'admin', 'user'])(
+    'refuses implicit same-email GitHub linking to an existing %s account',
+    async (role) => {
       const sent: Array<{ to: string; subject: string }> = [];
       env = {
         ...env,
         AGENT_EMAIL: {
           send: async (message: { to: string; subject: string }) => {
             sent.push(message);
-            return { messageId: `m-${sent.length}` };
+            return { messageId: 'test-email' };
           },
         },
       } as unknown as Env;
-      // The 2026-11-12 shape: an existing account, and a provider sign-in with the same verified
-      // email that better-auth links to it automatically. An owner must hear about that.
       const createdAt = Date.parse('2026-06-26T10:13:40Z');
       sqlite
         .prepare(
           `INSERT INTO users (id, email, email_verified, name, image, role, status, created_at, updated_at) VALUES
-            ('owner', 'owner@example.com', 1, 'Owner', NULL, 'superadmin', 'active', ?, ?),
-            ('linked', 'mona@example.com', 1, 'Mona', NULL, ?, 'active', ?, ?)`
+        ('owner', 'owner@example.com', 1, 'Owner', NULL, 'superadmin', 'active', ?, ?),
+        ('linked', 'mona@example.com', 1, 'Mona', NULL, ?, 'active', ?, ?)`
         )
         .run(createdAt, createdAt, role, createdAt, createdAt);
-
       const callback = await signInWithGitHub();
       expect(callback.status).toBe(302);
-      // Liveness: the sign-in really linked a GitHub account to the existing user.
-      expect(githubAccounts()).toMatchObject([{ user_id: 'linked' }]);
-
-      if (alerted) {
-        await vi.waitFor(() => expect(sent.length).toBeGreaterThan(0));
-        expect(sent.map((message) => message.to).sort()).toEqual(
-          role === 'superadmin' ? ['mona@example.com', 'owner@example.com'] : ['owner@example.com']
-        );
-        expect(sent[0]!.subject).toBe(
-          `SAM security alert: a GitHub sign-in was linked to ${role === 'admin' ? 'an' : 'a'} ${role} account`
-        );
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 50));
-        expect(sent).toEqual([]);
-      }
+      expect(callback.headers.get('location')).toContain('error=');
+      expect(githubAccounts()).toEqual([]);
+      expect((await currentUser()).status).toBe(401);
+      expect(sent).toEqual([]);
+      expect(realUserIds()).toEqual(expect.arrayContaining(['owner', 'linked']));
     }
   );
 });

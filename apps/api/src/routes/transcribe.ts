@@ -2,15 +2,11 @@ import { Hono, type MiddlewareHandler } from 'hono';
 
 import type { Env } from '../env';
 import { createModuleLogger, serializeError } from '../lib/logger';
-import { requireApproved, requireAuth } from '../middleware/auth';
+import { requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { rateLimitTranscribe } from '../middleware/rate-limit';
 import { getWorkersAiBindingOrNull } from '../services/platform-capabilities';
-import {
-  resolveSpeechEndpoint,
-  SpeechEndpointError,
-  transcribeWithEndpoint,
-} from '../services/speech-endpoints';
+import { resolveSpeechTranscriptionBackend } from '../services/speech-backend';
 
 const log = createModuleLogger('transcribe');
 
@@ -53,12 +49,12 @@ const limitTranscription: MiddlewareHandler<{ Bindings: Env }> = (c, next) =>
  */
 transcribeRoutes.post('/', limitTranscription, async (c) => {
   const startTime = Date.now();
-  // Whisper runs on Workers AI. Without the binding, an admin-configured OpenAI-compatible
-  // transcription endpoint (`speech.transcription.*`) serves instead; with neither, refuse before
-  // reading the upload so the client gets a clear answer instead of a 500.
+  // Whisper runs on Workers AI. Without the binding, a backend the self-host build installed
+  // (services/speech-backend.ts) serves instead; with neither, refuse before reading the upload
+  // so the client gets a clear answer instead of a 500. With the binding nothing else is read.
   const ai = getWorkersAiBindingOrNull(c.env);
-  const endpoint = ai ? null : await resolveSpeechEndpoint(c.env, 'transcription');
-  if (!ai && !endpoint) {
+  const backend = ai ? null : await resolveSpeechTranscriptionBackend(c.env);
+  if (!ai && !backend) {
     throw errors.featureUnavailable(
       'speechToText',
       'Speech-to-text is not available on this installation'
@@ -116,25 +112,24 @@ transcribeRoutes.post('/', limitTranscription, async (c) => {
     );
   }
 
-  if (!ai && endpoint) {
+  if (!ai) {
+    if (!backend) throw errors.internal('Speech-to-text has no backend');
+    let text: string;
     try {
-      const text = await transcribeWithEndpoint(endpoint, audioFile);
-      log.info('request_complete', {
-        via: 'endpoint',
-        totalDurationMs: Date.now() - startTime,
-        inputSizeKB: Math.round(audioFile.size / 1024),
-        outputLength: text.trim().length,
-      });
-      return c.json({ text: text.trim() });
+      text = (await backend.transcribe(audioFile)).trim();
     } catch (err) {
-      log.error('endpoint_transcription_failed', {
-        error: err instanceof Error ? err.message : String(err),
-        status: err instanceof SpeechEndpointError ? err.status : null,
-      });
+      // The cause can name the admin's endpoint host or the provider's status; keep it in the log.
+      log.error('backend_transcription_failed', serializeError(err));
       throw errors.serviceUnavailable('Speech-to-text failed. Try again shortly.');
     }
+    log.info('request_complete', {
+      via: 'backend',
+      totalDurationMs: Date.now() - startTime,
+      inputSizeKB: Math.round(audioFile.size / 1024),
+      outputLength: text.length,
+    });
+    return c.json({ text });
   }
-  if (!ai) throw errors.internal('Speech-to-text has no backend');
 
   // Convert audio to base64 for Workers AI Whisper input
   const audioBuffer = await audioFile.arrayBuffer();
@@ -145,8 +140,8 @@ transcribeRoutes.post('/', limitTranscription, async (c) => {
   });
 
   // Determine model ID (configurable via env var, per Constitution Principle XI)
-  const modelId = (c.env.WHISPER_MODEL_ID ||
-    DEFAULT_WHISPER_MODEL) as '@cf/openai/whisper-large-v3-turbo';
+  const modelId = (c.env.WHISPER_MODEL_ID || DEFAULT_WHISPER_MODEL) as
+    '@cf/openai/whisper-large-v3-turbo';
   log.info('calling_workers_ai', { model: modelId });
 
   // Call Workers AI Whisper model

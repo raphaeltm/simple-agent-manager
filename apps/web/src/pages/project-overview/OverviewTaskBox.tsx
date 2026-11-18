@@ -154,6 +154,7 @@ export function OverviewTaskBox({
       projectId={projectId}
       agents={composer.configuredAgents}
       agentProfiles={composer.agentProfiles}
+      profilesLoading={profileChoice.profilesLoading}
       selectedProfileId={composer.selectedProfileId}
       onProfileChange={profileChoice.setSelectedProfileId}
       profilePicker={profileChoice.profilePicker}
@@ -176,6 +177,7 @@ export function OverviewTaskBox({
       onCloseProfileWizard={profileChoice.closeProfileWizard}
       onUpdateProfileWizard={profileChoice.updateProfileWizard}
       onCreateProfileFromWizard={profileChoice.createProfileFromWizard}
+      onCreateDefaultChatProfile={profileChoice.createDefaultChatProfile}
       suggestProfileName={profileChoice.suggestProfileName}
       slashCommands={slashCommands}
       attachments={attachments.chatAttachments}

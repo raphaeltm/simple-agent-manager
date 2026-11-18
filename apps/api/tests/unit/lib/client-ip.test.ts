@@ -42,6 +42,26 @@ describe('clientIpFromHeaders', () => {
     }
   );
 
+  it('accepts only the header overwritten by a trusted proxy from its TCP peer', () => {
+    const incoming = new Headers({
+      'CF-Connecting-IP': '198.51.100.66',
+      'X-Forwarded-For': '198.51.100.67',
+      'X-Real-IP': '198.51.100.68',
+    });
+    // An ingress outside Cloudflare must perform this overwrite and block direct origin access.
+    incoming.set('CF-Connecting-IP', '203.0.113.7');
+    expect(clientIpFromHeaders((name) => incoming.get(name))).toBe('203.0.113.7');
+  });
+
+  it('does not read client-controlled forwarding headers', () => {
+    const readHeader = (name: string) => {
+      expect(name).toBe('cf-connecting-ip');
+      return null;
+    };
+    expect(clientIpFromHeaders(readHeader)).toBeNull();
+    expect(read({ 'X-Real-IP': '198.51.100.1' })).toBeNull();
+  });
+
   it('never reads X-Forwarded-For when the trusted header is missing', () => {
     expect(read({ 'X-Forwarded-For': '198.51.100.1, 10.0.0.1' })).toBeNull();
     expect(read({ 'X-Forwarded-For': '198.51.100.1' })).toBeNull();

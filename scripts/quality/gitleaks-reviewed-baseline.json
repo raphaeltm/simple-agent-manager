@@ -77,10 +77,10 @@
     },
     {
       "classification": "code-identifier",
-      "reason": "Reviewed PEM header/footer string references in convertPkcs1ToPkcs8() at shifted line positions after KV caching code added earlier in github-app.ts; same code as main lines 189/196/207, now at 204/211/222.",
+      "reason": "Re-reviewed exact historical findings from e079597ab21ce94d5962a04e8c97bf6a320783b7: apps/api/src/services/github-app.ts lines 204/211/222 span PEM delimiter comments, conditional checks, stripping and ASN.1 wrapping/encoding code in convertPkcs1ToPkcs8(), with no embedded key body. All three digests reproduced with pinned Gitleaks 8.30.1; retained for PR-range history. Current converter is separately reviewed at packages/repo-hosting/src/github-app-tokens.ts.",
       "owner": "security",
-      "reviewedAt": "2026-08-19T00:00:00.000Z",
-      "expiresAt": "2026-11-17T00:00:00.000Z",
+      "reviewedAt": "2026-11-17T00:18:34.412Z",
+      "expiresAt": "2026-12-17T00:18:34.412Z",
       "digests": [
         "1b2e5830af04890ec8044656187a4435d76062a4c0c4b19b561046bac67d32a0",
         "0ed74e33345c51812e64da9c1525503195b08302331375958aaa089366731f2d",

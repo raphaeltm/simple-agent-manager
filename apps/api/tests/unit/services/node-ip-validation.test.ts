@@ -1,143 +1,141 @@
-/**
- * Tests for IP validation in node provisioning and heartbeat IP backfill.
- *
- * Validates:
- * 1. provisionNode handles empty IP by keeping node in creating state (awaiting heartbeat backfill)
- * 2. Heartbeat handler backfills IP when node has empty ipAddress
- * 3. DNS records are not created with empty IPs
- */
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+/** Behavioral coverage for heartbeat IP/DNS reconciliation; route wiring is covered by node-lifecycle-byo. */
+import type { Context } from 'hono';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { describe, expect, it } from 'vitest';
+import type { Node } from '../../../src/db/schema';
+import type { Env } from '../../../src/env';
+import { applyHeartbeatIp } from '../../../src/routes/node-heartbeat-ip';
+import { createNodeBackendDNSRecord, updateDNSRecord } from '../../../src/services/dns';
 
-// Empty/null provider IP behavior is exercised by the real provisionNode service
-// in provision-node-rethrow.test.ts, including DNS suppression and durable identity.
+vi.mock('../../../src/services/dns', () => ({
+  createNodeBackendDNSRecord: vi.fn(),
+  updateDNSRecord: vi.fn(),
+}));
+
+const REAL_IP = '203.0.113.7';
+const STORED_IP = '203.0.113.8';
+const env = { BASE_DOMAIN: 'example.com' } as Env;
+
+async function heartbeat(
+  overrides: Partial<Node> = {},
+  headers: Record<string, string> = { 'CF-Connecting-IP': REAL_IP }
+) {
+  const node = {
+    id: 'node-1',
+    status: 'running',
+    nodeClass: 'managed',
+    nodeRole: 'workspace',
+    ipAddress: null,
+    backendDnsRecordId: null,
+    errorMessage: null,
+    tunnelId: null,
+    ...overrides,
+  } as Node;
+  const requestHeaders = new Headers(headers);
+  const c = {
+    env,
+    req: { header: (name: string) => requestHeaders.get(name) ?? undefined },
+  } as Context<{ Bindings: Env }>;
+  const updatePayload: Record<string, unknown> = {};
+  await applyHeartbeatIp({ c, node, nodeId: node.id, updatePayload });
+  return updatePayload;
+}
 
 describe('heartbeat IP backfill', () => {
-  const file = readFileSync(resolve(process.cwd(), 'src/routes/node-lifecycle.ts'), 'utf8');
-  const heartbeatSection = file.slice(
-    file.indexOf("nodeLifecycleRoutes.post('/:id/heartbeat'"),
-    file.indexOf("nodeLifecycleRoutes.post('/:id/errors'")
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(createNodeBackendDNSRecord).mockResolvedValue('dns-record-id');
+    vi.mocked(updateDNSRecord).mockResolvedValue(undefined);
+  });
+
+  it.each(['creating', 'error', 'running'] as const)(
+    'backfills and clears the awaiting-IP error for %s nodes',
+    async (status) => {
+      const result = await heartbeat({ status, errorMessage: 'Awaiting IP allocation' });
+      expect(result).toMatchObject({ ipAddress: REAL_IP, backendDnsRecordId: 'dns-record-id' });
+      expect(result.errorMessage).toBeDefined(); // explicit SQL NULL, never undefined/dropped
+      if (status === 'running') expect(result).not.toHaveProperty('status');
+      else expect(result.status).toBe('running');
+      expect(createNodeBackendDNSRecord).toHaveBeenCalledWith('node-1', REAL_IP, env);
+    }
   );
 
-  it('checks if node has no IP address stored', () => {
-    expect(heartbeatSection).toContain('!node.ipAddress');
+  it.each([
+    {},
+    { 'X-Forwarded-For': '198.51.100.1', 'X-Real-IP': '198.51.100.2' },
+    { 'CF-Connecting-IP': '999.1.1.1' },
+  ])('does not backfill or create DNS without a valid ingress IP: %j', async (headers) => {
+    expect(await heartbeat({}, headers)).toEqual({});
+    expect(createNodeBackendDNSRecord).not.toHaveBeenCalled();
+    expect(updateDNSRecord).not.toHaveBeenCalled();
   });
 
-  it('extracts IP from CF-Connecting-IP through the shared client-IP helper', () => {
-    // Behaviour (malformed header, X-Forwarded-For ignored): routes/node-lifecycle-byo.test.ts.
-    expect(heartbeatSection).toContain('clientIpFromHeaders((name) => c.req.header(name))');
-  });
-
-  it('only trusts CF-Connecting-IP (not X-Real-IP)', () => {
-    expect(heartbeatSection).not.toContain("c.req.header('X-Real-IP')");
-  });
-
-  it('transitions creating/error→running when node was awaiting IP allocation', () => {
-    expect(heartbeatSection).toContain("node.status === 'creating'");
-    expect(heartbeatSection).toContain("node.status === 'error'");
-    expect(heartbeatSection).toContain("updatePayload.status = 'running'");
-  });
-
-  it('clears errorMessage unconditionally when IP is backfilled (not gated on status)', () => {
-    // errorMessage clearing must be OUTSIDE the status condition block
-    // to ensure "Awaiting IP allocation" is always cleared when IP arrives
-    const ipBackfillBlock = heartbeatSection.slice(
-      heartbeatSection.indexOf('updatePayload.ipAddress = heartbeatIp'),
-      heartbeatSection.indexOf("node.status === 'creating'")
+  it('prefers ingress IPv4 over stored IPv4 and ignores spoofed XFF', async () => {
+    const result = await heartbeat(
+      { ipAddress: STORED_IP },
+      { 'CF-Connecting-IP': REAL_IP, 'X-Forwarded-For': '198.51.100.1' }
     );
-    expect(ipBackfillBlock).toContain('updatePayload.errorMessage');
+    expect(result).toEqual({ backendDnsRecordId: 'dns-record-id' });
+    expect(createNodeBackendDNSRecord).toHaveBeenCalledWith('node-1', REAL_IP, env);
   });
 
-  it('updates ipAddress in the database update payload', () => {
-    expect(heartbeatSection).toContain('updatePayload.ipAddress = heartbeatIp');
-  });
+  it.each([{}, { 'CF-Connecting-IP': '2001:db8::7' }])(
+    'uses stored IP for missing or IPv6 heartbeat IP: %j',
+    async (headers) => {
+      expect(await heartbeat({ ipAddress: STORED_IP }, headers)).toEqual({
+        backendDnsRecordId: 'dns-record-id',
+      });
+      expect(createNodeBackendDNSRecord).toHaveBeenCalledWith('node-1', STORED_IP, env);
+    }
+  );
 
-  it('updates existing DNS record when backendDnsRecordId exists', () => {
-    expect(heartbeatSection).toContain('updateDNSRecord(node.backendDnsRecordId');
-  });
-
-  it('creates new DNS record when no backendDnsRecordId exists', () => {
-    expect(heartbeatSection).toContain('createNodeBackendDNSRecord(nodeId, dnsIp');
-  });
-
-  it('stores new DNS record ID in update payload', () => {
-    expect(heartbeatSection).toContain('updatePayload.backendDnsRecordId = dnsRecordId');
-  });
-
-  it('logs backfill event with structured context', () => {
-    expect(heartbeatSection).toContain('heartbeat.ip_backfilled');
-    expect(heartbeatSection).toContain('backfilledIp');
-    expect(heartbeatSection).toContain("action: 'ip_backfilled'");
-  });
-
-  it('handles DNS errors gracefully without failing the heartbeat', () => {
-    expect(heartbeatSection).toContain('heartbeat.backend_dns_backfill_failed');
-  });
-
-  it('self-heals nodes that already have an IP but no backend DNS record', () => {
-    // Behavioral coverage for the tunnel-skip + managed backfill lives in
-    // tests/unit/routes/node-lifecycle-byo.test.ts. This structural assertion tracks the
-    // effectiveNodeIp initializer, which now short-circuits to null for tunnel-transport nodes.
-    expect(heartbeatSection).toContain(
-      'let effectiveNodeIp = tunnelIngress ? null : node.ipAddress'
+  it('updates existing DNS when ingress IPv4 changes', async () => {
+    expect(await heartbeat({ ipAddress: STORED_IP, backendDnsRecordId: 'existing-dns' })).toEqual(
+      {}
     );
-    expect(heartbeatSection).toContain('if (effectiveNodeIp) {');
-    expect(heartbeatSection).toContain('const dnsIp = heartbeatIpv4 || effectiveNodeIp');
-    expect(heartbeatSection).toContain('} else {');
-    expect(heartbeatSection).toContain('createNodeBackendDNSRecord(nodeId, dnsIp');
-    expect(heartbeatSection).toContain('updatePayload.backendDnsRecordId = dnsRecordId');
-    expect(heartbeatSection).toContain('heartbeat.backend_dns_backfilled');
+    expect(updateDNSRecord).toHaveBeenCalledWith('existing-dns', REAL_IP, env);
+    expect(createNodeBackendDNSRecord).not.toHaveBeenCalled();
   });
 
-  it('prefers CF-Connecting-IP over stored IP for backend DNS self-healing', () => {
-    const selfHealBlock = heartbeatSection.slice(
-      heartbeatSection.indexOf('if (effectiveNodeIp) {'),
-      heartbeatSection.indexOf('  await db', heartbeatSection.indexOf('if (effectiveNodeIp) {'))
+  it('keeps existing DNS when the IP has not changed', async () => {
+    expect(await heartbeat({ ipAddress: REAL_IP, backendDnsRecordId: 'existing-dns' })).toEqual({});
+    expect(updateDNSRecord).not.toHaveBeenCalled();
+    expect(createNodeBackendDNSRecord).not.toHaveBeenCalled();
+  });
+
+  it('clears the provisioning DNS error after self-healing succeeds', async () => {
+    const result = await heartbeat({
+      ipAddress: STORED_IP,
+      status: 'error',
+      errorMessage: 'Backend DNS record creation failed: provider error',
+    });
+    expect(result).toMatchObject({ status: 'running', backendDnsRecordId: 'dns-record-id' });
+    expect(result.errorMessage).toBeDefined();
+  });
+
+  it('records bounded DNS failure without failing the heartbeat', async () => {
+    vi.mocked(createNodeBackendDNSRecord).mockRejectedValue(new Error('x'.repeat(600)));
+    const result = await heartbeat();
+    expect(result.ipAddress).toBe(REAL_IP);
+    expect(result.errorMessage).toEqual(
+      expect.stringContaining('Backend DNS record creation failed:')
     );
-    expect(selfHealBlock).toContain(
-      'const heartbeatIpv4 = isValidIPv4Address(heartbeatIp) ? heartbeatIp : null'
+    expect(String(result.errorMessage)).toHaveLength(500);
+    expect(result).not.toHaveProperty('backendDnsRecordId');
+  });
+
+  it('skips IP and DNS for tunnel workspace nodes', async () => {
+    expect(await heartbeat({ tunnelId: 'tunnel-1' })).toEqual({});
+    expect(createNodeBackendDNSRecord).not.toHaveBeenCalled();
+    expect(updateDNSRecord).not.toHaveBeenCalled();
+  });
+
+  it('records deployment tunnel IPv4 without creating conflicting backend DNS', async () => {
+    expect(await heartbeat({ tunnelId: 'tunnel-1', nodeRole: 'deployment' })).toHaveProperty(
+      'ipAddress',
+      REAL_IP
     );
-    expect(selfHealBlock).toContain('const dnsIp = heartbeatIpv4 || effectiveNodeIp');
-    expect(selfHealBlock).toContain("source: heartbeatIpv4 ? 'heartbeat' : 'stored'");
-  });
-
-  it('falls back to stored IP when heartbeat IP is not valid IPv4 for A records', () => {
-    const selfHealBlock = heartbeatSection.slice(
-      heartbeatSection.indexOf('if (effectiveNodeIp) {'),
-      heartbeatSection.indexOf('  await db', heartbeatSection.indexOf('if (effectiveNodeIp) {'))
-    );
-    expect(file).toContain('function isValidIPv4Address');
-    expect(selfHealBlock).toContain('isValidIPv4Address(heartbeatIp)');
-    expect(selfHealBlock).toContain('const dnsIp = heartbeatIpv4 || effectiveNodeIp');
-  });
-
-  it('clears the DNS-specific provisioning error after backend DNS self-healing succeeds', () => {
-    const selfHealBlock = heartbeatSection.slice(
-      heartbeatSection.indexOf('if (effectiveNodeIp) {'),
-      heartbeatSection.indexOf('  await db', heartbeatSection.indexOf('if (effectiveNodeIp) {'))
-    );
-    expect(selfHealBlock).toContain('isBackendDnsError(node.errorMessage)');
-    expect(selfHealBlock).toContain('updatePayload.errorMessage = sql`NULL`');
-    expect(selfHealBlock).toContain("node.status === 'error'");
-    expect(selfHealBlock).toContain("updatePayload.status = 'running'");
-  });
-
-  it('records and logs backend DNS self-heal failures without failing the heartbeat', () => {
-    expect(heartbeatSection).toContain('updatePayload.errorMessage = truncateNodeLifecycleError');
-    expect(heartbeatSection).toContain('heartbeat.backend_dns_backfill_failed');
-  });
-
-  it('updates existing backend DNS when heartbeat IP changes', () => {
-    expect(heartbeatSection).toContain('heartbeatIpv4 && heartbeatIpv4 !== node.ipAddress');
-    expect(heartbeatSection).toContain('updateDNSRecord(node.backendDnsRecordId, heartbeatIpv4');
-    expect(heartbeatSection).toContain('heartbeat.backend_dns_updated');
-  });
-
-  it('imports updateDNSRecord and createNodeBackendDNSRecord', () => {
-    const imports = file.slice(0, file.indexOf('const nodeLifecycleRoutes'));
-    expect(imports).toContain('updateDNSRecord');
-    expect(imports).toContain('createNodeBackendDNSRecord');
+    expect(createNodeBackendDNSRecord).not.toHaveBeenCalled();
+    expect(updateDNSRecord).not.toHaveBeenCalled();
   });
 });

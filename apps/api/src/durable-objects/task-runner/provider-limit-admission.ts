@@ -110,19 +110,37 @@ export async function holdTaskForProviderLimit(
   // 01M73WJGGD2TZP6XDFHJJWHD33). It covers only the exact, non-null credential it was granted
   // for: any other selection falls through to the checks below and blocks for review. A real
   // provider rejection later builds a fresh wait without the override and parks as usual.
+  const approval = previous?.ownerOverride;
+  const approvalScopeChanged =
+    approval?.expiresAt !== undefined &&
+    (approval.expiresAt <= now ||
+      approval.profileId !== (row?.agent_profile_hint ?? null) ||
+      approval.skillId !== (row?.skill_id ?? null) ||
+      (approval.runConfigurationId ?? null) !== (row?.agent_configuration_id ?? null) ||
+      approval.agentType !==
+        (state.config.agentType || rc.env.DEFAULT_TASK_AGENT_TYPE || 'opencode') ||
+      (approval.profileId !== null && profile?.profileId !== approval.profileId) ||
+      (profile !== null && profile.agentType !== null && profile.agentType !== approval.agentType));
   if (
     key !== null &&
     previous?.phase === 'released' &&
-    previous.ownerOverride?.credentialKey === key
+    approval?.credentialKey === key &&
+    !approvalScopeChanged
   )
     return false;
   const window = await rejectedProviderWindow(rc.env, reference, now);
   let wait = previous;
-  if (!ownerResumed && previous?.credentialKey && previous.credentialKey !== key) {
+  if (
+    previous &&
+    (approvalScopeChanged ||
+      (!ownerResumed && previous.credentialKey && previous.credentialKey !== key))
+  ) {
     wait = {
       ...previous,
       phase: 'blocked',
-      reason: 'Blocked: selected provider credential changed; review before resuming.', // A blocked wait needs fresh review; an earlier start-anyway must not carry over.
+      reason: approvalScopeChanged
+        ? 'Blocked: provider resume approval expired or the selected profile changed; review before resuming.'
+        : 'Blocked: selected provider credential changed; review before resuming.', // A blocked wait needs fresh review; an earlier start-anyway must not carry over.
       ownerOverride: undefined,
     };
   } else if (previous?.phase === 'blocked') {
@@ -164,8 +182,11 @@ export async function holdTaskForProviderLimit(
   } else if (!window) {
     if (previous && (previous.phase !== 'released' || ownerResumed)) {
       await rc.assertRecoveryAuthority(state);
+      // The queued watchdog measures runnable orchestration time. A deliberate
+      // provider wait is outside that interval; release starts a fresh clock.
+      // Its terminal CAS also checks this timestamp, fencing an earlier scan.
       const released = await rc.env.DATABASE.prepare(
-        `UPDATE tasks SET provider_limit_wait_json = ?, admission_state = NULL, admission_reason = NULL, admission_next_retry_at = NULL
+        `UPDATE tasks SET provider_limit_wait_json = ?, admission_state = NULL, admission_reason = NULL, admission_next_retry_at = NULL, updated_at = ?
          WHERE id = ? AND provider_limit_wait_json IS ?`
       )
         .bind(
@@ -181,6 +202,7 @@ export async function holdTaskForProviderLimit(
                     }
                   : {}),
               }),
+          new Date(now).toISOString(),
           state.taskId,
           row?.provider_limit_wait_json ?? null
         )

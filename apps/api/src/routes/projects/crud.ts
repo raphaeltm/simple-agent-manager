@@ -17,7 +17,7 @@ import {
   deleteProjectLibraryObjects,
   getProjectDeleteCleanupBatchSize,
 } from '../../services/file-library';
-import { resolveArtifactsBackend } from '../../services/hosted-git/backend';
+import { resolveArtifactsBackendForCleanup } from '../../services/hosted-git/backend';
 import { getRuntimeLimits } from '../../services/limits';
 import { deleteWorkspaceResourceHistoryObjectsForProject } from '../../services/workspace-resource-history';
 import { registerProjectCreateRoute } from './project-create';
@@ -43,9 +43,8 @@ async function cleanupArtifactsRepoOnProjectDelete(
     action: 'orphaned_artifacts_repo_on_delete',
   };
 
-  // The Cloudflare binding even when ARTIFACTS_ENABLED was turned off since creation (unchanged),
-  // else this install's own hosted git backend.
-  const artifacts = env.ARTIFACTS ?? resolveArtifactsBackend(env);
+  // Disabling Artifacts stops serving, but must not prevent cleanup of existing repositories.
+  const artifacts = resolveArtifactsBackendForCleanup(env);
   if (!artifacts || typeof artifacts.delete !== 'function') {
     log.warn('project_delete.artifacts_delete_unavailable', orphanDetails);
     return;
@@ -213,6 +212,10 @@ crudRoutes.delete('/:id', async (c) => {
   );
   statements.push(
     db.delete(schema.agentProfiles).where(eq(schema.agentProfiles.projectId, projectId))
+  );
+  // Run token usage (Insights slice U) has no FK to cascade from.
+  statements.push(
+    db.delete(schema.agentRunUsage).where(eq(schema.agentRunUsage.projectId, projectId))
   );
   statements.push(
     db

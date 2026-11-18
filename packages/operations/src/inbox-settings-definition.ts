@@ -63,6 +63,28 @@ export const INBOX_SETTINGS = [
     description: 'Characters of a typed inbox answer or comment.',
     range: { min: 100, max: 20_000 },
   },
+  // System error items (slice E, `inbox-error-core.ts`).
+  {
+    name: 'inbox.automationFailureThreshold',
+    defaultValue: 2,
+    description:
+      'Failed runs in a row that turn an automation into an inbox error item for its owner. The item closes when a run succeeds or the automation is resumed.',
+    range: { min: 1, max: 20 },
+  },
+  {
+    name: 'inbox.errorSweepBatchSize',
+    defaultValue: 10,
+    description:
+      'Error items one step of the five-minute sweep files at most (failed tasks, automations, lost answers). Each costs a few database writes.',
+    range: { min: 1, max: 50 },
+  },
+  {
+    name: 'inbox.errorLookbackMinutes',
+    defaultValue: 30,
+    description:
+      'How far back the sweep looks for failed tasks that have no inbox error item yet. A task that failed longer ago than this is not filed.',
+    range: { min: 5, max: 1_440 },
+  },
   {
     name: 'inbox.noticeRetryMinutes',
     defaultValue: 60,
@@ -107,6 +129,41 @@ export const INBOX_SETTINGS = [
     description:
       'Most minutes a question may stay open, even when its notification never reached a device. Never shorter than the question window.',
     range: { min: 1, max: 4_320 },
+  },
+  // Human tasks (slice H1).
+  {
+    name: 'inbox.openTasksPerChat',
+    defaultValue: 20,
+    description:
+      'Open human tasks one chat may have assigned at once. Assigning past it is refused, so one agent cannot flood a person’s list.',
+    range: { min: 1, max: 200 },
+  },
+  {
+    name: 'inbox.taskStepsMax',
+    defaultValue: 20,
+    description: 'Steps one human task may list.',
+    range: { min: 1, max: 50 },
+  },
+  {
+    name: 'inbox.watchersPerItemMax',
+    defaultValue: 10,
+    description:
+      'Chats that may watch one human task (the chat that assigned it plus chats that attached to it). Each watcher is woken by the task’s changes.',
+    range: { min: 1, max: 50 },
+  },
+  {
+    name: 'inbox.taskActivityMax',
+    defaultValue: 100,
+    description:
+      'Lifecycle rows a task view or an agent’s read of a task returns, newest kept. The view says when older rows exist.',
+    range: { min: 10, max: 500 },
+  },
+  {
+    name: 'inbox.closedTaskWatchHours',
+    defaultValue: 168,
+    description:
+      'Hours a finished, archived or cancelled task keeps waking the chats watching it (so a reopen still reaches them); after that their watch ends and frees its place.',
+    range: { min: 1, max: 2_160 },
   },
   {
     name: 'inbox.sweepBatchSize',

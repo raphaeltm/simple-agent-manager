@@ -8,7 +8,6 @@
  */
 import type { TaskMode, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { DEFAULT_WORKSPACE_PROFILE, hasByocComputeCredential } from '@simple-agent-manager/shared';
-import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { selectProfileId } from '../../components/project-chat/profile-picker/model';
@@ -21,7 +20,6 @@ import { useCredentials } from '../../hooks/useCredentials';
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { useTrialStatus } from '../../hooks/useTrialStatus';
 import { getTranscribeApiUrl, startInstantChatSession, submitTask } from '../../lib/api';
-import { instantRuntimeEnabledQueryOptions } from '../../lib/query-options';
 import { useProjectContext } from '../ProjectContext';
 import {
   buildBaseSubmitRequest,
@@ -83,12 +81,6 @@ export function useNewChatComposer() {
     setSelectedAgentType((current) => current ?? firstAgent.id);
   }, [configuredAgents]);
 
-  // Whether Instant can run here decides the runtime offered by profile creation.
-  const instantRuntimeQuery = useQuery({
-    ...instantRuntimeEnabledQueryOptions(queryScope),
-    enabled: Boolean(queryScope),
-  });
-
   // Profiles, the person's picker state and pre-selection, the picker sheet and the
   // inline create-profile wizard.
   const profileChoice = useProfileChoice({
@@ -96,7 +88,6 @@ export function useNewChatComposer() {
     queryScope,
     configuredAgents,
     selectedAgentType,
-    instantEnabled: instantRuntimeQuery.data === true,
   });
   const {
     agentProfiles,

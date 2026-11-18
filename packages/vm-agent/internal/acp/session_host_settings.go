@@ -21,12 +21,19 @@ func phaseTimeout(phaseMs int, fallback time.Duration) time.Duration {
 // applySessionSettings calls SetSessionConfigOption for the model and
 // SetSessionMode on the ACP connection. A rejected explicit Codex or Antigravity
 // model is fatal: continuing would silently run a different model. A rejected
-// Antigravity mode is fatal too, because a loaded session could otherwise keep a
-// more permissive mode. Other adapter settings remain best-effort for backward
+// Antigravity or Vibe mode is fatal too, because a loaded session could otherwise
+// keep a more permissive mode. Other adapter settings remain best-effort for backward
 // compatibility.
 func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentSettingsPayload) error {
-	if settings == nil || h.acpConn == nil || h.sessionID == "" {
+	if h.acpConn == nil || h.sessionID == "" {
 		return nil
+	}
+	if settings == nil {
+		if h.agentType != "mistral-vibe" {
+			return nil
+		}
+		// Missing settings must still reset a restored Vibe session to ask.
+		settings = &agentSettingsPayload{}
 	}
 
 	// These RPCs run while h.mu is held for write, and the ACP SDK blocks each
@@ -63,6 +70,9 @@ func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentS
 			}); err != nil {
 				if h.agentType == "google-antigravity" {
 					return fmt.Errorf("cannot apply Antigravity session mode %q: %w", modeID, err)
+				}
+				if h.agentType == "mistral-vibe" {
+					return fmt.Errorf("cannot apply Vibe session mode %q: %w", modeID, err)
 				}
 				slog.Warn("ACP SetSessionMode failed (non-fatal)", "mode", settings.PermissionMode, "error", err)
 				h.reportLifecycle("warn", "ACP SetSessionMode failed", map[string]interface{}{

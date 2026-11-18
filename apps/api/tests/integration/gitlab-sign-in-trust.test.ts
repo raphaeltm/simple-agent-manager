@@ -17,12 +17,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
+import { getBetterAuthAccessTokenForProvider } from '../../src/services/better-auth-access-token';
 import { generateEncryptionKey } from '../../src/services/encryption';
 import {
   __resetPlatformConfigCacheForTest,
   completeSetupWithConfig,
 } from '../../src/services/platform-config';
-import { startFakeSmtpServer } from '../helpers/fake-smtp-server';
 import {
   buildAuthApp,
   type CookieJar,
@@ -140,6 +140,15 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
     sqlite.close();
   });
 
+  function seedExistingPublicGitLab() {
+    sqlite
+      .prepare(
+        `INSERT INTO accounts (id, account_id, provider_id, user_id, scope, created_at, updated_at)
+      VALUES ('owner-gitlab', '424242', 'gitlab', ?, 'read_user', 1, 1)`
+      )
+      .run(OWNER.id);
+  }
+
   function baseEnv(overrides: Partial<Env> = {}): Env {
     return {
       DATABASE: createSqliteD1(sqlite),
@@ -221,6 +230,145 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
     );
   });
 
+  it.each(['https://127.0.0.1', 'https://10.0.0.2', 'https://metadata.google.internal'])(
+    'refuses private GitLab %s before browser authorization',
+    async (host) => {
+      const env = baseEnv({
+        GITLAB_HOST: host,
+        GITLAB_CLIENT_ID: CLIENT_ID,
+        GITLAB_CLIENT_SECRET: CLIENT_SECRET,
+      } as Partial<Env>);
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+      const response = await app.request(
+        `${API_ORIGIN}/api/auth/sign-in/social`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', origin: APP_ORIGIN },
+          body: JSON.stringify({ provider: 'gitlab', callbackURL: CALLBACK_URL }),
+        },
+        env
+      );
+      expect(response.status).toBe(404);
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([null, 0])(
+    'uses outbound.maxRedirects=%s through the real resolver for profile hops',
+    async (limit) => {
+      const env = await runtimeGitLabEnv(PUBLIC_HOST);
+      if (limit !== null)
+        sqlite
+          .prepare(
+            'INSERT INTO platform_settings(key,value,updated_at,updated_by) VALUES (?,?,?,NULL)'
+          )
+          .run('outbound.maxRedirects', String(limit), new Date().toISOString());
+      const gitlab = createFakeGitLab(PUBLIC_HOST, profileClaiming(OWNER.email));
+      let profileCalls = 0;
+      vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = new Request(input, init);
+        if (new URL(request.url).pathname === '/oauth/token') return gitlab.fetch(input, init);
+        profileCalls++;
+        return new Response(null, { status: 307, headers: { location: `${PUBLIC_HOST}/loop` } });
+      });
+      const callback = await signInWithGitLab(env, PUBLIC_HOST);
+      expect(callback.headers.get('location')).toContain('error=');
+      expect(profileCalls).toBe(1 + (limit ?? 3)); // original + configured/default hops
+      expect(gitlabAccounts()).toEqual([]);
+    }
+  );
+
+  it('profile redirects drop Authorization before the cross-origin hop', async () => {
+    const env = await runtimeGitLabEnv(PUBLIC_HOST);
+    seedExistingPublicGitLab();
+    const gitlab = createFakeGitLab(PUBLIC_HOST, profileClaiming(OWNER.email));
+    const requests: Request[] = [];
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      requests.push(request);
+      if (request.url === `${PUBLIC_HOST}/api/v4/user`)
+        return new Response(null, {
+          status: 302,
+          headers: { location: 'https://profile.example/user' },
+        });
+      if (request.url === 'https://profile.example/user') {
+        expect(request.headers.get('authorization')).toBeNull();
+        expect(request.redirect).toBe('manual');
+        return Response.json(profileClaiming(OWNER.email));
+      }
+      return gitlab.fetch(input, init);
+    });
+    const callback = await signInWithGitLab(env, PUBLIC_HOST);
+    expect(callback.headers.get('location')).toBe(CALLBACK_URL);
+    expect(requests.map((r) => new URL(r.url).pathname)).toEqual([
+      '/oauth/token',
+      '/api/v4/user',
+      '/user',
+    ]);
+    expect(gitlabAccounts()).toEqual([{ account_id: '424242', user_id: OWNER.id }]);
+  });
+
+  it('BetterAuth code exchange refuses 307 without replaying the client secret', async () => {
+    const env = await runtimeGitLabEnv(PUBLIC_HOST);
+    const requests: Request[] = [];
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      requests.push(request);
+      expect(request.redirect).toBe('manual');
+      return new Response(null, {
+        status: 307,
+        headers: { location: 'https://unvetted.example/token' },
+      });
+    });
+    const callback = await signInWithGitLab(env, PUBLIC_HOST);
+    expect(callback.headers.get('location')).toContain('error=');
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe(`${PUBLIC_HOST}/oauth/token`);
+    expect(gitlabAccounts()).toEqual([]);
+    expect(ownerSessions()).toBe(0);
+  });
+
+  it.each([200, 307])('BetterAuth refresh handles %s using manual token fetch', async (status) => {
+    const env = await runtimeGitLabEnv(PUBLIC_HOST);
+    seedExistingPublicGitLab();
+    vi.stubGlobal('fetch', createFakeGitLab(PUBLIC_HOST, profileClaiming(OWNER.email)).fetch);
+    await signInWithGitLab(env, PUBLIC_HOST);
+    const now = Date.now();
+    sqlite
+      .prepare(
+        "UPDATE accounts SET access_token = 'expired', refresh_token = 'refresh-secret', access_token_expires_at = ? WHERE provider_id = 'gitlab'"
+      )
+      .run(now - 60_000);
+    const requests: Request[] = [];
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      requests.push(request);
+      expect(request.redirect).toBe('manual');
+      if (status === 307)
+        return new Response(null, {
+          status: 307,
+          headers: { location: 'https://unvetted.example/token' },
+        });
+      return Response.json({
+        access_token: 'refreshed',
+        refresh_token: 'rotated',
+        expires_in: 3600,
+        token_type: 'Bearer',
+      });
+    });
+    const refresh = getBetterAuthAccessTokenForProvider(
+      env,
+      new Headers({ cookie: jar.header() }),
+      OWNER.id,
+      'gitlab'
+    );
+    if (status === 200) await expect(refresh).resolves.toMatchObject({ accessToken: 'refreshed' });
+    else await expect(refresh).rejects.toThrow();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe(`${PUBLIC_HOST}/oauth/token`);
+  });
+
   it('refuses a runtime self-managed host that claims the owner’s verified email (2026-11-12)', async () => {
     const env = await runtimeGitLabEnv(SELF_MANAGED_HOST);
     const gitlab = createFakeGitLab(SELF_MANAGED_HOST, profileClaiming(OWNER.email));
@@ -299,6 +447,7 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
     // to, whatever GitLab host is configured now. SAM reads tokens only server-side, scoped to
     // the configured host (getBetterAuthAccessTokenForProvider).
     const env = await runtimeGitLabEnv(PUBLIC_HOST);
+    seedExistingPublicGitLab();
     vi.stubGlobal('fetch', createFakeGitLab(PUBLIC_HOST, profileClaiming(OWNER.email)).fetch);
     await signInWithGitLab(env, PUBLIC_HOST);
     expect(await currentUserId(env)).toBe(OWNER.id);
@@ -324,7 +473,7 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
     expect(await currentUserId(env)).toBe(OWNER.id);
   });
 
-  it('trusts a runtime-saved host that equals the GITLAB_HOST the deployer pinned', async () => {
+  it('requires explicit linking even for a runtime host pinned by the deployer', async () => {
     const env = await runtimeGitLabEnv(SELF_MANAGED_HOST, {
       GITLAB_HOST: `${SELF_MANAGED_HOST}/`,
     } as Partial<Env>);
@@ -332,9 +481,9 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
 
     const callback = await signInWithGitLab(env, SELF_MANAGED_HOST);
 
-    expect(callback.headers.get('location')).toBe(CALLBACK_URL);
-    expect(await currentUserId(env)).toBe(OWNER.id);
-    expect(gitlabAccounts()).toEqual([{ account_id: '424242', user_id: OWNER.id }]);
+    expect(callback.headers.get('location')).toContain('error=');
+    expect(await currentUserId(env)).toBeNull();
+    expect(gitlabAccounts()).toEqual([]);
   });
 
   it('still refuses a runtime-saved host that differs from the pinned GITLAB_HOST', async () => {
@@ -350,47 +499,18 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
     expect(gitlabAccounts()).toEqual([]);
   });
 
-  it('links gitlab.com to the owner even when it was configured at runtime', async () => {
+  it('requires explicit linking for runtime-configured gitlab.com', async () => {
     const env = await runtimeGitLabEnv(PUBLIC_HOST);
     vi.stubGlobal('fetch', createFakeGitLab(PUBLIC_HOST, profileClaiming(OWNER.email)).fetch);
 
     const callback = await signInWithGitLab(env, PUBLIC_HOST);
 
-    expect(callback.headers.get('location')).toBe(CALLBACK_URL);
-    expect(await currentUserId(env)).toBe(OWNER.id);
-    expect(gitlabAccounts()).toEqual([{ account_id: '424242', user_id: OWNER.id }]);
+    expect(callback.headers.get('location')).toContain('error=');
+    expect(await currentUserId(env)).toBeNull();
+    expect(gitlabAccounts()).toEqual([]);
   });
 
-  // Box round R17 (D1): on a self-hosted box (SMTP, no AGENT_EMAIL) the owner alert for a newly
-  // linked sign-in was dropped with security_alert.no_sender. Entered through better-auth's own
-  // account.create.after hook, during a real GitLab callback.
-  it('emails the owners over SMTP when a GitLab sign-in is linked to the superadmin', async () => {
-    const smtp = await startFakeSmtpServer({ mode: 'plain' });
-    try {
-      const env = await runtimeGitLabEnv(PUBLIC_HOST, {
-        SMTP_HOST: '127.0.0.1',
-        SMTP_PORT: String(smtp.port),
-        SMTP_TLS: 'none',
-        SMTP_FROM: 'alerts@example.com',
-      } as Partial<Env>);
-      vi.stubGlobal('fetch', createFakeGitLab(PUBLIC_HOST, profileClaiming(OWNER.email)).fetch);
-      const linkedSubject =
-        'Subject: SAM security alert: a GitLab sign-in was linked to a superadmin account';
-      const linkAlerts = () => smtp.messages.filter((m) => m.data.includes(linkedSubject));
-      expect(linkAlerts()).toHaveLength(0);
-
-      const callback = await signInWithGitLab(env, PUBLIC_HOST);
-
-      expect(callback.headers.get('location')).toBe(CALLBACK_URL);
-      expect(gitlabAccounts()).toEqual([{ account_id: '424242', user_id: OWNER.id }]);
-      await vi.waitFor(() => expect(linkAlerts()).toHaveLength(1));
-      expect(linkAlerts()[0]).toMatchObject({ from: 'alerts@example.com', to: [OWNER.email] });
-    } finally {
-      await smtp.close();
-    }
-  });
-
-  it('links a self-managed host the deployer pinned in the Worker environment', async () => {
+  it('requires explicit linking for a self-managed host pinned in Worker environment', async () => {
     const env = baseEnv({
       GITLAB_HOST: SELF_MANAGED_HOST,
       GITLAB_CLIENT_ID: CLIENT_ID,
@@ -400,9 +520,9 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
 
     const callback = await signInWithGitLab(env, SELF_MANAGED_HOST);
 
-    expect(callback.headers.get('location')).toBe(CALLBACK_URL);
-    expect(await currentUserId(env)).toBe(OWNER.id);
-    expect(gitlabAccounts()).toEqual([{ account_id: '424242', user_id: OWNER.id }]);
+    expect(callback.headers.get('location')).toContain('error=');
+    expect(await currentUserId(env)).toBeNull();
+    expect(gitlabAccounts()).toEqual([]);
   });
 
   it('still signs a user linked through that same untrusted host back in', async () => {

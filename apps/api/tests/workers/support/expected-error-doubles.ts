@@ -464,7 +464,7 @@ export class ProjectDataTestDouble extends ProjectData {
       } else if (input.operation === 'persistMessage') {
         messages.persistMessage(this.ctx.storage.sql, this.env, ...input.args);
       } else if (input.operation === 'admitProjectEvent') {
-        this.admitProjectEvent(...input.args);
+        await this.admitProjectEvent(...input.args);
       } else if (input.operation === 'createProjectEventSubscription') {
         this.createProjectEventSubscription(...input.args);
       } else if (input.operation === 'createProjectEventDeliveryBatch') {

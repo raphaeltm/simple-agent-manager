@@ -43,8 +43,10 @@ import {
 } from '../../components/resource-requirements';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import type { UseProfilePickerResult } from '../../hooks/useProfilePicker';
+import { getComposerPlaceholder } from './profileWizardHelpers';
 import { NoAgentsNotice, NoProfilesGate, ProfileWizardPanel } from './ProfileWizardPanel';
 import type { ProfileSheetState, ProfileWizardState } from './useProfileChoice';
+import { useSoleAgentQuickStart } from './useSoleAgentQuickStart';
 
 interface ChatAttachmentDisplay {
   file: File;
@@ -65,6 +67,11 @@ type ChatInputProps = Readonly<{
   projectId: string;
   agents: AgentInfo[];
   agentProfiles: AgentProfile[];
+  /**
+   * The profile list has not loaded yet. An empty list then means "not known yet", not "none",
+   * so the create-a-profile gate waits instead of flashing on every open.
+   */
+  profilesLoading?: boolean;
   selectedProfileId: string | null;
   onProfileChange: (profileId: string | null) => void;
   profilePicker: UseProfilePickerResult;
@@ -88,7 +95,7 @@ type ChatInputProps = Readonly<{
   onCloseProfileWizard: () => void;
   onUpdateProfileWizard: (patch: Partial<ProfileWizardState>) => void;
   onCreateProfileFromWizard: () => Promise<AgentProfile | null>;
-  /** One click for a project with one agent: create its default chat profile (no wizard). */
+  /** One click when the project has exactly one agent: create its chat profile, no wizard. */
   onCreateDefaultChatProfile?: () => Promise<AgentProfile | null>;
   suggestProfileName: (agentType: string | null, workType: TaskMode | null) => string;
   slashCommands?: SlashCommand[];
@@ -110,22 +117,6 @@ type ChatInputProps = Readonly<{
   inputLabel?: string;
 }>;
 
-function getComposerPlaceholder({
-  noAgents,
-  needsProfileBeforeSubmit,
-  wizardOpen,
-  placeholder,
-}: Readonly<{
-  noAgents: boolean;
-  needsProfileBeforeSubmit: boolean;
-  wizardOpen: boolean;
-  placeholder: string;
-}>) {
-  if (noAgents) return 'Add an agent in Settings to start chatting...';
-  if (needsProfileBeforeSubmit || wizardOpen) return 'Create a profile to start chatting...';
-  return placeholder;
-}
-
 /**
  * The new-chat composer: one toolbar row (who the chat goes to, attach, options) above
  * the message box. Profiles are picked in a sheet or from the cards above, not from a
@@ -142,6 +133,7 @@ export function ChatInput({
   projectId,
   agents,
   agentProfiles,
+  profilesLoading = false,
   selectedProfileId,
   onProfileChange,
   profilePicker,
@@ -191,13 +183,24 @@ export function ChatInput({
   const selectedProfile = selectedProfileId
     ? (agentProfiles.find((p) => p.id === selectedProfileId) ?? null)
     : null;
-  const needsProfileBeforeSubmit = agentProfiles.length === 0 && agents.length >= 1;
+  const needsProfileBeforeSubmit =
+    !profilesLoading && agentProfiles.length === 0 && agents.length >= 1;
   const noAgents = agents.length === 0;
-  const inputDisabled = noAgents || needsProfileBeforeSubmit || profileWizard.open;
+  const inputDisabled =
+    noAgents || needsProfileBeforeSubmit || profileWizard.open || Boolean(profilesLoading);
   const showToolbar = !inputDisabled && agentProfiles.length > 0;
+  const quickStart = useSoleAgentQuickStart({
+    agents,
+    suggestProfileName,
+    onCreate: onCreateDefaultChatProfile,
+    instantAvailable: profileWizard.instantAvailable,
+    inputDisabled,
+    containerRef,
+  });
   const composerPlaceholder = getComposerPlaceholder({
     noAgents,
     needsProfileBeforeSubmit,
+    quickStartOffered: Boolean(quickStart),
     wizardOpen: profileWizard.open,
     placeholder,
   });
@@ -337,18 +340,7 @@ export function ChatInput({
       {noAgents && <NoAgentsNotice projectId={projectId} />}
 
       {needsProfileBeforeSubmit && !profileWizard.open && (
-        <NoProfilesGate
-          onStartWizard={onOpenProfileWizard}
-          quickStart={
-            agents.length === 1 && onCreateDefaultChatProfile
-              ? {
-                  label: `Start chatting with ${agents[0]?.name ?? 'the agent'}`,
-                  profileName: suggestProfileName(agents[0]?.id ?? null, 'conversation'),
-                  onCreate: onCreateDefaultChatProfile,
-                }
-              : undefined
-          }
-        />
+        <NoProfilesGate onStartWizard={onOpenProfileWizard} quickStart={quickStart} />
       )}
 
       {profileWizard.open && (

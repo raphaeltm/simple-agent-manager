@@ -21,7 +21,6 @@
  * if Workers AI is slow, retrying immediately wastes more of the Worker's
  * 30-second wall-clock budget.
  */
-
 import {
   DEFAULT_TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH,
   DEFAULT_TASK_TITLE_MAX_LENGTH,
@@ -280,6 +279,30 @@ async function fetchTaskTitle(
   });
 }
 
+function generatedTitleOrFallback(
+  rawTitle: string | null,
+  message: string,
+  maxLength: number,
+  modelId: string,
+  attempt: number
+): string {
+  if (!rawTitle) {
+    log.warn('task_title.empty_response', { modelId, messageLength: message.length, attempt });
+    return truncateTitle(message, maxLength);
+  }
+  const title = stripMarkdown(rawTitle);
+  if (!title) {
+    log.warn('task_title.empty_after_strip', {
+      modelId,
+      rawTitle,
+      messageLength: message.length,
+      attempt,
+    });
+    return truncateTitle(message, maxLength);
+  }
+  return truncateTitle(title, maxLength);
+}
+
 /**
  * Generate a concise task title from a message using Workers AI via AI Gateway.
  *
@@ -328,26 +351,8 @@ export async function generateTaskTitle(
         timeoutMs,
         errorDiagnosticMaxLength
       );
-      if (!rawTitle) {
-        log.warn('task_title.empty_response', { modelId, messageLength: message.length, attempt });
-        return truncateTitle(message, maxLength);
-      }
-
-      const title = stripMarkdown(rawTitle);
-      if (!title) {
-        log.warn('task_title.empty_after_strip', {
-          modelId,
-          rawTitle,
-          messageLength: message.length,
-          attempt,
-        });
-        return truncateTitle(message, maxLength);
-      }
-
-      return truncateTitle(title, maxLength);
+      return generatedTitleOrFallback(rawTitle, message, maxLength, modelId, attempt);
     } catch (err) {
-      // No model on this installation: truncation is the designed title, not a failure to
-      // retry or warn about.
       if (err instanceof LlmUnavailableError) return truncateTitle(message, maxLength);
       const classified = classifyError(err);
       lastError = classified;

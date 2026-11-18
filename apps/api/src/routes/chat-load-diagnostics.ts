@@ -71,7 +71,7 @@ export async function recordChatSessionLoadFailure(
         context,
         userId: input.userId,
         sessionId: input.sessionId,
-        ipAddress: clientIpFromHeaders((name) => c.req.header(name)),
+        ipAddress: clientIpFromHeaders((name) => c.req.header(name)) ?? null,
         userAgent: c.req.header('User-Agent') ?? null,
       },
       c.env

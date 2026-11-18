@@ -412,7 +412,9 @@ describe.skipIf(!hasDocker && !process.env.CI)('an aborted request does not pois
     { kind: 'platform', site: 'resolveLegacyPlatformConfig', loadsPerFlight: 5 },
     { kind: 'credentials', site: 'admin-settings credentialRows', loadsPerFlight: 1 },
     { kind: 'kv', site: 'admin-settings legacyKv', loadsPerFlight: 1 },
-    { kind: 'ensure', site: 'ensureOncePerIsolate', loadsPerFlight: 1 },
+    // Main's memo (af302dbd3) remembers only completed ensures: two concurrent cold requests each
+    // run their own ensure, so there is no join to strand, and each answer reports both loads.
+    { kind: 'ensure', site: 'ensureOncePerIsolate', loadsPerFlight: 2 },
     { kind: 'r2', site: 'compact-r2 timedR2 (archive cron)', loadsPerFlight: 1 },
     {
       kind: 'do',

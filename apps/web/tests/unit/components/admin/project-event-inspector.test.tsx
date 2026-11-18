@@ -227,4 +227,49 @@ describe('ProjectEventInspector', () => {
       )
     ).toBeInTheDocument();
   });
+  it('discloses skipped CI traffic even when no event rows exist', () => {
+    render(
+      <ProjectEventInspector
+        data={inspectorResponse({
+          events: [],
+          admission: {
+            windowStart: NOW - 60_000,
+            windowEnd: NOW,
+            skipUnsubscribedGitHubCi: true,
+            counts: {
+              'github:check_run.completed': {
+                calls: 12,
+                created: 0,
+                duplicate: 0,
+                conflict: 0,
+                skipped: 12,
+              },
+            },
+            overflowCalls: 0,
+          },
+        })}
+      />
+    );
+    expect(screen.getByText(/empty event list does not mean/)).toBeInTheDocument();
+    expect(screen.getByText('github:check_run.completed: 12 skipped')).toBeInTheDocument();
+    expect(screen.getByText(/Memory only/)).toBeInTheDocument();
+  });
+
+  it('discloses full-history rollback mode', () => {
+    render(
+      <ProjectEventInspector
+        data={inspectorResponse({
+          admission: {
+            windowStart: NOW,
+            windowEnd: NOW,
+            skipUnsubscribedGitHubCi: false,
+            counts: {},
+            overflowCalls: 0,
+          },
+        })}
+      />
+    );
+    expect(screen.getByText(/Full CI history is enabled/)).toBeInTheDocument();
+    expect(screen.getByText(/No skipped admissions observed/)).toBeInTheDocument();
+  });
 });

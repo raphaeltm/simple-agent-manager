@@ -13,9 +13,9 @@ interface AuthTestUser {
 }
 
 type BeforeCreateHook = (user: AuthTestUser) => Promise<{ data: AuthTestUser }>;
-type SessionBeforeHook = (
-  session: { userId: string }
-) => Promise<false | { data: { userId: string } }>;
+type SessionBeforeHook = (session: {
+  userId: string;
+}) => Promise<false | { data: { userId: string } }>;
 type SessionAfterHook = (session: { userId?: string | null }) => Promise<void>;
 
 interface BetterAuthOptions {
@@ -263,7 +263,9 @@ describe('BetterAuth configuration', () => {
   });
 
   it('still creates the session when the election throws, without retrying privilege', async () => {
-    mocks.establishFirstSuperadmin.mockRejectedValueOnce(new Error('D1_ERROR: database unavailable'));
+    mocks.establishFirstSuperadmin.mockRejectedValueOnce(
+      new Error('D1_ERROR: database unavailable')
+    );
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const beforeSession = await getSessionBeforeHook(fakeEnv());
 
@@ -471,7 +473,13 @@ describe('installer bootstrap owner hooks', () => {
             Response.json([{ email: 'owner@example.com', primary: true, verified }])
           )
       );
-      await createAuth(fakeEnv() as never);
+      // No existing provider link: preserve the provider verification under test.
+      await createAuth({
+        ...fakeEnv(),
+        DATABASE: {
+          prepare: vi.fn(() => ({ bind: vi.fn(() => ({ first: vi.fn(async () => null) })) })),
+        },
+      } as never);
       const github = capturedOptions!.socialProviders!.github as {
         getUserInfo(token: { accessToken: string }): Promise<{ user: { emailVerified: boolean } }>;
       };

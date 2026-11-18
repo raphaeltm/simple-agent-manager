@@ -18,8 +18,10 @@ import {
 } from '../services/email-sign-in';
 import { readAuthSession } from '../services/read-auth-session';
 import { assertUserNotSuspended } from '../services/signup-approval';
+import { accountLinkingRoutes } from './account-linking';
 
 const authRoutes = new Hono<{ Bindings: Env }>();
+authRoutes.route('/', accountLinkingRoutes);
 
 /**
  * GET /api/auth/me - Get current authenticated user
@@ -95,25 +97,6 @@ authRoutes.post(EMAIL_CODE_SIGN_IN_PATH, async (c, next) => {
   if (c.res.status === 403) {
     c.res = c.json({ code: 'INVALID_OTP', message: 'Invalid OTP' }, 400);
   }
-});
-
-/**
- * "Connect GitHub/GitLab" links only the providers whose sign-in keeps a linked account's own
- * email (`keepLinkedAccountEmail` in their `getUserInfo`); linking accepts a provider account
- * with a different email (`accountLinking.allowDifferentEmails`), so any other provider could
- * later overwrite the SAM email at sign-in.
- */
-const LINKABLE_PROVIDERS = new Set(['github', 'gitlab']);
-authRoutes.post('/link-social', async (c, next) => {
-  const body: unknown = await c.req.raw
-    .clone()
-    .json()
-    .catch(() => null);
-  const provider = maybeJsonRecord(body)?.provider;
-  if (typeof provider !== 'string' || !LINKABLE_PROVIDERS.has(provider)) {
-    throw errors.badRequest('Only GitHub and GitLab can be connected to an account');
-  }
-  return next();
 });
 
 /**

@@ -194,3 +194,54 @@ describe('publicPlatformCapabilities', () => {
     );
   });
 });
+
+/**
+ * Main's L11 pin (#2820): the capability inputs exactly as the production API Worker
+ * (`sam-api-prod`) had them when read from the Cloudflare script-settings API on 2026-11-16: an
+ * `ai` binding (`run` and `models`), and TTS_ENABLED and LOG_TAIL_AVAILABLE not bound at all.
+ * The branch's additional capabilities read inputs that capture did not record (ARTIFACTS,
+ * SANDBOX, AGENT_EMAIL, R2_*, ANALYTICS); they are pinned by `cloudflareEnv()` above and must be
+ * re-verified against production's deployed values before they land on main (rule 70).
+ */
+function cloudflareProductionEnv(overrides: Partial<Env> = {}): Env {
+  return {
+    AI: { run: async () => ({}), models: async () => [] },
+    AI_GATEWAY_ID: 'sam',
+    CF_ACCOUNT_ID: 'account-1',
+    CF_API_TOKEN: 'token-1',
+    CF_ZONE_ID: 'zone-1',
+    BASE_DOMAIN: 'example.com',
+    ...overrides,
+  } as unknown as Env;
+}
+
+describe('production Cloudflare configuration (L11 pin)', () => {
+  it('keeps every Workers AI capability on with the captured production inputs', () => {
+    const capabilities = resolvePlatformCapabilities(cloudflareProductionEnv());
+    expect(capabilities.workersAi).toBe(true);
+    expect(capabilities.speechToText).toBe(true);
+    expect(capabilities.textToSpeech).toBe(true);
+    // Inputs present in the capture keep their capabilities on.
+    expect(capabilities.cloudflareDns).toBe(true);
+    expect(capabilities.appDeployments).toBe(true);
+    expect(capabilities.liveLogStream).toBe(true);
+    expect(publicPlatformCapabilities(cloudflareProductionEnv())).toMatchObject({
+      speechToText: true,
+      textToSpeech: true,
+      agentModelCalls: true,
+      appDeployments: true,
+      liveLogStream: true,
+    });
+  });
+
+  it('treats any TTS_ENABLED other than "false" as on, like the TTS route', () => {
+    for (const value of ['true', '', 'yes']) {
+      expect(
+        resolvePlatformCapabilities(cloudflareProductionEnv({ TTS_ENABLED: value })).textToSpeech
+      ).toBe(true);
+    }
+    expect(
+      resolvePlatformCapabilities(cloudflareProductionEnv({ TTS_ENABLED: 'false' })).textToSpeech
+    ).toBe(false);
+  });
+});

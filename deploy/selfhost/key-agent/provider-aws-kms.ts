@@ -10,7 +10,7 @@
  * The context is bound as `EncryptionContext` {"sam:context-sha256": <hex>}: KMS authenticates
  * it and records it in CloudTrail, so a hash keeps the log short and free of bundle details.
  *
- * Tested against a fake of the documented JSON API (scripts/selfhost/aws-kms-fake.ts) and the
+ * Tested against a fake of the documented JSON API (scripts/selfhost/fixtures/aws-kms-fake.ts) and the
  * signer against AWS's published SigV4 vectors. It has NOT run against real AWS.
  */
 import { createHash } from 'node:crypto';

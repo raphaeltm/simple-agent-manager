@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CHILD_TEST_TIMEOUT_MS, CLOSED_HOST, runDeploy, writeBox } from './deploy-harness.js';
 import type { PlatformCandidates } from './key-choice.js';
-import { type FakeKeyService, startFakeKeyServices } from './key-provider-fakes.js';
+import { type FakeKeyService, startFakeKeyServices } from './fixtures/key-provider-fakes.js';
 import { parseDotenv } from './secret-files.js';
 import { runSwitch, type SwitchDeps } from './secrets-switch.js';
 

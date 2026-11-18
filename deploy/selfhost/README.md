@@ -1212,7 +1212,7 @@ The celld egress fence needs no change: it matches celld's uid only, sam-mx call
 other way round), and the fence still refuses the Worker any connection to port 25.
 
 Code: `deploy/selfhost/sam-mx/` (receiver and its tests),
-`apps/api/src/routes/self-host-gateway-inbound-email.ts` (gateway route),
+`apps/api/src/selfhost/reverse-tunnel/inbound-email.ts` (gateway route),
 `apps/api/src/services/agent-email/self-host-inbound.ts` (on-switch, SMTP reply sender),
 `scripts/selfhost/inbound-mail-settings.ts` (deploy wiring).
 

@@ -7,12 +7,9 @@
  * encrypted in `platform_credentials` like every other secret admin setting. The dependency
  * back to the registry is type-only; only the shared secret length floor is imported at runtime.
  */
-import { isAcceptableOperatorEndpoint } from '../lib/network-hosts';
-import {
-  type AdminSettingDefinition,
-  type AdminSettingName,
-  MIN_SECRET_SETTING_LENGTH,
-} from './admin-setting-definitions';
+import { classifyHost } from '@simple-agent-manager/worker-core';
+
+import { type AdminSettingDefinition, type AdminSettingName } from './admin-setting-definitions';
 
 /** Which control-plane caller is asking; each can use its own model on the endpoint. */
 export type LlmPurpose = 'agent' | 'taskTitle' | 'diagnosis' | 'aiProxy';
@@ -55,7 +52,16 @@ export function validLlmBaseUrl(value: unknown): boolean {
   if (typeof value !== 'string' || value.trim().length === 0 || value.length > 2048) return false;
   try {
     const url = new URL(value.trim());
-    return isAcceptableOperatorEndpoint(url) && !/\/chat\/completions\/?$/.test(url.pathname);
+    return (
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      classifyHost(url.hostname) !== 'forbidden' &&
+      (url.protocol === 'https:' ||
+        (url.protocol === 'http:' && classifyHost(url.hostname) === 'private')) &&
+      !/\/chat\/completions\/?$/.test(url.pathname)
+    );
   } catch {
     return false;
   }
@@ -63,7 +69,10 @@ export function validLlmBaseUrl(value: unknown): boolean {
 
 /** Normalized base URL without a trailing slash. Caller must have validated it. */
 export function normalizeLlmBaseUrl(value: string): string {
-  return value.trim().replace(/\/+$/, '');
+  const trimmed = value.trim();
+  let end = trimmed.length;
+  while (end > 0 && trimmed[end - 1] === '/') end--;
+  return trimmed.slice(0, end);
 }
 
 function validModelId(value: unknown): boolean {
@@ -119,9 +128,7 @@ function definition(key: LlmEndpointSettingKey): AdminSettingDefinition {
       credential: { provider: 'openai-compatible', kind: 'api-key' },
       // Same floor as the OAuth secrets: a real key is never this short.
       validate: (value) =>
-        typeof value === 'string' &&
-        value.trim().length >= MIN_SECRET_SETTING_LENGTH &&
-        value.length <= MAX_API_KEY_LENGTH,
+        typeof value === 'string' && value.trim().length >= 8 && value.length <= MAX_API_KEY_LENGTH,
     };
   }
   return {

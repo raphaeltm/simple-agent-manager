@@ -1305,6 +1305,7 @@ const AI_BUDGET_RESPONSE = {
   dailyUsage: { inputTokens: 610_000, outputTokens: 98_000 },
   effectiveLimits: { dailyInputTokenLimit: 900_000, dailyOutputTokenLimit: 150_000 },
   monthCostUsd: 184.2,
+  monthlyCostCap: { available: true, ceilingUsd: null, effectiveCapUsd: 400 },
   utilization: { dailyInputPercent: 67.8, dailyOutputPercent: 65.3, monthlyCostPercent: 46.05 },
   exceeded: false,
 };
@@ -1522,13 +1523,6 @@ const COST_SUMMARY = {
     dailyAverageCostUsd: 158.3,
     daysElapsed: 14,
     daysInMonth: 30,
-  },
-  compute: {
-    totalNodeHours: 980.5,
-    totalVcpuHours: 3720.4,
-    estimatedCostUsd: 612.4,
-    activeNodes: 4,
-    vcpuHourCostUsd: 0.0165,
   },
   period: 'current-month',
   periodLabel: 'September 2026',

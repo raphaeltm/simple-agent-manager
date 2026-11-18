@@ -20,16 +20,16 @@ import {
   requireGitLabUserAccessToken,
   verifyGitLabProjectAccess,
 } from '../../services/gitlab';
-import {
-  artifactsRemoteFetch,
-  isLocalHostedGitActive,
-  resolveArtifactsBackend,
-} from '../../services/hosted-git/backend';
+import { resolveArtifactsBackend } from '../../services/hosted-git/backend';
 import {
   importIntoHostedRepository,
   parseHostedGitImportUrl,
   resolveImportDefaultBranch,
 } from '../../services/hosted-git/import';
+import {
+  artifactsRemoteFetch,
+  isLocalHostedGitActive,
+} from '../../services/hosted-git/local-backend';
 import { getRuntimeLimits } from '../../services/limits';
 import {
   assertRepositoryAccess,
@@ -93,13 +93,9 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
       if (!artifactsEnabled) {
         throw errors.badRequest('Artifacts repo provider is not enabled');
       }
-      // Enabled but no binding: this runtime has no Cloudflare Artifacts (not a server fault).
       const artifacts = resolveArtifactsBackend(c.env);
       if (!artifacts) {
-        throw errors.featureUnavailable(
-          'artifacts',
-          'SAM-native Git repositories are not available on this installation'
-        );
+        throw errors.internal('Artifacts binding is not configured');
       }
 
       // Check per-user Artifacts repo limit

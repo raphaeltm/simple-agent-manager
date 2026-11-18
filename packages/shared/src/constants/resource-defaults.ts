@@ -14,6 +14,7 @@ import type {
   ResourceResolutionInput,
 } from '../types/resource';
 import type { VMSize } from '../types/workspace';
+import { DEFAULT_INFOMANIAK_BOOT_VOLUME_GB } from './hetzner';
 
 // =============================================================================
 // Resource Reservation Schema Version
@@ -113,10 +114,12 @@ export const PROVIDER_VM_CAPACITY: Record<string, Record<VMSize, VmCapacity>> & 
     medium: { vcpu: 4, ramGb: 8, storageGb: 160 },
     large: { vcpu: 6, ramGb: 16, storageGb: 320 },
   },
+  // Disk is the default Cinder boot volume (DEFAULT_INFOMANIAK_BOOT_VOLUME_GB), not the flavor's
+  // 20 GB local disk: SAM boots Infomaniak VMs from a volume (infomaniak-boot-volume.ts).
   infomaniak: {
-    small: { vcpu: 2, ramGb: 4, storageGb: 20 },
-    medium: { vcpu: 4, ramGb: 8, storageGb: 20 },
-    large: { vcpu: 8, ramGb: 16, storageGb: 20 },
+    small: { vcpu: 2, ramGb: 4, storageGb: DEFAULT_INFOMANIAK_BOOT_VOLUME_GB },
+    medium: { vcpu: 4, ramGb: 8, storageGb: DEFAULT_INFOMANIAK_BOOT_VOLUME_GB },
+    large: { vcpu: 8, ramGb: 16, storageGb: DEFAULT_INFOMANIAK_BOOT_VOLUME_GB },
   },
   digitalocean: {
     small: { vcpu: 2, ramGb: 4, storageGb: 80 },

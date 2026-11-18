@@ -16,7 +16,7 @@ the trial product in November 2026; a value saved for it earlier is ignored.
 
 ## Open the settings
 
-Select **Admin** in the sidebar (only superadmins see it), then the **Settings** tab. The page is
+Select **Admin** in the sidebar (only superadmins see it), then **Settings** under **Platform**. The page is
 titled **Runtime settings**. An account must be an approved, active superadmin to use it; admins
 can't.
 
@@ -46,6 +46,17 @@ shows as **operations · cron Sweeps Enabled**), and shows:
     alt="The Runtime settings page under Admin → Settings. On a desktop: a search box, the number of settings, then the OAuth group, where the GitHub sign-in cards say &quot;Source: environment · Configured · Requires confirmation&quot;, the Google ones &quot;Source: database&quot;, client ID fields show their values, and secret fields say &quot;Current secret is never returned&quot;. On a phone: the Connector group, where &quot;connector · enabled&quot; says &quot;Source: default · Not configured&quot; and &quot;connector · write Enabled&quot; is set to Disabled with &quot;Source: database&quot; and an available Reset override button."
   />
 </picture>
+
+If an older stored override no longer meets the current bounds or type, its card shows
+**Default in effect, stored value invalid**, with the stored text for nonsecret settings.
+Security controls that fail closed instead show **Safe fallback in effect**: Connector
+access and writes are disabled, registration is allowlisted, redirect hosts are empty,
+and the private SAM assistant is disabled. Existing emergency brakes remain effective.
+The other settings remain available. Use **Reset override** to remove the invalid row,
+or save a valid replacement. Secret values are never displayed.
+
+<!-- Verified implementation: apps/api/src/services/admin-settings-resolution.ts:readAdminSettings
+     isolates invalid overrides; resolveAdminSetting retains runtime safety fallbacks. -->
 
 ## Change a setting
 
@@ -186,6 +197,7 @@ before you try again.
 | Chat          | `chat.profileUsageWindowDays`, `chat.profilePinCandidateLimit`                                                                                                   | 30                                                | How far back the new-chat profile picker looks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | —                                                                                 |
 | Chat          | `secrets.*`                                                                                                                                                      | see [Chat](#chat) below                           | Agent secret requests: how long they stay open, allowed expiries, the open-request cap, retention and purging                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | —                                                                                 |
 | AI models     | `aiModels.*` (below)                                                                                                                                             | see below                                         | Which AI models agents may call, and the spending limits                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | —                                                                                 |
+| AI models     | `overviewBrief.*` ([Project Overview brief](#project-overview-brief))                                                                                            | see below                                         | How often the generated brief on each Project Overview is written, and whether it is on                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | —                                                                                 |
 | Email         | `agentEmail.*` (below)                                                                                                                                           | see below                                         | Limits for agent email (preview)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | —                                                                                 |
 
 **Operations** also holds the [lifecycle latency budgets](#lifecycle-latency-monitoring), limits for [workflows](#workflows), [linked work](#linked-work), pull
@@ -264,19 +276,27 @@ where it says so and the app continues from there.
 Listed under **Chat**. Bounds for the [inbox](/docs/reference/api/#inbox) list and for the inbox
 items agents file (`packages/operations/src/inbox-settings-definition.ts`).
 
-| Setting                    | Default | Range      | What it limits                                                                         |
-| -------------------------- | ------- | ---------- | -------------------------------------------------------------------------------------- |
-| `inbox.listPageSize`       | 25      | 1–200      | Items one list page returns when the app does not ask for a number                     |
-| `inbox.listPageMax`        | 100     | 1–200      | Most items one list page returns                                                       |
-| `inbox.titleMaxChars`      | 200     | 40–1,000   | Characters of an item title; longer titles are refused when the item is filed          |
-| `inbox.bodyMaxChars`       | 4,000   | 200–20,000 | Characters of an item body (the agent's reason)                                        |
-| `inbox.linksMax`           | 20      | 0–100      | Links one item may carry                                                               |
-| `inbox.openItemsPerChat`   | 20      | 1–500      | Open items one chat may have at once; filing past it is refused                        |
-| `inbox.answerMaxChars`     | 4,000   | 100–20,000 | Characters of a typed answer or comment                                                |
-| `inbox.similarMatchesMax`  | 3       | 0–20       | Similar open items an agent is shown when it files an ask or a review; 0 turns it off  |
-| `inbox.similarScanMax`     | 50      | 1–500      | Newest open items of the project compared when an agent files (rows read per filing)   |
-| `inbox.noticeRetryMinutes` | 60      | 5–1,440    | Minutes the sweep retries telling an agent its item was answered, archived or expired  |
-| `inbox.sweepBatchSize`     | 10      | 1–50       | Items each step of the five-minute sweep handles (reminders, expiries, notice retries) |
+| Setting                            | Default | Range      | What it limits                                                                            |
+| ---------------------------------- | ------- | ---------- | ----------------------------------------------------------------------------------------- |
+| `inbox.listPageSize`               | 25      | 1–200      | Items one list page returns when the app does not ask for a number                        |
+| `inbox.listPageMax`                | 100     | 1–200      | Most items one list page returns                                                          |
+| `inbox.titleMaxChars`              | 200     | 40–1,000   | Characters of an item title; longer titles are refused when the item is filed             |
+| `inbox.bodyMaxChars`               | 4,000   | 200–20,000 | Characters of an item body (the agent's reason)                                           |
+| `inbox.linksMax`                   | 20      | 0–100      | Links one item may carry                                                                  |
+| `inbox.openItemsPerChat`           | 20      | 1–500      | Open items one chat may have at once; filing past it is refused                           |
+| `inbox.answerMaxChars`             | 4,000   | 100–20,000 | Characters of a typed answer or comment                                                   |
+| `inbox.similarMatchesMax`          | 3       | 0–20       | Similar open items an agent is shown when it files an ask, review or result; 0 turns it off |
+| `inbox.similarScanMax`             | 50      | 1–500      | Newest open items of the project compared when an agent files (rows read per filing)      |
+| `inbox.noticeRetryMinutes`         | 60      | 5–1,440    | Minutes the sweep retries telling an agent its item was answered, archived or expired     |
+| `inbox.automationFailureThreshold` | 2       | 1–20       | Failed runs in a row that file an inbox error item for an automation's owner              |
+| `inbox.errorSweepBatchSize`        | 10      | 1–50       | Error items one five-minute sweep files at most (failed tasks, automations, lost answers) |
+| `inbox.errorLookbackMinutes`       | 30      | 5–1,440    | How far back that sweep looks for failures with no error item yet                         |
+| `inbox.sweepBatchSize`             | 10      | 1–50       | Items each step of the five-minute sweep handles (reminders, expiries, notice retries)    |
+| `inbox.openTasksPerChat`           | 20      | 1–200      | Open human tasks one chat may have assigned; assigning past it is refused                 |
+| `inbox.taskStepsMax`               | 20      | 1–50       | Steps one human task may list                                                             |
+| `inbox.watchersPerItemMax`         | 10      | 1–50       | Chats that may watch one task (the one that assigned it plus chats that attached)         |
+| `inbox.taskActivityMax`            | 100     | 10–500     | Lifecycle rows a task view returns, newest kept; the view says when older ones exist      |
+| `inbox.closedTaskWatchHours`       | 168     | 1–2,160    | Hours a finished, archived or cancelled task still wakes the chats watching it            |
 
 A question an agent asks with `request_human_input` is an inbox item, and these settings set its
 schedule (`apps/api/src/services/inbox/sweep.ts`, every five minutes):
@@ -297,28 +317,49 @@ given, and its reminders follow the current percentages.
 Listed under **Chat**. Bounds for the [run receipt](/docs/reference/api/#get-apiprojectsprojectidtaskstaskidreceipt)
 (`packages/operations/src/insights-receipt-settings-definition.ts`).
 
-| Setting                                  | Default | Range       | What it limits                                                                     |
-| ---------------------------------------- | ------- | ----------- | ---------------------------------------------------------------------------------- |
-| `insights.receiptMessageScanMaxRows`     | 10,000  | 100–100,000 | Chat messages one receipt reads to count tool calls; a longer run shows a floor    |
-| `insights.receiptWaitingMaxQuestions`    | 200     | 10–2,000    | Agent questions one receipt reads to measure time waiting on a person              |
-| `insights.receiptComparisonRuns`         | 50      | 3–500       | Recent runs of the same skill or profile read to find the usual durations          |
-| `insights.receiptComparisonWindowDays`   | 30      | 1–365       | Days back the receipt looks for runs to compare with                               |
-| `insights.receiptComparisonMinRuns`      | 3       | 1–50        | Fewest comparable runs before a duration is called slower than usual               |
-| `insights.receiptSlowFactorPercent`      | 150     | 101–1,000   | Percentage of the usual duration at which a phase is listed as slow                |
-| `insights.receiptSlowMinSeconds`         | 60      | 0–3,600     | Phases shorter than this are never listed as slowing a run down                    |
-| `insights.receiptMemoryNearLimitPercent` | 90      | 50–100      | Peak memory at or above this share of the requested memory is listed as a slowdown |
+| Setting                                  | Default | Range       | What it limits                                                                           |
+| ---------------------------------------- | ------- | ----------- | ---------------------------------------------------------------------------------------- |
+| `insights.receiptMessageScanMaxRows`     | 10,000  | 100–100,000 | Chat messages one receipt reads to count tool calls; a longer run shows a floor          |
+| `insights.receiptWaitingMaxQuestions`    | 200     | 10–2,000    | Agent questions one receipt reads to measure time waiting on a person                    |
+| `insights.receiptComparisonRuns`         | 50      | 3–500       | Recent runs of the same skill or profile read to find the usual durations                |
+| `insights.receiptComparisonWindowDays`   | 30      | 1–365       | Days back the receipt looks for runs to compare with                                     |
+| `insights.receiptComparisonMinRuns`      | 3       | 1–50        | Fewest comparable runs before a duration is called slower than usual                     |
+| `insights.receiptSlowFactorPercent`      | 150     | 101–1,000   | Percentage of the usual duration at which a phase is listed as slow                      |
+| `insights.receiptSlowMinSeconds`         | 60      | 0–3,600     | Phases shorter than this are never listed as slowing a run down                          |
+| `insights.receiptMemoryNearLimitPercent` | 90      | 50–100      | Peak memory at or above this share of the requested memory is listed as a slowdown       |
+| `insights.receiptTokenRowsMax`           | 64      | 8–1,000     | Token-usage rows (model × account × agent restart) one receipt reads; more shows a floor |
 
-## Insights flow
+## Insights page
 
-Listed under **Operations**. Bounds for the project [Insights](/docs/guides/insights/) Flow tab
-(`packages/operations/src/insights-flow-settings.ts`).
+Listed under **Operations**. Bounds for the project [Insights](/docs/guides/insights/) Flow, Agent
+setups, Accounts and People tabs (`packages/operations/src/insights-page-settings.ts`).
 
-| Setting                          | Default | Range  | What it limits                                                                                      |
-| -------------------------------- | ------- | ------ | --------------------------------------------------------------------------------------------------- |
-| `insights.flowIdeaSampleCap`     | 100     | 10–500 | Ideas, newest-updated first, examined for "idea to merged"; the page says when the cap cut it short |
-| `insights.flowWaitingIdeasLimit` | 5       | 1–20   | Ideas shown under "Ideas waiting longest"                                                           |
-| `insights.flowFlakyChecksLimit`  | 5       | 1–20   | Checks shown under "Flaky checks"                                                                   |
-| `insights.flowReworkWindowDays`  | 7       | 1–30   | Days after a merge in which another pull request on the same branch or idea counts as rework        |
+| Setting                                  | Default | Range      | What it limits                                                                                                                                    |
+| ---------------------------------------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `insights.flowIdeaSampleCap`             | 100     | 10–500     | Ideas, newest-updated first, examined for "idea to merged"; the page says when the cap cut it short                                               |
+| `insights.flowWaitingIdeasLimit`         | 5       | 1–20       | Ideas shown under "Ideas waiting longest"                                                                                                         |
+| `insights.flowFlakyChecksLimit`          | 5       | 1–20       | Checks shown under "Flaky checks"                                                                                                                 |
+| `insights.flowReworkWindowDays`          | 7       | 1–30       | Days after a merge in which another pull request on the same branch or idea counts as rework                                                      |
+| `insights.accountsStallScanCap`          | 500     | 50–5,000   | Usage-limit waits and exhausted limit windows, newest first, examined for "Stalled on a limit"; the page says when the cap cut it short           |
+| `insights.accountsEpisodesListed`        | 10      | 1–50       | Limit stalls listed under "Stalled on a limit"                                                                                                    |
+| `insights.accountsUsageRowCap`           | 500     | 50–5,000   | Measured token usage rows (one per account and model), largest first, read for Accounts tokens and spend; the page says when the cap cut it short |
+| `insights.setupsRunScanCap`              | 2,000   | 100–10,000 | Runs, newest first, examined on Agent setups; the page says when the cap cut the range short                                                      |
+| `insights.setupsSuggestionMinRuns`       | 10      | 3–200      | Finished runs each compared setup needs before Agent setups suggests a skill change                                                               |
+| `insights.setupsSuggestionMinGapPercent` | 20      | 5–80       | Points by which a profile must beat the one it is compared with to be suggested as a skill default                                                |
+| `insights.setupsMemoryHeadroomPercent`   | 25      | 0–200      | Headroom added to the 90th-percentile peak memory when suggesting a memory request                                                                |
+| `insights.peopleWaitingItemsListed`      | 10      | 1–50       | Open items listed per person under "Waiting on" (each person still shows how many are open)                                                       |
+| `insights.peopleReviewScanCap`           | 2,000   | 100–20,000 | Review requests in the range, newest first, examined for "Review pickup"; the page says when the cap cut it short                                 |
+
+## Insights for agents
+
+Listed under **Operations**. The per-chat rate limit of the sam-mcp `project_insights` tool
+(`packages/operations/src/insights-agent-settings.ts`, enforced by
+`apps/api/src/routes/mcp/project-insights-tool.ts` on the `McpRateCounter` Durable Object).
+
+| Setting                            | Default | Range     | What it limits                                                         |
+| ---------------------------------- | ------- | --------- | ---------------------------------------------------------------------- |
+| `insights.agentToolCallsPerWindow` | 30      | 1–1,000   | Calls one agent chat may make to `project_insights` per window         |
+| `insights.agentToolWindowSeconds`  | 600     | 10–86,400 | Length of that window in seconds; later calls wait for the next window |
 
 ## Node provisioning
 
@@ -535,6 +576,124 @@ The rest control the checks themselves:
 | `lifecycleLatency.retentionDays`                | 30      | 8–365      | Days finished episodes and stored phase timings are kept                                                                                     |
 | `lifecycleLatency.evaluationSampleLimit`        | 2,000   | 10–20,000  | Most recent finished episodes the daily check reads per state                                                                                |
 
+## Health & cost
+
+**Admin → Spend and health → Health & cost** (`/admin/health-cost`, superadmins only) shows how
+this installation's machines are doing over the last 7 days, the last 30 days, or the month so far.
+Everything except the Cloudflare card is computed from records SAM already keeps when the page
+loads; the Cloudflare card reads a small daily snapshot (below). The page is served by `GET /api/admin/health-cost?range=7d|30d|month`, which calls the
+shared `installationHealth` operation (`packages/operations/src/insights-installation.ts`).
+
+- **Compute spend per provider per week.** Each cloud machine's running time multiplied by the
+  hourly price recorded on it when it was created (`nodes.provider_instance_price_hourly_micros`),
+  summed per machine. Workspaces share machines, so a machine is counted once however many
+  workspaces ran on it. A machine's running time ends when it reaches `destroying`, `destroyed`,
+  `deleted` or `error`. Machines you brought yourself and Instant containers cost no provider money
+  and are left out. Costs are estimates at list prices: they include machines on people's own
+  cloud accounts as well as the platform's, and exclude discounts, storage and traffic. A machine
+  removed with an explicit delete loses its row, so its time is not counted. Each provider records
+  prices in its own currency (Hetzner in EUR, Google Cloud in USD) and SAM keeps no exchange
+  rates, so spend is shown per currency, for example "€1,234 · $567", with one weekly chart per
+  currency. A machine with no recorded price is counted under "without a price".
+- **Warm machine reuse.** The share of workspace placements that went onto a machine that already
+  existed: an earlier workspace exists on that machine, or the node decision log recorded a
+  warm-pool claim on it since its previous workspace. The note under it gives how many of those
+  placements came from the warm pool. A claim given back unused, or whose workspace was later
+  deleted, is not counted, so the warm-pool number is always part of the reuse number. The node
+  decision log keeps `operations.nodeDecisionLogRetentionDays` (14 by default), so placements older
+  than that are never credited to the warm pool. If a machine's first workspace row is
+  later removed and its next placement packed onto it without a warm-pool claim, that placement
+  reads as new, so the rate is a lower bound.
+- **Agents per busy machine.** Agents running at once on a machine, averaged over the time it had
+  at least one running. Running time comes from resource telemetry (first to last sample while a
+  workspace ran), not from the compute ledger, which runs from a workspace's creation to its
+  deletion and would count stopped workspaces that were not deleted yet.
+- **Slowest 5% vs budget.** The p95 of each [lifecycle latency](#lifecycle-latency-monitoring)
+  state in the range against its budget. A state is over budget when it has at least
+  `lifecycleLatency.minSamples` finished episodes and its p95 is above the budget. Times are the
+  watchdog's sampled lower bounds, the same ones the daily check uses (first to last sample of an
+  episode), so a state seen in only one sample reads 0s. The page also
+  shows rows stuck past their budget right now and links any open incident the watchdog or daily
+  check raised for that state. A state whose budget is 0 is not watched and not shown.
+- **Why new machines were created.** For the first workspace on each new machine, the reasons the
+  capacity check gave for turning down every existing machine it considered, in its own words. A
+  machine is counted once under each reason it recorded. "No other machine in the pool to try" means
+  there was nothing to reuse.
+- **Cloudflare.** An estimate of what the Cloudflare account costs this month, in USD, kept apart
+  from compute spend: the month so far, a projection for the month, the five product lines with
+  the highest projected cost, everything else summed, and the daily cost for the last 30 days.
+  The projection is what is already spent plus the average of the last
+  `insights.healthCloudflareProjectionDays` days (7) for each remaining day, not the month's
+  running average, so an early spike does not inflate it. Storage (D1, KV, R2) projects as what
+  the observed days already accrued plus the latest stored level for each remaining day. It is an estimate
+  from Cloudflare's billed usage analytics at list prices, not an invoice: it covers every Worker
+  on the Cloudflare account (not only this installation's), and leaves out the $5 Workers Paid
+  subscription, R2 operations, and container CPU and disk. The month shown is the month of the
+  latest stored day, so on the 1st it is still the previous month's total.
+
+A section that cannot be read is named at the top of the page; the others still show. These
+**Operations** settings bound how much the page reads; when a read reaches its cap the page says
+the number is a lower bound.
+
+| Setting                                   | Default | Range       | What it controls                                                               |
+| ----------------------------------------- | ------- | ----------- | ------------------------------------------------------------------------------ |
+| `insights.healthMaxNodes`                 | 5,000   | 100–50,000  | Machines read for compute spend: still running first, then most recently ended |
+| `insights.healthMaxPlacements`            | 30,000  | 100–200,000 | Workspace placements read for reuse and new-machine reasons                    |
+| `insights.healthMaxRuns`                  | 30,000  | 100–200,000 | Running intervals read for agents per busy machine                             |
+| `insights.healthMaxReasons`               | 30      | 5–200       | New-machine reasons listed, most common first; the rest are counted            |
+| `insights.healthSpendWeeks`               | 6       | 1–26        | Weeks shown in the compute spend chart and the reuse sparkline                 |
+| `insights.healthCloudflareSeriesDays`     | 30      | 7–62        | Days of daily cost shown in the Cloudflare card                                |
+| `insights.healthCloudflareProjectionDays` | 7       | 1–31        | Recent days whose daily average projects the rest of the month                 |
+| `insights.healthCloudflareTopLines`       | 5       | 1–19        | Cloudflare product lines listed by projected cost; the rest are summed         |
+
+### Cloudflare cost snapshot
+
+A daily job (the `0 3 * * *` cron, `runCloudflareCostSnapshot()` in
+`apps/api/src/services/cloudflare-cost-snapshot.ts`) asks Cloudflare's GraphQL analytics API for
+the last complete days and stores one row per day per product line in `installation_cost_daily`:
+usage, unit, estimated USD cost and fetch time. It uses the same request and the same billed
+fields as `pnpm quality:cloudflare-cost` (`packages/shared/src/cloudflare-cost/`): Durable Object
+duration from `durableObjectsPeriodicGroups.sum.duration`, Workers requests without tail-worker
+invocations, Workers CPU, Durable Object requests and storage operations, D1 rows and storage, KV
+operations and storage, R2 storage, Workers AI neurons and container memory. A day's cost is its
+share of the month: the monthly allowance is used up by the month's earliest days, so a month
+whose earlier days were never collected (a new installation, or a gap older than 31 days) shows
+a lower cost than Cloudflare will bill.
+
+Every run fetches its whole window again in one request and overwrites those days, so late
+analytics and missed days fill in by themselves. A day the response has no usage for at all is
+not written, so an analytics outage cannot replace stored days with zeros; the card counts such a
+day as missing. Cloudflare serves at most the last 31 days, so a
+gap older than that cannot be filled and the card counts those days as $0 and says how many.
+**Refresh now** on the card runs the job immediately, at most once per
+`insights.cloudflareCostRefreshMinSeconds`. A failed Cloudflare request is recorded and
+shown on the card; a run that fails for any reason does not affect the other daily jobs.
+
+The job uses the Worker's existing `CF_API_TOKEN` and `CF_ACCOUNT_ID` secrets. The token needs
+**Account → Account Analytics → Read** (Admin Analytics' Analytics Engine queries need it too).
+Without the secrets the card says what to set; without the permission it says the token cannot
+read account analytics. The rest of the page still loads. You can add the permission to the existing token in
+the Cloudflare dashboard; no redeploy is needed.
+
+| Setting                                    | Default | Range       | What it controls                                                                                                    |
+| ------------------------------------------ | ------- | ----------- | ------------------------------------------------------------------------------------------------------------------- |
+| `insights.cloudflareCostBackfillDays`      | 30      | 1–31        | Complete days each run fetches and stores again                                                                     |
+| `insights.cloudflareCostRefreshMinSeconds` | 60      | 10–3,600    | Minimum seconds between Refresh now presses; the daily run is not limited                                           |
+| `insights.cloudflareCostQueryLimit`        | 10,000  | 100–100,000 | Rows per analytics dataset one request may return; reaching it fails the run rather than storing a partial estimate |
+
+**Admin → Costs** covers LLM spend only. Its compute card links here: the earlier flat
+vCPU-hour estimate (`COMPUTE_VCPU_HOUR_COST_USD`) was removed in favour of the per-machine prices
+above.
+
+## Analytics
+
+**Admin → Analytics** (under **Spend and health**) shows how the installation is used: summary
+figures, **AI Usage**, **Daily Active Users**, **Feature Adoption**, **Website Traffic** and **Top
+Events**, over the period you pick, with **Refresh**. It no longer has the sign-up funnel, the
+geography map or the retention cohorts. For how work moves through a project, open that project's
+[Insights](/docs/guides/insights/); for what the installation costs, see
+[Health & cost](#health--cost).
+
 ## Linked work
 
 These **Operations** settings control automatic links between chats, ideas, library files and pull requests. Links that mean work (a chat working on, creating or editing something) are always kept; links that only record reading or viewing are capped.
@@ -562,7 +721,7 @@ If you lower the cap on read and view links below what a target already has, not
 
 These **Collaboration** settings bound the size of the `get_instructions` payload every agent
 reads at session start. Pinned policies and the task are never trimmed by them. Every policy is
-pinned until a project admin unpins it in **Agent context → Policies**. While every policy is
+pinned until a project admin unpins it in [**Agent Context → Policies**](/docs/guides/agent-context/#pinned-or-on-demand). While every policy is
 pinned, setting the three character budgets to their maximum returns the unbudgeted payload. To
 undo an unpin, pin the policy again. The section budgets count characters of rendered text; the
 total counts characters of the serialized payload, so the three do not simply add up.
@@ -611,6 +770,33 @@ These control [AI models for agents](/docs/guides/ai-models-for-agents/): the Cl
 | `aiModels.catalogCacheSeconds`          | 21,600                               | 60–604,800        | Seconds the Cloudflare model catalog is cached                                                                    |
 
 Lowering the maximum also caps projects that set a higher limit earlier.
+
+### Project Overview brief
+
+The [brief](/docs/guides/project-overview/#the-brief) at the top of each Project Overview is
+written by a small model (Gemma 4 26B on Workers AI) through SAM's AI Gateway, on the platform's
+account. These bound how often it runs.
+
+| Setting                              | Default | Range    | What it controls                                                                                                  |
+| ------------------------------------ | ------- | -------- | ----------------------------------------------------------------------------------------------------------------- |
+| `overviewBrief.enabled`              | on      | on/off   | Whether briefs are written and shown. Off: no model calls, and every Overview is just its sections                |
+| `overviewBrief.minIntervalMinutes`   | 30      | 1–1,440  | Fewest minutes between two briefs for one project. A change sooner waits, and the old brief is shown dimmed       |
+| `overviewBrief.dailyCap`             | 24      | 0–288    | Most briefs one project may write in a UTC day, failed attempts included. 0 stops new briefs                      |
+| `overviewBrief.checkIntervalSeconds` | 60      | 10–3,600 | Fewest seconds between two checks of whether a project's facts changed; each check is one batch of database reads |
+
+At the defaults one project costs at most 24 model calls a day. A call sends at most about 3,000
+input tokens (the instructions and up to eight items of each kind) and gets at most 400 back, so at
+the model's published price ($0.10 per million input and $0.30 per million output tokens) a call
+costs at most about $0.0004: about $0.01 per project per day and $0.30 per project per month in the
+worst case. Quiet projects make no calls.
+
+When an [OpenAI-compatible model server](#use-an-openai-compatible-model-server) is set, the brief
+goes there instead, with the titles model (`llm.openAICompatible.taskTitleModel`, else
+`llm.openAICompatible.model`). The same call limits apply; the price is that server's. With no model
+route at all, briefs are not written and each Overview is just its sections.
+
+<!-- Verified: services/project-brief/refresh.ts:callModel (purpose 'taskTitle'),
+     services/ai-proxy-shared.ts:fetchWorkersAIChatCompletion, services/llm-chat-target.ts. -->
 
 ## Email
 
@@ -730,7 +916,7 @@ attempts count).
 | `operations.opsAnomalyTerminalTaskGraceMs`    | 900,000    | 0–7 days      | Time after a task ends before its still-running workspace is reported                                                                                                                                           |
 | `operations.opsAnomalyIdleTaskMinutes`        | 60         | 1–10,080      | Minutes without task or workspace activity before an in-progress task is reported                                                                                                                               |
 | `operations.opsAnomalyDestroyingNodeHours`    | 6          | 1–720         | Hours a node may stay destroying, counted from its last heartbeat, before its unfinished teardown is reported with any recorded cleanup refusal                                                                 |
-| `operations.opsAnomalyWakingMinutes`          | 60         | 1–43,200      | Minutes a sleeping chat may stay waking, counted from its wake claim, before the wake is reported (`session_wake_stalled`), with no lookback limit                                                              |
+| `operations.opsAnomalyWakingMinutes`          | 60         | 1–43,200      | Minutes a sleeping chat may stay waking, counted from its wake claim, before the wake is reported (`session_wake_stalled`), with no lookback limit; a provider-limit hold is reported only past its deadline    |
 | `operations.opsAnomalyLookbackHours`          | 24         | 1–720         | Hours of snapshot failures and deletion-quarantine reports the anomaly check looks at                                                                                                                           |
 | `operations.opsAnomalyMaxPerClass`            | 25         | 1–200         | Findings returned per anomaly type; each type still reports its total                                                                                                                                           |
 | `operations.opsNodeLogMaxLines`               | 200        | 1–1,000       | Most log lines one `ops_node_logs` call returns                                                                                                                                                                 |
@@ -873,6 +1059,21 @@ These control the live Google Cloud catalog described in [Google Cloud](/docs/gu
 | `gcpCatalog.bootDiskGbPerVcpu`              | 20                                              | 1–256             | GB of boot disk a new Google Cloud node gets per vCPU, used by the catalog, prices and new nodes from the next catalog refresh; running nodes keep their disk. |
 | `gcpCatalog.bootDiskMinGb`                  | 50                                              | 10–4096           | Smallest boot disk, in GB, a new Google Cloud node gets whatever its vCPU count; same refresh rule.                                                            |
 
+### Infomaniak boot volume
+
+Infomaniak flavors carry a small local root disk (20 GB on the default `a2/a4/a8-…-disk20-perf1` flavors), which devcontainer builds fill. SAM boots every new Infomaniak VM from a Cinder volume of this size instead, created by Nova from the image and deleted with the server (`InfomaniakProvider.createVM`, `packages/providers/src/infomaniak-boot-volume.ts`). The volume uses the project's default Cinder volume type.
+
+| Setting                   | Default | Allowed range | Applies to                                                                                                                                                |
+| ------------------------- | ------: | ------------: | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `infomaniak.bootVolumeGb` |      80 |       20–4096 | Disk the Infomaniak catalog advertises and new Infomaniak VMs boot from, from the next catalog refresh. Running VMs keep the disk they were created with. |
+
+Nodes created before this change still boot from the flavor's local disk and keep reporting it; SAM does not migrate them. Replace such a node (delete it and let SAM provision a new one) to move it onto a boot volume. A pool candidate published before this change still names 20 GB until its catalog refreshes; SAM creates the volume at the larger of the candidate's disk and this setting, so such a node still gets the configured size.
+
+- It is also the largest boot volume a request may ask for: a node or workspace request with a larger `bootDiskSizeGb` is refused before anything is created, because the node may run on a shared platform credential. Lowering the setting does not affect nodes already recorded with a larger size.
+- The volume counts against your Infomaniak block storage quota (volume count and gigabytes).
+- It uses the project's default Cinder volume type, which may differ from `INFOMANIAK_VOLUME_TYPE` (used for data volumes): selecting a type needs a newer Nova API version than SAM requests.
+- Nova deletes the volume with the server. If a delete ever leaves an unattached volume behind, SAM does not track it (boot volumes carry no SAM labels): look for unattached volumes in the Infomaniak console after a failed node deletion.
+
 ### Provider fallback
 
 | Setting                                               | Default | Allowed range | Applies to                                                                                                                             |
@@ -920,3 +1121,90 @@ bootstrap default. Bootstrap cannot depend on reading its own D1 override. Once 
 available, the runtime deadline governs legacy platform configuration and session reads.
 Pending cache loads expire on deadline; late results cannot republish stale data. No deployment
 configuration is required.
+
+## GitHub CI event storage
+
+`events.skipUnsubscribedGitHubCi` defaults to **on** in Operations. In
+`ProjectData.admitProjectEvent` (`packages/project-data/src/do/index.ts`), a GitHub
+`check_run`, `check_suite`, or `workflow_run` event with no matching active, unexpired
+subscription returns `skipped_no_subscriber` with no event receipt or match written.
+Other GitHub events, channel publications, lifecycle, schedule, workflow and credential
+history retain their existing behavior (`project-events.ts`). Subscriptions do not
+backfill earlier CI events: check current GitHub status before and immediately after
+subscribing.
+
+The superadmin event inspector no longer lists skipped CI events. Its CI storage
+summary shows the effective switch and counts by source/type in the current usage
+window (`ProjectEventInspector.tsx`). These counters live only in the object's memory:
+they reset on window flush or eviction, and are not a durable traffic history. The
+existing `project_data.row_usage` log includes the same bounded admission counters;
+overflow is disclosed separately. An empty event list does not establish an absence
+of CI traffic.
+
+Turn the switch **off** to retain all future unmatched CI receipts. This does not
+recover earlier skipped events. Already stored receipts keep their delivery-key
+replay, duplicate count and fingerprint-conflict behavior in either mode. A skipped
+event has no delivery-key ledger; a later redelivery is evaluated against the
+subscriptions active at that later admission. GitHub trigger execution remains
+independent of canonical project-event storage (`routes/github-webhook.ts`).
+
+## Use an OpenAI-compatible model server
+
+Under **AI models**, set `llm.openAICompatible.baseUrl`, the model ID and optional API key.
+The endpoint replaces Workers AI chat calls and the SAM agent's model route. Purpose-specific
+model settings are available for agents, titles (also used by the
+[Project Overview brief](#project-overview-brief)), diagnosis and the Workers AI proxy route.
+Private hosts require the separate `allowPrivateNetwork` confirmation; metadata hosts are always
+refused. Reset the base URL to restore normal routing. See the
+[endpoint configuration reference](/docs/reference/configuration/#openai-compatible-model-endpoint)
+for all keys, budgets, proxy availability and accounting limits.
+
+<!-- Verified: services/llm-endpoint-settings.ts, services/llm-chat-target.ts,
+     services/platform-capabilities.ts:resolveLlmEndpointCapability. -->
+
+## Guided-login cleanup recovery
+
+`credentialSetup.cleanupRecoveryStepTimeoutMs` (Operations) limits each remote step when a
+guided credential-login cleanup is retried by its recovery alarm: D1 repair, sandbox scrub,
+sandbox destruction and pool release. The default is 5,000 ms per step (range 1–10,000 ms),
+capped by `SANDBOX_EXEC_TIMEOUT_MS`. `credentialSetup.cleanupRecoveryMaxAttempts` sets the
+number of recovery work attempts (default 3, range 1–10). Its value is fixed for each cleanup
+when recovery first begins; changing it affects future cleanups. Legacy cleanup already in
+progress keeps its original cap of three. Waiting for an
+already-issued SDK operation does not consume an attempt. Remote waits total
+at most 20 seconds per attempt by default (40 seconds at the maximum), plus the existing
+bounded settings read. A late successful scrub and a successful destruction may each continue once without spending
+another attempt. Including these two bounded continuation passes, the maximum configured
+cap allows 480 seconds of remote waits; the default allows 100 seconds. A final bounded
+D1/pool reconciliation after proven destruction adds at most 20 seconds (10 seconds by
+default), making the conservative episode limits 500 and 110 seconds respectively. Only recovery reads these settings; inline cancellation keeps the
+interactive sandbox timeout.
+
+An alarm joining cleanup already owned by an inline cancellation waits at most one
+recovery-step timeout. If that owner is still blocked in D1 or pool bookkeeping, the
+alarm preserves its ownership and schedules the same immutable uncertainty watchdog.
+Settlement wakes recovery sooner when cleanup is still owed; a permanent stall reaches
+quarantine without starting duplicate sandbox work or repeatedly polling the blocked RPC.
+
+A deadline stops waiting; it does not cancel an SDK operation. Cleanup cannot record
+successful destruction or release its pool slot while earlier sandbox work may still start
+the container. D1 status writes run outside the sandbox-flight counter: once the actual
+SDK work settles, a stalled status write cannot delay sandbox cleanup. Any subsequent
+SDK read rechecks the session lifecycle before starting. Unfinished cleanup remains marked pending. If an isolate dies before that
+work's settlement is observed, recovery preserves the uncertainty. After the recovery cap,
+the session is quarantined and reported as an operator-visible platform error; a late
+settlement does not reset the cap. Pending SDK work has a separate watchdog at the later
+of the original session expiry and one interactive timeout plus a capture poll after teardown.
+Observed settlement wakes cleanup earlier. A timed-out destruction remains tracked: only its
+original successful completion records destruction proof, and recovery waits before another
+sandbox operation or pool release. A rejected or nonzero scrub remains retryable until scrub
+or destruction succeeds. If an alarm cannot establish a durable next wake while cleanup is
+still owed, it fails so Cloudflare can apply its bounded alarm retry policy.
+
+Initial cancellation establishes its recovery alarm before committing a terminal state. If
+arming fails, cancellation fails with the session still active and eligible for the existing
+sweep. Recovery scrubs a provisioning sandbox after its SDK flight settles because a
+background login driver may already have started. A late successful scrub or a successful destruction
+can finish its current attempt once; it never reopens quarantined cleanup. Once destruction
+is proven, successful D1/pool bookkeeping clears pending cleanup before the failure budget
+is checked; failed bookkeeping still spends the bounded budget.

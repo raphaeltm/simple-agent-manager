@@ -12,6 +12,9 @@
  * Time is injected: a fake clock moves the sweep forward five minutes per tick, so no
  * test keeps anything running for real (task brief: inject clocks/faults).
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import {
   guardedSessionSleep,
   type SessionSleepRuntimeGuard,
@@ -43,8 +46,17 @@ import {
   recordSessionSnapshotProgress,
 } from '../../src/services/session-snapshots';
 import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
+import { seedSnapshotGeneration, type SnapshotSeedMode } from '../helpers/session-snapshot-seed';
 import { createAllSchemaTables, createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 import { createRouteTestApp } from '../unit/routes/route-test-app';
+
+/** Shared with the vm-agent and the wake bootstrap: see the fixture's comment. */
+const TRANSCRIPT_ONLY_RESTORE_CONTRACT = JSON.parse(
+  readFileSync(
+    join(__dirname, '../../../../tests/fixtures/session-snapshot-restore-transcript-only-v1.json'),
+    'utf8'
+  )
+) as { controlPlaneRestoreResponse: Record<string, unknown> };
 
 const mocks = vi.hoisted(() => ({
   cleanupTaskRun: vi.fn(),
@@ -287,61 +299,9 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
     chatSessionId: string,
     workspaceId: string,
     generation: string,
-    mode: 'complete' | 'home-skipped' | 'wip-skipped'
+    mode: SnapshotSeedMode
   ) {
-    const prefix = `session-snapshots/${chatSessionId}/${generation}`;
-    const home = mode === 'complete' || mode === 'wip-skipped';
-    const wip = mode === 'complete' || mode === 'home-skipped';
-    if (home) r2Objects.set(`${prefix}/home.tar`, { size: 4, sha256: HOME_SHA256 });
-    if (wip) r2Objects.set(`${prefix}/wip.bundle`, { size: 9, sha256: WIP_SHA256 });
-    r2Objects.set(`${prefix}/manifest.json`, { size: 512, sha256: null });
-    const status = mode === 'complete' ? 'available' : 'degraded';
-    const degradation = mode === 'complete' ? 'none' : mode;
-    sqlite
-      .prepare(
-        `UPDATE session_snapshots
-         SET status = ?, degradation = ?, snapshot_generation = ?, capture_generation = NULL,
-             capture_error = NULL, base_commit = ?,
-             home_r2_key = ?, home_sha256 = ?, wip_r2_key = ?, wip_sha256 = ?,
-             manifest_r2_key = ?, manifest_json = ?, expires_at = ?
-         WHERE chat_session_id = ?`
-      )
-      .run(
-        status,
-        degradation,
-        generation,
-        BASE_COMMIT,
-        home ? `${prefix}/home.tar` : null,
-        home ? HOME_SHA256 : null,
-        wip ? `${prefix}/wip.bundle` : null,
-        wip ? WIP_SHA256 : null,
-        `${prefix}/manifest.json`,
-        JSON.stringify({
-          version: 1,
-          chatSessionId,
-          workspaceId,
-          agentSessionId: workspaceId.replace('ws-', 'agent-'),
-          acpSessionId: 'acp-1',
-          agentType: 'claude-code',
-          baseCommit: BASE_COMMIT,
-          git: {
-            branch: 'sam/feature',
-            upstream: 'origin/sam/feature',
-            remote: 'origin',
-            detached: false,
-          },
-          status,
-          degradation,
-          skipped: mode === 'complete' ? [] : [{ path: '$HOME', reason: 'budget exhausted' }],
-          artifacts: {
-            ...(home ? { home: { sizeBytes: 4, sha256: HOME_SHA256 } } : {}),
-            ...(wip ? { wip: { sizeBytes: 9, sha256: WIP_SHA256 } } : {}),
-          },
-          createdAt: new Date().toISOString(),
-        }),
-        new Date(Date.now() + 7 * DAY_MS).toISOString(),
-        chatSessionId
-      );
+    seedSnapshotGeneration(sqlite, r2Objects, chatSessionId, workspaceId, generation, mode);
   }
 
   /** Run the sweep as the scheduled handler does, then drain its background work. */
@@ -1052,6 +1012,30 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       // The next sleep's complete capture: its wake loads the agent session normally.
       completeGeneration('chat-a', 'ws-wake-a', 'gen-after-wake', 'complete');
       expect((await restoreResponse()).manifest).toMatchObject({ acpSessionId: 'acp-1' });
+    });
+
+    // Hop one of the transcript-only wake contract. The vm-agent answers this body with
+    // `transcript-replay` (session_snapshot_restore_contract_test.go) and the VM wake
+    // bootstrap starts the agent fresh on that (task-runner-transcript-only-wake.test.ts).
+    it('lets the wake claim a transcript-only fallback and answers the shared restore contract', async () => {
+      seedSession({ id: 'a', taskStatus: 'completed' });
+      capture = 'old-agent-rejected';
+      await spendFullBudget();
+      await sweepAt(tick(3));
+      expect(row()).toMatchObject({ sleep_status: 'sleeping', degradation: 'transcript-only' });
+
+      await expect(
+        claimSessionSnapshotRecovery(drizzle(env.DATABASE, { schema }), env, {
+          chatSessionId: 'chat-a',
+          userId: 'user-1',
+          taskId: 'wake-task',
+          now: tick(4),
+        })
+      ).resolves.toMatchObject({ status: 'claimed' });
+
+      expect(await restoreResponse()).toEqual(
+        TRANSCRIPT_ONLY_RESTORE_CONTRACT.controlPlaneRestoreResponse
+      );
     });
 
     it('still resumes the agent session after an ordinary sleep', async () => {

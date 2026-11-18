@@ -9,14 +9,18 @@
 import {
   type AcpInteractionBrowserAnswer,
   type InboxActionResponse,
+  type InboxErrorAction,
   type InboxItem,
   type ParsedInboxRef,
 } from '@simple-agent-manager/shared';
 
 import { authorizeProjectOperation } from './authorization';
 import { OperationError } from './errors';
+import { answerErrorItem, archiveErrorItem } from './inbox-error-core';
 import { INBOX_NOT_FOUND, resolveInboxItem } from './inbox-item-core';
+import { TERMINAL_TASK_STATUSES } from './inbox-rows';
 import { getInboxLimits } from './inbox-settings';
+import { archiveTask, completeTask } from './inbox-task-core';
 import type { InboxAskNoticeOutcome, InboxAskNoticeRow } from './ports';
 import type { OperationContext } from './types';
 
@@ -29,6 +33,8 @@ export interface InboxAnswerInput {
   formContent?: Record<string, unknown>;
   decision?: 'approve' | 'deny';
   note?: string;
+  /** A system error item's fix (`retry`, `wake`, `resume`). */
+  action?: InboxErrorAction;
   /** Browser (web actor) only; never logged or returned. */
   secret?: { value: string; replaceExisting?: boolean; expectedExistingVersion?: string };
 }
@@ -39,6 +45,9 @@ async function requireActable(
 ): Promise<{ item: InboxItem; ref: ParsedInboxRef }> {
   await authorizeProjectOperation(ctx, input.projectId, 'task:write');
   const resolved = await resolveInboxItem(ctx, input, true);
+  // A human task has its own rule for who may close it (`canWriteTask`); the task operation
+  // checks it, so the inbox's assignee-only gate must not refuse the filer first.
+  if (resolved.item.kind === 'task' && resolved.ref.store === 'ask') return resolved;
   if (resolved.item.status !== 'open')
     throw new OperationError('conflict', `This inbox item is already ${resolved.item.status}`);
   if (!resolved.item.canAct) throw new OperationError('forbidden', 'You cannot act on this item');
@@ -107,25 +116,72 @@ export async function notifyClosedAsk(
   return true;
 }
 
+/** Not `conflict`: clients read a 409 as "answered elsewhere" and would hide this message. */
+function finishedAgentReply(): OperationError {
+  return new OperationError(
+    'invalid_input',
+    'The agent that filed this has finished, so it would not see a reply. Continue in its chat.'
+  );
+}
+
+/** Whether the task that filed an ask has reached a terminal status. */
+async function sourceTaskFinished(
+  ctx: OperationContext,
+  projectId: string,
+  askId: string
+): Promise<boolean> {
+  const row = await ctx.env.DATABASE.prepare(
+    `SELECT t.status FROM asks a JOIN tasks t ON t.id = a.source_task_id AND t.project_id = a.project_id
+      WHERE a.id = ? AND a.project_id = ?`
+  )
+    .bind(askId, projectId)
+    .first<{ status: string }>();
+  return Boolean(row && (TERMINAL_TASK_STATUSES as readonly string[]).includes(row.status));
+}
+
 /** Compare-and-set an open ask to a closed status. Returns false when someone else won. */
 async function closeAsk(
   ctx: OperationContext,
   projectId: string,
   askId: string,
   status: 'answered' | 'done' | 'archived',
-  answerJson: string | null
+  answerJson: string | null,
+  options: {
+    /** No agent notice will be sent, so record it as settled in the same write. */
+    silent?: boolean;
+    /** Close only while the filing task is live, so a reply cannot land after it finished. */
+    requireLiveTask?: boolean;
+  } = {}
 ): Promise<boolean> {
   const now = Date.now();
   const me = ctx.actor.userId;
   const result = await ctx.env.DATABASE.prepare(
     `UPDATE asks
-        SET status = ?, answer_json = ?, resolved_by_user_id = ?, resolved_at = ?, updated_at = ?
+        SET status = ?, answer_json = ?, resolved_by_user_id = ?, resolved_at = ?, updated_at = ?,
+            notified_at = CASE WHEN ? THEN ? ELSE notified_at END
       WHERE id = ? AND project_id = ? AND status = 'open'
         AND (expires_at IS NULL OR expires_at > ?)
         AND ((assignee_kind = 'user' AND assignee_user_id = ?)
-          OR (assignee_kind = 'team' AND (claimed_by_user_id IS NULL OR claimed_by_user_id = ?)))`
+          OR (assignee_kind = 'team' AND (claimed_by_user_id IS NULL OR claimed_by_user_id = ?)))
+        AND (? = 0 OR source_task_id IS NULL OR NOT EXISTS (
+          SELECT 1 FROM tasks t WHERE t.id = asks.source_task_id AND t.project_id = asks.project_id
+            AND t.status IN (${TERMINAL_TASK_STATUSES.map((value) => `'${value}'`).join(', ')})))`
   )
-    .bind(status, answerJson, me, now, now, askId, projectId, now, me, me)
+    .bind(
+      status,
+      answerJson,
+      me,
+      now,
+      now,
+      options.silent ? 1 : 0,
+      now,
+      askId,
+      projectId,
+      now,
+      me,
+      me,
+      options.requireLiveTask ? 1 : 0
+    )
     .run();
   return (result.meta?.changes ?? 0) === 1;
 }
@@ -138,6 +194,15 @@ async function answerAsk(
 ): Promise<InboxActionResponse> {
   // Length was checked against `inbox.answerMaxChars` by `answerInboxItem`.
   const answer = input.answer?.trim();
+  if (item.kind === 'task') {
+    // A human task closes through its own path: the `sam.inbox` event is the agent's notice.
+    const result = await completeTask(ctx, {
+      projectId: item.projectId,
+      askId,
+      note: answer || undefined,
+    });
+    return { ref: item.ref, outcome: result.status, agentNotified: result.agentNotified };
+  }
   if (item.kind === 'question' && item.sessionId) {
     // A question is answered through the one path a chat card, a notification and the Connector
     // also use (`answerAttention`, `apps/api/src/routes/chat-attention.ts`), so concurrent answers
@@ -161,13 +226,31 @@ async function answerAsk(
     throw new OperationError('invalid_input', 'answer must match one of the requested options');
   if (spec.type === 'text' && !answer)
     throw new OperationError('invalid_input', 'answer is required');
+  const status = 'answered';
+  // A reply reaches the agent only while its task is live (`sourceTaskGuardForClaim`,
+  // `inbox_ask`); after that it would be stored and silently never delivered. Checked here for
+  // the message, and again in the closing write in case the task finishes in between.
+  const replyNeedsLiveTask = (item.kind === 'result' || item.kind === 'review') && Boolean(answer);
+  if (replyNeedsLiveTask && item.agentState === 'finished') throw finishedAgentReply();
+  if (item.kind === 'result' && !answer) {
+    // "Got it": the person read the result and needs nothing more, so the agent is not woken.
+    // `notified_at` is set in the closing write, so the ask-notice sweep never sends one later.
+    if (!(await closeAsk(ctx, item.projectId, askId, status, null, { silent: true })))
+      throw new OperationError('conflict', 'This inbox item was already answered or closed');
+    return { ref: item.ref, outcome: status, agentNotified: false };
+  }
   // An answer reaches the agent as a prompt, so the agent-wake policy decides first.
   if (item.sessionId)
     await ctx.ports.inbox.authorizeAnswerWake(item.projectId, item.sessionId, ctx.actor.userId);
-  const status = item.kind === 'task' ? 'done' : 'answered';
   const answerJson = answer ? JSON.stringify({ text: answer }) : null;
-  if (!(await closeAsk(ctx, item.projectId, askId, status, answerJson)))
+  const closed = await closeAsk(ctx, item.projectId, askId, status, answerJson, {
+    requireLiveTask: replyNeedsLiveTask,
+  });
+  if (!closed) {
+    if (replyNeedsLiveTask && (await sourceTaskFinished(ctx, item.projectId, askId)))
+      throw finishedAgentReply();
     throw new OperationError('conflict', 'This inbox item was already answered or closed');
+  }
   const row = await loadAskNoticeRow(ctx, item.projectId, askId);
   const agentNotified = row ? await notifyClosedAsk(ctx, row, status) : false;
   return { ref: item.ref, outcome: status, agentNotified };
@@ -253,6 +336,8 @@ export async function answerInboxItem(
   const me = ctx.actor.userId;
   switch (ref.store) {
     case 'ask':
+      // A system error has no filing agent: answering it runs its fix (inbox-error-core.ts).
+      if (item.kind === 'error') return answerErrorItem(ctx, item, ref.id, input.action);
       return answerAsk(ctx, item, ref.id, input);
     case 'attention': {
       if (item.answerSpec.type === 'interaction') {
@@ -325,6 +410,11 @@ export async function archiveInboxItem(
   const me = ctx.actor.userId;
   switch (ref.store) {
     case 'ask': {
+      if (item.kind === 'task') {
+        const result = await archiveTask(ctx, { projectId: item.projectId, askId: ref.id });
+        return { ref: item.ref, outcome: result.status, agentNotified: result.agentNotified };
+      }
+      if (item.kind === 'error') return archiveErrorItem(ctx, item, ref.id);
       // The notice wakes the filing agent, so the agent-wake policy decides, as for an answer.
       if (item.sessionId)
         await ctx.ports.inbox.authorizeAnswerWake(item.projectId, item.sessionId, me);

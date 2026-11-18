@@ -41,7 +41,6 @@ import { adminAIProxyRoutes } from '../../../src/routes/admin-ai-proxy';
 import {
   forwardToAnthropic,
   forwardToOpenAI,
-  forwardToWorkersAI,
 } from '../../../src/routes/ai-proxy-upstream';
 import { resolveUnifiedBillingToken, resolveUpstreamAuth } from '../../../src/services/ai-billing';
 import { runMonthlyCostAggregation } from '../../../src/services/ai-monthly-cost-cron';
@@ -212,13 +211,6 @@ describe('provider forwarding', () => {
     expect(headers['cf-aig-metadata']).toBe(AIG_METADATA);
   });
 
-  it('cloudflare: Workers AI goes through the gateway (control)', async () => {
-    await forwardToWorkersAI(makeEnv('cloudflare'), CHAT, '@cf/m/x', AIG_METADATA);
-    expect(sent().url).toBe(
-      'https://gateway.ai.cloudflare.com/v1/account-1/sam/workers-ai/v1/chat/completions'
-    );
-  });
-
   it.each(PARTIAL)('%s: Anthropic goes straight to Anthropic without SAM ids', async (shape) => {
     fetchMock.mockResolvedValueOnce(Response.json(ANTHROPIC_OK));
     const res = await forwardToAnthropic(makeEnv(shape), CHAT, 'claude-sonnet-5', AIG_METADATA, {
@@ -230,16 +222,7 @@ describe('provider forwarding', () => {
     expect(headers['x-api-key']).toBe('sk-platform-key');
     expect(headers['cf-aig-metadata']).toBeUndefined();
   });
-
-  it.each(PARTIAL)('%s: Workers AI uses the account REST API, as before', async (shape) => {
-    const { response } = await forwardToWorkersAI(makeEnv(shape), CHAT, '@cf/m/x', AIG_METADATA);
-    expect(response.status).toBe(200);
-    const { url, headers } = sent();
-    expect(url).toBe(
-      'https://api.cloudflare.com/client/v4/accounts/account-1/ai/v1/chat/completions'
-    );
-    expect(headers.Authorization).toBe('Bearer cf-api-token');
-  });
+  // Workers AI forwarding without a gateway is main's L12 shape (tests/unit/services/llm-endpoint.test.ts).
 });
 
 describe('monthly cost cron', () => {

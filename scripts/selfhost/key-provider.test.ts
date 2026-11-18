@@ -20,9 +20,9 @@ import {
 } from '../../deploy/selfhost/key-agent/provider-file.ts';
 import { createGcpKmsProvider } from '../../deploy/selfhost/key-agent/provider-gcp-kms.ts';
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
-import { FAKE_AWS_REGION, type FakeAws, startFakeAws } from './aws-kms-fake';
+import { FAKE_AWS_REGION, type FakeAws, startFakeAws } from './fixtures/aws-kms-fake';
 import { describeKeyProviderConformance } from './key-provider-conformance';
-import { type FakeKeyService, startFakeKeyServices } from './key-provider-fakes';
+import { type FakeKeyService, startFakeKeyServices } from './fixtures/key-provider-fakes';
 
 const dir = mkdtempSync(join(tmpdir(), 'sam-kek-'));
 function kekFile(name: string): string {

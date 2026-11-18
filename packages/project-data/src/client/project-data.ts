@@ -28,6 +28,7 @@ import type {
   GetProjectEventInput,
   GetProjectEventRecentStatusInput,
   GetProjectEventSubscriptionInput,
+  InboxItemCommentThread,
   LibraryFileCommentMutationResponse,
   ListProjectEventChannelsInput,
   ListProjectEventChannelSubscribersInput,
@@ -90,6 +91,11 @@ import type {
   GroupedFtsWallRecoveryResult,
 } from '../do/grouped-fts-wall-recovery';
 import type { IdeaWorkLinkCaps, IdeaWorkSnapshot } from '../do/idea-work';
+import type {
+  CreateInboxItemCommentInput,
+  InboxItemCommentMutationResult,
+  ListInboxItemCommentThreadsInput,
+} from '../do/inbox-item-comments';
 import type { LogicalMessageRequest, LogicalMessageResult } from '../do/logical-message';
 import type { LogicalTranscriptRequest, LogicalTranscriptResult } from '../do/logical-transcript';
 import type { MessageContextRequest, MessageContextResult } from '../do/message-context';
@@ -166,6 +172,7 @@ import {
 import { projectDataPorts } from '../do/ports';
 import type { ValidateProjectEventWakeRecoveryAuthorityInput } from '../do/project-events-wake-delivery';
 import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from '../do/prompt-delivery';
+import type { CancelUnissuedSessionPromptsResult } from '../do/prompt-delivery-cancellation';
 import type { ActivityReportOutcome } from '../do/session-work-clock';
 import type {
   CreateReservedTaskSessionWithInitialMessageInput,
@@ -190,7 +197,7 @@ import type { ProjectDataRootSearchCoverage } from './project-data-search-covera
 import { recordReservedTaskSessionRevocation } from './project-data-session-revocations';
 import { toProjectDataStorageFullError } from './project-data-storage-errors';
 
-export type { ProjectDataSessionIdentityGuard };
+export type { CancelUnissuedSessionPromptsResult, ProjectDataSessionIdentityGuard };
 
 function rootExactReadOwner(projectId: string, sessionId: string): ProjectDataArchiveLocation {
   return {
@@ -633,24 +640,70 @@ export async function linkSessionToWorkspace(
   );
 }
 
+/** Cancel pending prompts without discarding saved work or inventing access revocation. */
+export async function cancelUnissuedSessionPrompts(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  taskId: string,
+  options?: { acceptedBefore: number }
+): Promise<CancelUnissuedSessionPromptsResult> {
+  await assertExactWriteAllowedIfArchiveEnabled(
+    env,
+    projectId,
+    sessionId,
+    'cancelUnissuedSessionPrompts'
+  );
+  const stub = await getStub(env, projectId);
+  return options
+    ? stub.cancelUnissuedSessionPrompts(sessionId, taskId, options)
+    : stub.cancelUnissuedSessionPrompts(sessionId, taskId);
+}
+
 export async function stopSession(
   env: Env,
   projectId: string,
   sessionId: string,
-  options?: { lifecycleSource: 'workspace_eviction_finalization' }
+  options?: {
+    lifecycleSource?: 'workspace_eviction_finalization';
+    guard?: ProjectDataSessionIdentityGuard;
+  }
 ): Promise<boolean> {
   await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'stopSession');
   const source = options?.lifecycleSource ?? 'project_data.stop_session';
   await recordReservedTaskSessionRevocation(env, {
     projectId,
     chatSessionId: sessionId,
+    taskId: options?.guard?.taskId,
     reason: 'session_stopped',
     source,
   });
   const stub = await getStub(env, projectId);
-  const stopped = options?.lifecycleSource
-    ? await stub.stopSession(sessionId, { source: options.lifecycleSource })
-    : await stub.stopSession(sessionId);
+  let stopped: boolean;
+  try {
+    stopped =
+      options?.lifecycleSource || options?.guard
+        ? await stub.stopSession(sessionId, {
+            source: options.lifecycleSource,
+            guard: options.guard,
+          })
+        : await stub.stopSession(sessionId);
+  } catch (error) {
+    if (
+      options?.guard &&
+      error instanceof Error &&
+      (error.message.startsWith(`Session ${sessionId} cannot stopped: expected `) ||
+        error.message === `Session ${sessionId} not found`)
+    ) {
+      log.info('project_data.stop_session_identity_guard_denied', {
+        projectId,
+        sessionId,
+        taskId: options.guard.taskId ?? null,
+      });
+      return false;
+    }
+    throw error;
+  }
   if (stopped) {
     await recordSessionLifecycleEventBestEffort(env, {
       projectId,
@@ -1029,6 +1082,21 @@ export async function getRunReceiptFacts(
     projectId,
     'getRunReceiptFacts',
     (stub) => stub.getRunReceiptFacts(input),
+    'idempotent_read'
+  );
+}
+
+export async function countRunNudges(
+  env: Env,
+  projectId: string,
+  windows: Parameters<ProjectData['countRunNudges']>[0],
+  maxWindows: number
+): Promise<ReturnType<ProjectData['countRunNudges']>> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'countRunNudges',
+    (stub) => stub.countRunNudges(windows, maxWindows),
     'idempotent_read'
   );
 }
@@ -2292,6 +2360,59 @@ export async function runProjectEventRetention(
   return callProjectDataEvent(env, projectId, 'runProjectEventRetention', input);
 }
 
+// --- Inbox item comments (inbox slice H1) ------------------------------------
+// Scoped to the asks id. Callers must have already proven the item belongs to `projectId` and
+// that the actor may read it (packages/operations/src/inbox-task-core.ts) — the DO has no D1.
+
+export async function listInboxItemCommentThreads(
+  env: Env,
+  projectId: string,
+  input: ListInboxItemCommentThreadsInput
+): Promise<{ threads: InboxItemCommentThread[]; hasMore: boolean }> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'listInboxItemCommentThreads',
+    (stub) => stub.listInboxItemCommentThreads(input),
+    'idempotent_read'
+  );
+}
+
+export async function countInboxItemWatchers(
+  env: Env,
+  projectId: string,
+  itemId: string
+): Promise<number> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'countInboxItemWatchers',
+    (stub) => stub.countInboxItemWatchers(projectId, itemId),
+    'idempotent_read'
+  );
+}
+
+/** Renew an item's watches before admitting a change (`renewInboxItemWatches`). */
+export async function renewInboxItemWatches(
+  env: Env,
+  projectId: string,
+  input: { itemId: string; open: boolean; closedGraceMs: number }
+): Promise<number> {
+  return callProjectDataNoRetry(env, projectId, 'renewInboxItemWatches', (stub) =>
+    stub.renewInboxItemWatches({ projectId, ...input })
+  );
+}
+
+export async function createInboxItemComment(
+  env: Env,
+  projectId: string,
+  input: CreateInboxItemCommentInput
+): Promise<InboxItemCommentMutationResult> {
+  return callProjectDataNoRetry(env, projectId, 'createInboxItemComment', (stub) =>
+    stub.createInboxItemComment(input)
+  );
+}
+
 // --- Library file comments ---------------------------------------------------
 // Every entry point is `fileId`-scoped. Callers must have already proven the file
 // belongs to `projectId` (see assertLibraryFileInProject) — the DO has no D1.
@@ -3440,7 +3561,6 @@ export async function expireQuestionAsk(
   const stub = await getStub(env, projectId);
   return stub.expireQuestionAsk(input);
 }
-
 
 export async function prepareAttentionAnswer(
   env: Env,

@@ -1,18 +1,22 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { EXIT_BUDGET_EXCEEDED, getConfig, main, parseCostResponse } from './check-cloudflare-cost';
 import {
   analyzeCloudflareCost,
-  calculateProjectedCost,
-  createDefaultPricing,
+  calculateCloudflareMetricCost,
   type CloudflareCostRows,
-  formatCostReport,
+  createCloudflarePricing,
+  parseCloudflareCostResponse,
   validateDurationIdentity,
-} from './cloudflare-cost-core';
+} from '../../packages/shared/src/cloudflare-cost/index.js';
+import { EXIT_BUDGET_EXCEEDED, getConfig, main } from './check-cloudflare-cost';
+import { formatCostReport } from './cloudflare-cost-report';
 
 const EMPTY_ROWS: CloudflareCostRows = {
   durableObjectPeriodic: [],
   durableObjectInvocations: [],
+  workersInvocations: [],
+  kvOperations: [],
+  kvStorage: [],
   workersAi: [],
   r2Storage: [],
   d1Analytics: [],
@@ -28,10 +32,10 @@ describe('check-cloudflare-cost', () => {
   });
 
   it('calculates allowance boundaries without charging included usage', () => {
-    const pricing = createDefaultPricing().metrics.doRowsRead;
+    const pricing = createCloudflarePricing().metrics.doRowsRead;
 
-    expect(calculateProjectedCost(25_000_000_000, pricing)).toBe(0);
-    expect(calculateProjectedCost(26_000_000_000, pricing)).toBeCloseTo(1);
+    expect(calculateCloudflareMetricCost(25_000_000_000, pricing)).toBe(0);
+    expect(calculateCloudflareMetricCost(26_000_000_000, pricing)).toBeCloseTo(1);
   });
 
   it('validates the Durable Object activeTime to billed duration identity', () => {
@@ -66,17 +70,13 @@ describe('check-cloudflare-cost', () => {
         ],
         durableObjectInvocations: [
           {
-            dimensions: {
-              date: '2026-09-01',
-              namespaceId: 'notification',
-              scriptName: 'sam-api-prod',
-              type: 'websocket',
-            },
-            sum: { requests: 10, wallTime: 51 * 60 * 60 * 1_000_000 },
+            dimensions: { date: '2026-09-01' },
+            // wallTime is deliberately present: the analysis must ignore it (rule 76.3).
+            sum: { requests: 10, wallTime: 51 * 60 * 60 * 1_000_000 } as { requests: number },
           },
         ],
       },
-      createDefaultPricing(),
+      createCloudflarePricing(),
       { startDate: '2026-09-01', endDate: '2026-09-01', recentDays: 1 }
     );
 
@@ -112,7 +112,7 @@ describe('check-cloudflare-cost', () => {
 
     const analysis = analyzeCloudflareCost(
       { ...EMPTY_ROWS, durableObjectPeriodic },
-      createDefaultPricing(),
+      createCloudflarePricing(),
       { startDate: '2026-09-01', endDate: '2026-09-21', recentDays: 7 }
     );
     const rowsReadProjection = analysis.projections.find(
@@ -145,12 +145,12 @@ describe('check-cloudflare-cost', () => {
   });
 
   it('propagates GraphQL errors and refuses partial-looking limit hits', () => {
-    expect(() => parseCostResponse({ errors: [{ message: 'bad field' }] }, 10)).toThrow(
+    expect(() => parseCloudflareCostResponse({ errors: [{ message: 'bad field' }] }, 10)).toThrow(
       'Cloudflare GraphQL error: bad field'
     );
 
     expect(() =>
-      parseCostResponse(
+      parseCloudflareCostResponse(
         {
           data: {
             viewer: {
@@ -167,7 +167,63 @@ describe('check-cloudflare-cost', () => {
         },
         2
       )
-    ).toThrow('refusing a partial cost report');
+    ).toThrow('refusing a partial cost estimate');
+  });
+
+  it('excludes tail-worker invocations from Workers requests but keeps their CPU time', () => {
+    const analysis = analyzeCloudflareCost(
+      {
+        ...EMPTY_ROWS,
+        workersInvocations: [
+          {
+            dimensions: { date: '2026-11-15', eventType: 'fetch' },
+            sum: { requests: 260_706, cpuTimeUs: 2_949_020_908 },
+          },
+          {
+            dimensions: { date: '2026-11-15', eventType: 'cron' },
+            sum: { requests: 311, cpuTimeUs: 224_486_837 },
+          },
+          {
+            dimensions: { date: '2026-11-15', eventType: 'tail' },
+            sum: { requests: 590_939, cpuTimeUs: 113_113_779 },
+          },
+        ],
+      },
+      createCloudflarePricing(),
+      { startDate: '2026-11-01', endDate: '2026-11-15', recentDays: 7 }
+    );
+    const day = analysis.daily.find((entry) => entry.date === '2026-11-15');
+    expect(day?.metrics.workersRequests).toBe(261_017);
+    expect(day?.metrics.workersCpuMs).toBeCloseTo(
+      (2_949_020_908 + 224_486_837 + 113_113_779) / 1000
+    );
+  });
+
+  it('maps KV actions and sums KV storage across namespaces', () => {
+    const analysis = analyzeCloudflareCost(
+      {
+        ...EMPTY_ROWS,
+        kvOperations: [
+          { dimensions: { date: '2026-11-15', actionType: 'read' }, sum: { requests: 45_849 } },
+          { dimensions: { date: '2026-11-15', actionType: 'write' }, sum: { requests: 3_516 } },
+          { dimensions: { date: '2026-11-15', actionType: 'delete' }, sum: { requests: 2 } },
+          { dimensions: { date: '2026-11-15', actionType: 'list' }, sum: { requests: 7 } },
+          { dimensions: { date: '2026-11-15', actionType: 'unknown' }, sum: { requests: 99 } },
+        ],
+        kvStorage: [
+          { dimensions: { date: '2026-11-15', namespaceId: 'a' }, max: { byteCount: 732_963 } },
+          { dimensions: { date: '2026-11-15', namespaceId: 'b' }, max: { byteCount: 23_744 } },
+        ],
+      },
+      createCloudflarePricing(),
+      { startDate: '2026-11-15', endDate: '2026-11-15', recentDays: 1 }
+    );
+    const metrics = analysis.daily[0]?.metrics;
+    expect(metrics?.kvReads).toBe(45_849);
+    expect(metrics?.kvWrites).toBe(3_516);
+    expect(metrics?.kvDeletes).toBe(2);
+    expect(metrics?.kvLists).toBe(7);
+    expect(metrics?.kvStorageGb).toBeCloseTo((732_963 + 23_744) / 1e9);
   });
 
   it('returns a budget failure when --max-usd is exceeded', async () => {

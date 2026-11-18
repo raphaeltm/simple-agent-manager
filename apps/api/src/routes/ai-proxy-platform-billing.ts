@@ -5,6 +5,8 @@
  *
  * Split out of ai-proxy.ts per .claude/rules/18-file-size-limits.md.
  */
+import type { MeasuredTokenUsage } from '@simple-agent-manager/ai-proxy';
+
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
@@ -141,7 +143,9 @@ export function accountingResponse(
   response: Response,
   userId: string,
   estimatedInputTokens: number,
-  options: { estimateMissingUsage?: boolean; costModelId?: string } = {}
+  /** Insights run usage hook (`proxyRunUsageRecorder`); receives measured usage only. */
+  onMeasuredUsage?: (usage: MeasuredTokenUsage) => Promise<void>,
+  metering: { costModelId?: string; estimateMissingUsage?: boolean } = {}
 ): Promise<Response> {
   let executionCtx: Pick<ExecutionContext, 'waitUntil'> | undefined;
   try {
@@ -155,7 +159,7 @@ export function accountingResponse(
     format: 'openai',
     fallbackInputTokens: estimatedInputTokens,
     executionCtx,
-    estimateMissingUsage: options.estimateMissingUsage === true,
-    costModelId: options.costModelId,
+    onMeasuredUsage,
+    ...metering,
   });
 }

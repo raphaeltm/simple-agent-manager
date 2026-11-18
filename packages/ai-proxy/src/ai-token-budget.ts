@@ -6,7 +6,6 @@
  * environments, but it is no longer the primary counter because KV read-modify-
  * write updates are not atomic under concurrent requests.
  */
-
 import type { UserAiBudgetSettings } from '@simple-agent-manager/shared';
 import {
   DEFAULT_AI_PROXY_DAILY_INPUT_TOKEN_LIMIT,
@@ -16,7 +15,8 @@ import {
 import { log } from '@simple-agent-manager/worker-core';
 
 import { getUserBudgetSettings } from './ai-budget-settings';
-import { checkMonthlyCostCap } from './ai-monthly-cost-cap';
+import { hasLocalAiCostMetering } from './ai-gateway-availability';
+import { checkMonthlyCostCap, type MonthlyCostCeilingPort } from './ai-monthly-cost-cap';
 import type { AiProxyEnv } from './env';
 
 export {
@@ -33,9 +33,10 @@ export {
 export {
   buildMonthlyCostCacheKey,
   checkMonthlyCostCap,
+  effectiveMonthlyCostCapUsd,
   getCachedMonthlyCost,
-  getLocalMonthlyAiCostUsd,
-  type MonthlyCostCapCheck,
+  type MonthlyCostCeilingPort,
+  resolveMonthlyCostCeilingUsd,
 } from './ai-monthly-cost-cap';
 
 export interface TokenBudget {
@@ -70,7 +71,8 @@ interface AiTokenBudgetCounterStub extends DurableObjectStub {
     attribution: AiProviderUsageAttribution,
     inputTokens: number,
     outputTokens: number,
-    estimatedCostUsd: number
+    estimatedCostUsd: number,
+    modelId?: string
   ): Promise<void>;
   getProviderUsage(startDateKey: string): Promise<AiProviderUsageEntry[]>;
 }
@@ -332,7 +334,9 @@ export async function incrementProviderUsage(
   inputTokens: number,
   outputTokens: number,
   env?: AiProxyEnv,
-  estimatedCostUsd = 0
+  estimatedCostUsd = 0,
+  /** Catalog model SAM priced this call from; adds a per-model row (DO only, ai-model-usage.ts). */
+  modelId?: string
 ): Promise<void> {
   const counter = getBudgetCounter(env, userId);
   if (counter) {
@@ -341,7 +345,8 @@ export async function incrementProviderUsage(
       attribution,
       inputTokens,
       outputTokens,
-      estimatedCostUsd
+      estimatedCostUsd,
+      ...(modelId ? [modelId] : [])
     );
     return;
   }
@@ -368,7 +373,13 @@ export async function incrementProviderUsage(
 
   const ttl =
     parseInt(env?.AI_USAGE_BUDGET_TTL_SECONDS || '', 10) || DEFAULT_AI_USAGE_BUDGET_TTL_SECONDS;
-  await kv.put(key, JSON.stringify(existing), { expirationTtl: ttl });
+  // Local monthly caps read these daily rows. Retain them through the end of their month
+  // plus the existing grace TTL; a later BYO write must not shorten a priced row's lifetime.
+  const now = new Date();
+  const monthEnd = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+  const retention =
+    env && hasLocalAiCostMetering(env) ? Math.ceil((monthEnd - now.getTime()) / 1000) + ttl : ttl;
+  await kv.put(key, JSON.stringify(existing), { expirationTtl: retention });
 }
 
 export async function getProviderUsage(
@@ -449,14 +460,19 @@ export type AiUsageGateResult =
 export async function checkAiUsageGate(
   kv: KVNamespace,
   userId: string,
-  env: AiProxyEnv
+  env: AiProxyEnv,
+  ports: MonthlyCostCeilingPort,
+  options?: { platformBilled?: boolean }
 ): Promise<AiUsageGateResult> {
   const budget = await checkTokenBudget(kv, userId, env);
   if (!budget.allowed) {
     return { allowed: false, reason: 'daily-token-budget', budget };
   }
 
-  const monthlyCap = await checkMonthlyCostCap(kv, userId, env);
+  // Local dollar totals contain only platform-funded spend. Daily budgets still cover all calls.
+  // Omission means platform billing; only the resolved passthrough credential opts out.
+  if (options?.platformBilled === false && hasLocalAiCostMetering(env)) return { allowed: true };
+  const monthlyCap = await checkMonthlyCostCap(kv, userId, env, ports);
   if (!monthlyCap.allowed) {
     return { allowed: false, reason: 'monthly-cost-cap', monthlyCap };
   }
