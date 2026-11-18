@@ -693,8 +693,11 @@ It writes the `users` row BetterAuth reads, through `celld d1 execute`, so the s
 running and deployed. It is idempotent: an existing account is left as it is, except that
 `--superadmin` promotes it (and approves it if it was pending; it never lifts a suspension). The new account is active and its email verified (you vouch for the
 address); it then signs in by requesting a code. Pass `--env-file` as for the deploy, and
-`--dry-run` to print the SQL without running it. While `BOOTSTRAP_OWNER_EMAIL` is set and that
-owner has never signed in, SAM admits only the owner. On an unbound fresh install with exactly one real account and no completed owner election, that account becomes the first superadmin when it signs in (the same durable election used on Cloudflare).
+`--dry-run` to print the SQL without running it (it reads the box settings, because the SQL
+depends on the owner email). While `BOOTSTRAP_OWNER_EMAIL` is set and that
+owner has never signed in, SAM admits only the owner, so `--superadmin` for any other address is
+refused (nothing is written) until the owner has signed in once: a superadmin created first would
+stop SAM from ever promoting the owner and lock everyone out. On an unbound fresh install with exactly one real account and no completed owner election, that account becomes the first superadmin when it signs in (the same durable election used on Cloudflare).
 
 **First run after the owner exists.** A box has no `SETUP_TOKEN` (only the Cloudflare installer
 generates one), so `/setup` closes itself once an active superadmin exists and says SAM is set up

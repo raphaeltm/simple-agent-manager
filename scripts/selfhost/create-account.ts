@@ -18,10 +18,13 @@ import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
 import {
+  type AccountPlan,
+  type AccountReport,
   createAccountSql,
   generateAccountId,
   normalizeAccountEmail,
   parseAccountReport,
+  superadminWaitsForOwner,
 } from './account-sql.js';
 import { celldChildEnv, redactSecrets } from './box-settings.js';
 import { ensureCelldBinary, resolveEsbuild } from './celld-binary.js';
@@ -33,6 +36,25 @@ const CHILD_OUTPUT_MAX_BYTES = 16 * 1024 * 1024;
 
 function log(message: string): void {
   console.log(`[selfhost] ${message}`);
+}
+
+/**
+ * Why `--superadmin` was refused, or null. The SQL writes nothing for a non-owner superadmin
+ * while the bootstrap owner is not established (account-sql.ts), so a missing account, or one
+ * that is still not a superadmin, means the guard held.
+ */
+export function ownerLockoutRefusal(
+  plan: AccountPlan,
+  account: AccountReport | null
+): string | null {
+  if (!superadminWaitsForOwner(plan) || account?.role === 'superadmin') return null;
+  return (
+    `refused: ${plan.bootstrapOwnerEmail} (BOOTSTRAP_OWNER_EMAIL) has not signed in yet. ` +
+    `SAM makes the owner the administrator on their first sign-in only while no other ` +
+    `superadmin exists, and admits no one else before that, so a superadmin for ` +
+    `${plan.email} now would lock everyone out. Nothing was changed. Sign in as the owner ` +
+    `first, then run this again, or run it without --superadmin.`
+  );
 }
 
 /** The D1 database bound as DATABASE in the deployed (secrets-free) celld config. */
@@ -64,16 +86,6 @@ async function main(): Promise<void> {
   });
   if (!values.email) throw new Error('--email is required');
   const email = normalizeAccountEmail(values.email);
-  const sql = createAccountSql({
-    email,
-    superadmin: values.superadmin ?? false,
-    id: generateAccountId(),
-    nowMs: Date.now(),
-  });
-  if (values['dry-run']) {
-    console.log(sql);
-    return;
-  }
 
   const envFile = resolve(values['env-file'] ?? join(REPO_ROOT, 'deploy/selfhost/.env'));
   assertPrivateFile(envFile);
@@ -83,6 +95,20 @@ async function main(): Promise<void> {
     dirname(envFile),
     values['state-dir'] ?? box.SAM_SELFHOST_STATE_DIR ?? '.state'
   );
+  const owner = readSecretsFile(join(stateDir, 'secrets.env')).BOOTSTRAP_OWNER_EMAIL?.trim();
+  const plan = {
+    email,
+    superadmin: values.superadmin ?? false,
+    id: generateAccountId(),
+    nowMs: Date.now(),
+    bootstrapOwnerEmail: owner ? normalizeAccountEmail(owner) : undefined,
+  };
+  const sql = createAccountSql(plan);
+  if (values['dry-run']) {
+    console.log(sql);
+    return;
+  }
+
   const projectDir = join(stateDir, 'project');
   const configPath = join(projectDir, 'wrangler.json');
   if (!existsSync(configPath)) throw new Error(`${configPath} not found; run pnpm selfhost:deploy`);
@@ -102,13 +128,14 @@ async function main(): Promise<void> {
   if (result.status !== 0) throw new Error(`celld d1 execute failed (exit ${result.status})`);
   // The last statement reports the account; no row means nothing usable was written.
   const account = parseAccountReport(result.stdout ?? '', email);
+  const refusal = ownerLockoutRefusal(plan, account);
+  if (refusal) throw new Error(refusal);
   if (!account) throw new Error(`no account for ${email} after the command; nothing was created`);
   if (account.status === 'suspended') {
     log(`note: ${email} is suspended; an administrator must reactivate it in Admin → Users`);
   }
   log(`done: ${email} can now request a sign-in code at https://app.${box.SAM_DOMAIN ?? ''}`);
   // Until the installer owner has signed in once, SAM admits no one else (bootstrap-owner.ts).
-  const owner = readSecretsFile(join(stateDir, 'secrets.env')).BOOTSTRAP_OWNER_EMAIL?.trim();
   if (owner && owner.toLowerCase() !== email) {
     log(`note: BOOTSTRAP_OWNER_EMAIL is set; if ${owner} has not signed in yet, only they can`);
   }
