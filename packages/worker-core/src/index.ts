@@ -56,7 +56,6 @@ export {
   type OutboundRefusalReason,
   OutboundRequestRefusedError,
 } from './network-hosts';
-export { guardedFetchWithDeadline, OutboundDeadlineError } from './network-hosts/deadline';
 export {
   type AskAttentionSummary,
   DEFAULT_OPEN_QUESTION_READ_LIMIT,

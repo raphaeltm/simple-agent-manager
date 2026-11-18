@@ -15,4 +15,3 @@ export {
   type OutboundRefusalReason,
   OutboundRequestRefusedError,
 } from '@simple-agent-manager/worker-core';
-export { guardedFetchWithDeadline } from '@simple-agent-manager/worker-core';

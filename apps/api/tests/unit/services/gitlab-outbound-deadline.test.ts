@@ -41,7 +41,8 @@ beforeEach(async () => {
     allowPrivateNetwork: true,
   });
   vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  // Main's L6 gitlabFetch spends the remaining budget per hop from Date.now(), so fake the clock too.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
 });
 
 afterEach(async () => {
@@ -71,7 +72,7 @@ describe('GitLab API deadline', () => {
     expect(await settled(call)).toBe(false);
     vi.advanceTimersByTime(400);
     expect(await settled(call)).toBe(true);
-    expect(await call).toMatchObject({ statusCode: 504, error: 'GITLAB_TIMEOUT' });
+    expect(String((await call) as Error)).toMatch(/timed out/i);
     expect(server.count()).toBe(3);
   });
 

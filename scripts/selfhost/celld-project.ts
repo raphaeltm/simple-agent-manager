@@ -22,6 +22,7 @@ import { dirname, join, resolve } from 'node:path';
 
 import type { CelldConfigPlan, CelldWranglerConfig } from './celld-config.js';
 import { materialiseSandboxImageContext } from './guided-login.js';
+import { appendReverseTunnelMigrations } from './reverse-tunnel-migrations.js';
 import { writePrivateFile } from './secret-files.js';
 import {
   SELFHOST_DURABLE_OBJECTS,
@@ -34,6 +35,8 @@ export const SOURCE_LINK = 'src';
 export const ASSETS_DIR = 'web';
 /** The celld entry module, in both key modes (renderRuntimeSecretsMain / renderPlainMain). */
 export const CELLD_MAIN = 'celld-main.ts';
+/** apps/api/wrangler.toml `migrations_dir` of the primary DATABASE. */
+const PRIMARY_MIGRATIONS_DIR = 'src/db/migrations';
 
 /**
  * Runtime switches every celld entry turns on before any request runs. On celld the code that
@@ -178,6 +181,9 @@ export function prepareCelldProject(options: PrepareProjectOptions): void {
     rmSync(target, { recursive: true, force: true });
     mkdirSync(target, { recursive: true });
     for (const file of files) symlinkSync(join(source, file), join(target, file));
+    // The primary database also gets the self-host-only migrations (reverse-tunnel leases,
+    // apps/api/src/selfhost/migrations/), which apps/api/wrangler.toml never lists.
+    if (dir.sourceDir === PRIMARY_MIGRATIONS_DIR) appendReverseTunnelMigrations(apiDir, target);
   }
 
   const mainPath = join(projectDir, CELLD_MAIN);

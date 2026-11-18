@@ -71,9 +71,12 @@ function watchSignatures(watch: LifecycleWatch): Promise<string[]> {
       platformErrorSignature('api', regressionMessage(watch)),
     ]);
     // A failed digest is not cached, so the next request retries it.
+    // shared-flight-join-allowed: local SHA-256 digests only (crypto.subtle), no request I/O to drop.
     cached.catch(() => signatureCache.delete(key));
+    // shared-flight-join-allowed: local SHA-256 digests only (crypto.subtle), no request I/O to drop.
     signatureCache.set(key, cached);
   }
+  // shared-flight-join-allowed: local SHA-256 digests only (crypto.subtle), no request I/O to drop.
   return cached;
 }
 

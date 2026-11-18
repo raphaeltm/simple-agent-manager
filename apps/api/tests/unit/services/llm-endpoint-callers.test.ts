@@ -9,7 +9,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resolveOperatorModel } from '../../../src/durable-objects/sam-session/operator/model';
 import type { Env } from '../../../src/env';
-import { forwardToWorkersAI } from '../../../src/routes/ai-proxy-upstream';
 import {
   __resetAdminSettingsCacheForTest,
   updateAdminSettings,
@@ -72,70 +71,8 @@ const ENDPOINT = {
   model: 'default-model',
 };
 
-describe('/ai/v1 Workers AI route (forwardToWorkersAI)', () => {
-  it('serves @cf requests from the endpoint with its proxy model, key and no gateway metadata', async () => {
-    Object.assign(env, CLOUDFLARE);
-    await configureEndpoint({ ...ENDPOINT, aiProxyModel: 'proxy-model' });
-
-    const { response: res, estimateMissingUsage } = await forwardToWorkersAI(
-      env,
-      { messages: [{ role: 'user', content: 'hi' }] },
-      '@cf/qwen/qwen3-30b-a3b-fp8',
-      '{"userId":"u1"}'
-    );
-
-    expect(res.status).toBe(200);
-    expect(estimateMissingUsage).toBe(true);
-    const sent = lastRequest();
-    expect(sent.url).toBe('https://llm.example.com/v1/chat/completions');
-    expect(sent.headers.get('authorization')).toBe('Bearer sk-endpoint-key');
-    expect(sent.headers.get('cf-aig-metadata')).toBeNull();
-    expect(sent.body.model).toBe('proxy-model');
-  });
-
-  it('keeps the Cloudflare gateway request when no endpoint is configured', async () => {
-    Object.assign(env, CLOUDFLARE);
-    const forwarded = await forwardToWorkersAI(env, { messages: [] }, '@cf/m/x', '{"userId":"u1"}');
-    expect(forwarded.estimateMissingUsage).toBe(false);
-    const sent = lastRequest();
-    expect(sent.url).toBe(
-      'https://gateway.ai.cloudflare.com/v1/account-1/sam/workers-ai/v1/chat/completions'
-    );
-    expect(sent.headers.get('cf-aig-metadata')).toBe('{"userId":"u1"}');
-    expect(sent.body.model).toBe('@cf/m/x');
-  });
-
-  it('answers 404 FEATURE_UNAVAILABLE without any upstream call when nothing can serve it', async () => {
-    Object.assign(env, { AI_GATEWAY_ID: 'sam' });
-    const { response: res } = await forwardToWorkersAI(env, { messages: [] }, '@cf/m/x', '{}');
-    expect(res.status).toBe(404);
-    expect(await res.json()).toMatchObject({ error: { code: 'FEATURE_UNAVAILABLE' } });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-});
-
-describe('/ai/v1 Workers AI route when the endpoint settings are unreadable', () => {
-  it('answers 503 without calling the endpoint or the Cloudflare gateway', async () => {
-    Object.assign(env, CLOUDFLARE);
-    await configureEndpoint(ENDPOINT);
-    // Liveness: the endpoint serves the route while settings are readable.
-    expect((await forwardToWorkersAI(env, { messages: [] }, '@cf/m/x', '{}')).response.status).toBe(
-      200
-    );
-    fetchMock.mockClear();
-    __resetAdminSettingsCacheForTest();
-    vi.spyOn(env.DATABASE, 'prepare').mockImplementation(() => {
-      throw new Error('D1 unavailable');
-    });
-    vi.spyOn(console, 'error').mockImplementation(() => undefined);
-
-    const { response: res } = await forwardToWorkersAI(env, { messages: [] }, '@cf/m/x', '{}');
-
-    expect(res.status).toBe(503);
-    expect(await res.json()).toMatchObject({ error: { code: 'LLM_SETTINGS_UNAVAILABLE' } });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-});
+// The /ai/v1 Workers AI route (forwardToWorkersAI) is covered by main's L12 tests
+// (tests/unit/services/llm-endpoint.test.ts).
 
 describe('diagnosis runner (complete)', () => {
   const config = { model: '@cf/zai-org/glm-5.3-flash', timeoutMs: 5_000 } as never;
