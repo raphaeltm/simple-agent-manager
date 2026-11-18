@@ -5,12 +5,13 @@
   "groups": [
     {
       "classification": "code-identifier",
-      "reason": "Fresh pinned current-tree review: analytics-forward.ts reads an environment-variable identifier; github-app-tokens.ts findings span PEM delimiter comments and parser/encoder code, with no embedded key body. Exact current rule/path/line/bytes only.",
+      "reason": "Fresh pinned current-tree review: analytics-forward.ts reads an environment-variable identifier (same bytes at line 339, and at line 343 after PR #2889 added four lines above it); github-app-tokens.ts findings span PEM delimiter comments and parser/encoder code, with no embedded key body. Exact current rule/path/line/bytes only.",
       "owner": "security",
       "reviewedAt": "2026-11-06T12:30:14.413Z",
       "expiresAt": "2026-12-06T12:30:14.413Z",
       "digests": [
         "43311ab05444a3deed84ddf803f7d4a523e4ab4a97d044200e84fedc73661f5f",
+        "ecc456aef877ed66b358ddeca553c9a7ae1f9cf5aa429fb514335a9b0942de31",
         "81f3369b6025e96d9c0e14739af278a7174b8ea9387c1e8a307e7ee1b50ad36e",
         "b0eb549c5588a1c5a61aec95eca31cc8d4008a6f86f9f78845482246d19a19fb",
         "b1dcd2817cc876421ba0377a672cd178370f310251e33ea7936f5e25436359c6"
