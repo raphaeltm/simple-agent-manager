@@ -113,7 +113,7 @@ describe('content-free message ingestion counters through real workerd', () => {
       const { stub, session } = await setup();
       const response = await stub.fetch(
         new Request(`https://test/ws${sessionScoped ? `?sessionId=${session}` : ''}`, {
-          headers: { Upgrade: 'websocket' },
+          headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': 'test-user' },
         })
       );
       expect(response.status).toBe(101);
@@ -164,7 +164,7 @@ describe('content-free message ingestion counters through real workerd', () => {
       const capability = reader === 'capable reader' ? '&messageAppend=message-append-v1' : '';
       const response = await stub.fetch(
         new Request(`https://test/ws?sessionId=${watched}${capability}`, {
-          headers: { Upgrade: 'websocket' },
+          headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': 'test-user' },
         })
       );
       expect(response.status).toBe(101);

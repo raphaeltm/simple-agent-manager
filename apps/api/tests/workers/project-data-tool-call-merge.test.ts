@@ -625,13 +625,15 @@ it('keeps legacy admission session scoped and permanent after disconnect', async
   const { stub, session } = await fixture();
   const other = await stub.createSession(source.workspaceId, 'Other session');
   const project = await stub.fetch(
-    new Request('https://test/ws', { headers: { Upgrade: 'websocket' } })
+    new Request('https://test/ws', {
+      headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': 'test-user' },
+    })
   );
   project.webSocket!.accept();
   await stub.persistMessageBatch(session, [notification(1, { status: 'pending' })], source);
   const legacy = await stub.fetch(
     new Request(`https://test/ws?sessionId=${session}&messageAppend=append-v1`, {
-      headers: { Upgrade: 'websocket' },
+      headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': 'test-user' },
     })
   );
   legacy.webSocket!.accept();

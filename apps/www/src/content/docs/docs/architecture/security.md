@@ -165,6 +165,8 @@ Some failures delete the token, because no later state can make it valid again: 
 
 The token check does not look at the member's role. Tools that need a particular capability check the current role themselves. Destructive orchestration tools require `task:write` (`apps/api/src/routes/mcp/orchestration-authority.ts`). The GCP deployment identity endpoint requires `deployment:deploy` before it reads its cached identity token or signs a new one (`apps/api/src/routes/project-deployment.ts`).
 
+Browser WebSockets on a project (`GET /api/projects/:projectId/sessions/ws`) check membership only when they open, so they are closed when access ends. The upgrade route tags each socket with the user it authenticated (`routes/chat.ts`, `forwardWebSocket`), and the Durable Object refuses a socket without that tag (`admitBrowserSocket` in `packages/project-data/src/do/session-sockets.ts`). Offboarding a member (`routes/projects/member-offboarding.ts`) and suspending an account (`routes/admin.ts`) close that user's sockets with close code 4403 (`services/project-socket-revocation.ts`), and the upgrade route refuses a new one. Browser sockets are read-only: a `message.send` frame is refused.
+
 Removing a member does not stop the workspaces they started. Those workspaces lose MCP access as described above, but they keep running until they are stopped. Their callback tokens are checked against the workspace, not the member.
 
 While a workspace is ending, a few cleanup calls are still accepted:

@@ -9,6 +9,11 @@
  * A socket advertises `message-append-v1` when it can apply `message.append`. Clients built
  * before chunk merging (#2760) do not, and they stay connected until the tab reloads.
  *
+ * Every socket is tagged with the user the API route authenticated (`actor:<userId>`, from
+ * `BROWSER_SOCKET_ACTOR_HEADER`, which the route overwrites so a browser cannot choose it). When
+ * that user loses project access (offboarding, account suspension), the API closes their sockets
+ * with `closeBrowserSocketsForActor`; the upgrade route refuses them a new one.
+ *
  * Contract kept here:
  * - Transcript frames go only to sockets subscribed to that session. No project-socket consumer
  *   has ever read them (`useProjectWebSocket` since its creation), so a project socket without the
@@ -31,6 +36,13 @@ import { sealToolMerging } from './tool-call-changes';
 const log = createModuleLogger('project_data.sockets');
 
 const SESSION_TAG_PREFIX = 'session:';
+const ACTOR_TAG_PREFIX = 'actor:';
+/** Hibernation tags are capped at 256 characters; user ids are far shorter. */
+const MAX_ACTOR_ID_LENGTH = 200;
+/** Set by the authenticated API route on the forwarded upgrade; never taken from the browser. */
+export const BROWSER_SOCKET_ACTOR_HEADER = 'x-sam-browser-socket-actor';
+/** Close code for a socket whose user lost access to the project. */
+export const BROWSER_SOCKET_ACCESS_REVOKED_CLOSE_CODE = 4403;
 const SESSION_ID_PATTERN = /^[0-9a-f-]{36}$/i;
 /** Frames that carry transcript rows; sent only to sockets subscribed to the session. */
 const TRANSCRIPT_FRAME_TYPES: ReadonlySet<string> = new Set([
@@ -44,15 +56,32 @@ function sessionTag(sessionId: string): string {
   return `${SESSION_TAG_PREFIX}${sessionId}`;
 }
 
+function actorTag(actorId: string): string {
+  return `${ACTOR_TAG_PREFIX}${actorId}`;
+}
+
+function isValidActorId(actorId: string | null): actorId is string {
+  return !!actorId && actorId.length <= MAX_ACTOR_ID_LENGTH;
+}
+
 /** Accept a browser socket upgrade forwarded by the API route. */
 export function admitBrowserSocket(
   ctx: DurableObjectState,
   sql: SqlStorage,
   url: URL,
+  actorId: string | null,
   onToolSeal?: () => void
 ): Response {
+  // Without the authenticated user the socket could not be closed when their access ends.
+  if (!isValidActorId(actorId)) {
+    log.warn('websocket.admission_rejected_no_actor', {
+      hasActor: actorId !== null,
+      action: 'rejected',
+    });
+    return new Response('Socket actor is required', { status: 400 });
+  }
   const requested = url.searchParams.get('sessionId');
-  const tags: string[] = [];
+  const tags: string[] = [actorTag(actorId)];
   // Session IDs are stored lowercase; an uppercase spelling must still match the
   // broadcast tag and the merge gate, or the socket would be invisible to both.
   const sessionId = requested ? requested.toLowerCase() : null;
@@ -121,6 +150,17 @@ function send(ws: WebSocket, message: string): void {
 }
 
 /** Close a socket that may already be closing (server-initiated resync, or the peer's close). */
+/** Close every socket the given user opened on this project. Returns how many were open. */
+export function closeBrowserSocketsForActor(ctx: DurableObjectState, actorId: string): number {
+  if (!isValidActorId(actorId)) throw new Error('A valid actor id is required to close sockets');
+  let closed = 0;
+  for (const ws of ctx.getWebSockets(actorTag(actorId))) {
+    if (ws.readyState === WebSocket.OPEN) closed++;
+    closeQuietly(ws, BROWSER_SOCKET_ACCESS_REVOKED_CLOSE_CODE, 'project access revoked');
+  }
+  return closed;
+}
+
 export function closeQuietly(ws: WebSocket, code?: number, reason?: string): void {
   try {
     ws.close(code, reason);

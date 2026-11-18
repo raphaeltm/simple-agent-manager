@@ -451,7 +451,7 @@ describe('canonical streamed chunks through real ProjectData persistence', () =>
     await stub.persistMessageBatch(session, batch.slice(1, 5), source);
     const response = await stub.fetch(
       new Request(`https://test/ws?sessionId=${session}`, {
-        headers: { Upgrade: 'websocket' },
+        headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': 'test-user' },
       })
     );
     expect(response.status).toBe(101);

@@ -135,6 +135,8 @@ import { countLegacyToolSockets } from './session-sockets';
 import {
   admitBrowserSocket,
   broadcastToBrowserSockets,
+  BROWSER_SOCKET_ACTOR_HEADER,
+  closeBrowserSocketsForActor as closeActorSockets,
   closeQuietly,
   countLegacySockets,
 } from './session-sockets';
@@ -3867,7 +3869,8 @@ export class ProjectData extends DurableObject<Env> {
       const upgradeHeader = request.headers.get('Upgrade');
       if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket')
         return new Response('Expected WebSocket upgrade', { status: 426 });
-      return admitBrowserSocket(this.ctx, this.sql, url, () => {
+      const actorId = request.headers.get(BROWSER_SOCKET_ACTOR_HEADER);
+      return admitBrowserSocket(this.ctx, this.sql, url, actorId, () => {
         const metrics = emptyMessageIngestMetrics();
         metrics.toolSealedSessions = 1;
         this.rowUsage.recordMessageIngest(metrics);
@@ -3904,6 +3907,11 @@ export class ProjectData extends DurableObject<Env> {
     } catch {
       /* Ignore non-JSON messages */
     }
+  }
+
+  /** Close a user's browser sockets after their access to this project was revoked. */
+  closeBrowserSocketsForActor(actorId: string): number {
+    return closeActorSockets(this.ctx, actorId);
   }
 
   async webSocketClose(
