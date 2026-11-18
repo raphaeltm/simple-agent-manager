@@ -113,7 +113,7 @@ Policy TRUE throughout; admission overflow zero; all windows include admission c
 | alarm:project_event_wake_materialization | 227 | 11,099 | 11,097.53 | 5,142.86 |
 | alarm:project_event_retention | Unknown | Unknown | Unknown | 1,942.86 |
 
-Historical baseline: 291,000 admission writes / 40,807 calls over 17.5 hours;
+Rounded historical baseline: 291,000 admission writes / 40,807 calls over 17.5 hours;
 wake 90,000 and retention 34,000 over the same coverage. Admission calls/hour
 1,582.79 vs 2,331.83 (-32.12%); writes/hour -35.75%; writes/call 6.7505 vs
 7.1311 (-5.34%). Recent comparison 18,434 writes/h gives -42.04%. Wake writes/hour
@@ -179,7 +179,26 @@ Comparison within the deployed skip regime: first postrelease sample was 226.97 
 
 Additional same-clock control (Nov16 22:49 to Nov17 02:16), job sx-1d47541d492d0192eddbf88c656a3842c9ddd772b5bccb61b2fb896eaa999a45: 10 complete windows / 2.50152028 covered h. Admission 5,696 calls / 53,334 writes = 21,320.63 writes/h; wake 373 calls / 21,420 writes = 149.11 alarms/h, 8,562.79 writes/h, 57.4263 writes/alarm. Extended postrelease has about twice the alarm passes, with 14.97% fewer writes/pass. Historical whole-baseline 17.5098058 h: 98.06 alarms/h, 52.19 writes/alarm. Activity varies substantially by window; avoid calling this a doubled per-pass cost.
 
-Limits: exact before/after writes per matched event and owner-kind/distinct-session attribution of the original 370 CI events cannot be recovered from row_usage. Historical logs predate the source counters; current counters do not expose match count/owner. Own-session MCP reads and capped recent inspector cannot establish complete historical owner attribution. No production login, new diagnostics deployment, settings change or fixture writes were used. No regression fix is justified by the inspected mechanism/measurements; no net event-system or billed savings claim. First + extended samples total 4.25288222 covered hours, admission 8,009 calls / 68,275 writes and wake 1,200 calls / 58,609 writes. Cleanup P1 separately resolved as never-allocated-node absence with documented proof. Archive PR #2879 remains draft while coordinator reconciles this extended result.
+Limits: exact before/after writes per matched event and owner-kind/distinct-session attribution of the original 370 CI events cannot be recovered from row_usage. Historical logs predate the source counters; current counters do not expose match count/owner. Own-session MCP reads and capped recent inspector cannot establish complete historical owner attribution. No production login, new diagnostics deployment, settings change or fixture writes were used. No regression fix is justified by the inspected mechanism/measurements; no net event-system or billed savings claim. First + extended samples total 4.25288222 covered hours, admission 8,009 calls / 68,275 writes and wake 1,200 calls / 58,609 writes. Cleanup P1 separately resolved as never-allocated-node absence with documented proof. Coordinator reconciled this extended result and closed the investigation hold in event `31a2edf2-46dc-401f-9f88-a5949027c38c`; archive PR #2879 can finish its normal gates.
 
 
 Deployment context: production also deployed commits 4fc4cb99a (run 44196825924) and 472dc9684 (run 44214771797) during the observation. Git comparison from ecb58a6d through both deployments shows no changes in project-event modules, row-usage metering, alarm-schedule or session-wake-ready. Other concurrent changes and workload variation still prevent causal attribution.
+
+
+### Final interpretation and counterfactual estimate
+
+No scheduling or matcher regression was identified: writes per wake pass stayed
+flat or decreased, while subscribed-event volume and alarm pass frequency rose.
+No net saving is directly measurable from these uncontrolled windows; stored,
+matched CI traffic rose about 65% to 611 events/hour during observation. Exact
+historical matched-receipt, match-row and subscription-owner attribution is not
+available from the current counters; retention label absence remains unknown.
+
+**Counterfactual estimate, not observed or billed savings:** 3,855 skipped CI
+admissions / 3.25274944 covered hours = about 1,185 skipped admissions/hour.
+Multiplying by the historical mixed-traffic average of approximately 7.1 writes
+per admission call gives about **8,400 writes/hour avoided** at this night's
+traffic. That assumes skipped CI would have incurred the historical average;
+it is not a measured per-skipped-event cost, does not isolate matched fanout,
+and excludes any unmeasured downstream retention effects. The zero-write skip
+path itself was measured in real-workerd tests before release.
