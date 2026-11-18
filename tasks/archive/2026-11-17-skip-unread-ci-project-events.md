@@ -79,9 +79,20 @@ Final candidate `5e943cecc` passed CI 44106481715; primary staging deployment
 44113797829 proved skip ON, full-SHA subscriber storage/runtime wake, and OFF
 storage. Default restored at revision 100; inspector confirmed TRUE. Channel replay
 returned the same ID/sequence twice; credential reset persisted. Instant fixture
-workspace removed and node absent. The failed preallocation GCP VM fixture's node
-cleanup was tracked separately under idea 01M7N20Z6P4VWCGG2C6VMZ4QQA; no claim of
-strict absence. Lease release 44117420882 succeeded. Mobile/desktop disclosure
+workspace removed and node absent. The failed preallocation GCP fixture node
+`01M7MZRES1XSTZ0F93ERSGFWAW` was never allocated: STS authentication failed before
+provider creation, and its provider instance ID remained null. Code corroboration:
+`packages/providers/src/gcp.ts:createVMUnclassified` awaits `authHeaders` before
+setting `dispatch.sent` and sending the instance POST. Repair task
+`01M7NZTWT6AC98R70CGYJJZE0A` independently found zero VMs in the staging Google
+project at 00:22 UTC on November 18, then removed the control-plane node record
+through the supported owner-attested escape at 00:25 UTC. Follow-up D1 count was
+zero, with the named `owner_attested_manual_deletion` audit event. Counts-only job
+provenance is on idea `01M7N20Z6P4VWCGG2C6VMZ4QQA`, update
+`01M7P0XSWRTGT60TGYNF3D7N49`. Coordinator reviewed these facts and accepted the
+never-allocated-node absence evidence (event `1062cbef-cfd6-40cc-a5a9-ed3917eff2b9`).
+No provider-termination proof or human waiver is claimed: this case requires
+absence evidence because allocation never happened. Cleanup was not duplicated. Lease release 44117420882 succeeded. Mobile/desktop disclosure
 screenshots reviewed with no layout issue. Storage/test/UI reviewers PASS or
 ADDRESSED; CodeRabbit returned Review skipped, with no findings. PR body retains
 full evidence and links.
