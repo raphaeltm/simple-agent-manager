@@ -15,6 +15,7 @@
  */
 import {
   type RunReceipt,
+  type RunReceiptAccount,
   type RunReceiptSection,
   TASK_TERMINAL_STATUSES,
 } from '@simple-agent-manager/shared';
@@ -66,9 +67,29 @@ export interface RunReceiptInput {
   taskId: string;
 }
 
+/**
+ * Whether the viewer may see a run's dollar spend: their own session, or an account that is not a
+ * person's (project or platform). Unknown fails closed: a run with no recorded account, or one
+ * whose source was not recorded, may have run on a teammate's personal key.
+ */
+export function receiptSpendVisible(
+  account: Pick<RunReceiptAccount, 'isOwnSession' | 'credentialSource'> | null
+): boolean {
+  if (!account) return false;
+  if (account.isOwnSession) return true;
+  return account.credentialSource === 'project' || account.credentialSource === 'platform';
+}
+
+export interface RunReceiptOptions {
+  /** Read the viewer's own account name (one statement). The agent view (`insights-agent.ts`)
+   *  never shows it, so it skips the read and keeps its rate-limit check inside the budget. */
+  accountName?: boolean;
+}
+
 export async function runReceipt(
   ctx: OperationContext,
-  input: RunReceiptInput
+  input: RunReceiptInput,
+  options: RunReceiptOptions = {}
 ): Promise<RunReceipt> {
   const projectId = typeof input.projectId === 'string' ? input.projectId.trim() : '';
   const taskId = typeof input.taskId === 'string' ? input.taskId.trim() : '';
@@ -137,7 +158,7 @@ export async function runReceipt(
     'account',
     context,
     null,
-    () => readAccount(ctx, row, facts),
+    () => readAccount(ctx, row, facts, options.accountName ?? true),
     unavailable
   );
 
@@ -206,9 +227,7 @@ export async function runReceipt(
           }
         : null,
     // Spend on a person's own key is theirs to see, like the account name (`readAccount`).
-    tokens: summarizeRunTokens(tokenUsage, {
-      spendVisible: account?.isOwnSession === true || account?.credentialSource !== 'user',
-    }),
+    tokens: summarizeRunTokens(tokenUsage, { spendVisible: receiptSpendVisible(account) }),
     slowedDown: slowedDown(
       {
         phases,
