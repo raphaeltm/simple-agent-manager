@@ -905,7 +905,7 @@ attempts count).
 | `operations.opsAnomalyTerminalTaskGraceMs`    | 900,000    | 0–7 days      | Time after a task ends before its still-running workspace is reported                                                                                                                                           |
 | `operations.opsAnomalyIdleTaskMinutes`        | 60         | 1–10,080      | Minutes without task or workspace activity before an in-progress task is reported                                                                                                                               |
 | `operations.opsAnomalyDestroyingNodeHours`    | 6          | 1–720         | Hours a node may stay destroying, counted from its last heartbeat, before its unfinished teardown is reported with any recorded cleanup refusal                                                                 |
-| `operations.opsAnomalyWakingMinutes`          | 60         | 1–43,200      | Minutes a sleeping chat may stay waking, counted from its wake claim, before the wake is reported (`session_wake_stalled`), with no lookback limit                                                              |
+| `operations.opsAnomalyWakingMinutes`          | 60         | 1–43,200      | Minutes a sleeping chat may stay waking, counted from its wake claim, before the wake is reported (`session_wake_stalled`), with no lookback limit; a provider-limit hold is reported only past its deadline    |
 | `operations.opsAnomalyLookbackHours`          | 24         | 1–720         | Hours of snapshot failures and deletion-quarantine reports the anomaly check looks at                                                                                                                           |
 | `operations.opsAnomalyMaxPerClass`            | 25         | 1–200         | Findings returned per anomaly type; each type still reports its total                                                                                                                                           |
 | `operations.opsNodeLogMaxLines`               | 200        | 1–1,000       | Most log lines one `ops_node_logs` call returns                                                                                                                                                                 |
@@ -1046,6 +1046,21 @@ These control the live Google Cloud catalog described in [Google Cloud](/docs/gu
 | `gcpCatalog.apiIssueTtlMinutes`             | 10080                                           | 60–43200          | How long a Google API problem Google reported stays shown on a credential; a successful check clears it.                                                       |
 | `gcpCatalog.bootDiskGbPerVcpu`              | 20                                              | 1–256             | GB of boot disk a new Google Cloud node gets per vCPU, used by the catalog, prices and new nodes from the next catalog refresh; running nodes keep their disk. |
 | `gcpCatalog.bootDiskMinGb`                  | 50                                              | 10–4096           | Smallest boot disk, in GB, a new Google Cloud node gets whatever its vCPU count; same refresh rule.                                                            |
+
+### Infomaniak boot volume
+
+Infomaniak flavors carry a small local root disk (20 GB on the default `a2/a4/a8-…-disk20-perf1` flavors), which devcontainer builds fill. SAM boots every new Infomaniak VM from a Cinder volume of this size instead, created by Nova from the image and deleted with the server (`InfomaniakProvider.createVM`, `packages/providers/src/infomaniak-boot-volume.ts`). The volume uses the project's default Cinder volume type.
+
+| Setting                   | Default | Allowed range | Applies to                                                                                                                                                |
+| ------------------------- | ------: | ------------: | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `infomaniak.bootVolumeGb` |      80 |       20–4096 | Disk the Infomaniak catalog advertises and new Infomaniak VMs boot from, from the next catalog refresh. Running VMs keep the disk they were created with. |
+
+Nodes created before this change still boot from the flavor's local disk and keep reporting it; SAM does not migrate them. Replace such a node (delete it and let SAM provision a new one) to move it onto a boot volume. A pool candidate published before this change still names 20 GB until its catalog refreshes; SAM creates the volume at the larger of the candidate's disk and this setting, so such a node still gets the configured size.
+
+- It is also the largest boot volume a request may ask for: a node or workspace request with a larger `bootDiskSizeGb` is refused before anything is created, because the node may run on a shared platform credential. Lowering the setting does not affect nodes already recorded with a larger size.
+- The volume counts against your Infomaniak block storage quota (volume count and gigabytes).
+- It uses the project's default Cinder volume type, which may differ from `INFOMANIAK_VOLUME_TYPE` (used for data volumes): selecting a type needs a newer Nova API version than SAM requests.
+- Nova deletes the volume with the server. If a delete ever leaves an unattached volume behind, SAM does not track it (boot volumes carry no SAM labels): look for unattached volumes in the Infomaniak console after a failed node deletion.
 
 ### Provider fallback
 

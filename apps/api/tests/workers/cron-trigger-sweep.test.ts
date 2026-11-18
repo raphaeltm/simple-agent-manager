@@ -17,13 +17,13 @@
  *
  * Source: apps/api/src/scheduled/cron-triggers.ts
  */
+import { cronToNextFire } from '@simple-agent-manager/cron';
 import { env } from 'cloudflare:test';
 import { and, count, desc, eq, inArray, isNotNull, lte } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { describe, expect, it } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { cronToNextFire } from '../../src/services/cron-utils';
 import { buildCronContext, renderTemplate } from '../../src/services/trigger-template';
 import {
   seedInstallation,

@@ -1,10 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  classifyInfomaniakError,
-  InfomaniakProvider,
-  mapInfomaniakStatus,
-} from '../../src/infomaniak';
+import { InfomaniakProvider } from '../../src/infomaniak';
+import { classifyInfomaniakError, mapInfomaniakStatus } from '../../src/infomaniak-metadata';
 import { ProviderError } from '../../src/types';
 
 const AUTH_URL = 'https://identity.test/v3';
@@ -159,9 +156,16 @@ describe('InfomaniakProvider', () => {
             name: 'sam-node',
             status: 'ACTIVE',
             addresses: { 'ext-net1': [{ version: 4, addr: '203.0.113.10' }] },
-            flavor: { id: 'flavor-1', original_name: 'a2-ram4-disk20-perf1' },
+            flavor: {
+              id: 'flavor-1',
+              original_name: 'a2-ram4-disk20-perf1',
+              vcpus: 2,
+              ram: 4096,
+              disk: 20,
+            },
+            image: '',
             created: '2026-07-25T00:00:00Z',
-            metadata: { project: 'p1' },
+            metadata: { project: 'p1', 'sam-root-disk-gb': '80' },
           },
         });
       throw new Error(`Unexpected request ${init?.method ?? 'GET'} ${url}`);
@@ -180,23 +184,42 @@ describe('InfomaniakProvider', () => {
       },
     });
     expect(result).toMatchObject({ id: 'server-1', ip: '203.0.113.10', status: 'running' });
+    // The volume-booted server reports the boot volume, not the flavor's unused 20 GB local disk.
+    expect(result.observedHardware.resources).toEqual({
+      value: { vcpuCount: 2, memoryMb: 4096, diskGb: 80 },
+      source: 'observed',
+    });
     const createCall = fetchMock.mock.calls.find(
       ([input, init]) => String(input) === `${COMPUTE}/servers` && init?.method === 'POST'
     );
     expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({
       server: {
         name: 'sam-node',
-        imageRef: 'image-1',
         flavorRef: 'flavor-1',
         networks: [{ uuid: 'network-1' }],
+        block_device_mapping_v2: [
+          {
+            boot_index: 0,
+            uuid: 'image-1',
+            source_type: 'image',
+            destination_type: 'volume',
+            volume_size: 80,
+            delete_on_termination: true,
+          },
+        ],
         user_data: 'I2Nsb3VkLWNvbmZpZwp1c2VyczogW10=',
         metadata: {
           managed: 'simple-agent-manager',
           env: 'production',
           installation: '0123456789abcdef0123456789abcdef',
+          'sam-root-disk-gb': '80',
         },
       },
     });
+    // Base Nova API only: no microversion header, so `volume_type` (2.67+) must never be sent.
+    const headers = new Headers(createCall?.[1]?.headers);
+    expect(headers.has('OpenStack-API-Version')).toBe(false);
+    expect(headers.has('X-OpenStack-Nova-API-Version')).toBe(false);
   });
 
   it('uses config.instanceType as the concrete flavor name when provided', async () => {
