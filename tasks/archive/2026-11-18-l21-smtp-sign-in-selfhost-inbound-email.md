@@ -66,7 +66,7 @@ coordinator review) and missing CI (F12).
 - [x] Docs: self-hosting guide section "Email on a single-box build" (SMTP, readiness probe, inbound), admin-settings (`agentEmail.smtpTimeoutMs`), security-alert sender
 - [x] Review fixes: sam-mx strict alignment default, DKIM-only replay binding (signed To/Cc + Date window + single To/Cc/Date), conn-bound gateway ctx + timeout ordering, shutdown drain; SMTP envelope validation; sanitized agent-visible SMTP errors; create-account empty owner refusal; compose passthrough (#2888)
 - [x] Deferred MEDIUM/LOW review items tracked in idea 01M7QHHKBJP5D57Z9DQF25X2GP
-- [ ] Staging: Cloudflare email sign-in and inbound agent email unchanged
+- [x] Staging: Cloudflare email sign-in unchanged (live); inbound agent email config unchanged (live); the loopback round trip could not run (no email trigger on staging, agent sessions cannot create one, smoke token invalid): decision requested from the coordinator
 - [x] BOX: SMTP sign-in, inbound mail via sam-mx + gateway, F13 fixes, with real mail (evidence below)
 - [x] BOX restore and cleanup (box back on ba35d4905, .env and secrets.env byte-identical, temp resources removed; BOX FREE posted)
 
@@ -108,3 +108,10 @@ coordinator review) and missing CI (F12).
 - Inbound (trusted loopback): mail to agent+8mg1myz4hjnpkf5k@agents.vmtest.sam2.party via sam-mx -> gateway route -> agent_email.inbound_accepted, task 01M7QHDB6Q513Y9RCBTMPB1FJM submitted; node 01M7QHDG46H3BEV9B6CGM3JR5P provisioned over the reverse tunnel.
 - Inbound (real DNS DKIM, from the box's internal IP 10.10.0.2, not trusted): ed25519 key published at l21sel._domainkey.l21.vmtest.sam2.party; valid signed message -> sam-mx auth=pass dkim=pass -> gateway -> Worker 550 "Sender not allowed" (sender deliberately not on the allowlist, so no second task); replay (signed To = another address) -> 550 at sam-mx naming the signed To/Cc; 8-day-old Date -> 550 "too old".
 - Agent reply: the inbound task's agent (free model) called reply_to_email; the collector received "Re: L21 inbound proof", body "pong", From "L21 inbound email proof" <sign-in@vmtest.sam2.party> (SMTP_FROM), Reply-To agent+8mg1myz4hjnpkf5k@agents.vmtest.sam2.party, In-Reply-To/References = the inbound Message-ID, Auto-Submitted: auto-replied.
+
+## Staging evidence (2026-11-18, primary staging, deploy run 44364340779 on merged head 14904c6c3)
+
+- Deploy to Cloudflare: success. Pipeline Playwright smoke: attempt 1 had 2 failed + 2 flaky page.goto timeouts (8 passed); attempt 2 passed. Other branches' deploys that hour passed smoke.
+- Live, as a superadmin (workload identity): /api/config/login-providers -> email:true (Cloudflare binding still selected); POST send-verification-otp for an unknown address -> 200 {"success":true}; /api/config/agent-email -> enabled, agents.sammy.party; /api/admin/agent-email -> enabled, no error.
+- Not run: the admin loopback (Email Sending -> Email Routing -> inbound handler -> reply). Staging has no email trigger, trigger creation refuses agent sign-in sessions by design, and the stored smoke token returns "Invalid token format". A browser could not start in the restored workspace (libnspr4 missing; no apt allowed), so the UI check is the pipeline smoke suite.
+- Cleanup: no staging resources created; session signed out (me -> 401); lease released (run 44375407464).
