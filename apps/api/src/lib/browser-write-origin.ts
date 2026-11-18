@@ -62,7 +62,8 @@ export function requireTrustedWriteOrigin(
   return async (c, next) => {
     const origin = c.req.header('Origin');
     const fetchSite = c.req.header('Sec-Fetch-Site');
-    if (origin || fetchSite) {
+    // `undefined` is "header absent"; an empty Origin is still a browser signal to validate.
+    if (origin !== undefined || fetchSite !== undefined) {
       requireExactBrowserOrigin(c, what);
     }
     await next();

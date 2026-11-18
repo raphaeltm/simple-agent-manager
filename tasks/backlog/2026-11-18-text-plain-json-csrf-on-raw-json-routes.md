@@ -18,7 +18,9 @@ Example found while finishing PR #2865 (multipart variant):
 
 Other candidates to check, excluding bearer/callback-only routes:
 
-- `c.req.json()` and `c.req.text()` in `apps/api/src/routes/`
+- `c.req.json()`, typed `c.req.json<T>()` and `c.req.text()` in `apps/api/src/routes/`
+- `jsonValidator` routes whose schema accepts `{}`: for a non-JSON content type Hono passes `{}`
+  to the schema, so the handler can still run
 - `parseOptionalBody` (`apps/api/src/schemas/_validator.ts`), which calls `req.json()` without a
   content-type check, used on cookie routes such as `chat.ts`, `chat-prompt-route.ts` and
   `chat-ideas.ts`
@@ -32,8 +34,12 @@ finding `acf_063f530a5742d0498761f77e05d88516` (PR #2865). Not verified on stagi
 
 ## Acceptance Criteria
 
-- [ ] Every cookie-authenticated POST route that parses a body refuses a CORS-simple body from a
-      non-app origin (either require a JSON content type, or apply `requireTrustedWriteOrigin`)
+- [ ] For each candidate, confirm it accepts a session cookie for a state change and lacks an
+      equivalent origin or media-type guard before classifying it as affected
+- [ ] Every affected route refuses a CORS-simple body from a non-app origin: either an explicit
+      media-type check that rejects non-JSON with 415 before any mutation, or
+      `requireTrustedWriteOrigin`
 - [ ] A worker test through `SELF.fetch` with a session cookie, `Origin: https://ws-...` and
-      `Content-Type: text/plain` gets 403/415 and changes nothing; an app-origin control succeeds
+      `Content-Type: text/plain` gets 403/415 and changes nothing; an app-origin control sending
+      `Content-Type: application/json` succeeds
 - [ ] Removing the guard turns the attack test red

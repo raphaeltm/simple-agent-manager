@@ -26,6 +26,7 @@ const rejectedBrowserWrites: Array<{ label: string; headers: Record<string, stri
     },
   },
   { label: 'opaque origin', headers: { Origin: 'null' } },
+  { label: 'empty origin', headers: { Origin: '' } },
   { label: 'missing origin', headers: { 'Sec-Fetch-Site': 'same-site' } },
   { label: 'same-origin metadata without Origin', headers: { 'Sec-Fetch-Site': 'same-origin' } },
   { label: 'user-initiated metadata without Origin', headers: { 'Sec-Fetch-Site': 'none' } },
@@ -112,5 +113,31 @@ describe('trusted write origin', () => {
     );
     expect(response.status).toBe(403);
     expect(deployed).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['look-alike suffix', 'http://localhost.evil.example:5173'],
+    ['https loopback', 'https://localhost:5173'],
+    ['workspace host under a local base', 'http://ws-attacker--3000.localhost:8787'],
+  ])('refuses a %s origin even when BASE_DOMAIN is local', async (_label, origin) => {
+    const next = vi.fn();
+    const response = await makeApp(next).request(
+      '/write',
+      { method: 'POST', headers: { Origin: origin } },
+      { BASE_DOMAIN: 'localhost:8787' } as Env
+    );
+    expect(response.status).toBe(403);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('admits the 127.0.0.1 loopback app under a local BASE_DOMAIN', async () => {
+    const next = vi.fn();
+    const response = await makeApp(next).request(
+      '/write',
+      { method: 'POST', headers: { Origin: 'http://127.0.0.1:5173' } },
+      { BASE_DOMAIN: 'localhost:8787' } as Env
+    );
+    expect(response.status).toBe(200);
+    expect(next).toHaveBeenCalledOnce();
   });
 });
