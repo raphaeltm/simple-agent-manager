@@ -51,7 +51,11 @@ jobs:
           cache: 'pnpm'
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # Only the lockfile-pinned native builds these tests need (as the CLI contract job does).
+      - name: Build trusted native dependencies
+        run: pnpm --filter @simple-agent-manager/api rebuild better-sqlite3 esbuild
 
       - name: Build API dependencies
         run: pnpm exec turbo run build --filter=@simple-agent-manager/api^...

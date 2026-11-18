@@ -14,4 +14,6 @@ COPY --from=build /out/sam-mx /usr/local/bin/sam-mx
 # The file capability is the only privilege: compose runs it as an unprivileged uid with every
 # other capability dropped (docker-compose.yml, service sam-mx).
 RUN setcap cap_net_bind_service=+ep /usr/local/bin/sam-mx && apk del libcap-utils
+# Never root, even without compose's `user:` (which sets the same uid on the box).
+USER 7102:7102
 ENTRYPOINT ["/usr/local/bin/sam-mx"]
