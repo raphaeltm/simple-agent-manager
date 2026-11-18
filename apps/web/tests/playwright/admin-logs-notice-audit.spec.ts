@@ -43,6 +43,12 @@ async function setupMocks(page: Page, capabilities: Record<string, boolean>) {
   const respond = (route: Route, status: number, body: unknown) =>
     route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
+  // The first-run onboarding wizard overlays every authenticated page for a user with no
+  // credentials and would cover the surface under test (rule 62); mark it dismissed first.
+  await page.addInitScript(
+    (id) => localStorage.setItem(`sam-onboarding-wizard-dismissed-${id}`, 'true'),
+    MOCK_USER.user.id
+  );
   await page.routeWebSocket('**/api/notifications/ws', () => undefined);
   await page.routeWebSocket('**/api/admin/observability/logs/stream**', (ws) => {
     logRequests.push('stream-ws');
@@ -67,6 +73,18 @@ async function setupMocks(page: Page, capabilities: Record<string, boolean>) {
     return respond(route, 200, {});
   });
   return { logRequests };
+}
+
+/** Whether `locator` is what a user would hit at its own center: nothing is drawn over it. */
+async function isTopmost(locator: ReturnType<Page['locator']>): Promise<boolean> {
+  return locator.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(
+      box.left + box.width / 2,
+      box.top + Math.min(box.height / 2, 40)
+    );
+    return hit !== null && el.contains(hit);
+  });
 }
 
 const SURFACES = [
@@ -109,6 +127,8 @@ for (const layout of LAYOUTS) {
 
           const notice = page.getByTestId('box-logs-notice');
           await expect(notice).toBeVisible();
+          // Visible to a user, not just present: no overlay sits on top of it.
+          expect(await isTopmost(notice)).toBe(true);
           await expect(notice).toContainText(surface.heading);
           await expect(notice).toContainText('docker compose logs -f --since 30m celld');
           await expect(notice).toContainText('Errors that SAM records itself');
@@ -142,6 +162,7 @@ for (const layout of LAYOUTS) {
 
         // Liveness: the real viewer rendered, and the notice did not.
         await expect(page.getByLabel(surface.viewerLabel)).toBeVisible();
+        expect(await isTopmost(page.getByLabel(surface.viewerLabel))).toBe(true);
         await expect(page.getByTestId('box-logs-notice')).toHaveCount(0);
 
         await screenshot(page, `admin-${surface.slug}-cloudflare-${layout.slug}`);
