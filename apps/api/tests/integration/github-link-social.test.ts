@@ -326,7 +326,9 @@ describe('Connect GitHub for an email-signed account (vertical slice)', () => {
       const alert = relay.messages[1]!;
       expect(alert.from).toBe('sam@vmtest.example.com');
       expect(alert.to).toEqual([SAM_EMAIL]);
-      expect(alert.data).toMatch(/^Subject: .*(connected|linked)/im);
+      expect(alert.data).toMatch(
+        /^Subject: SAM security alert: a GitHub sign-in was linked to a user account$/im
+      );
       expect(sent).toHaveLength(0);
     } finally {
       await relay.close();

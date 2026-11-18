@@ -91,6 +91,12 @@ coordinator review) and missing CI (F12).
 - Local `ci-suite-selection.test.ts > packages` times out at 30 s on this workspace on the base
   commit too (not related).
 
+## Decisions recorded (task-completion-validator follow-ups)
+
+- `services/agent-email/self-host-inbound.ts` stays Worker-loaded: `isAgentEmailOn` and `activeAgentEmailSender` (packages/agent-email setup-state) reach it through `ports`, and the SMTP transport is shared with sign-in. It mirrors the gateway secret floor instead of importing `selfhost/` (pinned by `inbound-email-gateway-secret.test.ts`). The route itself is self-host-only (`selfhost/reverse-tunnel/inbound-email.ts`).
+- F13b on a runtime without `executionCtx.waitUntil`: `routes/auth.ts` logs `email_sign_in.wait_until_unavailable` once per isolate when SMTP is the transport. Cloudflare and celld both provide it (BOX evidence below).
+- F13c ships with L22: the owner guard is in integration PR #2888, and the landing idea notes that `create-account` must carry it to main.
+
 ## BOX evidence (2026-11-18, box upgraded in place ba35d4905 -> sam/l21-box-proof 54c921e55)
 
 - Upgrade EXIT=0, healthy; `mail-in` profile enabled (sam-mx listening :25), SAM_MX_TRUSTED_NETWORKS=127.0.0.0/8 for loopback injection.
@@ -100,3 +106,4 @@ coordinator review) and missing CI (F12).
 - F13c: owner already established on the box, so the refusal is proven by the real-SQLite tests; the live `--superadmin --dry-run` SQL carries the owner guard (owner admin-r15@vmtest.sam2.party).
 - Inbound (trusted loopback): mail to agent+8mg1myz4hjnpkf5k@agents.vmtest.sam2.party via sam-mx -> gateway route -> agent_email.inbound_accepted, task 01M7QHDB6Q513Y9RCBTMPB1FJM submitted; node 01M7QHDG46H3BEV9B6CGM3JR5P provisioned over the reverse tunnel.
 - Inbound (real DNS DKIM, from the box's internal IP 10.10.0.2, not trusted): ed25519 key published at l21sel._domainkey.l21.vmtest.sam2.party; valid signed message -> sam-mx auth=pass dkim=pass -> gateway -> Worker 550 "Sender not allowed" (sender deliberately not on the allowlist, so no second task); replay (signed To = another address) -> 550 at sam-mx naming the signed To/Cc; 8-day-old Date -> 550 "too old".
+- Agent reply: the inbound task's agent (free model) called reply_to_email; the collector received "Re: L21 inbound proof", body "pong", From "L21 inbound email proof" <sign-in@vmtest.sam2.party> (SMTP_FROM), Reply-To agent+8mg1myz4hjnpkf5k@agents.vmtest.sam2.party, In-Reply-To/References = the inbound Message-ID, Auto-Submitted: auto-replied.
