@@ -1187,7 +1187,9 @@ quarantine without starting duplicate sandbox work or repeatedly polling the blo
 
 A deadline stops waiting; it does not cancel an SDK operation. Cleanup cannot record
 successful destruction or release its pool slot while earlier sandbox work may still start
-the container. Unfinished cleanup remains marked pending. If an isolate dies before that
+the container. D1 status writes run outside the sandbox-flight counter: once the actual
+SDK work settles, a stalled status write cannot delay sandbox cleanup. Any subsequent
+SDK read rechecks the session lifecycle before starting. Unfinished cleanup remains marked pending. If an isolate dies before that
 work's settlement is observed, recovery preserves the uncertainty. After the recovery cap,
 the session is quarantined and reported as an operator-visible platform error; a late
 settlement does not reset the cap. Pending SDK work has a separate watchdog at the later

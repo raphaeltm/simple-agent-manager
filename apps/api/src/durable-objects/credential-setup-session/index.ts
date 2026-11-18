@@ -264,22 +264,20 @@ export class CredentialSetupSession extends DurableObject<Env> {
       throw new Error('Invalid Claude verification code');
     }
 
-    return this.withSandboxFlight(row, async () => {
+    await this.withSandboxFlight(row, async () => {
       const sandbox = await getSandboxInstance(this.env, row.id);
       if (this.readRow()?.status !== 'waiting_for_user')
         throw new Error('Claude Code setup is no longer waiting for a verification code');
       await sandbox.writeFile(`${row.codex_home}/${CLAUDE_VERIFICATION_CODE_FILE}`, normalizedCode);
-      const current = this.readRow();
-      if (!current || current.status !== 'waiting_for_user') {
-        throw new Error('Claude Code setup is no longer waiting for a verification code');
-      }
-      this.setStatus(row.id, 'exchanging');
-      await this.updateD1Status(row.id, 'exchanging');
-      if (this.readRow()?.status !== 'exchanging')
-        return this.getState() ?? this.terminalState(row, 'cancelled');
-      await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
-      return this.getState() ?? this.terminalState(row, 'exchanging');
     });
+    if (this.readRow()?.status !== 'waiting_for_user')
+      throw new Error('Claude Code setup is no longer waiting for a verification code');
+    this.setStatus(row.id, 'exchanging');
+    await this.updateD1Status(row.id, 'exchanging');
+    if (this.readRow()?.status !== 'exchanging')
+      return this.getState() ?? this.terminalState(row, 'cancelled');
+    await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
+    return this.getState() ?? this.terminalState(row, 'exchanging');
   }
 
   /**
@@ -370,6 +368,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
         () => this.readRow()?.status === 'provisioning',
         this.startSetupDriverCommand(row, `${row.codex_home}/${DEVICE_AUTH_STATE_FILE}`)
       );
+      await settle(); // D1 bookkeeping cannot restart sandbox work.
       if (!currentFlight) return;
       const current = this.readRow();
       if (!current || current.status !== 'provisioning') return;
@@ -527,7 +526,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
   }
 
   private async attemptCapture(row: SetupSessionRow): Promise<void> {
-    const file = await this.withSandboxFlight(row, async () => {
+    const capture = await this.withSandboxFlight(row, async () => {
       if (isTerminalSetupStatus(this.readRow()?.status ?? 'cancelled')) return null;
       const sandbox = await getSandboxInstance(this.env, row.id);
       if (isTerminalSetupStatus(this.readRow()?.status ?? 'cancelled')) return null;
@@ -535,20 +534,22 @@ export class CredentialSetupSession extends DurableObject<Env> {
 
       const existence = await sandbox.exists(credentialPath);
       if (isTerminalSetupStatus(this.readRow()?.status ?? 'cancelled')) return null;
-      if (!existence.exists) {
+      return existence.exists ? { sandbox, credentialPath } : null;
+    });
+    if (!capture) {
+      if (!isTerminalSetupStatus(this.readRow()?.status ?? 'cancelled'))
         await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
-        return null;
-      }
-
-      const current = this.readRow();
-      if (!current || isTerminalSetupStatus(current.status)) return null;
-      if (current.status !== 'capturing') {
-        this.setStatus(current.id, 'capturing');
-        await this.updateD1Status(current.id, 'capturing');
-      }
-
+      return;
+    }
+    const currentCapture = this.readRow();
+    if (!currentCapture || isTerminalSetupStatus(currentCapture.status)) return;
+    if (currentCapture.status !== 'capturing') {
+      this.setStatus(row.id, 'capturing');
+      await this.updateD1Status(row.id, 'capturing');
+    }
+    const file = await this.withSandboxFlight(row, async () => {
       if (isTerminalSetupStatus(this.readRow()?.status ?? 'cancelled')) return null;
-      return sandbox.readFile(credentialPath);
+      return capture.sandbox.readFile(capture.credentialPath);
     });
     if (!file || isTerminalSetupStatus(this.readRow()?.status ?? 'cancelled')) return;
     let content = file.content ?? '';

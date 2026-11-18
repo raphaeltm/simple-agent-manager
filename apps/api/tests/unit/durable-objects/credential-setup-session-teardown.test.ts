@@ -1815,53 +1815,75 @@ describe('CredentialSetupSession teardown — unresolved asynchronous operations
     }
   );
 
-  it('preserves terminal D1 when the original admitting write lands after cancellation', async () => {
-    const fixture = createFixture();
-    const handle = await startSession(fixture, false);
-    const realDb = fixture.env.DATABASE;
-    let releaseWrite: (() => void) | undefined;
-    let writeHeld = false;
-    const gate = new Promise<void>((resolve) => {
-      releaseWrite = resolve;
-    });
-    fixture.env.DATABASE = {
-      ...realDb,
-      prepare(query: string) {
-        const statement = realDb.prepare(query);
-        return {
-          ...statement,
-          bind: (...args: unknown[]) => {
-            const bound = statement.bind(...args);
-            if (args[0] !== 'admitting') return bound;
-            return {
-              ...bound,
-              run: async () => {
-                writeHeld = true;
-                await gate;
-                return bound.run();
-              },
-            };
-          },
-        };
-      },
-    } as Env['DATABASE'];
-    const provision = handle.instance.alarm();
-    try {
-      await vi.waitFor(() => expect(writeHeld).toBe(true));
-      await handle.instance.cancel();
-      expect(d1Status(fixture.d1)).toBe('cancelled');
-      releaseWrite?.();
-      await provision;
-      // Assert before recovery can repair a resurrected active mirror.
-      expect(d1Status(fixture.d1)).toBe('cancelled');
-      expect(doRow(fixture.doDb)).toMatchObject({ status: 'cancelled', cleanup_pending: 1 });
-      await handle.instance.alarm();
-      expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0 });
-    } finally {
-      releaseWrite?.();
-      await provision;
+  it.each(['admitting', 'exchanging', 'capturing'] as const)(
+    'finishes cleanup while the original %s D1 write remains held',
+    async (phase) => {
+      const fixture = createFixture();
+      const handle = await startSession(
+        fixture,
+        phase !== 'admitting',
+        phase === 'exchanging' ? 'claude-code' : 'openai-codex'
+      );
+      const realDb = fixture.env.DATABASE;
+      let releaseWrite: (() => void) | undefined;
+      let writeHeld = false;
+      const gate = new Promise<void>((resolve) => {
+        releaseWrite = resolve;
+      });
+      fixture.env.DATABASE = {
+        ...realDb,
+        prepare(query: string) {
+          const statement = realDb.prepare(query);
+          return {
+            ...statement,
+            bind: (...args: unknown[]) => {
+              const bound = statement.bind(...args);
+              if (args[0] !== phase) return bound;
+              return {
+                ...bound,
+                run: async () => {
+                  writeHeld = true;
+                  await gate;
+                  return bound.run();
+                },
+              };
+            },
+          };
+        },
+      } as Env['DATABASE'];
+      if (phase === 'capturing') fixture.sandbox.exists.mockResolvedValue({ exists: true });
+      const provision =
+        phase === 'exchanging'
+          ? handle.instance.submitVerificationCode('test-code')
+          : handle.instance.alarm();
+      try {
+        await vi.waitFor(() => expect(writeHeld).toBe(true));
+        expect(
+          fixture.doDb.prepare('SELECT cleanup_sandbox_io_pending FROM setup_session').get()
+        ).toEqual({ cleanup_sandbox_io_pending: 0 });
+        const readsBeforeCancel = fixture.sandbox.readFile.mock.calls.length;
+        await handle.instance.cancel();
+        expect(d1Status(fixture.d1)).toBe('cancelled');
+        expect(doRow(fixture.doDb)).toMatchObject({ status: 'cancelled', cleanup_pending: 0 });
+        expect(scrubCalls(fixture.sandbox)).toHaveLength(1);
+        expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+        expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), LEASE_ID);
+        releaseWrite?.();
+        await provision;
+        // Assert before recovery can repair a resurrected active mirror.
+        expect(d1Status(fixture.d1)).toBe('cancelled');
+        expect(doRow(fixture.doDb)).toMatchObject({ status: 'cancelled', cleanup_pending: 0 });
+        expect(fixture.sandbox.readFile).toHaveBeenCalledTimes(readsBeforeCancel);
+        await handle.instance.alarm();
+        await handle.instance.alarm();
+        expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0 });
+        expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+      } finally {
+        releaseWrite?.();
+        await provision;
+      }
     }
-  });
+  );
 
   it('keeps an issued scrub pending across eviction and tears down only after its original promise settles', async () => {
     const fixture = createFixture({ SANDBOX_EXEC_TIMEOUT_MS: '30000' });
