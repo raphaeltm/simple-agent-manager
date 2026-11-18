@@ -11,7 +11,7 @@ Raphaël reports externally resetting his selected Claude account and cannot fin
 - `provider-limit-admission.ts`: released override bypasses live rejected window; must bind profile/current credential and deadline, preserve changed-account review.
 - `project-event-schedules-delivery.ts`: scheduled callback continuation validates scheduleKey before submit; changing the key invalidates obsolete pending notices. Reconcile must still inspect already-issued receipts.
 - Existing restored-session prompt machinery retains original accepted inbox messages. Do not repost/fork/replay.
-- Sol owns shared catalog/placement and committed-active/readiness fixes. Coordinate imports and staging, do not duplicate. The recovery scan now needs additive ordered partial index0238; applied main0237_archive_reclaim_pending stays unchanged; Sol reserved unapplied0239 for catalog.
+- Sol owns shared catalog/placement and committed-active/readiness fixes. Coordinate imports and staging, do not duplicate. The final recovery scan uses additive ordered partial index0257_provider_limit_recovery_scan_index.sql; applied main migration files stay unchanged. Historical index reservations and renumbering below describe earlier candidates.
 
 ## Implementation checklist
 
@@ -21,18 +21,19 @@ Raphaël reports externally resetting his selected Claude account and cannot fin
 - [x] Add thin HTTP adapter and owner-only session notice action with pending/error state.
 - [x] Exercise public action in Workers through live rejected windows, claimed/unclaimed recovery and original delivery once.
 - [x] Cover double click, non-owner/access revocation, expired/degraded snapshot, cancellation, mutation/races and fresh rejection.
-- [x] Run API/UI lint/typecheck and desktop/mobile screenshot audit (full repository tests/build still pending).
+- [x] Run API/UI lint/typecheck, full CI and desktop/mobile screenshot audit; latest complete CI44254174177 passed on ba073ffceb29ff5fa4419f1e52d37b3fb01e5fe4.
 - [x] Update API/user docs; specialist reviews and implementation completion review (release gates remain pending).
-- [ ] Coordinate bounded real staging validation and cleanup.
-- [ ] Draft PR, CI, CodeRabbit, full-head evidence to coordinator.
+- [x] Coordinate bounded real staging attempt and cleanup; preserve its failed restore/Instant results. On November18 Raphaël permits release without another live trial based on the passing vertical slices; this is a scoped re-test waiver, not a live pass.
+- [x] Open PR2691 and complete immutable full CI; publish full-head evidence. Original coordinator is unavailable (message transport reports missing workspace/node).
+- [ ] Finish fresh independent Claude final-head review, request CodeRabbit on readiness, then merge and verify production smoke. These are the remaining release-workflow steps, not missing implementation.
 
 ## Acceptance criteria
 
-Owner can request Resume anyway on an eligible callback waiting saved session before reset. Existing task/snapshot/profile/account and original accepted delivery remain authoritative. Claimed recovery advances without claim replacement. Unclaimed recovery uses normal restoration. A changed account/profile cannot inherit consent; terminal/expired/cancelled work cannot advance. An actual rejection re-parks and clears override; repeated clicks do not duplicate work. UI is usable on mobile/desktop. Tests, review and real staging evidence precede release.
+Owner can request Resume anyway on an eligible callback waiting saved session before reset. Existing task/snapshot/profile/account and original accepted delivery remain authoritative. Claimed recovery advances without claim replacement. Unclaimed recovery uses normal restoration. A changed account/profile cannot inherit consent; terminal/expired/cancelled work cannot advance. An actual rejection re-parks and clears override; repeated clicks do not duplicate work. UI is usable on mobile/desktop. Tests and review precede release. The prior real staging attempt and its failed outcome remain recorded; on November18 Raphaël explicitly permits shipping without another live trial if the vertical-slice evidence establishes confidence.
 
 ## Release gate
 
-Keep PR draft until coordinator 01M77NV1B621TKTV79272F7YX3 independently approves full 40-character head. Every new commit invalidates approval. No production DB bypass, reset or replay. Automatic overage parsing remains separate in canonical idea.
+Keep PR draft until independent review approves the final full40-character head. The originally assigned coordinator01M77NV1B621TKTV79272F7YX3 is unreachable (Target workspace or node not found); use a fresh independent Claude reviewer for that gate under the human shipping authorization. Every source commit invalidates approval; final documentation-only changes must be explicitly reconciled by the reviewer. No production DB bypass, reset or replay. Automatic overage parsing remains separate in canonical idea.
 
 ## Local validation and review
 
@@ -138,7 +139,7 @@ Catalog2693 merged96be6b24; force-resume remains a separate draft/full-SHA revie
 - [x] Preserve the explicit per-run account through owner grant, durable repair, admission and final secret injection; fence run-configuration changes in the receipt and SQL CAS.
 - [x] Regression tests cover profile/no-profile run account over defaults, account changes/unavailability, interrupted release and secret release.
 - [x] Preserve all applied migration bytes. The required migration-ordering check rejects the duplicate0238 prefix; the unpublished force index moves to0243 (0242 is reserved by an existing staging-only trial). Update real migration/query-plan fixtures and validate clean/current-main late upgrade.
-- [ ] Final exact-head specialist/CI/CodeRabbit and standalone staging evidence; final coordinator approval remains required.
+- [x] Final exact-head CI and specialist evidence completed through ba073; prior standalone staging failure retained, with November18 human permission to skip another live trial. Final independent Claude review and ready-state CodeRabbit request remain explicit release steps above.
 
 Prior combined4c73 evidence is historical only, and no feature fixture or combined deployment occurred.
 
@@ -272,3 +273,11 @@ Focused API inventory tests pass149/149; script scanner tests4/4, node-pool boun
 Full CI44200555318 on54e184b6733ec9d80e7ad592f303f6fe52ef3613 passed every selected check except one Workers7 assertion (312/313 tests): owner grant revocation during file1 transfer correctly retired the preparing claim, so the resumed worker returned terminal_target instead of the earlier sender_unauthorized classification. Commit21505158a changes only this test: assert canonical failed/sender_access_revoked reason and transcript label, cleared attempt/retry lease, no second upload or prompt, and no subsequent claim or mutation. The focused real Workers suite passes5/5 and the wrapper's native runtime suites67/67. Earlier unchanged-test reproduction failed exactly one with four controls passing. No application code changed for this correction.
 
 After a model-capacity interruption, integrated main d29015f35742bc31abd43cc2964f69a4d9c083be. Two conflict resolutions retain both behaviors: released owner-approved recovery ACK/repair plus main's shared expired-wait helper; split omitted-variable read paths plus main's extension-transport coverage. Independent local merge_delta_review found no regression in these and the automatic delivery/session recovery merges. Focused recovery/lifecycle/default suites pass208/208 across6files after rebuilding12 dependency packages. Remaining exact-head CI and live release gates are not claimed passed. No new live trial is authorized or started.
+
+## November18 human release direction and final evidence
+
+At07:40UTC Raphaël answered inbox ask01M7PRRG6DG85JYBQ9ET3V3F31: “Go for it. Though if you're confident this works based on vertical slice tests, I think we can ship without more testing.” Proceed without another paid trial. This is permission to omit a further live retry for this PR, not a claim that the earlier four-VM restore trial or Instant402 passed. No new staging allocation is planned.
+
+The real Workers slices enter through the public owner action and exercise real D1, TaskRunner/ProjectData, R2 snapshot restore, credential callbacks, original delivery identity/acknowledgement, claimed/unclaimed future holds and rejection re-parking. Additional discriminating cancellation/authority and admission races cover the defects exposed by the failed live run. Exact ba073ffceb29ff5fa4419f1e52d37b3fb01e5fe4 fullCI44254174177 passed all selected checks: all3 API shards, all7 Workers shards, both web shards, packages, CLI, lint, build/types and code/workspace quality. Local postmerge208 recovery/configuration tests and5 attachment Workers also pass.
+
+Historical actual ClaudeOpus5.5/SAMClaude review6963758175 found no blocking delta on15ee; the later main integration was independently reviewed locally. A fresh actual Claude final-head review is being arranged, with the account observed at1% five-hour and33% weekly usage at07:40UTC. Source remains frozen. CodeRabbit is requested at readiness; the PR retains historical live limitations and tracked follow-ups. Final merge/production health-version smoke are still pending and must be recorded after they occur.
