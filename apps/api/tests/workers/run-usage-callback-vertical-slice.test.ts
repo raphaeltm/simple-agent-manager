@@ -265,8 +265,37 @@ describe('run token usage from the VM agent callback to the receipt', () => {
       );
       expect(receipt.status).toBe(200);
       expect(await receipt.json()).toMatchObject({
-        tokens: { state: 'reported', total: { input: 1711, output: 403 } },
+        tokens: { state: 'reported', limited: true, total: { input: 1711, output: 403 } },
       });
+    });
+  });
+
+  it('shows an incomplete receipt when the real callback admits none of a multi-model report', async () => {
+    await withUsageCap(1, async (session, report, suffix) => {
+      expect((await postUsage(session, report)).status).toBe(204);
+      expect(await storedRows(session.projectId)).toHaveLength(0);
+      const taskId = `task-marker-${suffix}`;
+      await seedTask(taskId, session.projectId, session.userId, {
+        status: 'completed',
+        chatSessionId: session.chatSessionId,
+        workspaceId: session.workspaceId,
+      });
+      const cookie = await seedSignedInUser(session.userId);
+      const response = await app().request(
+        `/api/projects/${session.projectId}/tasks/${taskId}/receipt`,
+        { headers: { Cookie: cookie } },
+        testEnv
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        tokens: { state: 'not_reported', limited: true },
+      });
+      const marker = await testEnv.DATABASE.prepare(
+        'SELECT COUNT(*) AS n FROM agent_run_usage_admission_hits WHERE project_id=? AND chat_session_id=?'
+      )
+        .bind(session.projectId, session.chatSessionId)
+        .first<{ n: number }>();
+      expect(marker?.n).toBe(1);
     });
   });
 

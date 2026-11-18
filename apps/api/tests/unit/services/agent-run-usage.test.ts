@@ -54,6 +54,10 @@ describe('agent_run_usage writers and reads', () => {
   beforeEach(() => {
     sqlite = new Database(':memory:');
     applySqliteMigration(sqlite, MIGRATION);
+    applySqliteMigration(
+      sqlite,
+      new URL('../../../src/db/migrations/0260_agent_run_usage_admission_hits.sql', import.meta.url)
+    );
     sqlite.exec(
       'CREATE TABLE platform_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT, updated_by TEXT)'
     );
@@ -107,6 +111,8 @@ describe('agent_run_usage writers and reads', () => {
 
     await recordHarnessRunUsage(env, scope(), 'epoch-2', [opus(25, 4)]);
     expect((await read())?.models[0]).toMatchObject({ input: 35, output: 5 });
+    expect((await read())?.limited).toBe(true);
+    expect(summarizeRunTokens(await read())).toMatchObject({ limited: true });
   });
 
   it('updates existing keys in a mixed over-cap report without admitting any novel model', async () => {
@@ -119,6 +125,7 @@ describe('agent_run_usage writers and reads', () => {
     ]);
     expect(sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage').get()).toEqual({ n: 2 });
     expect((await read())?.models[0]).toMatchObject({ input: 25, output: 3 });
+    expect((await read())?.limited).toBe(true);
   });
 
   it('admits a whole novel model set or none and groups equivalent trimmed model names', async () => {
@@ -177,6 +184,61 @@ describe('agent_run_usage writers and reads', () => {
     expect(await recordHarnessRunUsage(env, scope(), 'new', [opus(20, 2)])).toBe(0);
     expect(await recordHarnessRunUsage(env, scope(), 'e', [opus(30, 3)])).toBe(1);
     expect(sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage').get()).toEqual({ n: 1 });
+  });
+
+  it('discloses an outage with no accepted rows and keeps the marker after recovery', async () => {
+    sqlite.exec('DROP TABLE platform_settings');
+    invalidateAdminSettings(env);
+    expect(await recordHarnessRunUsage(env, scope(), 'lost', [opus(10, 1)])).toBe(0);
+    expect(summarizeRunTokens(await read())).toEqual({ state: 'not_reported', limited: true });
+    expect(await read('other-project')).toBeNull();
+    expect(await read('project-a', 'other-chat')).toBeNull();
+    sqlite.exec(
+      'CREATE TABLE platform_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT, updated_by TEXT)'
+    );
+    cap(2);
+    await recordHarnessRunUsage(env, scope(), 'accepted', [opus(20, 2)]);
+    expect(summarizeRunTokens(await read())).toMatchObject({
+      state: 'reported',
+      limited: true,
+      total: { input: 20 },
+    });
+  });
+
+  it('keeps one refusal marker across credential changes, retries, and reordered report times', async () => {
+    cap(1);
+    await recordHarnessRunUsage(env, scope(), 'e', [opus(1, 1)], 1000);
+    await recordHarnessRunUsage(env, scope(), 'novel', [opus(2, 1)], 3000);
+    await recordHarnessRunUsage(
+      env,
+      scope({ credentialReference: 'cc_credentials:rotated' }),
+      'novel',
+      [opus(2, 1)],
+      2000
+    );
+    expect(sqlite.prepare('SELECT * FROM agent_run_usage_admission_hits').all()).toEqual([
+      { project_id: 'project-a', chat_session_id: 'chat-1', last_rejected_at: 3000 },
+    ]);
+    cap(3);
+    await recordHarnessRunUsage(env, scope(), 'novel', [opus(2, 1)], 4000);
+    expect((await read())?.limited).toBe(true);
+  });
+
+  it('rolls refusal metadata back if the usage statement fails', async () => {
+    cap(1);
+    await recordHarnessRunUsage(env, scope(), 'existing', [opus(10, 1)]);
+    sqlite.exec(`CREATE TRIGGER fail_usage BEFORE INSERT ON agent_run_usage
+      BEGIN SELECT RAISE(ABORT, 'injected usage failure'); END`);
+    await expect(
+      recordHarnessRunUsage(env, scope(), 'existing', [
+        opus(20, 2),
+        { ...opus(3, 1), model: 'novel' },
+      ])
+    ).rejects.toThrow('injected usage failure');
+    expect(
+      sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage_admission_hits').get()
+    ).toEqual({ n: 0 });
+    expect((await read())?.models[0]).toMatchObject({ input: 10 });
   });
 
   it('preserves a large legacy over-cap history without scanning it for admission', async () => {

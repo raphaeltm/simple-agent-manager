@@ -13,7 +13,8 @@ import type {
   ProjectAccountsResponse,
 } from '@simple-agent-manager/shared';
 
-export type AccountsScene = 'realistic' | 'stress' | 'empty' | 'partial' | 'tokens-failed';
+export type AccountsScene =
+  'realistic' | 'stress' | 'empty' | 'partial' | 'tokens-failed' | 'admission-hit';
 
 const DAY = 86_400_000;
 const MIN = 60_000;
@@ -160,9 +161,10 @@ export function makeAccounts(
       unavailable: ['tokens'],
     };
   }
-  if (scene === 'empty') {
+  if (scene === 'empty' || scene === 'admission-hit') {
     return {
       ...base,
+      usageLimited: scene === 'admission-hit',
       accounts: [],
       stallEpisodes: { items: [], total: 0, listed: 10, truncated: false },
       totals: { runs: 0, merged: 0 },

@@ -17,11 +17,11 @@
  *   range's usage by the account's merged runs.
  *
  * Round trips (rule 60, budget 6 in the Insights spec): authorization 1; settings 0 or 1 (the
- * per-isolate admin-settings cache); one D1 `batch()` carrying five statements 1; the viewer's own
+ * per-isolate admin-settings cache); one D1 `batch()` carrying six statements 1; the viewer's own
  * limit windows 0 or 1 (one statement per 100 of their own accounts, so 1 in practice). At most 4;
  * measured at 3 in `insights-accounts.test.ts`. If the batch fails as a whole, each statement is
- * retried on its own so one bad section cannot blank the page; that rare degraded path costs five
- * more (at most 9 on a cold settings cache) and is logged.
+ * retried on its own so one bad section cannot blank the page; that rare degraded path costs six
+ * more (at most 10 on a cold settings cache) and is logged.
  */
 import { parseProviderLimitWait } from '@simple-agent-manager/scheduler-core';
 import {
@@ -60,7 +60,9 @@ import { getInsightsPageLimits } from './insights-page-settings';
 import {
   type AccountUsageRow,
   accountUsageStatement,
+  hasRunUsageAdmissionHit,
   parseAccountUsageRows,
+  runUsageAdmissionHitStatement,
   summarizeAccountUsage,
 } from './insights-run-usage';
 import type { OperationContext } from './types';
@@ -74,12 +76,13 @@ export interface ProjectAccountsInput {
 }
 
 const EVENT = 'insights_accounts';
-type BatchKey = 'runs' | 'waits' | 'windows' | 'ownLong' | 'usage';
+type BatchKey = 'runs' | 'waits' | 'windows' | 'ownLong' | 'usage' | 'usageAdmission';
 const SECTION_OF: Record<BatchKey, InsightsAccountsSection> = {
   runs: 'runs',
   waits: 'stalls',
   windows: 'stalls',
   usage: 'tokens',
+  usageAdmission: 'tokens',
   // Only used to name the viewer's own digest-keyed accounts; losing it hides names, not data.
   ownLong: 'usage',
 };
@@ -176,6 +179,7 @@ export async function projectAccounts(
       waits: stallWaitsStatement(w, viewerId, cap),
       windows: rejectedWindowsStatement(w, viewerId, cap),
       ownLong: ownLongCredentialsStatement(viewerId),
+      usageAdmission: runUsageAdmissionHitStatement({ projectId, sinceMs: w.sinceMs }),
       usage: accountUsageStatement({
         projectId,
         viewerId,
@@ -388,7 +392,7 @@ export async function projectAccounts(
       runs: list.reduce((sum, account) => sum + account.runs, 0),
       merged: list.reduce((sum, account) => sum + account.merged, 0),
     },
-    usageLimited: usage.limited,
+    usageLimited: usage.limited || hasRunUsageAdmissionHit(rows.usageAdmission),
     unavailable: [...unavailable],
     generatedAt: new Date().toISOString(),
   };

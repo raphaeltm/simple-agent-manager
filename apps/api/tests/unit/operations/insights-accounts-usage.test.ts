@@ -9,6 +9,7 @@ import { projectAccounts } from '@simple-agent-manager/operations';
 import {
   accountUsageStatement,
   parseAccountUsageRows,
+  runUsageAdmissionHitStatement,
 } from '@simple-agent-manager/operations/internal/insights-run-usage';
 import { PLATFORM_AI_MODELS } from '@simple-agent-manager/shared';
 import type Database from 'better-sqlite3';
@@ -16,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { invalidateAdminSettings } from '../../../src/services/admin-settings';
 import {
   recordHarnessRunUsage,
   recordProxyRunUsage,
@@ -167,10 +169,48 @@ describe('projectAccounts tokens and spend', () => {
     return { result, byKey: Object.fromEntries(result.accounts.map((a) => [a.key, a])) };
   }
 
+  it('seeks refusal metadata and recent usage by project indexes at historical scale', () => {
+    sqlite.exec(`WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<5001)
+      INSERT INTO agent_run_usage_admission_hits(project_id,chat_session_id,last_rejected_at)
+      SELECT 'p','history-'||x,0 FROM n`);
+    const statement = runUsageAdmissionHitStatement({ projectId: 'p', sinceMs: NOW - 7 * DAY });
+    const plan = sqlite.prepare('EXPLAIN QUERY PLAN ' + statement.sql).all(...statement.binds) as {
+      detail: string;
+    }[];
+    const details = plan.map((row) => row.detail).join('\n');
+    expect(details).toContain('idx_agent_run_usage_hits_project_rejected');
+    expect(details).toContain('idx_agent_run_usage_project_updated');
+    expect(details).not.toMatch(/SCAN [hrp](?:$|\s)/m);
+    expect(sqlite.prepare(statement.sql).all(...statement.binds)).toEqual([]);
+  });
+
+  it('discloses a rejected report with no accepted rows only in its project and reporting window', async () => {
+    sqlite.exec(
+      "INSERT INTO platform_settings(key,value) VALUES ('insights.runUsageMaxRowsPerSession','1')"
+    );
+    invalidateAdminSettings(env);
+    await harness('cap', 'cc-key', [counts(SONNET, 10, 1), counts(HAIKU, 5, 1)]);
+    expect((await accounts()).result.usageLimited).toBe(true);
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage').get()).toEqual({ n: 0 });
+    sqlite
+      .prepare('UPDATE agent_run_usage_admission_hits SET last_rejected_at = ?')
+      .run(NOW - 8 * DAY);
+    expect((await accounts()).result.usageLimited).toBe(false);
+    await harness('cap', 'cc-key', [counts(SONNET, 10, 1)]);
+    // Even a recently updated admitted row remains incomplete after an older refusal.
+    expect((await accounts()).result.usageLimited).toBe(true);
+    await proxied('cap', 'cc-key', SONNET, 10, 1);
+    expect((await accounts()).result.usageLimited).toBe(false);
+    await harness('foreign-cap', 'cc-key', [counts(SONNET, 10, 1), counts(HAIKU, 5, 1)], {
+      projectId: 'foreign',
+    });
+    expect((await accounts()).result.usageLimited).toBe(false);
+  });
+
   beforeEach(() => {
     ({ sqlite, env } = createAccountsTestDb());
     // The writers upsert on the unique key, and the read seeks the project/updated index.
-    createDeclaredIndexes(sqlite, [schema.agentRunUsage]);
+    createDeclaredIndexes(sqlite, [schema.agentRunUsage, schema.agentRunUsageAdmissionHits]);
     credential('cc-key', 'owner', 'Work API key', 'api-key');
     credential('cc-key2', 'owner', 'Spare API key', 'api-key');
     credential('cc-max', 'owner', 'Personal Max', 'oauth-token');

@@ -13,6 +13,7 @@
 import { expect, type Page, test } from '@playwright/test';
 import { isInsightsRange } from '@simple-agent-manager/shared';
 
+import { seedTheme } from './audit-helpers';
 import { docsShot } from './docs-shot';
 import { type AccountsScene, makeAccounts } from './insights-accounts-fixtures';
 import {
@@ -358,6 +359,21 @@ test.describe('Insights', () => {
     ).toBeVisible();
     await capture(page, 'insights-accounts-stress');
   });
+
+  for (const theme of ['dark', 'light'] as const) {
+    test(`accounts discloses refused usage without token rows (${theme})`, async ({ page }) => {
+      await seedTheme(page, theme);
+      await setupScene(page, 'empty', [], 'admission-hit');
+      await page.goto(`${BASE}/accounts`);
+      await expect(
+        page.getByText(
+          'Token usage is incomplete for this range. Some usage could not be recorded; shown token and spend totals are lower bounds.'
+        )
+      ).toBeVisible();
+      await expect(page.getByTestId('insights-accounts-empty')).toBeVisible();
+      await capture(page, `insights-accounts-admission-${theme}`);
+    });
+  }
 
   test('accounts for an empty project', async ({ page }) => {
     await setupScene(page, 'realistic', [], 'empty');

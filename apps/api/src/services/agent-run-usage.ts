@@ -52,7 +52,7 @@ const CONFLICT_KEY = 'project_id, chat_session_id, source, usage_epoch, model, c
  * Admit all novel model keys in one statement or none; existing keys remain updatable. The count and insert share SQLite's write boundary,
  * so concurrent client-selected epochs cannot race past the configured per-run row ceiling.
  */
-const HARNESS_UPSERT_SQL = `WITH report(
+const HARNESS_ADMISSION_CTE = `WITH report(
     project_id, chat_session_id, workspace_id, agent_session_id, usage_epoch, credential_key,
     credential_source, agent_type, reported_at, max_rows, models_json
   ) AS (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)),
@@ -95,7 +95,19 @@ const HARNESS_UPSERT_SQL = `WITH report(
   admission AS MATERIALIZED (
     SELECT new_rows = 0 OR existing_rows + new_rows <= report.max_rows AS allowed
     FROM report, usage_counts
-  )
+  )`;
+
+// Marker first: both statements observe the same pre-write admission decision in one D1 batch.
+// One sticky row per chat; rejected epochs/models/credentials cannot grow the marker table.
+const HARNESS_ADMISSION_HIT_SQL = `${HARNESS_ADMISSION_CTE}
+INSERT INTO agent_run_usage_admission_hits (project_id, chat_session_id, last_rejected_at)
+  SELECT report.project_id, report.chat_session_id, report.reported_at
+  FROM report, admission WHERE NOT admission.allowed
+  ON CONFLICT (project_id, chat_session_id) DO UPDATE SET
+    last_rejected_at = MAX(last_rejected_at, excluded.last_rejected_at)
+  WHERE excluded.last_rejected_at > last_rejected_at`;
+
+const HARNESS_UPSERT_SQL = `${HARNESS_ADMISSION_CTE}
 INSERT INTO agent_run_usage (${UPSERT_COLUMNS})
   SELECT report.project_id, report.chat_session_id, report.workspace_id,
     report.agent_session_id, 'harness', report.usage_epoch, incoming.model,
@@ -229,8 +241,9 @@ export async function recordHarnessRunUsage(
   const normalized = normalizedModels(models);
   if (normalized.length === 0) return 0;
   const credentialKey = (await credentialLimitReferenceKey(scope.credentialReference)) ?? '';
-  const result = await env.DATABASE.prepare(HARNESS_UPSERT_SQL)
-    .bind(
+  const maxRows = Number(await resolveAdminSetting(env, 'insights.runUsageMaxRowsPerSession'));
+  const statement = (sql: string) =>
+    env.DATABASE.prepare(sql).bind(
       scope.projectId,
       scope.chatSessionId,
       scope.workspaceId,
@@ -240,11 +253,14 @@ export async function recordHarnessRunUsage(
       credentialKey ? scope.credentialSource : null,
       scope.agentType,
       now,
-      Number(await resolveAdminSetting(env, 'insights.runUsageMaxRowsPerSession')),
+      maxRows,
       JSON.stringify(normalized)
-    )
-    .run();
-  return result.meta.changes ?? 0;
+    );
+  const results = await env.DATABASE.batch([
+    statement(HARNESS_ADMISSION_HIT_SQL),
+    statement(HARNESS_UPSERT_SQL),
+  ]);
+  return results[1]?.meta.changes ?? 0;
 }
 
 /** Cumulative token totals of one VM-agent usage epoch, per model (the callback's `tokenUsage`). */
