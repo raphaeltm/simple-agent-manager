@@ -26,41 +26,46 @@ func TestStandaloneCloneUsesCallbackUsername(t *testing.T) {
 		{"Artifacts default", "https://acct.artifacts.cloudflare.net/git/default/repo.git", "", "x"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			const token = "standalone-clone-test-token"
-			called := false
-			controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/api/workspaces/ws/git-token" || r.Header.Get("Authorization") != "Bearer callback" {
-					t.Error("clone requested credentials without its workspace binding")
-					w.WriteHeader(http.StatusUnauthorized)
-					return
-				}
-				called = true
-				_ = json.NewEncoder(w).Encode(gitTokenResponse{Token: token, CloneURL: tc.cloneURL, Username: tc.username})
-			}))
-			defer controlPlane.Close()
-			cloned := false
-			runStandaloneGitCommand = func(_ context.Context, _ string, env []string, args ...string) (string, error) {
-				if !slices.Contains(args, "clone") {
-					return "", nil
-				}
-				cloned = true
-				if !slices.Contains(args, tc.cloneURL) || !envContains(env, "SAM_CLONE_CREDENTIAL_USERNAME="+tc.wantUsername) || !envContains(env, "SAM_CLONE_CREDENTIAL_TOKEN="+token) {
-					t.Error("clone did not receive the callback URL and matching credential pair")
-				}
-				if strings.Contains(strings.Join(args, " "), token) {
-					t.Error("clone exposed its token in command arguments")
-				}
-				return "", nil
-			}
-			s := &Server{config: &config.Config{ControlPlaneURL: controlPlane.URL}}
-			runtime := &WorkspaceRuntime{ID: "ws", Repository: "owner/repo", CallbackToken: "callback"}
-			if err := s.cloneStandaloneRepository(context.Background(), runtime, filepath.Join(t.TempDir(), "repo")); err != nil {
-				t.Fatal(err)
-			}
-			if !called || !cloned {
-				t.Fatal("credential callback and standalone clone must both run")
-			}
+			assertStandaloneCallbackClone(t, tc.cloneURL, tc.username, tc.wantUsername)
 		})
+	}
+}
+
+func assertStandaloneCallbackClone(t *testing.T, cloneURL, username, wantUsername string) {
+	t.Helper()
+	const token = "standalone-clone-test-token"
+	called := false
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/workspaces/ws/git-token" || r.Header.Get("Authorization") != "Bearer callback" {
+			t.Error("clone requested credentials without its workspace binding")
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		called = true
+		_ = json.NewEncoder(w).Encode(gitTokenResponse{Token: token, CloneURL: cloneURL, Username: username})
+	}))
+	defer controlPlane.Close()
+	cloned := false
+	runStandaloneGitCommand = func(_ context.Context, _ string, env []string, args ...string) (string, error) {
+		if !slices.Contains(args, "clone") {
+			return "", nil
+		}
+		cloned = true
+		if !slices.Contains(args, cloneURL) || !envContains(env, "SAM_CLONE_CREDENTIAL_USERNAME="+wantUsername) || !envContains(env, "SAM_CLONE_CREDENTIAL_TOKEN="+token) {
+			t.Error("clone did not receive the callback URL and matching credential pair")
+		}
+		if strings.Contains(strings.Join(args, " "), token) {
+			t.Error("clone exposed its token in command arguments")
+		}
+		return "", nil
+	}
+	s := &Server{config: &config.Config{ControlPlaneURL: controlPlane.URL}}
+	runtime := &WorkspaceRuntime{ID: "ws", Repository: "owner/repo", CallbackToken: "callback"}
+	if err := s.cloneStandaloneRepository(context.Background(), runtime, filepath.Join(t.TempDir(), "repo")); err != nil {
+		t.Fatal(err)
+	}
+	if !called || !cloned {
+		t.Fatal("credential callback and standalone clone must both run")
 	}
 }
 
