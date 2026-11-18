@@ -1,6 +1,11 @@
 import { type Page } from '@playwright/test';
 
-import { describeThemeAudit, makeMockUser, setupAuditRoutes, visitAndCapture } from './audit-helpers';
+import {
+  describeThemeAudit,
+  makeMockUser,
+  setupAuditRoutes,
+  visitAndCapture,
+} from './audit-helpers';
 
 /**
  * Light-mode visual audit for the Settings cluster sub-pages:
@@ -220,6 +225,7 @@ const aiBudget = {
   dailyUsage: { inputTokens: 750_000, outputTokens: 120_000 },
   effectiveLimits: { dailyInputTokenLimit: 1_000_000, dailyOutputTokenLimit: 200_000 },
   monthCostUsd: 12.34,
+  monthlyCostCap: { available: true, ceilingUsd: null, effectiveCapUsd: 50 },
   utilization: { dailyInputPercent: 75, dailyOutputPercent: 60, monthlyCostPercent: 24 },
   exceeded: false,
 };
@@ -260,7 +266,8 @@ async function setupMocks(page: Page) {
         updatedAt: null,
       });
     if (path === '/api/github/installations') return respond(200, installations);
-    if (path === '/api/github/install-url') return respond(200, { url: 'https://github.com/apps/sam/installations/new' });
+    if (path === '/api/github/install-url')
+      return respond(200, { url: 'https://github.com/apps/sam/installations/new' });
     if (path === '/api/github/repositories') return respond(200, { repositories });
     if (path === '/api/notifications/preferences') return respond(200, notificationPreferences);
     if (path === '/api/notifications/unread-count') return respond(200, { count: 0 });
@@ -275,7 +282,12 @@ async function setupMocks(page: Page) {
 }
 
 describeThemeAudit('Settings cluster theme audit', setupMocks, async (page, theme, suffix) => {
-  await visitAndCapture(page, '/settings/cloud-provider', `settings-cloud-provider-${suffix}`, theme);
+  await visitAndCapture(
+    page,
+    '/settings/cloud-provider',
+    `settings-cloud-provider-${suffix}`,
+    theme
+  );
   await visitAndCapture(page, '/settings/github', `settings-github-${suffix}`, theme);
   await visitAndCapture(page, '/settings/agents', `settings-agents-${suffix}`, theme);
   await visitAndCapture(page, '/settings/notifications', `settings-notifications-${suffix}`, theme);

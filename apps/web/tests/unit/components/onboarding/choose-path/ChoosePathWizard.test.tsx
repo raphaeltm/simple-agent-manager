@@ -22,6 +22,9 @@ vi.mock('../../../../../src/components/onboarding/OnboardingContext', () => ({
 }));
 
 vi.mock('../../../../../src/lib/api', () => ({
+  fetchUserAiBudget: vi.fn(() =>
+    Promise.resolve({ monthlyCostCap: { available: true, ceilingUsd: null } })
+  ),
   listAgentCredentials: mocks.listAgentCredentials,
   listAgents: vi.fn(() => Promise.resolve({ agents: [] })),
   listCredentials: mocks.listCredentials,

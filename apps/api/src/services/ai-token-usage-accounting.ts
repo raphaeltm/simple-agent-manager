@@ -4,5 +4,6 @@ export {
   attachTokenUsageAccounting,
   attachUpstreamTokenUsageAccounting,
   estimateInputTokensFromMessages,
+  estimateInputTokensFromRequest,
   optionalExecutionContext,
 } from '@simple-agent-manager/ai-proxy';

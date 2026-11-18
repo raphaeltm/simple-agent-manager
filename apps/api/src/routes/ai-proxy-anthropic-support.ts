@@ -1,3 +1,4 @@
+import { type MonthlyCostCapCheck,monthlyCostCapMessage } from '@simple-agent-manager/ai-proxy';
 /**
  * Error shapes and platform-credential telemetry for the native Anthropic proxy
  * (`routes/ai-proxy-anthropic.ts`).
@@ -50,7 +51,8 @@ export function anthropicProviderErrorHeaders(upstreamHeaders: Headers): Headers
 }
 
 export function anthropicUsageGateError(
-  reason: 'daily-token-budget' | 'monthly-cost-cap'
+  reason: 'daily-token-budget' | 'monthly-cost-cap',
+  cap?: MonthlyCostCapCheck
 ): Response {
   if (reason === 'daily-token-budget') {
     return anthropicError(
@@ -60,11 +62,7 @@ export function anthropicUsageGateError(
     );
   }
 
-  return anthropicError(
-    'Monthly cost cap exceeded. Adjust your cap in Settings > Usage.',
-    'rate_limit_error',
-    429
-  );
+  return anthropicError(monthlyCostCapMessage(cap), 'rate_limit_error', 429);
 }
 
 export function anthropicBodyMaxBytes(c: AnthropicProxyContext): number {

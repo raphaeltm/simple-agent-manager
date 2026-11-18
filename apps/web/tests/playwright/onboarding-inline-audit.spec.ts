@@ -43,6 +43,8 @@ const REPOSITORY = {
 };
 
 interface Installation {
+  monthlyCapAvailable?: boolean;
+  monthlyCeilingUsd?: number | null;
   instant?: boolean;
   platformCompute?: boolean;
   artifacts?: boolean;
@@ -70,6 +72,13 @@ async function setupMocks(page: Page, state: Installation): Promise<Recorded> {
     if (p.startsWith('/api/notifications'))
       return jsonResponse(route, 200, { notifications: [], unreadCount: 0 });
     if (p === '/api/agents') return jsonResponse(route, 200, []);
+    if (p === '/api/usage/ai/budget')
+      return jsonResponse(route, 200, {
+        monthlyCostCap: {
+          available: state.monthlyCapAvailable ?? true,
+          ceilingUsd: state.monthlyCeilingUsd ?? null,
+        },
+      });
 
     // What the installation offers.
     if (p === '/api/config/instant-runtime')
@@ -274,6 +283,54 @@ test('SAM-managed AI is offered only when this installation enables it', async (
   await assertNoOverflow(page);
   await viewportScreenshot(page, 'onboarding-agent-api-key');
 });
+
+for (const available of [false, true]) {
+  test(`SAM onboarding monthly cap pricing available=${available}`, async ({ page }) => {
+    await setupMocks(page, {
+      instant: true,
+      hasGitHub: true,
+      samAi: true,
+      monthlyCapAvailable: available,
+      monthlyCeilingUsd: available ? 25 : null,
+    });
+    const wizard = await begin(page);
+    await wizard.getByRole('button', { name: /Right here, on Cloudflare/ }).click();
+    await wizard.getByRole('button', { name: /Claude Code/ }).click();
+    await wizard.getByRole('button', { name: 'SAM AI', exact: true }).click();
+    await expect(wizard.getByLabel('Daily input tokens')).toBeVisible();
+    const monthly = wizard.getByLabel('Monthly cap (USD)');
+    if (available) {
+      await expect(monthly).toHaveAttribute('max', '25');
+      await expect(
+        wizard.getByText('Your administrator limits everyone to $25.00 a month.')
+      ).toBeVisible();
+    } else {
+      await expect(monthly).toHaveCount(0);
+      await expect(wizard.getByText(/Monthly caps are unavailable/)).toBeVisible();
+    }
+    await assertNoOverflow(page);
+    await wizard.getByRole('button', { name: /Use this agent/ }).scrollIntoViewIfNeeded();
+    await page.waitForTimeout(600);
+    await page.screenshot({
+      path: `../../.tmp/playwright-screenshots/onboarding-monthly-cap-${available}-${page.viewportSize()?.width}.png`,
+    });
+    if (available) await monthly.fill('25');
+    else await wizard.getByLabel('Daily input tokens').fill('500');
+    const budgetWrite = page.waitForRequest(
+      (request) => request.url().endsWith('/api/usage/ai/budget') && request.method() === 'PUT'
+    );
+    const modeWrite = page.waitForRequest(
+      (request) =>
+        request.url().endsWith('/api/agent-settings/claude-code') && request.method() === 'PUT'
+    );
+    await wizard.getByRole('button', { name: /Use this agent/ }).click();
+    expect((await budgetWrite).postDataJSON()).toEqual(
+      available ? { monthlyCostCapUsd: 25 } : { dailyInputTokenLimit: 500 }
+    );
+    expect((await modeWrite).postDataJSON()).toEqual({ providerMode: 'sam' });
+    await expect(wizard.getByRole('heading', { name: 'What are we building?' })).toBeVisible();
+  });
+}
 
 test('SAM-hosted path: no GitHub, an Instant profile, then the first chat', async ({ page }) => {
   const recorded = await setupMocks(page, { instant: true, artifacts: true });
