@@ -48,10 +48,10 @@ SAM task 01M7QB46M5C4GE1Z51D1ZNEBGJ; coordinator 01M7JMXS2JRW6QQMB1356ENPM3; pla
 - [x] API reverse-tunnel tests that render through `installReverseTunnelTransport(generateCloudInit)`
       pass against the new renderer
 - [x] Docs: self-hosting.mdx (boot mode), security.md (reverse-tunnel ingress; `isTunnelMode` now covers both tunnel modes), packages/cloud-init/AGENTS.md, rule 06 cloud-init step
-- [ ] lint, typecheck, test, build
+- [x] lint, typecheck, test, build (local full suite 41/41 tasks; CI green on b7e8dec0d)
 - [x] security-auditor (PASS: 0 CRITICAL/HIGH/MEDIUM; 3 LOW deferred to tasks/backlog/2026-11-18-reverse-tunnel-cloud-init-hardening.md to keep byte-identity with the BOX-proven tip), task-completion-validator (WARN, no CRITICAL/HIGH; all four items addressed in a0bb64b27)
-- [ ] BOX proof (byte-identical to integration tip: cite BOX run 01M7QB382PDGH42XEG3ZFFS6DE)
-- [ ] Staging: real VM node provisioning with heartbeat, then cleanup
+- [x] BOX proof: original port covered by BOX run 01M7QB382PDGH42XEG3ZFFS6DE; after CodeRabbit fixes, own BOX proof on ba35d4905 (integration PR #2886): reverse-tunnel node 01M7QEZFVAB723NYBXXD4EPAQQ lease 20008, frpc login, heartbeat, gateway system-info, terminal, cleanup
+- [x] Staging: primary staging at b7e8dec0d, Cloudflare Tunnel node 01M7QGWHQDPNB74YWAQK37SB67 heartbeat 14:32:02Z, workspace + terminal, cleaned up. staging2 unusable for VMs (GCP STS 400, #2880)
 
 ## Acceptance criteria
 
@@ -62,3 +62,9 @@ SAM task 01M7QB46M5C4GE1Z51D1ZNEBGJ; coordinator 01M7JMXS2JRW6QQMB1356ENPM3; pla
 - Invalid reverse-tunnel variable combinations are rejected without echoing the credential.
 - The control plane accepts `frpc_install` boot-failure reports.
 - Staging node provisioning still boots a VM that heartbeats; VM cleaned up.
+
+## Outcome
+
+- CodeRabbit (10 threads): 9 fixed (8e1a22a47, b7e8dec0d), 1 deferred with reason (write_files secret window shared with callback-token).
+- Review changes moved the slice off the integration tip; the same changes are on integration PR #2886.
+- Follow-ups: tasks/backlog/2026-11-18-reverse-tunnel-cloud-init-hardening.md.
