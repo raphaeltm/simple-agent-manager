@@ -80,6 +80,8 @@ export interface RuntimeWorkspaceSnapshot {
   nodeId: string | null;
   userId: string | null;
   nodeRuntime: string | null;
+  /** `nodes.transport` from the same snapshot query; routes the node-health probe. */
+  nodeTransport?: string | null;
   nodeStatus: string | null;
   nodeHealthStatus: string | null;
   nodeHeartbeatAt: number | null;

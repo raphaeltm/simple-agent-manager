@@ -64,6 +64,7 @@ import { resolveDiagnosticIncidentConfig } from '../../../src/services/diagnosti
 import { githubTriggerRecoveryConfig } from '../../../src/services/github-trigger-recovery-config';
 import { getRuntimeLimits } from '../../../src/services/limits';
 import { buildNodeCloudInit } from '../../../src/services/node-provisioning-cloud-init';
+import { provisionsExtensionTransportNodes } from '../../../src/services/node-transport-extension';
 import {
   resolveManagedNodeTransport,
   resolveVmAgentTunnelPort,
@@ -106,7 +107,11 @@ export const READ_PATHS: readonly ReadPath[] = [
   },
   {
     label: 'managed VM tunnel transport and connector boot configuration',
-    sources: [`${API}/services/node-tunnel-config.ts`, `${API}/selfhost/reverse-tunnel/env.ts`],
+    sources: [
+      `${API}/services/node-tunnel-config.ts`,
+      `${API}/selfhost/reverse-tunnel/env.ts`,
+      `${API}/services/node-transport-extension.ts`,
+    ],
     read: (env) => {
       let boot: string;
       try {
@@ -147,7 +152,12 @@ export const READ_PATHS: readonly ReadPath[] = [
           throw error;
         selected = error.message;
       }
-      return [selected, boot, isReverseTunnelInstallation(asEnv(env))];
+      return [
+        selected,
+        boot,
+        isReverseTunnelInstallation(asEnv(env)),
+        provisionsExtensionTransportNodes(asEnv(env)),
+      ];
     },
   },
   {

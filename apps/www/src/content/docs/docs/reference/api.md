@@ -316,17 +316,22 @@ the login page offers.
 ### `GET /api/config/platform-capabilities`
 
 Public. `{ "speechToText": bool, "textToSpeech": bool, "agentModelCalls": bool }`: which platform
-services this installation has, so the app hides controls that cannot work here. Computed from the
-Worker's bindings and settings with no D1 or KV read (`publicPlatformCapabilities()` in
-`apps/api/src/services/platform-capabilities.ts`). On Cloudflare, with the Workers AI binding
-present, every field is true; `textToSpeech` is also false when `TTS_ENABLED` is `"false"`. The
+services this installation has, so the app hides controls that cannot work here. On Cloudflare it
+is computed from the Worker's bindings and settings with no D1 or KV read
+(`resolvePublicPlatformCapabilities()` in `apps/api/src/services/speech-backend.ts`, over
+`publicPlatformCapabilities()` in `apps/api/src/services/platform-capabilities.ts`). With the
+Workers AI binding present, every field is true; `textToSpeech` is also false when `TTS_ENABLED` is
+`"false"`. Only a runtime without the binding whose entry installed a speech backend (the self-host
+build's OpenAI-compatible speech endpoints, `apps/api/src/selfhost/speech/`) reads that backend's
+settings to answer `speechToText` and `textToSpeech`. The
 web app treats a missing field, a failed request or a pending answer as "available", so controls
 never flicker away while it loads.
 
 Routes that need a missing service answer `404` with
 `{ "error": "FEATURE_UNAVAILABLE", "message": "…", "details": { "feature": "<capability>" } }`
 (`errors.featureUnavailable()` in `apps/api/src/middleware/error.ts`): `POST /api/transcribe`,
-`POST /api/tts/synthesize` and `GET /api/agent-models/catalog` without the Workers AI binding.
+`POST /api/tts/synthesize` and `GET /api/agent-models/catalog` without the Workers AI binding
+(the two speech routes only when no speech backend is installed and configured either).
 Agent-facing model calls (`list_ai_models`, `run_ai_model`) answer with the non-retryable
 `not_available` code in that case.
 
@@ -1165,6 +1170,37 @@ items the caller may open. Returns `ProjectPeopleResponse`
   `truncated` means the scan cap (`insights.peopleReviewScanCap`) kept only the newest requests.
 - `firstPerson`: `{ closed, firstPerson, share }`, `share` `null` when nothing closed.
 - `unavailable`: sections whose read failed this time (`waiting`, `reviews`, `first_person`).
+
+### Insights for agents: MCP `project_insights` / Connector `sam_project_insights`
+
+The same Insights reads, for agents, as one tool with a `method` (`projectInsights`,
+`packages/operations/src/insights-agent.ts`; catalog operation `sam_project_insights`, which the SAM
+Connector lists; sam-mcp tool `project_insights`, `apps/api/src/routes/mcp/project-insights-tool.ts`).
+
+- `receipt` (`taskId`): `runReceipt`. `flow` (`range`): `projectFlow`. `setups` (`range`,
+  `groupBy`): `projectSetups`. `accounts` (`range`): `projectAccounts`. `phases` (`skillId` or
+  `agentProfileId`, optional `operation`, `phaseNames` and `windowDays`): median and p90 per
+  lifecycle phase from `phaseDurationStats`, over at most the 500 newest successful rows of each
+  operation and phase. Each (operation, phase) is read newest first from one range of an index
+  keyed on every filter (migration 0260), and the read stops at its sample, so the cost does not
+  grow with stored history. Each stat's `truncated` says its pair had older rows left out (the
+  response-level `truncated` says any did, or that the total row bound was reached). An undeclared argument, an argument the method does not
+  read, or a missing one it needs is `invalid_input`.
+- Numbers only: no task, pull request or idea titles, no idea notes, no agent questions, no account
+  names or credential references, no names of a teammate's profiles. CI check names are kept
+  (capped at 100 characters) because they identify a flaky check. Accounts are keyed `account-1`,
+  `account-2`, ... in the order the page lists them. Dollar spend appears only where the receipt
+  page would show it, and is hidden when the run's account was not recorded.
+- On sam-mcp the project always comes from the MCP token; a different `projectId` is refused with
+  `Project does not match workspace token`. Each chat may call it `insights.agentToolCallsPerWindow`
+  times per `insights.agentToolWindowSeconds` (see [admin settings](/docs/guides/admin-settings/));
+  the next call returns JSON-RPC error `-32000` with the retry time. A call refused for its
+  arguments does not count. The Connector has no chat, so
+  there it spends the per-user `connector.readRateLimitPerMinute` budget instead.
+- Round trips in the handler are the page read's plus one rate-limit RPC: receipt at most 8 (it
+  skips the account-name read), flow at most 11, setups at most 6, accounts at most 5, phases 3.
+  Every sam-mcp call also pays the token, storage-activation and HTTP rate-limit checks that all
+  sam-mcp tools share.
 
 ### `POST /api/projects/:id/tasks`
 

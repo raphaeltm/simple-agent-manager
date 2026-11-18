@@ -4,8 +4,8 @@ import { getCredentialEncryptionKey } from '../lib/secrets';
 import { AppError, errors } from '../middleware/error';
 import { AdminSettingsUnavailableError } from './admin-settings-cache';
 import {
-  ADMIN_SETTINGS_REGISTRY,
   type AdminSettingName,
+  adminSettingsRegistry,
   type AdminSettingValue,
   findAdminSetting,
 } from './admin-settings-registry';
@@ -181,7 +181,7 @@ function validateMutationInput(input: {
 }): void {
   if (
     !input.changes.length ||
-    input.changes.length > ADMIN_SETTINGS_REGISTRY.length ||
+    input.changes.length > adminSettingsRegistry().length ||
     new Set(input.changes.map((x) => x.name)).size !== input.changes.length ||
     input.changes.some(
       (change) =>

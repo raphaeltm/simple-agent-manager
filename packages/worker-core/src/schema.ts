@@ -6063,7 +6063,7 @@ export const lifecycleStateEpisodes = sqliteTable(
 );
 
 /**
- * One row per reported lifecycle phase (Insights slice T, migration 0250). Written by
+ * One row per reported lifecycle phase (Insights slice T, migrations 0250 and 0260). Written by
  * `recordLifecycleTimings` and `recordRunnerPhase`, read by `packages/operations`
  * `insights-phase-timings`, purged by the daily lifecycle latency evaluation. No foreign keys:
  * bounded telemetry must never block or cascade an entity delete. `createdAt` is epoch ms.
@@ -6092,11 +6092,26 @@ export const lifecyclePhaseTimings = sqliteTable(
     taskIdx: index('idx_lifecycle_phase_timings_task')
       .on(table.taskId, table.createdAt)
       .where(sql`task_id IS NOT NULL`),
-    skillPhaseIdx: index('idx_lifecycle_phase_timings_skill_phase')
-      .on(table.projectId, table.skillId, table.phase, table.createdAt)
+    // Migration 0260: per (operation, phase) samples of successful rows, one index range each.
+    skillPairIdx: index('idx_lifecycle_phase_timings_skill_pair')
+      .on(
+        table.projectId,
+        table.skillId,
+        table.operation,
+        table.phase,
+        table.outcome,
+        table.createdAt
+      )
       .where(sql`skill_id IS NOT NULL`),
-    profilePhaseIdx: index('idx_lifecycle_phase_timings_profile_phase')
-      .on(table.projectId, table.agentProfileId, table.phase, table.createdAt)
+    profilePairIdx: index('idx_lifecycle_phase_timings_profile_pair')
+      .on(
+        table.projectId,
+        table.agentProfileId,
+        table.operation,
+        table.phase,
+        table.outcome,
+        table.createdAt
+      )
       .where(sql`agent_profile_id IS NOT NULL`),
     createdIdx: index('idx_lifecycle_phase_timings_created').on(table.createdAt),
   })

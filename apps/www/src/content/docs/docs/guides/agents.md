@@ -5,6 +5,13 @@ description: Configure and use AI coding agents in SAM — Claude Code, OpenAI C
 
 SAM supports seven AI coding agents. You connect the ones you want to use, then choose which to run for a given chat by selecting an **agent profile**.
 
+If a project has no profiles and you have connected exactly one agent, choose
+**Start chatting with &lt;agent&gt;** in project chat or the Overview task box. That click
+creates one **&lt;agent&gt; Chat** profile; opening the page creates nothing. The profile
+uses Instant where this installation supports it, and a Cloud VM otherwise.
+Choose **Customize** to open the profile wizard instead. With several connected
+agents, use the wizard to choose one.
+
 ## Supported Agents
 
 ### Claude Code
@@ -807,6 +814,7 @@ change.
 | `knowledge_read` / `knowledge_write`                                                                               | Read and maintain remembered facts. Read methods: `search`, `relevant`, `get`, `list`, `related`. Write methods: `add`, `update`, `confirm`, `remove`, `relate`, `flag_contradiction`.                                                                                                                                                                                         |
 | `policies_read` / `policies_write`                                                                                 | Read and maintain project policies. Methods: `list`, `get`; `add`, `update`, `remove`. `injectMode` (`pinned`, the default, or `on_demand`) controls whether a policy is always in `get_instructions` or listed by title until it matches the task.                                                                                                                            |
 | `workspace_read`                                                                                                   | Read your workspace. Methods: `info`, `network`, `dns`, `diff`, `credentials`, `runtime_env` (the runtime variable and secret names this session can use, with scope, expiry and provenance, never values), `credential_limits` (the [usage limits](#usage-limits) of this session's credential, or with `scope: "project"` of the project's credentials), `setup_guide`.      |
+| `project_insights`                                                                                                 | Numbers about this project's runs, rate-limited per chat. Methods: `receipt` (one task run), `flow` (CI first-try rate, flaky checks, why runs stopped), `setups` (memory p90 vs requested, median to PR, tokens per merged PR), `phases` (usual phase durations for a skill or profile), `accounts` (limits and stalls). See the [API reference](/docs/reference/api/).       |
 | `list_library_files`, `download_library_file`, `upload_to_library`, `replace_library_file`, `display_from_library` | Project library files. `download_library_file` writes into the workspace, so it is separate from the read-only list.                                                                                                                                                                                                                                                           |
 | `schedules_read` / `schedules_write`                                                                               | One-off scheduled messages to a chat or a new task, such as a reminder for an agent to wake itself later. Methods: `list`, `get`; `create`, `reschedule`, `cancel`, `reconcile`.                                                                                                                                                                                               |
 | `comments_read` / `comments_write`                                                                                 | Comment threads on chat messages and library files. Methods: `list`, `get`, `list_file`; `create`, `reply`, `resolve`, `reopen`, `create_file`.                                                                                                                                                                                                                                |

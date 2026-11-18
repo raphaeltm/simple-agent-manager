@@ -42,6 +42,7 @@ import {
   sourceValidationReadFailure,
 } from './prompt-delivery-source-guards';
 import { labelSteerOutcomeOnTranscript } from './prompt-delivery-steer';
+import { applyProviderLimitDeliveryHold } from './provider-limit-delivery-hold';
 import * as sessionState from './session-state';
 import type { Env } from './types';
 import { raiseSessionWakeFailure } from './wake-failure';
@@ -336,6 +337,18 @@ export async function runPromptDeliveryClaim(
       result.promptEpoch,
       result.promptEpoch
     );
+  }
+  if (applied && result.kind === 'retry' && result.reason === 'not_ready' && hooks.projectId) {
+    // A sleeping chat whose task is held by a provider usage limit cannot wake before the hold
+    // ends: keep the person's message past its TTL and park retries until the hold's retry time
+    // (`provider-limit-delivery-hold.ts`). Never throws. An awake chat costs one local read; a
+    // sleeping one adds one D1 read per retry, and a held one is then parked.
+    const held = await applyProviderLimitDeliveryHold(sql, env.DATABASE, {
+      projectId: hooks.projectId,
+      sessionId: claim.message.targetSessionId,
+      ttlMs: config.ttlMs,
+    });
+    if (held && held.closedWakeAsks > 0) hooks.scheduleSummarySync();
   }
   if (applied && result.kind === 'failed' && result.reason === 'wake_refused') {
     await raiseSessionWakeFailure(

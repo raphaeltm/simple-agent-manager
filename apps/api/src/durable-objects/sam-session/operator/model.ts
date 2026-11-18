@@ -18,7 +18,10 @@ import {
   resolveCloudflareWorkersAiTarget,
   resolveOpenAICompatibleTarget,
 } from '../../../services/llm-chat-target';
-import { aiGatewayOnlyHeaders } from '../../../services/platform-capabilities';
+import {
+  aiGatewayOnlyHeaders,
+  hasLocalAiCostMetering,
+} from '../../../services/platform-capabilities';
 import { buildAnthropicGatewayUrl } from '../agent-loop-helpers';
 
 /** Provider ID of the OpenAI-compatible Workers AI route; also its providerOptions key. */
@@ -205,6 +208,8 @@ export async function recordOperatorStepUsage(
       : ((input - cached) * catalogModel.costPer1kInputTokens +
           cached * cachedRate +
           output * catalogModel.costPer1kOutputTokens) /
-          1000
+          1000,
+    // Per-model breakdown only where SAM's own record is the spend record (ai-model-usage.ts).
+    !customEndpoint && hasLocalAiCostMetering(env) ? catalogModel.id : undefined
   );
 }

@@ -1,3 +1,4 @@
+import { monthlyCostCapMessage } from '@simple-agent-manager/ai-proxy';
 /**
  * Request admission for the platform AI proxy (`routes/ai-proxy.ts`): authentication, request-size
  * limits, and every gate a request must pass before it may spend platform credentials.
@@ -154,18 +155,12 @@ export async function enforceUsageGate(
     );
   }
 
-  return proxyJsonError(
-    c,
-    'Monthly cost cap exceeded. Adjust your cap in Settings > Usage.',
-    'rate_limit_error',
-    429,
-    {
-      monthlyCost: {
-        used: usageGate.monthlyCap.costUsd,
-        cap: usageGate.monthlyCap.capUsd,
-      },
-    }
-  );
+  return proxyJsonError(c, monthlyCostCapMessage(usageGate.monthlyCap), 'rate_limit_error', 429, {
+    monthlyCost: {
+      used: usageGate.monthlyCap.costUsd,
+      cap: usageGate.monthlyCap.capUsd,
+    },
+  });
 }
 
 export function validateAllowedModel(c: AIProxyContext, modelId: string): Response | null {
