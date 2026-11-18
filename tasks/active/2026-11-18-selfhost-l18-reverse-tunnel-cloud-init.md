@@ -49,7 +49,7 @@ SAM task 01M7QB46M5C4GE1Z51D1ZNEBGJ; coordinator 01M7JMXS2JRW6QQMB1356ENPM3; pla
       pass against the new renderer
 - [x] Docs: self-hosting.mdx (boot mode), security.md (reverse-tunnel ingress; `isTunnelMode` now covers both tunnel modes), packages/cloud-init/AGENTS.md, rule 06 cloud-init step
 - [ ] lint, typecheck, test, build
-- [ ] security-auditor, task-completion-validator (validator: WARN, no CRITICAL/HIGH; doc-sync, checklist and two extra snapshot cases addressed)
+- [x] security-auditor (PASS: 0 CRITICAL/HIGH/MEDIUM; 3 LOW deferred to tasks/backlog/2026-11-18-reverse-tunnel-cloud-init-hardening.md to keep byte-identity with the BOX-proven tip), task-completion-validator (WARN, no CRITICAL/HIGH; all four items addressed in a0bb64b27)
 - [ ] BOX proof (byte-identical to integration tip: cite BOX run 01M7QB382PDGH42XEG3ZFFS6DE)
 - [ ] Staging: real VM node provisioning with heartbeat, then cleanup
 
