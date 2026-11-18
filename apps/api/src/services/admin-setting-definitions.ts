@@ -1,5 +1,6 @@
 import type { DeploymentPublishJobSettingName } from '@simple-agent-manager/app-deployment';
 import type {
+  InsightsAgentSettingName,
   InsightsCloudflareCostSettingName,
   InsightsInstallationSettingName,
   InsightsPageSettingName,
@@ -9,6 +10,7 @@ import type {
 
 import type { Env } from '../env';
 import { type GcpCatalogSettingName } from './admin-settings-gcp-catalog-definitions';
+import { type InfomaniakSettingName } from './admin-settings-infomaniak-definitions';
 import { type InstructionBudgetSettingName } from './admin-settings-instructions-definitions';
 import type { NodeTunnelSettingName } from './admin-settings-node-tunnel-definitions';
 import { type OutboundSettingName } from './admin-settings-outbound-definitions';
@@ -55,11 +57,13 @@ export type AdminSettingName =
   | InsightsInstallationSettingName
   | InsightsCloudflareCostSettingName
   | ProjectBriefSettingName
+  | InsightsAgentSettingName
   | RuntimeSecretRequestSettingName
   | AgentEmailSettingName
   | FleetOpsSettingName
   | NodeTunnelSettingName
   | GcpCatalogSettingName
+  | InfomaniakSettingName
   | InstructionBudgetSettingName
   | OperationsTelemetrySettingName
   | OutboundSettingName

@@ -38,7 +38,7 @@ This starts:
 ## Prerequisites
 
 ```bash
-node --version   # v22.14+ (Node 22 LTS) or v24.x or higher
+node --version   # v22.22+ (Node 22 LTS) or v24.x or higher
 pnpm --version   # 9.x or higher
 ```
 
@@ -95,6 +95,7 @@ Packages must be built in dependency order:
 pnpm --filter @simple-agent-manager/shared build
 pnpm --filter @simple-agent-manager/providers build
 pnpm --filter @simple-agent-manager/worker-core build
+pnpm --filter @simple-agent-manager/cron build
 pnpm --filter @simple-agent-manager/app-deployment build
 pnpm --filter @simple-agent-manager/scheduler-core build
 pnpm --filter @simple-agent-manager/project-data build

@@ -470,8 +470,12 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
     expect(fetchWithTimeoutMock).toHaveBeenCalledWith(
       'https://01m064tg56ecjw1d127h32brvj.vm.example.test:8443/health',
       { method: 'GET', redirect: 'manual' },
-      5_000
+      expect.any(Number)
     );
+    // Route resolution shares the probe budget, so the fetch gets what remains.
+    const fetchBudgetMs = fetchWithTimeoutMock.mock.calls[0]?.[2] as number;
+    expect(fetchBudgetMs).toBeGreaterThan(0);
+    expect(fetchBudgetMs).toBeLessThanOrEqual(5_000);
     expect(insertedSuccessor).toBe(false);
     expect(result.failedInProgress).toBe(0);
     expect(statusOf(PREDECESSOR_ID)).toMatchObject({

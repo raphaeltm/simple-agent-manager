@@ -49,7 +49,7 @@ vi.mock('../../../src/middleware/project-auth', () => ({
 const mockValidateCron = vi
   .fn()
   .mockReturnValue({ valid: true, humanReadable: 'Every day at 9:00 AM' });
-vi.mock('../../../src/services/cron-utils', () => ({
+vi.mock('@simple-agent-manager/cron', () => ({
   validateCronExpression: (...args: any[]) => mockValidateCron(...args),
   cronToNextFire: vi.fn().mockReturnValue('2026-04-10T09:00:00.000Z'),
   cronToHumanReadable: vi.fn().mockReturnValue('Every day at 9:00 AM (UTC)'),
