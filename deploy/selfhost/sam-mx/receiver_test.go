@@ -116,7 +116,13 @@ type harness struct {
 	cfg     *Config
 	key     ed25519.PrivateKey
 	server  *smtp.Server
+	// stop is the shutdown signal serveUntil waits on; served receives its result.
+	stop     chan struct{}
+	stopOnce sync.Once
+	served   chan error
 }
+
+func (h *harness) shutdown() { h.stopOnce.Do(func() { close(h.stop) }) }
 
 // newHarness runs the real receiver (config, listener limits, go-smtp server, session, gateway
 // client) on a loopback port against a fake gateway HTTP server.
@@ -164,9 +170,14 @@ func newHarness(t *testing.T, mutate func(map[string]string)) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() { _ = server.Serve(newLimitedListener(ln, cfg)) }()
-	t.Cleanup(func() { _ = server.Close() })
-	return &harness{t: t, addr: ln.Addr().String(), dns: dns, gateway: gw, cfg: cfg, key: priv, server: server}
+	h := &harness{t: t, addr: ln.Addr().String(), dns: dns, gateway: gw, cfg: cfg, key: priv, server: server,
+		stop: make(chan struct{}), served: make(chan error, 1)}
+	go func() { h.served <- serveUntil(server, newLimitedListener(ln, cfg), h.stop, cfg.ShutdownGrace) }()
+	t.Cleanup(func() {
+		h.shutdown()
+		_ = server.Close()
+	})
+	return h
 }
 
 func message(from, subject string) []byte {
@@ -520,6 +531,49 @@ func TestDKIMSignatureMustCoverToAndDate(t *testing.T) {
 		if smtpCode(t, h.send("x@nospf.example", []string{agentRcpt}, out.Bytes())) != 550 {
 			t.Fatalf("want 550 for a signature over %v", keys)
 		}
+	}
+}
+
+func TestShutdownWaitsForAnInFlightDelivery(t *testing.T) {
+	h := newHarness(t, nil)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseGateway := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseGateway) // a failing run must not leave the fake gateway blocked forever
+	h.gateway.block = func(r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}
+	delivered := make(chan error, 1)
+	go func() {
+		delivered <- h.send("x@nospf.example", []string{agentRcpt}, h.sign("sender.example", message(allowedFrom, "drain")))
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for h.gateway.count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if h.gateway.count() != 1 {
+		t.Fatal("the delivery never reached the gateway")
+	}
+	h.shutdown() // SIGTERM while the Worker is still answering
+	select {
+	case <-h.served:
+		t.Fatal("serveUntil returned while a delivery was still in flight")
+	case <-time.After(300 * time.Millisecond):
+	}
+	releaseGateway()
+	if err := <-delivered; err != nil {
+		t.Fatalf("the in-flight delivery was cut off: %v", err)
+	}
+	select {
+	case err := <-h.served:
+		if err != nil {
+			t.Fatalf("serveUntil: %v", err)
+		}
+	case <-time.After(h.cfg.ShutdownGrace + 2*time.Second):
+		t.Fatal("serveUntil did not return after the drain")
 	}
 }
 
