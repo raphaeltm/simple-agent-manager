@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({
+  fetchUserAiBudget: vi.fn(),
   saveAgentCredential: vi.fn(),
   saveAgentSettings: vi.fn(),
   updateUserAiBudget: vi.fn(),
@@ -21,6 +22,9 @@ beforeEach(() => {
   api.saveAgentCredential.mockResolvedValue({});
   api.saveAgentSettings.mockResolvedValue({});
   api.updateUserAiBudget.mockResolvedValue({});
+  api.fetchUserAiBudget.mockResolvedValue({
+    monthlyCostCap: { available: true, ceilingUsd: null },
+  });
 });
 
 describe('authMethodsForAgent', () => {
@@ -102,6 +106,54 @@ describe('saveAgentConnection', () => {
 
   it('refuses without an agent', async () => {
     await expect(saveAgentConnection(INITIAL_FORM)).rejects.toThrow('Please choose an agent');
+  });
+
+  it('omits a stale monthly cap where pricing is unavailable but saves daily limits', async () => {
+    api.fetchUserAiBudget.mockResolvedValue({
+      monthlyCostCap: { available: false, ceilingUsd: null },
+    });
+    await saveAgentConnection({
+      ...INITIAL_FORM,
+      selectedAgent: 'claude-code',
+      selectedAuthMethod: 'sam',
+      monthlyCostCapUsd: '25',
+      dailyInputTokenLimit: '500',
+    });
+    expect(api.updateUserAiBudget).toHaveBeenCalledWith({ dailyInputTokenLimit: 500 });
+    expect(api.saveAgentSettings).toHaveBeenCalledWith('claude-code', { providerMode: 'sam' });
+  });
+
+  it('refuses above the current installation ceiling before any mutation', async () => {
+    api.fetchUserAiBudget.mockResolvedValue({
+      monthlyCostCap: { available: true, ceilingUsd: 10 },
+    });
+    await expect(
+      saveAgentConnection({
+        ...INITIAL_FORM,
+        selectedAgent: 'claude-code',
+        selectedAuthMethod: 'sam',
+        monthlyCostCapUsd: '25',
+      })
+    ).rejects.toThrow('administrator limit');
+    expect(api.updateUserAiBudget).not.toHaveBeenCalled();
+    expect(api.saveAgentSettings).not.toHaveBeenCalled();
+  });
+
+  it('accepts equality and does not switch provider mode if the budget save fails', async () => {
+    api.fetchUserAiBudget.mockResolvedValue({
+      monthlyCostCap: { available: true, ceilingUsd: 25 },
+    });
+    api.updateUserAiBudget.mockRejectedValue(new Error('Budget rejected'));
+    await expect(
+      saveAgentConnection({
+        ...INITIAL_FORM,
+        selectedAgent: 'claude-code',
+        selectedAuthMethod: 'sam',
+        monthlyCostCapUsd: '25',
+      })
+    ).rejects.toThrow('Budget rejected');
+    expect(api.updateUserAiBudget).toHaveBeenCalledWith({ monthlyCostCapUsd: 25 });
+    expect(api.saveAgentSettings).not.toHaveBeenCalled();
   });
 });
 

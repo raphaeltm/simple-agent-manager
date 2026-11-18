@@ -6,6 +6,7 @@ import { validLlmBaseUrl } from './llm-endpoint-settings';
 export {
   aiGatewayOnlyHeaders,
   hasCloudflareAccountApi,
+  hasLocalAiCostMetering,
   isMonthlyCostCapAvailable,
   resolveAiGatewayId,
 } from '@simple-agent-manager/ai-proxy';
