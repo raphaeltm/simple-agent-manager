@@ -547,10 +547,11 @@ export class CredentialSetupSession extends DurableObject<Env> {
       this.setStatus(row.id, 'capturing');
       await this.updateD1Status(row.id, 'capturing');
     }
-    const file = await this.withSandboxFlight(row, async () => {
-      if (isTerminalSetupStatus(this.readRow()?.status ?? 'cancelled')) return null;
-      return capture.sandbox.readFile(capture.credentialPath);
-    });
+    const file = await this.withSandboxFlight(row, () =>
+      isTerminalSetupStatus(this.readRow()?.status ?? 'cancelled')
+        ? Promise.resolve(null)
+        : capture.sandbox.readFile(capture.credentialPath)
+    );
     if (!file || isTerminalSetupStatus(this.readRow()?.status ?? 'cancelled')) return;
     let content = file.content ?? '';
     if (row.agent_type === 'claude-code') content = content.trim();
