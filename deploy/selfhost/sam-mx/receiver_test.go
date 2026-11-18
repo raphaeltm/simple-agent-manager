@@ -464,6 +464,38 @@ func TestOldDKIMMessageIsRefused(t *testing.T) {
 	}
 }
 
+func TestPrependedUnsignedToOrDateCannotRebindAReplay(t *testing.T) {
+	h := newHarness(t, nil)
+	signed := func(subject string) []byte {
+		raw := []byte(strings.Replace(string(message(allowedFrom, subject)), "To: "+agentRcpt, "To: bob@elsewhere.example", 1))
+		return h.sign("sender.example", raw)
+	}
+	// An unsigned To naming the agent address, prepended above the signed one.
+	if smtpCode(t, h.send("x@nospf.example", []string{agentRcpt}, append([]byte("To: "+agentRcpt+"\r\n"), signed("dup-to")...))) != 550 {
+		t.Fatal("want 550 for a prepended To")
+	}
+	old := []byte(strings.Replace(string(message(allowedFrom, "dup-date")),
+		"Date: "+time.Now().UTC().Format(time.RFC1123Z),
+		"Date: "+time.Now().Add(-30*24*time.Hour).UTC().Format(time.RFC1123Z), 1))
+	fresh := "Date: " + time.Now().UTC().Format(time.RFC1123Z) + "\r\n"
+	if smtpCode(t, h.send("x@nospf.example", []string{agentRcpt}, append([]byte(fresh), h.sign("sender.example", old)...))) != 550 {
+		t.Fatal("want 550 for a prepended fresh Date")
+	}
+	if h.gateway.count() != 0 {
+		t.Fatal("neither replay may reach the Worker")
+	}
+}
+
+func TestFarFutureDKIMDateIsRefused(t *testing.T) {
+	h := newHarness(t, nil)
+	raw := []byte(strings.Replace(string(message(allowedFrom, "future")),
+		"Date: "+time.Now().UTC().Format(time.RFC1123Z),
+		"Date: "+time.Now().Add(2*time.Hour).UTC().Format(time.RFC1123Z), 1))
+	if smtpCode(t, h.send("x@nospf.example", []string{agentRcpt}, h.sign("sender.example", raw))) != 550 {
+		t.Fatal("want 550 for a Date two hours ahead")
+	}
+}
+
 func TestAlignedSPFPassNeedsNoSignedRecipientOrDate(t *testing.T) {
 	h := newHarness(t, nil)
 	// An SPF pass is bound to the sending server, so the replay checks do not apply to it.

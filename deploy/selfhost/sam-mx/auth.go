@@ -50,6 +50,10 @@ var singleHeaders = map[string]bool{
 	"from": true, "sender": true, "reply-to": true, "subject": true, "message-id": true,
 	"in-reply-to": true, "references": true, "auto-submitted": true, "precedence": true,
 	"list-id": true,
+	// The DKIM replay checks read these (dkimBindsRecipient, dkimFresh). DKIM signs one instance
+	// per name from the bottom, so an unsigned copy prepended above a signed one could otherwise
+	// name the agent address or carry a fresh date.
+	"to": true, "cc": true, "date": true,
 }
 
 // checkHeaderBlock refuses header blocks two parsers could read differently: a field name that
@@ -377,5 +381,10 @@ func dkimFresh(h mail.Header, policy AuthPolicy) bool {
 	if policy.Now != nil {
 		now = policy.Now
 	}
-	return now().Sub(date) <= policy.DKIMMaxAge
+	age := now().Sub(date)
+	// A date far in the future would make any age check pass forever.
+	return age <= policy.DKIMMaxAge && age >= -dkimMaxClockSkew
 }
+
+// dkimMaxClockSkew is how far ahead of this server's clock a sender's Date may be.
+const dkimMaxClockSkew = 15 * time.Minute
