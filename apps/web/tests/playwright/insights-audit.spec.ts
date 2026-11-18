@@ -13,6 +13,7 @@
 import { expect, type Page, test } from '@playwright/test';
 import { isInsightsRange } from '@simple-agent-manager/shared';
 
+import { seedTheme } from './audit-helpers';
 import { docsShot } from './docs-shot';
 import { type AccountsScene, makeAccounts } from './insights-accounts-fixtures';
 import {
@@ -200,6 +201,21 @@ test.describe('Insights', () => {
     await capture(page, 'insights-setups-realistic');
   });
 
+  for (const theme of ['dark', 'light'] as const) {
+    test(`agent setups discloses refused token usage (${theme})`, async ({ page }) => {
+      await seedTheme(page, theme);
+      await setupScene(page, 'realistic', [], 'realistic', 'admission-hit');
+      await page.goto(`${BASE}/agent-setups`);
+      await expect(
+        page.getByText(
+          'Some token usage is incomplete. Token totals and comparisons may be understated.'
+        )
+      ).toBeVisible();
+      await expect(page.getByTestId('insights-section-setups')).toBeVisible();
+      await capture(page, `insights-setups-admission-${theme}`);
+    });
+  }
+
   test('agent setups at a tablet width uses cards, not a squeezed table', async ({
     page,
   }, testInfo) => {
@@ -357,6 +373,31 @@ test.describe('Insights', () => {
       page.getByText('Showing the 10 most recent of 47. Older limit waits were not examined.')
     ).toBeVisible();
     await capture(page, 'insights-accounts-stress');
+  });
+
+  for (const theme of ['dark', 'light'] as const) {
+    test(`accounts discloses refused usage without token rows (${theme})`, async ({ page }) => {
+      await seedTheme(page, theme);
+      await setupScene(page, 'empty', [], 'admission-hit');
+      await page.goto(`${BASE}/accounts`);
+      await expect(page.getByText('Token usage is incomplete for this range.')).toBeVisible();
+      await expect(page.getByTestId('insights-accounts-empty')).toBeVisible();
+      await capture(page, `insights-accounts-admission-${theme}`);
+    });
+  }
+
+  test('accounts keeps complete totals exact beside another run admission warning', async ({
+    page,
+  }) => {
+    await setupScene(page, 'realistic', [], 'admission-other-account');
+    await page.goto(`${BASE}/accounts`);
+    await expect(page.getByText(/Token usage is incomplete/)).toBeVisible();
+    const key = page.getByTestId('insights-account-cred:cc-key');
+    await expect(key.getByTestId('insights-usage-tokens')).toContainText('21.6M');
+    await expect(key.getByTestId('insights-usage-tokens')).not.toContainText('+');
+    await expect(key.getByTestId('insights-usage-spend')).toContainText('41.27');
+    await expect(key.getByTestId('insights-usage-spend')).not.toContainText('At least');
+    await capture(page, 'insights-accounts-unaffected-account');
   });
 
   test('accounts for an empty project', async ({ page }) => {

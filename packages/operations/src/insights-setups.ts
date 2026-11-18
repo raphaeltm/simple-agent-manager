@@ -12,7 +12,9 @@
  * per-isolate admin-settings cache); one D1 `batch()` carrying the runs statement 1; one ProjectData
  * RPC counting nudges for the runs that have a chat 1 (skipped when none has). At most 4, measured
  * in `insights-setups.test.ts`. If the batch fails as a whole its statement is retried once alone
- * (`runInsightsBatch`), at most 5.
+ * (`runInsightsBatch`), at most 5. Admission disclosure adds no round trip: at most two
+ * indexed project/chat probes per picked run (marker primary key and proxy unique-key prefix),
+ * 4,000 probes at the default 2,000-run cap or 20,000 at the maximum 10,000-run cap.
  *
  * Throughput (rule 81): the response covers at most `insights.setupsRunScanCap` runs (default
  * 2,000, newest first) and says when the cap cut the range short. The cap bounds what leaves D1 and
@@ -84,6 +86,7 @@ const RunRowSchema = v.object({
   mem_peak: num,
   mem_oom: num,
   tokens: num,
+  usage_admission_limited: num,
   profile_name: str,
   profile_owner: OWNER,
   skill_name: str,
@@ -243,6 +246,7 @@ export async function projectSetups(
       projectId
     ),
     suggestionMinRuns: limits.setupsSuggestionMinRuns,
+    usageAdmissionLimited: runRows.some((row) => row.usage_admission_limited === 1),
     unavailable: [...unavailable],
     generatedAt: new Date().toISOString(),
   };

@@ -106,7 +106,7 @@ export const samInboxArchive = defineOperation({
   name: 'sam_inbox_archive',
   title: 'Archive an inbox item (confirm every time)',
   description:
-    'Use this when the user chooses not to act on an inbox item. Archive closes it and tells the agent the person will not act: a question is closed, a permission or approval is denied, a secret request is declined. Confirm with the user first. Reuse requestKey on retries.',
+    'Use this when the user chooses not to act on an inbox item. Archive closes it: a question or review is closed without telling the agent, a permission or approval is denied, a secret request is declined. Confirm with the user first. Reuse requestKey on retries.',
   kind: 'destructive',
   input: v.object({ projectId: id, ref, requestKey }),
   run(ctx, input) {

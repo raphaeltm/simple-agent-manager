@@ -164,7 +164,7 @@ func TestHandleGitCredentialRespectsRequestedHostProvider(t *testing.T) {
 				},
 			}
 
-			req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-123&host="+tc.queryHost, nil)
+			req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-123&protocol=https&host="+tc.queryHost, nil)
 			req.Header.Set("Authorization", "Bearer callback-token")
 
 			rec := httptest.NewRecorder()

@@ -20,6 +20,7 @@ import {
   requireGitLabUserAccessToken,
   verifyGitLabProjectAccess,
 } from '../../services/gitlab';
+import { resolveArtifactsBackend } from '../../services/hosted-git/backend';
 import { getRuntimeLimits } from '../../services/limits';
 import {
   assertRepositoryAccess,
@@ -83,7 +84,8 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
       if (!artifactsEnabled) {
         throw errors.badRequest('Artifacts repo provider is not enabled');
       }
-      if (!c.env.ARTIFACTS) {
+      const artifacts = resolveArtifactsBackend(c.env);
+      if (!artifacts) {
         throw errors.internal('Artifacts binding is not configured');
       }
 
@@ -119,7 +121,7 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
       // Must be sanitized: Artifacts rejects uppercase/spaces (the ULID projectId
       // is uppercase and normalizedName preserves spaces).
       const repoName = toArtifactsRepoName(normalizedName, projectId);
-      const created = await c.env.ARTIFACTS.create(repoName, {
+      const created = await artifacts.create(repoName, {
         description: description || undefined,
         setDefaultBranch: defaultBranch,
       });
@@ -148,7 +150,7 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
         // Best-effort cleanup: the repo exists but has no usable content, and no
         // project row will reference it. Delete it so it does not leak quota.
         try {
-          await c.env.ARTIFACTS.delete(created.name);
+          await artifacts.delete(created.name);
         } catch (cleanupError) {
           log.error('project_create.artifacts_seed_cleanup_failed', {
             projectId,

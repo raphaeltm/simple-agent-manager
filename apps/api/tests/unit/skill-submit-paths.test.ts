@@ -33,7 +33,13 @@ describe('skill submit path source contracts', () => {
     expect(dispatchTask).toContain('skillId?: string');
     expect(dispatchTask).toContain('resolveSkillProfile');
     expect(dispatchTask).toContain('input.skillId');
-    expect(dispatchTask).toContain('skill_id, skill_hint');
+    const storage = apiSrc('durable-objects/sam-session/tools/dispatch-task-storage.ts');
+    expect(dispatchTask).toContain("from './dispatch-task-storage'");
+    expect(dispatchTask).toMatch(/await insertSamDispatchedTask\(\s+env,\s+\[/);
+    expect(storage).toContain('export function insertSamDispatchedTask(');
+    expect(storage).toContain('INSERT INTO tasks');
+    expect(storage).toContain('task_mode, agent_profile_hint, skill_id, skill_hint, mission_id');
+    expect(storage).toContain('.bind(...values,');
     expect(dispatchTask).toMatch(
       /resolvedProfile\?\.skillId \?\? null,\s+input\.skillId \?\? null/
     );
@@ -59,7 +65,13 @@ describe('skill submit path source contracts', () => {
     expect(mcpDispatch).toContain('params.skillId');
     expect(mcpDispatch).toContain('skillId must be a non-empty string');
     expect(mcpDispatch).toContain('resolveSkillProfile');
-    expect(mcpDispatch).toContain('skill_id, skill_hint');
+    const storage = apiSrc('routes/mcp/dispatch-task-storage.ts');
+    expect(mcpDispatch).toContain("from './dispatch-task-storage'");
+    expect(mcpDispatch).toMatch(/await insertDispatchedTask\(\s+env,\s+\[/);
+    expect(storage).toContain('export function insertDispatchedTask(');
+    expect(storage).toContain('INSERT INTO tasks');
+    expect(storage).toContain('task_mode, agent_profile_hint, skill_id, skill_hint, mission_id');
+    expect(storage).toContain('...values,');
     expect(mcpDispatch).toMatch(/resolvedProfile\?\.skillId \?\? null,\s+skillId \?\? null/);
   });
 });

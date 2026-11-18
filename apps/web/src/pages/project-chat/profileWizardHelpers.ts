@@ -6,12 +6,17 @@ import type {
 } from '@simple-agent-manager/shared';
 import { DEFAULT_VM_SIZE } from '@simple-agent-manager/shared';
 
+/**
+ * The runtime a new profile gets. A chat defaults to Instant only where this installation can
+ * run it (`GET /api/config/instant-runtime`); otherwise, and for task work, a Cloud VM.
+ */
 export function resolveWizardRuntime(
   workType: TaskMode,
-  runtime: AgentProfileRuntime | null
+  runtime: AgentProfileRuntime | null,
+  instantAvailable = true
 ): AgentProfileRuntime {
   if (runtime) return runtime;
-  return workType === 'conversation' ? 'cf-container' : 'vm';
+  return workType === 'conversation' && instantAvailable ? 'cf-container' : 'vm';
 }
 
 export function resolveWizardWorkspaceProfile(
@@ -51,4 +56,37 @@ export function buildForkMessage({
     ...(taskId ? [`Parent task ID: ${taskId}`] : []),
   ];
   return `${FORK_MESSAGE_TEMPLATE}${ids.join('\n')}\n\n`;
+}
+
+/** The one-click path, offered only when the project has exactly one configured agent. */
+export interface NoProfilesQuickStart {
+  agentName: string;
+  /** Name of the profile the click creates, shown so nothing is created invisibly. */
+  profileName: string;
+  /** Where it will run ("in an Instant container", "on a Cloud VM"), once that is known. */
+  runtimeLabel: string | null;
+  onCreate: () => Promise<unknown>;
+}
+
+/** The composer's placeholder while it waits for an agent or a profile. */
+export function getComposerPlaceholder({
+  noAgents,
+  needsProfileBeforeSubmit,
+  quickStartOffered,
+  wizardOpen,
+  placeholder,
+}: Readonly<{
+  noAgents: boolean;
+  needsProfileBeforeSubmit: boolean;
+  /** The gate above offers the one-click profile, so point at it rather than at a wizard. */
+  quickStartOffered: boolean;
+  wizardOpen: boolean;
+  placeholder: string;
+}>) {
+  if (noAgents) return 'Add an agent in Settings to start chatting...';
+  if (needsProfileBeforeSubmit && quickStartOffered && !wizardOpen) {
+    return 'Choose Start chatting above to write your first message...';
+  }
+  if (needsProfileBeforeSubmit || wizardOpen) return 'Create a profile to start chatting...';
+  return placeholder;
 }

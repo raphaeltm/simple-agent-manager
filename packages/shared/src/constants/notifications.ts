@@ -33,6 +33,14 @@ export const NOTIFICATION_TYPE_URGENCY: Record<NotificationType, NotificationUrg
 };
 
 /**
+ * Types SAM no longer emits. They stay in `NOTIFICATION_TYPES` so notifications stored before
+ * they were retired still render, but settings no longer offer a toggle for them.
+ * `session_ended` ("Agent finished — your turn") carried no content; agents now file what the
+ * person needs in the inbox instead (inbox Result items).
+ */
+export const RETIRED_NOTIFICATION_TYPES: readonly NotificationType[] = ['session_ended'];
+
+/**
  * Window in which repeated comment activity on one session produces at most one `comment`
  * notification per recipient. Mentions are never batched. Default: 10 minutes.
  */

@@ -10,7 +10,11 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { projectDataPorts, type SessionRecoverySourceTaskGuard } from './ports';
-import type { PromptDeliveryClaim, PromptDeliveryResult } from './prompt-delivery';
+import {
+  type PromptDeliveryClaim,
+  promptDeliveryClaimSubmissionCheckpoint,
+  type PromptDeliveryResult,
+} from './prompt-delivery';
 import { labelUndeliveredPrompt, senderLacksSessionAccess } from './session-access';
 import type { Env } from './types';
 
@@ -300,6 +304,19 @@ export function invalidSessionWriterSenderResult(
   if (claim.mode !== 'submit') return null;
   const denied = senderLacksSessionAccess(sql, claim.message);
   if (!denied) return null;
+  const submission = promptDeliveryClaimSubmissionCheckpoint(sql, claim);
+  if (submission) {
+    // The checkpoint precedes the transport guard as well as receipt lookup.
+    // Still refuse a new send, but never label a possibly issued prompt as unsent.
+    return {
+      kind: 'ambiguous',
+      reason: 'receipt_unavailable',
+      error: denied.error,
+      runtimeIdentity: submission.runtimeIdentity,
+      capabilities: null,
+      receipt: null,
+    };
+  }
   // The sweep labels prompts it cancels; label here too, so a prompt that reached delivery
   // between an expiry and the sweep does not read as delivered.
   if (denied.deliveryCancelled && claim.message.promptMessageId) {

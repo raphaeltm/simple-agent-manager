@@ -26,71 +26,96 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
 
 describe('validateBudgetUpdate with admin ceilings', () => {
   it('allows setting limits within admin ceiling', () => {
-    const result = validateBudgetUpdate({ dailyInputTokenLimit: 500_000 }, makeEnv(), {
-      maxDailyInputTokens: 1_000_000,
-      maxDailyOutputTokens: null,
-      maxMonthlyCostCapUsd: null,
-      allowedModelTiers: null,
-      updatedAt: '',
-      updatedBy: '',
-    });
-    expect(result.dailyInputTokenLimit).toBe(500_000);
-  });
-
-  it('rejects limits above admin ceiling', () => {
-    expect(() =>
-      validateBudgetUpdate({ dailyInputTokenLimit: 2_000_000 }, makeEnv(), {
+    const result = validateBudgetUpdate(
+      { dailyInputTokenLimit: 500_000 },
+      makeEnv(),
+      {
         maxDailyInputTokens: 1_000_000,
         maxDailyOutputTokens: null,
         maxMonthlyCostCapUsd: null,
         allowedModelTiers: null,
         updatedAt: '',
         updatedBy: '',
-      })
+      },
+      null
+    );
+    expect(result.dailyInputTokenLimit).toBe(500_000);
+  });
+
+  it('rejects limits above admin ceiling', () => {
+    expect(() =>
+      validateBudgetUpdate(
+        { dailyInputTokenLimit: 2_000_000 },
+        makeEnv(),
+        {
+          maxDailyInputTokens: 1_000_000,
+          maxDailyOutputTokens: null,
+          maxMonthlyCostCapUsd: null,
+          allowedModelTiers: null,
+          updatedAt: '',
+          updatedBy: '',
+        },
+        null
+      )
     ).toThrow(/dailyInputTokenLimit must be between/);
   });
 
   it('rejects output limits above admin ceiling', () => {
     expect(() =>
-      validateBudgetUpdate({ dailyOutputTokenLimit: 3_000_000 }, makeEnv(), {
-        maxDailyInputTokens: null,
-        maxDailyOutputTokens: 500_000,
-        maxMonthlyCostCapUsd: null,
-        allowedModelTiers: null,
-        updatedAt: '',
-        updatedBy: '',
-      })
+      validateBudgetUpdate(
+        { dailyOutputTokenLimit: 3_000_000 },
+        makeEnv(),
+        {
+          maxDailyInputTokens: null,
+          maxDailyOutputTokens: 500_000,
+          maxMonthlyCostCapUsd: null,
+          allowedModelTiers: null,
+          updatedAt: '',
+          updatedBy: '',
+        },
+        null
+      )
     ).toThrow(/dailyOutputTokenLimit must be between/);
   });
 
   it('rejects monthly cap above admin ceiling', () => {
     expect(() =>
-      validateBudgetUpdate({ monthlyCostCapUsd: 100 }, makeEnv(), {
-        maxDailyInputTokens: null,
-        maxDailyOutputTokens: null,
-        maxMonthlyCostCapUsd: 50,
-        allowedModelTiers: null,
-        updatedAt: '',
-        updatedBy: '',
-      })
+      validateBudgetUpdate(
+        { monthlyCostCapUsd: 100 },
+        makeEnv(),
+        {
+          maxDailyInputTokens: null,
+          maxDailyOutputTokens: null,
+          maxMonthlyCostCapUsd: 50,
+          allowedModelTiers: null,
+          updatedAt: '',
+          updatedBy: '',
+        },
+        null
+      )
     ).toThrow(/monthlyCostCapUsd must be between/);
   });
 
   it('uses platform defaults when no admin allowance', () => {
     // Should not throw with reasonable values when no admin ceiling
-    const result = validateBudgetUpdate({ dailyInputTokenLimit: 1_000_000 }, makeEnv(), null);
+    const result = validateBudgetUpdate({ dailyInputTokenLimit: 1_000_000 }, makeEnv(), null, null);
     expect(result.dailyInputTokenLimit).toBe(1_000_000);
   });
 
   it('uses platform defaults when admin allowance field is null', () => {
-    const result = validateBudgetUpdate({ dailyInputTokenLimit: 1_000_000 }, makeEnv(), {
-      maxDailyInputTokens: null,
-      maxDailyOutputTokens: null,
-      maxMonthlyCostCapUsd: null,
-      allowedModelTiers: null,
-      updatedAt: '',
-      updatedBy: '',
-    });
+    const result = validateBudgetUpdate(
+      { dailyInputTokenLimit: 1_000_000 },
+      makeEnv(),
+      {
+        maxDailyInputTokens: null,
+        maxDailyOutputTokens: null,
+        maxMonthlyCostCapUsd: null,
+        allowedModelTiers: null,
+        updatedAt: '',
+        updatedBy: '',
+      },
+      null
+    );
     expect(result.dailyInputTokenLimit).toBe(1_000_000);
   });
 });

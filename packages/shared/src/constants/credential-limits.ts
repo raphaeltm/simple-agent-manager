@@ -75,6 +75,9 @@ export const RUN_USAGE_MAX_MODELS_PER_REPORT = 16;
 /** Largest value one token counter in a run-usage report may carry (schema bound). */
 export const RUN_USAGE_MAX_TOKENS_PER_COUNTER = 1_000_000_000_000;
 
+/** Lifetime new-row admission ceiling for one chat across harness epochs, models and credentials. */
+export const DEFAULT_RUN_USAGE_MAX_ROWS_PER_SESSION = 256;
+
 /** Maximum predecessor-CAS recomputes for one credential-limit observation. */
 export const DEFAULT_CREDENTIAL_LIMIT_TRANSITION_RECOMPUTE_ATTEMPTS = 4;
 

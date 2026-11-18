@@ -200,6 +200,17 @@ message you sent can't be delivered in that time, the chat reports **Wake failed
   before it starts, it stops at **Needs you** instead. If the provider really does refuse the
   prompt, SAM pauses the task the usual way.
 
+**Already started, then went to sleep at the limit?** The owner can choose **Resume anyway**
+on the waiting notice after resetting the same account's limit or enabling extra usage. SAM
+restores the saved session and delivers its queued message using the same account and profile,
+including an account chosen specifically for that run. If no message is queued, the restored
+session waits for your next message; SAM does not replay an earlier prompt.
+Your choice applies to the current wait only and can use extra credits. If the account or profile
+changed, review the selection first. If the provider rejects again, SAM pauses again. An expired
+or unavailable saved workspace cannot be forced to restore. If recovery cannot get started or
+confirmed within its bounded repair window, SAM keeps the saved work and asks you to review it
+before resuming. A recovery already underway can finish under its original deadline.
+
 **Needs you**, with a reason starting **Blocked:**, means SAM stopped waiting. The task won't carry on by itself, and a reply in
 the chat doesn't restart it:
 

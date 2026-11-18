@@ -316,7 +316,8 @@ export async function selectStuckTaskCandidates(
     const forward = await env.DATABASE.prepare(
       `SELECT ${STUCK_TASK_CANDIDATE_COLUMNS}
        FROM tasks
-       WHERE status IN ('queued', 'delegated', 'in_progress')
+       WHERE (status IN ('queued', 'delegated', 'in_progress')
+         OR (status='sleeping' AND admission_state='provider_limit_recovery_pending'))
          AND (updated_at, id) > (?, ?)
        ORDER BY updated_at ASC, id ASC
        LIMIT ?`
@@ -333,7 +334,8 @@ export async function selectStuckTaskCandidates(
        FROM (
          SELECT ${STUCK_TASK_CANDIDATE_COLUMNS}
          FROM tasks
-         WHERE status IN ('queued', 'delegated', 'in_progress')
+         WHERE (status IN ('queued', 'delegated', 'in_progress')
+         OR (status='sleeping' AND admission_state='provider_limit_recovery_pending'))
          ORDER BY updated_at DESC, id DESC
          LIMIT ?
        )
@@ -350,7 +352,8 @@ export async function selectStuckTaskCandidates(
     const wrap = await env.DATABASE.prepare(
       `SELECT ${STUCK_TASK_CANDIDATE_COLUMNS}
        FROM tasks
-       WHERE status IN ('queued', 'delegated', 'in_progress')
+       WHERE (status IN ('queued', 'delegated', 'in_progress')
+         OR (status='sleeping' AND admission_state='provider_limit_recovery_pending'))
          AND (updated_at, id) <= (?, ?)
        ORDER BY updated_at ASC, id ASC
        LIMIT ?`

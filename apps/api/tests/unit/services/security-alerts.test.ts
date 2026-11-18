@@ -104,22 +104,23 @@ describe('security alerts', () => {
     expect(sent[0]!.text).not.toContain('cron');
   });
 
-  it('alerts when a social sign-in is linked to an admin or superadmin', async () => {
+  it('alerts the affected account owner when a provider is linked', async () => {
     const { env, sent } = createEnv();
     await deliverSecurityAlert(
       env,
       { kind: 'account-linked', userId: 'admin', providerId: 'gitlab' },
       NOW
     );
-    expect(sent).toHaveLength(2);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.to).toBe('admin@example.com');
     expect(sent[0]!.subject).toBe(
       'SAM security alert: a GitLab sign-in was linked to an admin account'
     );
     expect(sent[0]!.text).toContain('Account: Admin <admin@example.com>');
-    expect(sent[0]!.text).toContain('https://app.sam.example.org/admin/users');
+    expect(sent[0]!.text).toContain('https://app.sam.example.org/settings/github');
   });
 
-  it('does not alert for an ordinary user or a non-social account', async () => {
+  it('alerts ordinary owners, but not non-social or missing accounts', async () => {
     const { env, sent } = createEnv();
     await deliverSecurityAlert(
       env,
@@ -136,7 +137,8 @@ describe('security alerts', () => {
       { kind: 'account-linked', userId: 'missing', providerId: 'github' },
       NOW
     );
-    expect(sent).toEqual([]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.to).toBe('member@example.com');
     // Liveness control: the same harness does send for a superadmin link.
     await deliverSecurityAlert(
       env,
@@ -187,7 +189,8 @@ describe('security alerts', () => {
     expect(pending).toHaveLength(1);
     expect(sent).toEqual([]);
     await Promise.all(pending);
-    expect(sent).toHaveLength(2);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.to).toBe('owner@example.com');
   });
 
   it('skips scheduling an integration alert with no changes', () => {
