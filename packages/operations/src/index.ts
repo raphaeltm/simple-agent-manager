@@ -69,11 +69,13 @@ export {
   AgentCancelInputSchema,
   type AgentFileResult,
   type AgentLinkInput,
+  type AgentResultInput,
   type AgentReviewInput,
   AgentReviewInputSchema,
   AgentUpdateInputSchema,
   cancelAgentAsk,
   fileAgentAsk,
+  fileAgentResult,
   fileAgentReview,
   updateAgentAsk,
 } from './inbox-agent-core';
@@ -270,6 +272,7 @@ export {
 } from './platform-operations';
 export { type ProfileAccountBinding } from './port-types';
 export {
+  type ArchiveCheckinHold,
   type InboxAskAnnouncement,
   type InboxAskNoticeOutcome,
   type InboxAskNoticeRow,

@@ -53,7 +53,7 @@
     "jose": "catalog:",
     "tsx": "catalog:",
     "valibot": "catalog:",
-    "workers-ai-provider": "4.0.0",
+    "workers-ai-provider": "4.0.1",
     "yaml": "catalog:"
   },
   "devDependencies": {

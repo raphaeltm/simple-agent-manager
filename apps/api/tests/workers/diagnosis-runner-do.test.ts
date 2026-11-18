@@ -78,7 +78,10 @@ async function duringModelAwait(
 }
 
 describe('DiagnosisRunner DO durability and fault injection', () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
   it('starts idempotently and keeps one durable checkpoint/alarm after the 202 owner disappears', async () => {
     const runId = 'diagnosis-do-start-001';
     await seedRun(runId, 'diagnosis-user-start');
@@ -170,6 +173,9 @@ describe('DiagnosisRunner DO durability and fault injection', () => {
   });
 
   it('keeps cancellation terminal when it commits during the real model await', async () => {
+    // Keep native workerd alarms in the future while this test drives each tick explicitly.
+    // Otherwise start() can fire before duringModelAwait installs the gateway boundary.
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 60_000 });
     const runId = 'diagnosis-do-cancel-race-001';
     await seedRun(runId, 'diagnosis-user-cancel-race');
     const runner = stub(runId);
@@ -209,6 +215,8 @@ describe('DiagnosisRunner DO durability and fault injection', () => {
   });
 
   it('keeps deadline reconciliation terminal when it commits during the real model await', async () => {
+    // Use the same controlled alarm clock as the cancellation race above.
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 60_000 });
     const runId = 'diagnosis-do-deadline-race-001';
     await seedRun(runId, 'diagnosis-user-deadline-race');
     const runner = stub(runId);

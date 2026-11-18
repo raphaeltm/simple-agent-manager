@@ -323,12 +323,20 @@ export async function handleGetInstructions(
     },
     instructions: [
       'Tool names in these instructions refer to SAM MCP tools from the `sam-mcp` MCP server.',
+      // How to reach a person; the inbox tools need a task-backed agent token. Second, so it is
+      // read before the mode details: an agent that saw it eighth still answered in the chat.
+      ...(tokenData.taskId ? [INBOX_TURN_END_INSTRUCTION] : []),
       'After reading this response, check whether the current chat session topic/title accurately reflects the actual work. ' +
         'If the title is stale, generic, copied from a fork such as "get details from previous session", or the session changes direction later, ' +
         'call the SAM MCP `update_session_topic` tool with a concise descriptive topic.',
       ...(isConversation
         ? [
-            'You are in a conversation with a human. Respond to their messages directly.',
+            // The chat is where the person writes to you, not where they read: answers go to
+            // their inbox (INBOX_TURN_END_INSTRUCTION, above). The inbox tools need a task, so a
+            // taskless conversation keeps answering in the chat.
+            tokenData.taskId
+              ? 'A person started this conversation and may write to you here, but they do not watch it: whatever you want them to see goes in their inbox, as described above.'
+              : 'You are in a conversation with a human. Respond to their messages directly.',
             'Use the SAM MCP `dispatch_task` tool to spawn follow-up work to other agents when needed.',
             'Use the SAM MCP `update_task_status` tool to report significant findings or progress.',
             'Do NOT call the SAM MCP `complete_task` tool — the human will end the conversation when they are ready.',
@@ -340,8 +348,6 @@ export async function handleGetInstructions(
             'Push your changes to the output branch before calling the SAM MCP `complete_task` tool.',
             'If you encounter blockers, report them via the SAM MCP `update_task_status` tool with a clear description.',
           ]),
-      // How to reach a person; the inbox tools need a task-backed agent token.
-      ...(tokenData.taskId ? [INBOX_TURN_END_INSTRUCTION] : []),
       // Event tools need a task-backed agent token.
       ...(tokenData.taskId
         ? buildEventingInstructions({

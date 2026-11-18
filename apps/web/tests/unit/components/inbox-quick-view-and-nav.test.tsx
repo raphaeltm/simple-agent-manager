@@ -79,6 +79,7 @@ const ITEMS: InboxItem[] = [
     },
   }),
   item({ ref: 'ask:review', kind: 'review', answerSpec: { type: 'acknowledge' } }),
+  item({ ref: 'ask:result', kind: 'result', answerSpec: { type: 'acknowledge' } }),
   item({
     ref: 'secret:x',
     store: 'secret',
@@ -190,6 +191,8 @@ describe('Inbox icon', () => {
     expect(
       within(row('ask:review')).getByRole('button', { name: 'Looks good' })
     ).toBeInTheDocument();
+    // Result: "Got it".
+    expect(within(row('ask:result')).getByRole('button', { name: 'Got it' })).toBeInTheDocument();
     await within(row('attention:s1:m1')).findByRole('button', { name: 'Allow once' });
     expect(
       within(row('attention:s1:m1')).queryByRole('button', { name: 'Always allow' })
