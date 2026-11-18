@@ -27,13 +27,19 @@ Dispatched by the self-host coordinator (task 01M7JMXS2JRW6QQMB1356ENPM3). Coord
 ## Implementation Checklist
 
 - [x] Step 1: merge 4fc4cb99a, resolve, install/build/typecheck, commit, push, open draft PR (merge bf0c98bf5)
-- [ ] Step 2: merge b7502ba96, resolve, install/build/typecheck, commit, push, update PR
-- [ ] Step 3: merge current origin/main, resolve, install/build/typecheck, commit, push, update PR
+- [x] Step 2: merge b7502ba96, resolve, install/build/typecheck, commit, push, update PR (merge f987c53a8)
+- [x] Step 3: merge current origin/main (096db08db), resolve, install/build/typecheck, commit, push, update PR (merge ea608b26b)
+- [x] Post-merge validation fixes (d58e63d20): gitlab.ts onto main's L6 shape + private opt-in, dead gitlab-host-policy removed, test/lint fixes
 - [ ] Full root lint, typecheck, build, test on the final head
 - [ ] Self-host checks: `pnpm selfhost:test`, self-host-only import-graph tests
 - [ ] Reviewers: architecture-reviewer, task-completion-validator
 - [ ] CI green on the PR; CodeRabbit requested and waited for
-- [ ] Post PR link, steps and open questions on `feature.selfhost-landing`
+- [x] Post PR link and each pushed step on `feature.selfhost-landing` (final summary pending)
+
+## Notes
+
+- Step 3 pinned origin/main at 096db08db; main later moved to bfa8cc57c (#2862), which is left for the next merge.
+- The PR targets an integration branch and deploys nothing: no staging deploy, no box (coordinator schedules box proofs).
 
 ## Acceptance Criteria
 
