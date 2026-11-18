@@ -18,12 +18,12 @@ import {
   resolveTaskStartPlacement,
   resolveTaskStartPlacementCredentialAttributionFromPlacement,
 } from './placement-resolver';
-import { providerLimitRecoveryApprovalD1Fence } from './provider-limit-recovery-approval';
 import {
   blockExpiredProviderLimitWait,
   isExpiredProviderLimitWait,
 } from './provider-limit-reconciliation';
 import { presentBlockedProviderLimitWait } from './provider-limit-recovery';
+import { providerLimitRecoveryApprovalD1Fence } from './provider-limit-recovery-approval';
 import {
   assertReplacementDeletionConfirmed,
   WorkspaceDeletionUnconfirmedError,
