@@ -26,7 +26,7 @@ Narrow audit: markSchedulerSuccess still writes failure reset/diagnostics; capac
 - [x] Verify current-main workerd counts, add budget and behavior tests
 - [x] Remove only explicit post-claim refresh
 - [x] Prove cost and scheduler/delivery tests discriminating
-- [ ] Run lint/typecheck/tests/build and local specialist reviews
+- [x] Run lint/typecheck/tests/build and local specialist reviews
 - [ ] Deploy staging and verify Instant subscription -> channel event -> agent wake; clean up/release
 - [ ] CI and best-effort CodeRabbit; merge and monitor production deploy
 - [ ] Read production row_usage using rpc-split library, compare 48.8/pass and 12.8k/hour; report coordinator
@@ -41,4 +41,10 @@ Current main measured: N1=69, N8=111, N20=183; new budget tests RED by exactly 8
 
 Discrimination: suppress only retained helper refresh in cloned actual compiled production module -> scheduler test fails at final due NULL assertion (timestamp remains). Restore refresh, suppress only retry checkpoint -> same test fails at persisted retry attempt assertion (expected retry/busy/completed_at, got empty). Clone missing dependency setup caused one earlier collection failure, which is not discrimination evidence; corrected run collected all4 and failed the intended1. No mutant committed.
 
-Root lint23/typecheck38/build19 tasks PASS; root tests ongoing. Reviewers found no runtime correctness issue; medium test-discrimination/assertion findings addressed above. PR2882 draft. Staging primary reservation44262292426 succeeded, own turn until09:22Z, no migration added. Runtime .codex/config.toml pre-existing modification excluded.
+Root lint23/typecheck38/build19 tasks PASS; root tests41tasksPASS,27184testsPASS/4skipped. Reviewers found no runtime correctness issue; medium test-discrimination/assertion findings addressed above. PR2882 draft. Staging primary reservation44262292426 succeeded, own turn until09:22Z, no migration added. Runtime .codex/config.toml pre-existing modification excluded.
+
+## Review completion
+
+Both local specialist groups confirmed ADDRESSED/PASS. CodeRabbit review5952864630 (2026-11-18 08:10:54Z) raised one minor gap: split-claim due advancement was only type-checked. The test now publishes through real MCP at three distinct controlled admission times, asserts the first due is the oldest and the split claim advances to the third, and keeps the drained NULL assertion. Final4/4 workerd PASS. Removing retained helper refresh fails exact advancement; dropping retry checkpoint fails persisted attempt assertion under the final clock model. No runtime change since staged candidate7dc861db1372ed67323347ab1eb7482affc5410e.
+
+Implementation archived per /do Phase4 after local task-completion validation. Release gates (staging wake/cleanup, final-head CI, incremental CodeRabbit outcome, merge/deploy and production row_usage) remain tracked in PR2882 and durable SAM task; this record does not claim those pending gates passed.

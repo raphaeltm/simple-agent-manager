@@ -130,19 +130,29 @@ describe('project-event materializer write budget', () => {
       const f = await twoAgentProject();
       await withQuietAlarms(f, async () => {
         const id = await follow(f);
-        for (let n = 0; n < 3; n++) await publish(f, `split-${n}`);
-        const t0 = Date.now();
+        const admittedAt = Date.now();
+        const matchedTimes = [admittedAt, admittedAt + 1_000, admittedAt + 2_000];
+        for (let n = 0; n < matchedTimes.length; n++) {
+          // Drive admission's real clock; never seed the due column being asserted.
+          const clock = vi.spyOn(Date, 'now').mockReturnValue(matchedTimes[n]!);
+          try {
+            await publish(f, `split-${n}`);
+          } finally {
+            clock.mockRestore();
+          }
+        }
+        const t0 = admittedAt + 3_000;
         // A deliberately small production batch limit leaves real matches behind the claim.
         const previous = wakeEnv().PROJECT_EVENT_DELIVERY_BATCH_MAX_EVENTS;
         testEnv.PROJECT_EVENT_DELIVERY_BATCH_MAX_EVENTS = '2';
         try {
           const initialDue = (await dueRow(f, id))!.wake_due_at;
-          expect(initialDue).toBeTypeOf('number');
+          expect(initialDue).toBe(matchedTimes[0]);
           expect(await fireWakeAlarmsUntilMaterialized(f, t0)).toEqual([t0 + 1_000]);
           const first = (await wakeBatches(f, f.a.sessionId))[0]!;
           expect(first.event_count).toBe(2);
           const remainingDue = (await dueRow(f, id))!.wake_due_at;
-          expect(remainingDue).toBeTypeOf('number');
+          expect(remainingDue).toBe(matchedTimes[2]);
           // Pending delivery owns occupancy; a busy retry cannot create another batch.
           await retryWakeBehindBusyTurn(f, first.id, t0 + 2_000);
           expect(
