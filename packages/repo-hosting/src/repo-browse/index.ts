@@ -2,6 +2,7 @@ import { errors } from '@simple-agent-manager/worker-core';
 import * as schema from '@simple-agent-manager/worker-core/schema';
 
 import type { Env } from '../env';
+import { repoHostingPorts } from '../ports';
 import { GitHubRepoBrowser } from './github';
 import type { RepoBrowser } from './types';
 
@@ -38,7 +39,7 @@ export async function resolveRepoBrowser(opts: {
   }
 
   if (provider === 'artifacts') {
-    if (env.ARTIFACTS_ENABLED !== 'true' || !env.ARTIFACTS) {
+    if (!repoHostingPorts().artifacts.resolve(env)) {
       throw errors.badRequest('Artifacts is not enabled on this deployment');
     }
     if (!project.artifactsRepoId) {

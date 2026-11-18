@@ -50,6 +50,13 @@ func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
 	// it is requesting credentials for. GitHub/Artifacts keep the empty-allow
 	// behavior because the gh wrapper flow sends host=github.com with no path.
 	boundProvider, _ := s.credentialPathBinding(workspaceID)
+	// Hosted repository write credentials are never valid for a cleartext Git
+	// request. Require the helper's explicit protocol before fetching a token.
+	requestedProtocol := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("protocol")))
+	if strings.EqualFold(boundProvider, "artifacts") && requestedProtocol != "https" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if strings.EqualFold(boundProvider, "gitlab") && (requestedHost == "" || requestedPath == "") {
 		slog.Warn("Git credential request refused: gitlab-bound workspace requires host and path",
 			"workspaceID", workspaceID,
@@ -104,6 +111,15 @@ func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
 	// the control plane resolved. An empty resolved repositoryPath means we
 	// cannot verify the binding — refuse rather than vend a broad OAuth token.
 	gitlabResponse := strings.EqualFold(strings.TrimSpace(resp.Provider), "gitlab")
+	// The Artifacts callback predates provider tags: it returns cloneUrl while
+	// GitHub omits it and GitLab identifies itself explicitly. Preserve this
+	// legacy response contract when local provider metadata is unavailable.
+	artifactsResponse := strings.EqualFold(strings.TrimSpace(resp.Provider), "artifacts") ||
+		(strings.TrimSpace(resp.Provider) == "" && strings.TrimSpace(resp.CloneURL) != "")
+	if artifactsResponse && requestedProtocol != "https" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if gitlabResponse && (requestedHost == "" || requestedPath == "" || repositoryPath == "") {
 		slog.Warn("Git credential response withheld: gitlab credential requires verified host and path",
 			"workspaceID", workspaceID,
@@ -114,7 +130,11 @@ func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	if requestedHost != "" && !credentialHostMatchesRequest(host, requestedHost) {
+	hostMatches := credentialHostMatchesRequest(host, requestedHost)
+	if strings.EqualFold(boundProvider, "artifacts") && (resp.Provider == "" || strings.EqualFold(resp.Provider, "artifacts")) {
+		hostMatches = requestedHost == "" || gitrepo.HTTPSAuthoritiesEqual(host, requestedHost)
+	}
+	if requestedHost != "" && !hostMatches {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -149,7 +169,13 @@ func (s *Server) isAllowedCredentialHostForWorkspace(workspaceID, requestedHost 
 		return true
 	}
 	if runtime, ok := s.getWorkspaceRuntime(workspaceID); ok {
+		if strings.EqualFold(runtime.RepoProvider, "artifacts") {
+			return gitrepo.HTTPSAuthoritiesEqual(runtime.RepositoryHost, requestedHost)
+		}
 		return strings.EqualFold(strings.TrimSpace(runtime.RepositoryHost), requestedHost)
+	}
+	if strings.EqualFold(s.config.RepoProvider, "artifacts") {
+		return gitrepo.HTTPSAuthoritiesEqual(s.config.RepositoryHost, requestedHost)
 	}
 	return strings.EqualFold(strings.TrimSpace(s.config.RepositoryHost), requestedHost)
 }
