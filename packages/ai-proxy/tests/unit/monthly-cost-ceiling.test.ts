@@ -130,6 +130,33 @@ describe('installation ceiling on the direct-upstream (local metering) path', ()
     }
   );
 
+  it.each(['durable-object', 'kv'])(
+    'returns a retryable outage when monthly spend cannot be read (%s)',
+    async (storage) => {
+      const { kv, env } = fixture();
+      if (storage === 'durable-object') {
+        env.AI_TOKEN_BUDGET_COUNTER = {
+          idFromName: () => 'user',
+          get: () => ({
+            get: async () => ({ inputTokens: 0, outputTokens: 0 }),
+            getProviderUsage: async () => {
+              throw new Error('storage unavailable');
+            },
+          }),
+        } as unknown as DurableObjectNamespace;
+      } else {
+        kv.get.mockImplementation(async (key: string) => {
+          if (key.startsWith('ai-provider-usage:')) throw new Error('storage unavailable');
+          return null;
+        });
+      }
+      await expect(checkAiUsageGate(kv, 'user', env, ceiling(50))).rejects.toMatchObject({
+        statusCode: 503,
+        error: 'SERVICE_UNAVAILABLE',
+      });
+    }
+  );
+
   it('does not read the ceiling for locally own-funded calls during a settings outage', async () => {
     const { kv, env } = fixture();
     const ports = {

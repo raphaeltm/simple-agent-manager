@@ -121,3 +121,13 @@ The coordinator lifted the #2841 production hold in event
   configuration reference describes both behaviors; all53pages have zero broken internal links.
 - The fixes affect no-gateway local metering/validation. Accepted Gateway staging evidence
   carries unchanged; self-host missing-usage/ceiling live proof remains owed to L22.
+
+## Spending-store outage response follow-up
+A failed local monthly-spend lookup now raises a sanitized retryable 503 before inference,
+instead of fabricating a reached-cap429 with zero cost. DO and KV failure regressions through
+the real admission gate both went RED before the fix; package189 and combinedWorker88 pass.
+Independent security/completion review PASS (30ceiling cases). Retry text is generic to both
+settings and spending-data outages. Fullbuild19, lint/typecheck, secret guard and doclinks pass.
+The final main sync also includes88b6103e1 (#2879), an unrelated task archive only; runtime
+changes remain those reviewed above. Gateway staging proof carries; L22 still owes live self-host
+coverage for no-gateway metering and fault paths.

@@ -89,7 +89,7 @@ export async function resolveMonthlyCostCeilingUsd(
   } catch {
     log.error('ai_proxy.monthly_cost_ceiling_unreadable');
     throw errors.serviceUnavailable(
-      'AI spending limits are unavailable. Retry after settings recover.'
+      'AI spending limits are unavailable. Please try again later.'
     );
   }
 }
@@ -161,7 +161,10 @@ export async function checkMonthlyCostCap(
     try {
       costUsd = await getLocalMonthlyAiCostUsd(kv, userId, env);
     } catch {
-      return { allowed: false, costUsd: 0, capUsd, ...source };
+      log.error('ai_proxy.monthly_spend_unreadable');
+      throw errors.serviceUnavailable(
+        'AI spending limits are unavailable. Please try again later.'
+      );
     }
     return { allowed: costUsd < capUsd, costUsd, capUsd, ...source };
   }
