@@ -3,7 +3,7 @@
  * ai-token-budget.ts re-exports everything here, so callers keep their imports.
  */
 import { AI_MONTHLY_COST_CACHE_KV_PREFIX } from '@simple-agent-manager/shared';
-import { log } from '@simple-agent-manager/worker-core';
+import { errors, log } from '@simple-agent-manager/worker-core';
 
 import { getUserBudgetSettings } from './ai-budget-settings';
 import { hasLocalAiCostMetering, isMonthlyCostCapAvailable } from './ai-gateway-availability';
@@ -75,9 +75,8 @@ export function effectiveMonthlyCostCapUsd(
  * can spend of the platform key. With a gateway the spend record is the gateway's, and this is not
  * read at all, so the gateway path's I/O is unchanged.
  *
- * Never throws: the admin-settings resolver already falls back to the default (0, no ceiling) when
- * D1 is unreadable, and an unexpected failure here is logged and treated the same way, so a
- * settings fault cannot fail AI calls (daily token budgets still apply).
+ * An unreadable ceiling is unknown, not disabled. Refuse platform-funded calls until the
+ * settings snapshot can be read again; the Gateway path never reads this setting.
  */
 export async function resolveMonthlyCostCeilingUsd(
   env: AiProxyEnv,
@@ -87,11 +86,11 @@ export async function resolveMonthlyCostCeilingUsd(
   try {
     const ceiling = await ports.monthlyCostCeilingUsd();
     return Number.isFinite(ceiling) && ceiling > 0 ? ceiling : null;
-  } catch (err) {
-    log.error('ai_proxy.monthly_cost_ceiling_unreadable', {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
+  } catch {
+    log.error('ai_proxy.monthly_cost_ceiling_unreadable');
+    throw errors.serviceUnavailable(
+      'AI spending limits are unavailable. Retry after settings recover.'
+    );
   }
 }
 

@@ -113,11 +113,34 @@ describe('installation ceiling on the direct-upstream (local metering) path', ()
     expect(result).toEqual({ allowed: true, costUsd: 0, capUsd: null });
   });
 
-  it('a ceiling read that throws degrades to no ceiling without failing the call', async () => {
+  it.each([null, 100])(
+    'refuses admission while the ceiling is unknown (personal cap %s)',
+    async (monthlyCostCapUsd) => {
+      const { rows, kv, env } = fixture();
+      rows.set(buildBudgetSettingsKey('user'), JSON.stringify({ monthlyCostCapUsd }));
+      const ports = { monthlyCostCeilingUsd: vi.fn(async () => Promise.reject(new Error('d1'))) };
+      await expect(resolveMonthlyCostCeilingUsd(env, ports)).rejects.toMatchObject({
+        statusCode: 503,
+        error: 'SERVICE_UNAVAILABLE',
+      });
+      await expect(checkAiUsageGate(kv, 'user', env, ports)).rejects.toMatchObject({
+        statusCode: 503,
+        error: 'SERVICE_UNAVAILABLE',
+      });
+    }
+  );
+
+  it('does not read the ceiling for locally own-funded calls during a settings outage', async () => {
     const { kv, env } = fixture();
-    const ports = { monthlyCostCeilingUsd: vi.fn(async () => Promise.reject(new Error('d1'))) };
-    await expect(resolveMonthlyCostCeilingUsd(env, ports)).resolves.toBeNull();
-    await expect(checkAiUsageGate(kv, 'user', env, ports)).resolves.toEqual({ allowed: true });
+    const ports = {
+      monthlyCostCeilingUsd: vi.fn(async () => {
+        throw new Error('settings unavailable');
+      }),
+    };
+    await expect(
+      checkAiUsageGate(kv, 'user', env, ports, { platformBilled: false })
+    ).resolves.toEqual({ allowed: true });
+    expect(ports.monthlyCostCeilingUsd).not.toHaveBeenCalled();
   });
 
   it('a malformed stored settings row does not fail the call, and the ceiling still applies', async () => {

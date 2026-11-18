@@ -157,6 +157,50 @@ describe('direct-upstream metering, without forced include_usage', () => {
   });
 });
 
+describe('legacy OpenAI function call estimation', () => {
+  it.each([false, true])('counts function_call output without usage, streaming=%s', async (streaming) => {
+    const { kv, env } = fixture();
+    const model = PLATFORM_AI_MODELS.find(
+      (m) => m.provider === 'openai' && m.costPer1kOutputTokens > 0
+    )!;
+    const measured = vi.fn();
+    const functionCall = { name: 'lookup', arguments: '{"query":"twelve bytes"}' };
+    const options = {
+      env,
+      userId: 'user',
+      format: 'openai' as const,
+      costModelId: model.id,
+      estimateMissingUsage: true,
+      onMeasuredUsage: measured,
+    };
+    if (streaming) {
+      const pending: Promise<unknown>[] = [];
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          for (const chunk of [{ name: functionCall.name }, { arguments: functionCall.arguments }]) {
+            c.enqueue(new TextEncoder().encode(
+              `data: ${JSON.stringify({ choices: [{ delta: { function_call: chunk } }] })}\n\n`
+            ));
+          }
+          c.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+          c.close();
+        },
+      });
+      accountTokenUsageFromStream(stream, {
+        ...options,
+        executionCtx: { waitUntil(p) { pending.push(p); } },
+      });
+      await Promise.all(pending);
+    } else {
+      await accountTokenUsageFromJson(
+        { choices: [{ message: { content: null, function_call: functionCall } }] }, options
+      );
+    }
+    expect(await getLocalMonthlyAiCostUsd(kv, 'user', env)).toBeGreaterThan(0);
+    expect(measured).not.toHaveBeenCalled();
+  });
+});
+
 describe('Anthropic missing usage estimation', () => {
   const text = 'twelve bytes';
   it.each([

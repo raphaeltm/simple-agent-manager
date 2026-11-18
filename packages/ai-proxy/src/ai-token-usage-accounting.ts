@@ -407,6 +407,10 @@ function choicesOutputByteLength(choices: unknown, field: 'message' | 'delta'): 
       if (typeof part[key] === 'string') bytes += utf8ByteLength(part[key]);
     }
     if (Array.isArray(part.tool_calls)) bytes += utf8ByteLength(JSON.stringify(part.tool_calls));
+    const functionCall = maybeJsonRecord(part.function_call);
+    for (const key of ['name', 'arguments'] as const) {
+      if (typeof functionCall?.[key] === 'string') bytes += utf8ByteLength(functionCall[key]);
+    }
   }
   return bytes;
 }

@@ -90,3 +90,17 @@ separate. This carries the staged L13 behavior evidence; it does not claim an ex
 Final task-completion review passed before archive: research, implementation, tests/live acceptance, UI propagation, funding/runtime variants, vertical slice coverage and cleanup/restoration/release. No outstanding findings remain in the accepted L13 scope. Exact-head CI and normal serial merge remain release gates.
 The coordinator lifted the #2841 production hold in event
 `be50db76-357a-4f17-8d19-46f82048d6ec` and monitors production after merge.
+
+## Late review corrections (2026-11-18)
+- Codex P1: a failed installation-ceiling read now raises a sanitized retryable 503 before
+  platform-funded inference. The worker uses the strict settings snapshot (at most 60 s cache);
+  removed its extra last-known fallback so an old disabled/higher ceiling cannot outlive that
+  cache during an outage. Gateway and locally own-funded calls never read the ceiling.
+- Codex P2: OpenAI legacy message.function_call and split streamed delta.function_call
+  name/arguments count toward estimated output when provider usage is absent.
+- Discrimination: ceiling-fault test returned null before the fix (RED); both legacy-function
+  JSON/SSE tests recorded $0 before the fix (RED). Full package suite now 187 PASS. Worker
+  port/real-SQLite/passthrough suites 73 PASS. Package lint/typecheck and secret guard PASS.
+- Independent security/completion delta review PASS: inference cannot proceed with unknown
+  ceiling state. These changes affect only no-gateway local metering; prior accepted Gateway
+  staging evidence carries unchanged. Fault-path live proof is also owed to self-host L22.

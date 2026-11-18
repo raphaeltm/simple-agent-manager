@@ -16,7 +16,6 @@ vi.mock('../../../src/services/admin-settings-resolution', () => ({
 
 import { AiTokenBudgetCounter } from '../../../src/durable-objects/ai-token-budget-counter';
 import type { Env } from '../../../src/env';
-import { __resetLastKnownCeilingForTest } from '../../../src/services/ai-proxy-ports';
 import { checkAiUsageGate, incrementProviderUsage } from '../../../src/services/ai-token-budget';
 import { attachTokenUsageAccounting } from '../../../src/services/ai-token-usage-accounting';
 import { createSqlStorage } from './sql-storage-test-utils';
@@ -58,7 +57,6 @@ beforeEach(() => {
     AI_TOKEN_BUDGET_COUNTER: { idFromName: (name: string) => name, get: () => counter },
   } as unknown as Env;
   mocks.resolveAdminSettingDetails.mockReset();
-  __resetLastKnownCeilingForTest();
 });
 afterEach(() => db.close());
 
@@ -118,6 +116,16 @@ describe('AiTokenBudgetCounter per-model rows', () => {
 });
 
 describe("the worker's usage gate reads the installation ceiling (F2)", () => {
+  it('refuses platform-funded admission while the strict ceiling snapshot is unreadable', async () => {
+    mocks.resolveAdminSettingDetails.mockRejectedValue(new Error('settings unavailable'));
+    await expect(checkAiUsageGate(env.KV, 'user', env)).rejects.toMatchObject({
+      statusCode: 503,
+      error: 'SERVICE_UNAVAILABLE',
+    });
+    // No accounted call or model row is produced while admission is unknown.
+    expect(await getLocalMonthlyAiCostUsd(env.KV, 'user', env)).toBe(0);
+  });
+
   it('blocks a user who never set a cap once spend reaches the ceiling', async () => {
     await pricedResponse('user');
     const spent = await getLocalMonthlyAiCostUsd(env.KV, 'user', env);

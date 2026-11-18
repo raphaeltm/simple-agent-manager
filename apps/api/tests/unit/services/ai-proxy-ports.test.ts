@@ -21,7 +21,7 @@ vi.mock('../../../src/services/admin-settings-resolution', () => ({
 vi.mock('drizzle-orm/d1', () => ({ drizzle: mocks.drizzle }));
 
 import type { Env } from '../../../src/env';
-import { __resetLastKnownCeilingForTest, aiProxyPorts } from '../../../src/services/ai-proxy-ports';
+import { aiProxyPorts } from '../../../src/services/ai-proxy-ports';
 
 const env = {
   DATABASE: { name: 'd1' },
@@ -32,7 +32,6 @@ const env = {
 describe('aiProxyPorts', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    __resetLastKnownCeilingForTest();
   });
 
   it('reads the Claude Code platform credential with the credential encryption key', async () => {
@@ -86,13 +85,18 @@ describe('aiProxyPorts', () => {
     );
   });
 
-  it('serves the last-known ceiling while settings are unreadable', async () => {
-    mocks.resolveAdminSettingDetails.mockResolvedValueOnce({ value: 25 });
-    await aiProxyPorts(env).monthlyCostCeilingUsd();
-    mocks.resolveAdminSettingDetails.mockRejectedValueOnce(new Error('settings unavailable'));
+  it.each([0, 25])(
+    'does not reuse a previous ceiling of %s after a failed settings read',
+    async (value) => {
+      mocks.resolveAdminSettingDetails.mockResolvedValueOnce({ value });
+      await aiProxyPorts(env).monthlyCostCeilingUsd();
+      mocks.resolveAdminSettingDetails.mockRejectedValueOnce(new Error('settings unavailable'));
 
-    await expect(aiProxyPorts(env).monthlyCostCeilingUsd()).resolves.toBe(25);
-  });
+      await expect(aiProxyPorts(env).monthlyCostCeilingUsd()).rejects.toThrow(
+        'settings unavailable'
+      );
+    }
+  );
 
   it('throws on a cold isolate with unreadable settings, rather than reporting no ceiling', async () => {
     mocks.resolveAdminSettingDetails.mockRejectedValueOnce(new Error('settings unavailable'));

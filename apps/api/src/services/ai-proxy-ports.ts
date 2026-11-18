@@ -28,31 +28,15 @@ export function aiProxyPorts(env: Env, db?: ReturnType<typeof drizzle>): AiProxy
   };
 }
 
-/** The last ceiling this isolate read successfully, served while settings are unreadable. */
-let lastKnownCeilingUsd: number | null = null;
-
 /**
- * The per-user monthly ceiling from the per-isolate admin settings snapshot (at most one D1 read
- * per cache TTL, 60 s max, so a changed ceiling applies within that TTL). Unlike
- * `resolveAdminSetting`, which turns an outage into the default (0, no ceiling), an unreadable
- * snapshot serves the last value this isolate read, and throws only on a cold isolate; the caller
- * logs that and applies no ceiling (`resolveMonthlyCostCeilingUsd`).
+ * Read the strict admin-settings snapshot (cached for at most 60 seconds). A failed read must
+ * remain a failure: defaulting to zero or retaining an older disabled/higher ceiling could spend
+ * beyond the operator's current limit. The package maps the failure to a retryable 503.
  */
 async function readMonthlyCostCeilingUsd(env: Env): Promise<number> {
-  try {
-    const { value } = await resolveAdminSettingDetails(
-      env,
-      AI_PROXY_PER_USER_MONTHLY_COST_CEILING_SETTING
-    );
-    lastKnownCeilingUsd = Number(value);
-    return lastKnownCeilingUsd;
-  } catch (err) {
-    if (lastKnownCeilingUsd !== null) return lastKnownCeilingUsd;
-    throw err;
-  }
-}
-
-/** Test seam: forget the last-known ceiling between cases. */
-export function __resetLastKnownCeilingForTest(): void {
-  lastKnownCeilingUsd = null;
+  const { value } = await resolveAdminSettingDetails(
+    env,
+    AI_PROXY_PER_USER_MONTHLY_COST_CEILING_SETTING
+  );
+  return Number(value);
 }
