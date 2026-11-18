@@ -8,6 +8,7 @@ import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { Env } from '../../../src/env';
+import { invalidateAdminSettings } from '../../../src/services/admin-settings';
 import {
   recordHarnessRunUsage,
   recordHarnessTokenReport,
@@ -40,15 +41,30 @@ const opus = (input: number, output: number, cacheRead = 0, cacheWrite = 0) => (
 
 describe('agent_run_usage writers and reads', () => {
   let sqlite: Database.Database;
-  let env: Pick<Env, 'DATABASE'>;
+  let env: Env;
+  const cap = (n: number) => {
+    sqlite
+      .prepare(
+        'INSERT OR REPLACE INTO platform_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, NULL)'
+      )
+      .run('insights.runUsageMaxRowsPerSession', String(n), new Date().toISOString());
+    invalidateAdminSettings(env);
+  };
 
   beforeEach(() => {
     sqlite = new Database(':memory:');
     applySqliteMigration(sqlite, MIGRATION);
+    applySqliteMigration(
+      sqlite,
+      new URL('../../../src/db/migrations/0261_agent_run_usage_admission_hits.sql', import.meta.url)
+    );
+    sqlite.exec(
+      'CREATE TABLE platform_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT, updated_by TEXT)'
+    );
     sqlite.exec(`CREATE TABLE cc_credentials (id TEXT PRIMARY KEY, owner_id TEXT, name TEXT, kind TEXT);
       INSERT INTO cc_credentials VALUES ('cred-key', 'u', 'Anthropic key', 'api-key'),
         ('cred-max', 'u', 'Claude Max', 'oauth-token');`);
-    env = { DATABASE: createSqliteD1(sqlite) };
+    env = { DATABASE: createSqliteD1(sqlite) } as Env;
   });
   afterEach(() => sqlite.close());
 
@@ -81,6 +97,195 @@ describe('agent_run_usage writers and reads', () => {
     await recordHarnessRunUsage(env, scope(), 'epoch-1', [opus(100, 20)]);
     await recordHarnessRunUsage(env, scope({ agentSessionId: 'as-2' }), 'epoch-2', [opus(40, 5)]);
     expect((await read())?.models[0]).toMatchObject({ input: 140, output: 25 });
+  });
+
+  it('atomically caps client-selected epochs while preserving cumulative updates', async () => {
+    cap(2);
+    await recordHarnessRunUsage(env, scope(), 'epoch-1', [opus(10, 1)]);
+    await recordHarnessRunUsage(env, scope(), 'epoch-2', [opus(20, 2)]);
+
+    // Lowering policy below existing cardinality must still allow non-growing cumulative updates.
+    cap(1);
+    expect(await recordHarnessRunUsage(env, scope(), 'epoch-3', [opus(30, 3)])).toBe(0);
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage').get()).toEqual({ n: 2 });
+
+    await recordHarnessRunUsage(env, scope(), 'epoch-2', [opus(25, 4)]);
+    expect((await read())?.models[0]).toMatchObject({ input: 35, output: 5 });
+    expect((await read())?.limited).toBe(true);
+    expect(summarizeRunTokens(await read())).toMatchObject({ limited: true });
+  });
+
+  it('updates existing keys in a mixed over-cap report without admitting any novel model', async () => {
+    cap(2);
+    await recordHarnessRunUsage(env, scope(), 'e', [opus(10, 1)]);
+    await recordHarnessRunUsage(env, scope(), 'other', [opus(5, 1)]);
+    await recordHarnessRunUsage(env, scope(), 'e', [
+      opus(20, 2),
+      { ...opus(9, 1), model: 'novel' },
+    ]);
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage').get()).toEqual({ n: 2 });
+    expect((await read())?.models[0]).toMatchObject({ input: 25, output: 3 });
+    expect((await read())?.limited).toBe(true);
+  });
+
+  it('admits a whole novel model set or none and groups equivalent trimmed model names', async () => {
+    cap(2);
+    expect(
+      await recordHarnessRunUsage(env, scope(), 'e', [
+        opus(10, 1),
+        { ...opus(20, 2), model: ' claude-opus-5-5 ' },
+      ])
+    ).toBe(1);
+    expect(
+      await recordHarnessRunUsage(env, scope(), 'new', [
+        opus(30, 3),
+        { ...opus(40, 4), model: 'other' },
+      ])
+    ).toBe(0);
+    expect((await read())?.models[0]).toMatchObject({ input: 20, output: 2 });
+  });
+
+  it('does not reset the lifetime bound across credential changes and isolates projects and chats', async () => {
+    cap(1);
+    await recordHarnessRunUsage(env, scope(), 'e', [opus(10, 1)]);
+    expect(
+      await recordHarnessRunUsage(
+        env,
+        scope({ credentialReference: 'cc_credentials:rotated' }),
+        'e',
+        [opus(20, 2)]
+      )
+    ).toBe(0);
+    expect(
+      await recordHarnessRunUsage(env, scope({ projectId: 'project-b' }), 'e', [opus(20, 2)])
+    ).toBe(1);
+    expect(
+      await recordHarnessRunUsage(env, scope({ chatSessionId: 'chat-b' }), 'e', [opus(20, 2)])
+    ).toBe(1);
+  });
+
+  it('bounds the default at 256 rows and retains old history and updates if settings fail', async () => {
+    for (let index = 0; index < 257; index++) {
+      await recordHarnessRunUsage(env, scope(), `epoch-${index}`, [opus(1, 1)]);
+    }
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage').get()).toEqual({ n: 256 });
+    sqlite.exec('DROP TABLE platform_settings');
+    invalidateAdminSettings(env);
+    expect(await recordHarnessRunUsage(env, scope(), 'new', [opus(2, 2)])).toBe(0);
+    expect(await recordHarnessRunUsage(env, scope(), 'epoch-0', [opus(3, 3)])).toBe(1);
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage').get()).toEqual({ n: 256 });
+  });
+
+  it('never widens a configured low cap during a settings outage', async () => {
+    cap(1);
+    await recordHarnessRunUsage(env, scope(), 'e', [opus(10, 1)]);
+    sqlite.exec('DROP TABLE platform_settings');
+    invalidateAdminSettings(env);
+    expect(await recordHarnessRunUsage(env, scope(), 'new', [opus(20, 2)])).toBe(0);
+    expect(await recordHarnessRunUsage(env, scope(), 'e', [opus(30, 3)])).toBe(1);
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage').get()).toEqual({ n: 1 });
+  });
+
+  it('discloses an outage with no accepted rows and keeps the marker after recovery', async () => {
+    sqlite.exec('DROP TABLE platform_settings');
+    invalidateAdminSettings(env);
+    expect(await recordHarnessRunUsage(env, scope(), 'lost', [opus(10, 1)])).toBe(0);
+    expect(summarizeRunTokens(await read())).toEqual({ state: 'not_reported', limited: true });
+    expect(await read('other-project')).toBeNull();
+    expect(await read('project-a', 'other-chat')).toBeNull();
+    sqlite.exec(
+      'CREATE TABLE platform_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT, updated_by TEXT)'
+    );
+    cap(2);
+    await recordHarnessRunUsage(env, scope(), 'accepted', [opus(20, 2)]);
+    expect(summarizeRunTokens(await read())).toMatchObject({
+      state: 'reported',
+      limited: true,
+      total: { input: 20 },
+    });
+  });
+
+  it('keeps one refusal marker across credential changes, retries, and reordered report times', async () => {
+    cap(1);
+    await recordHarnessRunUsage(env, scope(), 'e', [opus(1, 1)], 1000);
+    await recordHarnessRunUsage(env, scope(), 'novel', [opus(2, 1)], 3000);
+    await recordHarnessRunUsage(
+      env,
+      scope({ credentialReference: 'cc_credentials:rotated' }),
+      'novel',
+      [opus(2, 1)],
+      2000
+    );
+    expect(sqlite.prepare('SELECT * FROM agent_run_usage_admission_hits').all()).toEqual([
+      { project_id: 'project-a', chat_session_id: 'chat-1', last_rejected_at: 3000 },
+    ]);
+    cap(3);
+    await recordHarnessRunUsage(env, scope(), 'novel', [opus(2, 1)], 4000);
+    expect((await read())?.limited).toBe(true);
+  });
+
+  it('rolls refusal metadata back if the usage statement fails', async () => {
+    cap(1);
+    await recordHarnessRunUsage(env, scope(), 'existing', [opus(10, 1)]);
+    sqlite.exec(`CREATE TRIGGER fail_usage BEFORE INSERT ON agent_run_usage
+      BEGIN SELECT RAISE(ABORT, 'injected usage failure'); END`);
+    await expect(
+      recordHarnessRunUsage(env, scope(), 'existing', [
+        opus(20, 2),
+        { ...opus(3, 1), model: 'novel' },
+      ])
+    ).rejects.toThrow('injected usage failure');
+    expect(
+      sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage_admission_hits').get()
+    ).toEqual({ n: 0 });
+    expect((await read())?.models[0]).toMatchObject({ input: 10 });
+  });
+
+  it('preserves a large legacy over-cap history without scanning it for admission', async () => {
+    cap(2);
+    sqlite.exec(`WITH RECURSIVE epochs(n) AS (SELECT 0 UNION ALL SELECT n+1 FROM epochs WHERE n<10000)
+      INSERT INTO agent_run_usage(project_id,chat_session_id,source,usage_epoch,model,credential_key,input_tokens,created_at,updated_at)
+      SELECT 'project-a','chat-1','harness','legacy-'||n,'claude-opus-5-5','cc_credentials:cred-key',1,0,0 FROM epochs`);
+    let issuedSql = '';
+    let issuedBinds: unknown[] = [];
+    const real = env.DATABASE;
+    env.DATABASE = new Proxy(real, {
+      get(target, property) {
+        if (property === 'prepare')
+          return (query: string) => {
+            const statement = target.prepare(query);
+            if (!query.startsWith('WITH report')) return statement;
+            issuedSql = query;
+            return new Proxy(statement, {
+              get(object, method) {
+                if (method === 'bind')
+                  return (...values: unknown[]) => {
+                    issuedBinds = values;
+                    return object.bind(...values);
+                  };
+                const value = Reflect.get(object, method);
+                return typeof value === 'function' ? value.bind(object) : value;
+              },
+            });
+          };
+        const value = Reflect.get(target, property);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    expect(await recordHarnessRunUsage(env, scope(), 'new', [opus(2, 2)])).toBe(0);
+    expect(await recordHarnessRunUsage(env, scope(), 'legacy-10000', [opus(3, 3)])).toBe(1);
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage').get()).toEqual({ n: 10001 });
+    const plan = sqlite.prepare('EXPLAIN QUERY PLAN ' + issuedSql).all(...issuedBinds) as Array<{
+      detail: string;
+    }>;
+    expect(plan.some((row) => row.detail.includes('MATERIALIZE usage_counts'))).toBe(true);
+    expect(
+      plan
+        .filter((row) => row.detail.includes('agent_run_usage'))
+        .every((row) => row.detail.includes('COVERING INDEX idx_agent_run_usage_key'))
+    ).toBe(true);
+    // Static work-shape guard: real SQL includes the bound, above behavioral test proves history survives.
+    expect(issuedSql).toContain('LIMIT (SELECT max_rows + 1 FROM report)');
   });
 
   it('adds proxy responses and prefers the proxy over the harness for the same run', async () => {
@@ -206,7 +411,9 @@ describe('agent_run_usage writers and reads', () => {
 
   it('clamps a counter to the report ceiling on write', async () => {
     await recordHarnessRunUsage(env, scope(), 'epoch-1', [opus(Number.MAX_SAFE_INTEGER, 1)]);
-    const row = sqlite.prepare('SELECT input_tokens FROM agent_run_usage').get() as { input_tokens: number };
+    const row = sqlite.prepare('SELECT input_tokens FROM agent_run_usage').get() as {
+      input_tokens: number;
+    };
     expect(row.input_tokens).toBe(1_000_000_000_000);
   });
 

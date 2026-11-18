@@ -48,6 +48,16 @@ export function deliveryNote(response: InboxActionResponse): string {
   return response.agentNotified ? '' : ' · the agent will be told shortly';
 }
 
+/**
+ * The receipt for "Looks good" on a review or "Got it" on a result. "Got it" deliberately tells
+ * the agent nothing (`answerAsk`, `packages/operations`), so it must not get `deliveryNote`'s
+ * "will be told shortly".
+ */
+export function acknowledgeReceipt(item: InboxItem, response: InboxActionResponse): string {
+  if (item.kind === 'result') return 'Got it · the agent won’t be woken';
+  return `Marked “Looks good”${deliveryNote(response)}`;
+}
+
 /** One answer request with stale handling; failures keep the item and show the error. */
 export function useInboxSend(item: InboxItem, handlers: InboxAnswerHandlers) {
   const [busy, setBusy] = useState<string | null>(null);

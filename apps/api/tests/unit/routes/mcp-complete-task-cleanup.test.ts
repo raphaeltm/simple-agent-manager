@@ -51,7 +51,6 @@ vi.mock('../../../src/services/notification', () => ({
   getProjectName: vi.fn().mockResolvedValue('Test Project'),
   getChatSessionId: vi.fn().mockResolvedValue('session-1'),
   notifyTaskComplete: vi.fn().mockResolvedValue(undefined),
-  notifySessionEnded: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock logger

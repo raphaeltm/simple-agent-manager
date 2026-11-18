@@ -330,6 +330,64 @@ describe('InboxPage — answering', () => {
     expect(answerCalls(server)[0]?.body).toEqual({});
   });
 
+  it('marks a result "Got it", and a result can be answered with a reply', async () => {
+    server.items = [
+      item({
+        ref: 'ask:res',
+        kind: 'result',
+        blocking: false,
+        title: 'The flaky login test is fixed',
+        answerSpec: { type: 'acknowledge' },
+      }),
+    ];
+    installFetch(server);
+    renderInbox();
+    expect(await screen.findByText('Result')).toBeTruthy();
+    // A result is acknowledged, never "Looks good".
+    expect(screen.queryByRole('button', { name: 'Looks good' })).toBeNull();
+    fireEvent.click(await screen.findByRole('button', { name: 'Got it' }));
+    await screen.findByText('Nothing needs you');
+    expect(answerCalls(server)[0]?.body).toEqual({});
+  });
+
+  it('a result from a finished agent offers Open chat instead of Reply', async () => {
+    server.items = [
+      item({
+        ref: 'ask:res',
+        kind: 'result',
+        blocking: false,
+        agentState: 'finished',
+        answerSpec: { type: 'acknowledge' },
+      }),
+    ];
+    installFetch(server);
+    renderInbox();
+    // Liveness: the result's controls rendered.
+    expect(await screen.findByRole('button', { name: 'Got it' })).toBeTruthy();
+    expect(screen.getAllByRole('link', { name: 'Open chat' }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Reply' })).toBeNull();
+  });
+
+  it('replies to a result', async () => {
+    server.items = [
+      item({
+        ref: 'ask:res',
+        kind: 'result',
+        blocking: false,
+        answerSpec: { type: 'acknowledge' },
+      }),
+    ];
+    installFetch(server);
+    renderInbox();
+    fireEvent.click(await screen.findByRole('button', { name: 'Reply' }));
+    fireEvent.change(screen.getByLabelText('Your reply'), {
+      target: { value: 'Do production next week.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));
+    await screen.findByText('Nothing needs you');
+    expect(answerCalls(server)[0]?.body).toEqual({ answer: 'Do production next week.' });
+  });
+
   it('types a different answer beside the options', async () => {
     server.items = [
       item({ ref: 'ask:a', answerSpec: { type: 'options', options: ['Yes'], allowText: true } }),

@@ -210,12 +210,15 @@ test.describe('Inbox — Desktop', () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Allow once' })).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Looks good' })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Got it' })).toBeVisible();
     // A 10-option question is never one tap.
     await expect(dialog.getByRole('button', { name: 'Falkenstein (fsn1)' })).toHaveCount(0);
     const box = await dialog.boundingBox();
     expect(box!.x + box!.width).toBeLessThanOrEqual(1280);
     expect(box!.y + box!.height).toBeLessThanOrEqual(800);
     await screenshot(page, 'inbox-desktop-quick-view');
+    await dialog.getByRole('button', { name: 'Got it' }).scrollIntoViewIfNeeded();
+    await screenshot(page, 'inbox-desktop-quick-view-result');
   });
 
   test('nav items show counts', async ({ page }) => {

@@ -3,6 +3,7 @@
  * (the owner or an active grantee) picks one. Split out of `chat.ts`
  * (`.claude/rules/18-file-size-limits.md`).
  */
+import type { ArchiveCheckinHold } from '@simple-agent-manager/operations';
 import { HUMAN_INPUT_CATEGORIES, type HumanInputCategory } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Context, Hono } from 'hono';
@@ -27,6 +28,7 @@ import {
 } from '../middleware/project-auth';
 import { parseOptionalBody, ResolveAttentionAnswerSchema } from '../schemas';
 import { authorizeAgentWake } from '../services/agent-wake-authorization';
+import { announceQuestionArchived } from '../services/inbox/agent-asks';
 import { readAskContext } from '../services/inbox/ask-context';
 import {
   answerQuestionAsk,
@@ -35,7 +37,7 @@ import {
   questionAskRequestState,
 } from '../services/inbox/question-asks';
 import * as projectDataService from '../services/project-data';
-import { recordSharedSessionAnswer } from '../services/session-access';
+import { recordSharedSessionAnswer, requireSessionWriter } from '../services/session-access';
 import { preparePromptForLiveAgent, sendPreparedPromptToLiveAgent } from './chat-prompt-forward';
 
 /** The `request_human_input` category stored with the question, or null when absent/unknown. */
@@ -341,42 +343,27 @@ export async function answerAttention(
   return { resolved: true, alreadyResolved: false, answer };
 }
 
-/** What the agent is told when the person archives its question (spec section 3.3). */
-export function attentionArchivedPrompt(reason: string | null): string {
-  const quoted = reason ? ` ("${reason.trim().slice(0, 300)}")` : '';
-  return `The person archived your question${quoted} from their inbox and will not act on it. Do not wait for an answer: continue without it, or end your turn and say what is left undone.`;
-}
-
 /**
  * Archive a question still held as an attention marker: resolve it with reason `archived` and
- * tell the agent through the same path an answer takes (`answerAttention`): the same wake
- * authorization, the same claim (so an answer and an archive cannot both win), the same
- * live-agent prompt, deduplicated on the marker id.
+ * tell no one. Archive leaves the agent where it is; a person who wants the agent to act answers
+ * or writes in the chat instead (Raphaël, 2026-11-17, revising spec decision 4 of idea
+ * 01M7G03ZCQ6TM6CMEYDRKQ8ST9). It shares the answer claim, so an answer and an archive cannot
+ * both win; an archive claim left staged by an earlier build is completed here.
  */
 export async function archiveAttention(
   env: Env,
   userId: string,
   projectId: string,
   sessionId: string,
-  markerId: string
+  markerId: string,
+  hold: ArchiveCheckinHold
 ): Promise<{ agentNotified: boolean }> {
   const db = drizzle(env.DATABASE, { schema });
   await requireProjectCapability(db, projectId, userId, 'task:write');
-  const { writer, wake } = await authorizeAgentWake(env, {
-    projectId,
-    sessionId,
-    actorUserId: userId,
-    trigger: 'attention_answer',
+  const writer = await requireSessionWriter(env, projectId, sessionId, userId, {
     db,
     action: 'archive the agent question in this session',
   });
-  const viewer = await projectDataService.getAttentionRequest(
-    env,
-    projectId,
-    sessionId,
-    markerId,
-    userId
-  );
   const prepared = await projectDataService.prepareAttentionArchive(
     env,
     projectId,
@@ -393,23 +380,24 @@ export async function archiveAttention(
     throw markRejectedBeforeEffects(errors.conflict('Attention request is already resolved'));
   if (prepared.status === 'conflicting_answer' || prepared.status === 'invalid_option')
     throw markRejectedBeforeEffects(errors.conflict('An answer is already being delivered'));
-  if (prepared.status === 'in_flight') return { agentNotified: false };
-
-  let preparedPrompt;
+  // `ready` (this request claimed it) and `in_flight` (an archive claim already staged) both end
+  // in the same resolution. An `in_flight` claim is usually one an earlier build left stranded
+  // when its archive prompt's outcome was unknown, so completing it unsticks the item. An
+  // earlier build still sending at this moment (a rolling deploy) may tell the agent anyway,
+  // which is the pre-change behaviour; the claim carries no owner or time to tell the two apart.
+  const ownsClaim = prepared.status === 'ready';
   try {
-    preparedPrompt = await preparePromptForLiveAgent(env, db, {
-      projectId,
-      sessionId,
-      userId: writer.ownerUserId,
-      content: attentionArchivedPrompt(viewer.marker?.reason ?? null),
-    });
+    await projectDataService.completeAttentionArchive(env, projectId, sessionId, markerId);
   } catch (cause) {
-    await projectDataService.releaseAttentionArchive(env, projectId, sessionId, markerId);
-    throw cause instanceof Error ? markRejectedBeforeEffects(cause) : cause;
+    // Release only a claim this request staged: nothing was sent, and a staged claim would block
+    // every answer. A claim found already staged may belong to a request still in progress.
+    if (ownsClaim)
+      await projectDataService.releaseAttentionArchive(env, projectId, sessionId, markerId);
+    throw cause;
   }
-  // Outcome-unknown from here, exactly as for an answer: keep the claim, never replay.
-  await sendPreparedPromptToLiveAgent(env, preparedPrompt, markerId);
-  await projectDataService.completeAttentionArchive(env, projectId, sessionId, markerId);
-  await recordSharedSessionAnswer(env, writer, { markerId, wake: agentWakeRecord(wake) });
-  return { agentNotified: true };
+  // The resolved marker no longer keeps SAM's check-ins off this chat; hold them until the
+  // person writes in it, so archiving does not nudge the agent.
+  await announceQuestionArchived(env, { projectId, sessionId, askId: markerId, ...hold });
+  await recordSharedSessionAnswer(env, writer, { markerId, archived: true });
+  return { agentNotified: false };
 }

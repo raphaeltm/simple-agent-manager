@@ -27,7 +27,12 @@ import {
 import { ensureSessionRecovery } from '../session-recovery';
 import { clearTriggerPageCaches } from '../trigger-cache';
 import { triggerStatusUpdates } from '../trigger-status';
-import { announceAgentAsk, checkAgentLinkTargets, withdrawAgentQuestion } from './agent-asks';
+import {
+  announceAgentAsk,
+  announceQuestionArchived,
+  checkAgentLinkTargets,
+  withdrawAgentQuestion,
+} from './agent-asks';
 import { readAskContext } from './ask-context';
 import { deliverInboxAskNotice } from './ask-notice';
 
@@ -98,8 +103,8 @@ export function createInboxPort(env: Env): OperationInboxPort {
       return readAskContext(env, { projectId, sessionId, askedAt });
     },
 
-    archiveAttention: (userId, projectId, sessionId, markerId) =>
-      archiveAttention(env, userId, projectId, sessionId, markerId),
+    archiveAttention: (userId, projectId, sessionId, markerId, hold) =>
+      archiveAttention(env, userId, projectId, sessionId, markerId, hold),
 
     async fulfilSecret(userId, projectId, requestId, secret) {
       const database = db();
@@ -230,6 +235,7 @@ export function createInboxPort(env: Env): OperationInboxPort {
     announceAsk: (input) => announceAgentAsk(env, input),
 
     withdrawQuestion: (input) => withdrawAgentQuestion(env, input),
+    questionArchived: (input) => announceQuestionArchived(env, input),
 
     checkLinkTargets: (projectId, links) => checkAgentLinkTargets(env, projectId, links),
   };
