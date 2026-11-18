@@ -54,13 +54,14 @@ coordinator review) and missing CI (F12).
 - [x] Port slice files from `942d2c0a4`; drop capabilities and other slices' hunks
 - [x] `Env` + `.env.example` + runtime-tunables bootstrap exceptions for `SMTP_*`, `AGENT_EMAIL_INBOUND_SMTP`
 - [x] Gateway inbound route mounted by `createSelfHostGatewayRoutes` (`inboundEmailDeps`)
-- [ ] Account-link confirmation uses the system email transport; test over SMTP
-- [ ] Owner security alert for an explicit `/link-social` link over SMTP: test
-- [ ] F13a: SMTP readiness probes the relay (EHLO, TLS, AUTH, MAIL FROM, RCPT TO owner, RSET); failure is `unavailable`, not `ready`
-- [ ] F13b: hung-relay test proving the code-request response returns before the send; box check that celld provides `waitUntil`
+- [x] Account-link confirmation uses the system email transport; test over SMTP
+- [x] Owner security alert for an explicit `/link-social` link over SMTP: test
+- [x] F13a: SMTP readiness probes the relay (EHLO, TLS, AUTH, MAIL FROM, RCPT TO owner, RSET); failure is `unavailable`, not `ready`
+- [x] F13b: hung-relay test proving the code-request response returns before the send
+- [ ] F13b BOX: celld provides `waitUntil` (code request answers before a slow send)
 - [ ] F13c: `create-account --superadmin` refuses a non-owner before the owner is established (integration PR; L22 owns the command)
-- [ ] F12: CI job for sam-mx `go test` + SMTP vertical tests, on self-host/SMTP paths only and nightly (D9); real-receiver test fails instead of skipping in CI
-- [ ] F12: workerd (Miniflare) test of the real `cloudflare:sockets` SMTP client against a local server
+- [x] F12: CI job for sam-mx `go test` + SMTP vertical tests, on self-host/SMTP paths only and nightly (D9); real-receiver test fails instead of skipping in CI
+- [x] F12: workerd (Miniflare) test of the real `cloudflare:sockets` SMTP client against a local server
 - [ ] Cloudflare unchanged: tests pin the Cloudflare branch for sign-in, alerts, account-link mail, inbound
 - [ ] Docs: configuration reference (SMTP, inbound), admin-settings (`agentEmail.smtpTimeoutMs`), self-hosting security-alert sender
 - [ ] Staging: Cloudflare email sign-in and inbound agent email unchanged
@@ -74,3 +75,16 @@ coordinator review) and missing CI (F12).
 - A code request's response does not wait for the SMTP send.
 - An allowed sender's mail through sam-mx starts a task; the reply goes out over SMTP (box).
 - sam-mx Go tests and the SMTP vertical tests run in CI on self-host/SMTP changes and nightly.
+
+## Implementation notes
+
+- Real workerd (Miniflare) behaviour, observed 2026-11-18: `startTls({ expectedServerHostname })`
+  logs the option as unsupported and verifies against the `connect()` hostname, which the client
+  sets to the same `config.host`; untrusted certificates are refused for STARTTLS and implicit TLS
+  before AUTH (`tests/workers/smtp-client-workerd.test.ts`).
+- The real-receiver vertical test runs only with `SAM_MX_RECEIVER_TESTS=1` (the Self-host Email CI
+  job sets it with the pinned Go toolchain); without it the block is skipped with a warning, so
+  `Test api` never builds Go with whatever toolchain the runner happens to have.
+- CI runner budget for an all-filter PR raised 31 -> 32 for the Self-host Email job.
+- Local `ci-suite-selection.test.ts > packages` times out at 30 s on this workspace on the base
+  commit too (not related).

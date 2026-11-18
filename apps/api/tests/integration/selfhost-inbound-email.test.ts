@@ -416,18 +416,15 @@ describe('self-hosted inbound agent email', () => {
   });
 
   describe('through the real sam-mx receiver', () => {
-    const goAvailable = (() => {
-      try {
-        execFileSync('go', ['version'], { stdio: 'ignore' });
-        return true;
-      } catch {
-        return false;
-      }
-    })();
-    if (!goAvailable) {
-      // Visible in the run output, not silent: the Go tests in deploy/selfhost/sam-mx cover the
-      // receiver on its own; this block needs the Go toolchain to build it.
-      console.warn('selfhost-inbound-email: go not found, skipping the sam-mx binary tests');
+    // Builds and runs the Go receiver, so it runs only where CI provides the pinned Go toolchain:
+    // the self-host email job (.github/workflows/selfhost-email-tests.yml) sets
+    // SAM_MX_RECEIVER_TESTS=1, and then a missing toolchain fails instead of skipping. Locally:
+    // SAM_MX_RECEIVER_TESTS=1 pnpm vitest run tests/integration/selfhost-inbound-email.test.ts
+    const receiverTests = process.env.SAM_MX_RECEIVER_TESTS === '1';
+    if (!receiverTests) {
+      console.warn(
+        'selfhost-inbound-email: SAM_MX_RECEIVER_TESTS is not 1, skipping the sam-mx binary tests'
+      );
     }
     let binary = '';
     let bridge: http.Server;
@@ -436,7 +433,7 @@ describe('self-hosted inbound agent email', () => {
     let smtpPort = 0;
 
     beforeAll(() => {
-      if (!goAvailable) return;
+      if (!receiverTests) return;
       const dir = mkdtempSync(join(tmpdir(), 'sam-mx-'));
       binary = join(dir, 'sam-mx');
       execFileSync('go', ['build', '-o', binary, '.'], {
@@ -551,7 +548,7 @@ describe('self-hosted inbound agent email', () => {
       return replies;
     }
 
-    it.skipIf(!goAvailable)(
+    it.skipIf(!receiverTests)(
       'an SMTP message from an allowed sender starts a task, and the reply goes out',
       async () => {
         await startBridge();

@@ -1,0 +1,77 @@
+name: Self-host Email Tests
+
+# The self-host email path (landing plan finding F12, decision D9): the sam-mx SMTP receiver's
+# Go tests, the inbound vertical test that builds and runs the real receiver binary, the SMTP
+# sign-in tests, and the SMTP client in real workerd. CI calls this only when self-host email
+# paths change (never on the cloud-init path filter); it also runs nightly and on demand.
+on:
+  workflow_call:
+  schedule:
+    - cron: '41 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: '1.26.11'
+
+jobs:
+  selfhost-email:
+    name: Self-host email (sam-mx + SMTP)
+    # Nightly runs only in the canonical repository; forks dispatch it by hand if they want it.
+    if: github.event_name != 'schedule' || github.repository == 'raphaeltm/simple-agent-manager'
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: deploy/selfhost/sam-mx/go.sum
+
+      - name: Assert Go version
+        run: go version | grep -E '^go version go1\.26\.11 '
+
+      - name: Vet sam-mx
+        working-directory: deploy/selfhost/sam-mx
+        run: go vet ./...
+
+      - name: Test sam-mx
+        working-directory: deploy/selfhost/sam-mx
+        run: go test -race ./...
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build API dependencies
+        run: pnpm exec turbo run build --filter=@simple-agent-manager/api^...
+
+      # SAM_MX_RECEIVER_TESTS=1 makes the real-receiver block run, and fail rather than skip
+      # if the Go toolchain is missing.
+      - name: SMTP and inbound email tests (real sam-mx receiver)
+        working-directory: apps/api
+        env:
+          SAM_MX_RECEIVER_TESTS: '1'
+        run: >-
+          pnpm exec vitest run
+          tests/integration/selfhost-inbound-email.test.ts
+          tests/integration/email-sign-in-smtp.test.ts
+          tests/integration/github-link-social.test.ts
+          tests/unit/routes/setup-email.test.ts
+          tests/unit/services/smtp-client.test.ts
+          tests/unit/services/email-transport.test.ts
+          tests/unit/selfhost/inbound-email-gateway-secret.test.ts
+
+      - name: SMTP client in workerd
+        working-directory: apps/api
+        run: pnpm exec vitest run --config vitest.sam-runtime.config.ts tests/workers/smtp-client-workerd.test.ts
