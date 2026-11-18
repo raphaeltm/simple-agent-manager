@@ -137,6 +137,7 @@ for (const surface of surfaces) {
             dailyUsage: { inputTokens: 0, outputTokens: 0 },
             effectiveLimits: { dailyInputTokenLimit: 500000, dailyOutputTokenLimit: 200000 },
             monthCostUsd: 0,
+            monthlyCostCap: { available: true, ceilingUsd: null, effectiveCapUsd: null },
             utilization: { dailyInputPercent: 0, dailyOutputPercent: 0, monthlyCostPercent: null },
             exceeded: false,
           };

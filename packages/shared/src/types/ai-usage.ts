@@ -78,8 +78,17 @@ export interface UserAiBudgetResponse {
     dailyInputTokenLimit: number;
     dailyOutputTokenLimit: number;
   };
-  /** Current month's estimated cost from AI Gateway. */
+  /** Current month's estimated cost (AI Gateway logs, or SAM's own pricing without a gateway). */
   monthCostUsd: number;
+  /** The monthly cap actually enforced for this user. */
+  monthlyCostCap: {
+    /** False where SAM cannot price spend (a gateway without the account API): no cap can be set. */
+    available: boolean;
+    /** Installation-wide ceiling set by a superadmin (no-gateway installs only), or null. */
+    ceilingUsd: number | null;
+    /** min(user cap, ceiling): what the proxy enforces, or null for no cap. */
+    effectiveCapUsd: number | null;
+  };
   /** Utilization percentages (0-100). */
   utilization: {
     dailyInputPercent: number;
