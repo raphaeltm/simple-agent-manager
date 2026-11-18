@@ -52,10 +52,21 @@ export interface AccountPlan {
   superadmin: boolean;
   id: string;
   nowMs: number;
+  /**
+   * The installer's owner email (BOOTSTRAP_OWNER_EMAIL), when the box has one. Until that owner
+   * is established, SAM promotes them on their first sign-in only if no other superadmin exists
+   * (`bootstrapSessionAllowed` in apps/api/src/services/bootstrap-owner.ts) and admits no one
+   * else. So a superadmin for any other address, written first, would lock everyone out.
+   */
+  bootstrapOwnerEmail?: string;
 }
+
+/** `platform_settings` key apps/api/src/services/bootstrap-owner.ts writes once the owner exists. */
+export const OWNER_ESTABLISHED_SETTING = 'setup.bootstrapOwnerEstablished';
 
 function assertSafe(plan: AccountPlan): void {
   normalizeAccountEmail(plan.email);
+  if (plan.bootstrapOwnerEmail !== undefined) normalizeAccountEmail(plan.bootstrapOwnerEmail);
   if (!new RegExp(`^[${ID_ALPHABET}]{${ID_LENGTH}}$`).test(plan.id))
     throw new Error('bad account id');
   if (!Number.isSafeInteger(plan.nowMs) || plan.nowMs <= 0) throw new Error('bad timestamp');
@@ -67,21 +78,46 @@ const MATCH = (email: string) => `lower(trim(email)) = '${email}' AND status != 
  * The statements, in order: create when absent, promote when asked, then report the account and
  * whether the install has an administrator. Run as one batch.
  */
+/**
+ * True when `--superadmin` for this address must wait for the bootstrap owner: there is an owner
+ * email, this is another address, and the owner is not established yet.
+ */
+export function superadminWaitsForOwner(plan: AccountPlan): boolean {
+  return Boolean(
+    plan.superadmin && plan.bootstrapOwnerEmail && plan.bootstrapOwnerEmail !== plan.email
+  );
+}
+
+/**
+ * SQL condition: the bootstrap owner is established, by the same two proofs
+ * `bootstrapOwnerEstablished` accepts (its marker, or the owner as a verified active superadmin).
+ */
+function ownerEstablishedSql(owner: string): string {
+  return `(EXISTS (SELECT 1 FROM platform_settings WHERE key = '${OWNER_ESTABLISHED_SETTING}')
+    OR EXISTS (SELECT 1 FROM users WHERE lower(trim(email)) = '${owner}' AND email_verified = 1
+      AND role = 'superadmin' AND status = 'active'))`;
+}
+
 export function createAccountSql(plan: AccountPlan): string {
   assertSafe(plan);
   const { email, id, nowMs } = plan;
   const name = email.split('@')[0] ?? email;
   const role = plan.superadmin ? 'superadmin' : 'user';
+  // Checked in the same statements that write, so a concurrent sign-in cannot slip between a
+  // separate check and the write. When it fails nothing is written and the report shows it.
+  const ownerGuard = superadminWaitsForOwner(plan)
+    ? ` AND ${ownerEstablishedSql(plan.bootstrapOwnerEmail ?? '')}`
+    : '';
   const statements = [
     `INSERT INTO users (id, email, email_verified, name, role, status, created_at, updated_at)
      SELECT '${id}', '${email}', 1, '${name}', '${role}', 'active', ${nowMs}, ${nowMs}
-     WHERE NOT EXISTS (SELECT 1 FROM users WHERE lower(trim(email)) = '${email}')`,
+     WHERE NOT EXISTS (SELECT 1 FROM users WHERE lower(trim(email)) = '${email}')${ownerGuard}`,
     ...(plan.superadmin
       ? [
           `UPDATE users SET role = 'superadmin',
              status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
              updated_at = ${nowMs}
-           WHERE ${MATCH(email)}`,
+           WHERE ${MATCH(email)}${ownerGuard}`,
         ]
       : []),
     `SELECT id, email, role, status, email_verified AS emailVerified,
