@@ -43,14 +43,18 @@ once its gates pass, or close it with a reason.
 - [x] Fix #2877 type break (mastra 1.84.0 pairing)
 - [x] Build integration branch (this branch) with all eight bumps for one staging run
 - [x] Local reviewers: cloudflare PASS, go PASS, security PASS, task-completion WARN (F1/F2 addressed here)
-- [ ] Primary staging: deploy integration branch; TTS + operator agent + real VM
-      (provision, heartbeat, terminal access, cleanup); noise before/after
+- [x] Primary staging (run 44288653931 on f776f2823): TTS full+summary, SAM operator turn with
+      tool calls, compose yaml parse, real VM (node 01M7Q5HP9AAGVPFXRE8XBZ3ZKD: heartbeat, agent reply,
+      terminal JWT + tampered-token refusal, cleanup); noise before/after identical (waived per Raphaël)
 - [x] #2878 merged 74e14df (no runtime change)
-- [ ] Merge sequence: #2878, #2796, #2797, #2877, #2875, #2800, #2801, #2802, merging main
+- [x] Merge sequence (actual: #2796 88803812, #2801 296de59c, #2802 96d3745d, #2875 3bab5294,
+      #2800 16032643 after main merge, #2877 974a9971 after two main merges + carried #2797 test;
+      #2797 closed as superseded)
+- [x] (original plan): #2878, #2796, #2797, #2877, #2875, #2800, #2801, #2802, merging main
       into each branch first if it conflicts and waiting for green CI on that head. When #2877
       takes main after #2797: keep `@mastra/core` 1.84.0, regenerate the lockfile, confirm exactly one
       `@ai-sdk/provider@4.0.38`, and typecheck apps/api on the merged head.
-- [ ] Fix PR Evidence bodies with only reviews that happened
+- [x] Fix PR Evidence bodies with only reviews that happened
 - [ ] Monitor production deploys; basic production smoke
 
 ## Acceptance criteria
@@ -58,3 +62,11 @@ once its gates pass, or close it with a reason.
 - Every PR merged with green required checks, or closed with a stated reason
 - Staging evidence covers each bump's consumers
 - Production deploy succeeded after the merges
+
+## Outcome (2026-11-18)
+
+- Merged: #2878, #2796, #2801, #2802, #2875, #2800, #2877. Closed: #2797 (superseded by #2877's
+  `@mastra/core` 1.84.0; 1.83.0 would re-break the API typecheck with `ai` 7.0.173).
+- Follow-up ideas: 01M7Q0KCPTT8T2PMBH43634QEH (vm-agent JWKS refresh context cancelled),
+  01M7Q0KGQ7DCTSGA3WHHQK3JGZ (remove dead execa dependency), 01M7Q0T70T5ZSP31C9QMGYMTDM (flaky
+  direct-provisioning test).
