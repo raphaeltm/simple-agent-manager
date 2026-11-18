@@ -80,8 +80,7 @@ export async function joinCleanupFlight(
   }
   const current = readCleanupRow(sql, row.id);
   if (
-    !current ||
-    current.cleanup_pending !== 1 ||
+    current?.cleanup_pending !== 1 ||
     (current.cleanup_attempts ?? 0) > cleanupAttemptLimit(current)
   )
     return;
