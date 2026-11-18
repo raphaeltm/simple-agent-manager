@@ -125,6 +125,7 @@ describe('connector operations current membership and creator authority', () => 
       schema.projects,
       schema.projectMembers,
       schema.tasks,
+      schema.sessionSnapshots,
       schema.agentProfiles,
       schema.taskStatusEvents,
       schema.sessionSummaries,

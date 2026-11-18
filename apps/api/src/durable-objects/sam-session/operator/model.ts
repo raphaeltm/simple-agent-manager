@@ -1,5 +1,4 @@
 import type { MastraModelConfig } from '@mastra/core/llm';
-import { incrementModelUsage } from '@simple-agent-manager/ai-proxy';
 import {
   filterModelsForAgentLoop,
   type PlatformAIModel,
@@ -192,12 +191,6 @@ export async function recordOperatorStepUsage(
   const anthropic = config.model.startsWith('claude-');
   const providerId = anthropic ? 'anthropic' : 'workers-ai';
   const providerName = anthropic ? 'Anthropic' : 'Cloudflare Workers AI';
-  const costUsd = customEndpoint
-    ? 0
-    : ((input - cached) * catalogModel.costPer1kInputTokens +
-        cached * cachedRate +
-        output * catalogModel.costPer1kOutputTokens) /
-      1000;
   await incrementTokenUsage(env.KV, userId, input, output, env);
   await incrementProviderUsage(
     env.KV,
@@ -210,10 +203,13 @@ export async function recordOperatorStepUsage(
     input,
     output,
     env,
-    costUsd
+    customEndpoint
+      ? 0
+      : ((input - cached) * catalogModel.costPer1kInputTokens +
+          cached * cachedRate +
+          output * catalogModel.costPer1kOutputTokens) /
+          1000,
+    // Per-model breakdown only where SAM's own record is the spend record (ai-model-usage.ts).
+    !customEndpoint && hasLocalAiCostMetering(env) ? catalogModel.id : undefined
   );
-  // Per-model breakdown only where SAM's own record is the spend record (ai-model-usage.ts).
-  if (!customEndpoint && hasLocalAiCostMetering(env)) {
-    await incrementModelUsage(env, userId, catalogModel.id, providerId, input, output, costUsd);
-  }
 }

@@ -10,11 +10,6 @@ export {
   resolveUpstreamAuth,
   type UpstreamAuth,
 } from './ai-billing';
-export {
-  type AiBudgetLimits,
-  buildBudgetSettingsKey,
-  MONTHLY_COST_CAP_UNAVAILABLE_MESSAGE,
-} from './ai-budget-settings';
 export { findPricedModel, priceModelUsageUsd } from './ai-cost-pricing';
 export {
   aiGatewayOnlyHeaders,
@@ -39,17 +34,11 @@ export {
   type UsageByProvider,
 } from './ai-gateway-logs';
 export { checkModelTierAllowance, describeModelTierDenial } from './ai-model-tier-gate';
+export { getLocalUsageBreakdown } from './ai-model-usage';
 export {
-  type AiModelUsageRow,
-  getLocalUsageBreakdown,
-  incrementModelUsage,
-} from './ai-model-usage';
-export {
-  buildMonthlyCostCacheKey,
-  checkMonthlyCostCap,
-  getCachedMonthlyCost,
   getLocalMonthlyAiCostUsd,
   type MonthlyCostCapCheck,
+  monthlyCostCapMessage,
 } from './ai-monthly-cost-cap';
 export { type MonthlyCostCronResult, runMonthlyCostAggregation } from './ai-monthly-cost-cron';
 export type { WorkersAIChatCompletionOptions, WorkersAIChatMessage } from './ai-proxy-shared';
@@ -65,10 +54,10 @@ export {
 } from './ai-proxy-shared';
 export {
   type AiProviderUsageAttribution,
-  buildBudgetKey,
   checkAiUsageGate,
   consumeFeatureTokenBudget,
   deleteUserBudgetSettings,
+  effectiveMonthlyCostCapUsd,
   getAdminAiAllowance,
   getAiBudgetLimits,
   getFeatureTokenBudget,
@@ -77,8 +66,11 @@ export {
   getUserBudgetSettings,
   incrementProviderUsage,
   incrementTokenUsage,
+  MONTHLY_COST_CAP_UNAVAILABLE_MESSAGE,
+  type MonthlyCostCeilingPort,
   releaseFeatureTokenBudget,
   resolveEffectiveLimits,
+  resolveMonthlyCostCeilingUsd,
   resolvePlatformDailyTokenLimits,
   saveUserBudgetSettings,
   validateBudgetUpdate,
@@ -88,6 +80,7 @@ export {
   attachTokenUsageAccounting,
   attachUpstreamTokenUsageAccounting,
   estimateInputTokensFromMessages,
+  estimateInputTokensFromRequest,
   type MeasuredTokenUsage,
   measuredTokenUsage,
   optionalExecutionContext,

@@ -13,7 +13,13 @@
  */
 import { expect, type Page, type Route, test } from '@playwright/test';
 
-import { assertNoOverflow, jsonResponse, makeMockUser, screenshot } from './audit-helpers';
+import {
+  assertNoClippedOverflow,
+  assertNoOverflow,
+  jsonResponse,
+  makeMockUser,
+  screenshot,
+} from './audit-helpers';
 
 const MOCK_USER = makeMockUser({
   email: 'demo@example.com',
@@ -43,6 +49,8 @@ const REPOSITORY = {
 };
 
 interface Installation {
+  monthlyCapAvailable?: boolean;
+  monthlyCeilingUsd?: number | null;
   instant?: boolean;
   platformCompute?: boolean;
   artifacts?: boolean;
@@ -51,8 +59,6 @@ interface Installation {
   hasAgent?: boolean;
   hasCloud?: boolean;
   hasGitHub?: boolean;
-  /** Public capabilities: false without Cloudflare AI Gateway (no monthly AI cap). */
-  monthlyCostCap?: boolean;
 }
 
 interface Recorded {
@@ -62,7 +68,7 @@ interface Recorded {
 
 async function setupMocks(page: Page, state: Installation): Promise<Recorded> {
   const recorded: Recorded = { projects: [], profiles: [] };
-  await page.route('**/api/**', async (route: Route) => {
+  await page.route(new RegExp('^https?://[^/]+/api/'), async (route: Route) => {
     const p = new URL(route.request().url()).pathname;
     const method = route.request().method();
     const isGet = method === 'GET';
@@ -72,14 +78,15 @@ async function setupMocks(page: Page, state: Installation): Promise<Recorded> {
     if (p.startsWith('/api/notifications'))
       return jsonResponse(route, 200, { notifications: [], unreadCount: 0 });
     if (p === '/api/agents') return jsonResponse(route, 200, []);
+    if (p === '/api/usage/ai/budget')
+      return jsonResponse(route, 200, {
+        monthlyCostCap: {
+          available: state.monthlyCapAvailable ?? true,
+          ceilingUsd: state.monthlyCeilingUsd ?? null,
+        },
+      });
 
     // What the installation offers.
-    if (p === '/api/config/platform-capabilities')
-      return jsonResponse(route, 200, {
-        speechToText: true,
-        textToSpeech: true,
-        monthlyCostCap: state.monthlyCostCap !== false,
-      });
     if (p === '/api/config/instant-runtime')
       return jsonResponse(route, 200, { enabled: state.instant === true });
     if (p === '/api/config/artifacts-enabled')
@@ -283,25 +290,51 @@ test('SAM-managed AI is offered only when this installation enables it', async (
   await viewportScreenshot(page, 'onboarding-agent-api-key');
 });
 
-for (const monthlyCostCap of [true, false]) {
-  test(`SAM AI limits ${monthlyCostCap ? 'offer' : 'omit'} a monthly cap ${
-    monthlyCostCap ? 'with' : 'without'
-  } AI Gateway`, async ({ page }) => {
-    await setupMocks(page, { instant: true, hasGitHub: true, samAi: true, monthlyCostCap });
+for (const available of [false, true]) {
+  test(`SAM onboarding monthly cap pricing available=${available}`, async ({ page }) => {
+    await setupMocks(page, {
+      instant: true,
+      hasGitHub: true,
+      samAi: true,
+      monthlyCapAvailable: available,
+      monthlyCeilingUsd: available ? 25 : null,
+    });
     const wizard = await begin(page);
     await wizard.getByRole('button', { name: /Right here, on Cloudflare/ }).click();
     await wizard.getByRole('button', { name: /Claude Code/ }).click();
-    await wizard.getByRole('button', { name: 'SAM AI' }).click();
-    // Liveness: the daily limits are always there.
-    await expect(page.locator('#onboarding-daily-input')).toBeVisible();
-    await expect(page.locator('#onboarding-daily-output')).toBeVisible();
-    await expect(page.locator('#onboarding-monthly-cap')).toHaveCount(monthlyCostCap ? 1 : 0);
-    await page.locator('#onboarding-daily-output').scrollIntoViewIfNeeded();
+    await wizard.getByRole('button', { name: 'SAM AI', exact: true }).click();
+    await expect(wizard.getByLabel('Daily input tokens')).toBeVisible();
+    const monthly = wizard.getByLabel('Monthly cap (USD)');
+    if (available) {
+      await expect(monthly).toHaveAttribute('max', '25');
+      await expect(
+        wizard.getByText('Your administrator limits everyone to $25.00 a month.')
+      ).toBeVisible();
+    } else {
+      await expect(monthly).toHaveCount(0);
+      await expect(wizard.getByText(/Monthly caps are unavailable/)).toBeVisible();
+    }
     await assertNoOverflow(page);
-    await viewportScreenshot(
-      page,
-      `onboarding-sam-ai-limits-${monthlyCostCap ? 'with-gateway' : 'no-gateway'}`
+    await wizard.getByRole('button', { name: /Use this agent/ }).scrollIntoViewIfNeeded();
+    await page.waitForTimeout(600);
+    await page.screenshot({
+      path: `../../.tmp/playwright-screenshots/onboarding-monthly-cap-${available}-${page.viewportSize()?.width}.png`,
+    });
+    if (available) await monthly.fill('25');
+    else await wizard.getByLabel('Daily input tokens').fill('500');
+    const budgetWrite = page.waitForRequest(
+      (request) => request.url().endsWith('/api/usage/ai/budget') && request.method() === 'PUT'
     );
+    const modeWrite = page.waitForRequest(
+      (request) =>
+        request.url().endsWith('/api/agent-settings/claude-code') && request.method() === 'PUT'
+    );
+    await wizard.getByRole('button', { name: /Use this agent/ }).click();
+    expect((await budgetWrite).postDataJSON()).toEqual(
+      available ? { monthlyCostCapUsd: 25 } : { dailyInputTokenLimit: 500 }
+    );
+    expect((await modeWrite).postDataJSON()).toEqual({ providerMode: 'sam' });
+    await expect(wizard.getByRole('heading', { name: 'What are we building?' })).toBeVisible();
   });
 }
 
@@ -385,3 +418,29 @@ test('dashboard empty state offers a new project, not a GitHub import', async ({
   await assertNoOverflow(page);
   await screenshot(page, 'onboarding-dashboard-empty-projects');
 });
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`account linking onboarding gate ${theme} navigates to Settings`, async ({ page }) => {
+    await page.addInitScript((value) => localStorage.setItem('sam-theme', value), theme);
+    await setupMocks(page, { hasAgent: true, hasCloud: true });
+    await page.route('**/api/auth/list-accounts', (route) => jsonResponse(route, 200, []));
+    await page.route('**/api/config/login-providers', (route) =>
+      jsonResponse(route, 200, { github: true, gitlab: false, google: false, email: true })
+    );
+    const wizard = await begin(page);
+    const gate = wizard.getByTestId('onboarding-connect-github');
+    await expect(gate).toBeVisible();
+    await expect(wizard.getByRole('button', { name: 'Install the GitHub app' })).toHaveCount(0);
+    const link = gate.getByRole('link', { name: 'Connect GitHub' });
+    await expect(link).toHaveAttribute('href', '/settings/github');
+    await viewportScreenshot(page, `account-linking-onboarding-${theme}`);
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await link.click();
+    await expect(page).toHaveURL(/settings\/github/);
+    await expect(page.getByTestId('onboarding-wizard')).toHaveCount(0);
+    await expect(
+      page.getByTestId('connected-provider-github').getByRole('button', { name: 'Connect GitHub' })
+    ).toBeVisible();
+  });
+}

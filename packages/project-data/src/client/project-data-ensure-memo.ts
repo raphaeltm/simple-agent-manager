@@ -24,12 +24,12 @@
  * given DO, the row survives DO eviction, hibernation and isolate recycling.
  *
  * This memo therefore records the durable fact "this DO has been ensured at least
- * once" so that only the first operation per (isolate, DO) pays the extra RPC
- * roundtrip instead of every single one.
+ * once" so that operations after a completed ensure avoid the extra RPC.
+ * Overlapping cold operations each keep their own request-scoped ensure RPC.
  *
  * See: tasks/archive/2026-08-18-do-roundtrip-ensure-project-id-and-chat-agent-state.md
  */
-import { parsePositiveInt, settleSharedFlight } from '@simple-agent-manager/worker-core';
+import { parsePositiveInt } from '@simple-agent-manager/worker-core';
 
 /**
  * Upper bound on memo entries held by one isolate. Entries are ~64 bytes of hex
@@ -49,18 +49,6 @@ export interface ProjectDataEnsureMemoEnv {
  */
 const ensured = new Map<string, true>();
 
-/** In-flight ensure calls, so concurrent first-callers issue exactly one RPC. */
-const inFlight = new Map<string, { startedAt: number; promise: Promise<void> }>();
-
-/**
- * How long a caller waits on an ensure another request started before running its own. The
- * ensure RPC has no deadline of its own, and on the self-hosted celld runtime a request's RPC is
- * dropped when that request's client disconnects, so a joined flight could otherwise never settle
- * (lib/shared-flight.ts). A healthy ensure takes milliseconds; the duplicate it allows past this
- * wait is an idempotent `INSERT OR IGNORE`. Internal safety margin, not an operator setting.
- */
-export const DEFAULT_PROJECT_DATA_ENSURE_JOIN_WAIT_MS = 5_000;
-
 export function getProjectDataEnsureMemoMaxEntries(env: ProjectDataEnsureMemoEnv): number {
   return parsePositiveInt(
     env.PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES,
@@ -69,38 +57,17 @@ export function getProjectDataEnsureMemoMaxEntries(env: ProjectDataEnsureMemoEnv
 }
 
 /**
- * How many abandoned ensures one caller waits out before it runs its own without registering it.
- * Bounds the wait when every replacement's starter also loses its client: at most
- * 3 x (5 s + 1 s grace) = 18 s before that last ensure. Internal safety margin.
- */
-const MAX_ENSURE_JOIN_ATTEMPTS = 3;
-
-/**
- * Run `ensure` exactly once per DO id for the lifetime of this isolate.
+ * Remember successful ensures per DO id for the lifetime of this isolate.
  *
- * Concurrent callers for the same id share a single in-flight promise. A
- * rejected ensure is not memoized, so the next caller retries it.
- *
- * A caller joins another request's ensure only until `DEFAULT_PROJECT_DATA_ENSURE_JOIN_WAIT_MS`
- * plus the join grace (lib/shared-flight.ts). Past that, the first caller to notice drops the dead
- * entry and registers its own ensure, and every other waiter joins that one: a slow Durable
- * Object receives one extra call, not one per waiter. This also applies on Cloudflare when an
- * ensure RPC takes longer than the wait (an overloaded Durable Object), where callers used to wait
- * for the original call however long it took; the extra call is an idempotent `INSERT OR IGNORE`.
+ * Cache only completed durable facts. A pending RPC belongs to its originating
+ * Workers request: if that request ends, sharing its promise can strand another
+ * request permanently. Concurrent cold callers each issue the idempotent ensure;
+ * warm calls still avoid the extra RPC. A failed ensure is never memoized.
  */
 export async function ensureOncePerIsolate(
   env: ProjectDataEnsureMemoEnv,
   doId: string,
   ensure: () => Promise<void>
-): Promise<void> {
-  return ensureOnce(env, doId, ensure, 0);
-}
-
-async function ensureOnce(
-  env: ProjectDataEnsureMemoEnv,
-  doId: string,
-  ensure: () => Promise<void>,
-  joinAttempt: number
 ): Promise<void> {
   if (ensured.has(doId)) {
     // Refresh recency so a hot project is not evicted by cold-project churn.
@@ -110,39 +77,8 @@ async function ensureOnce(
     return;
   }
 
-  const pending = inFlight.get(doId);
-  if (pending && joinAttempt < MAX_ENSURE_JOIN_ATTEMPTS) {
-    const joined = await settleSharedFlight(
-      pending.promise,
-      pending.startedAt + DEFAULT_PROJECT_DATA_ENSURE_JOIN_WAIT_MS
-    );
-    if (!joined.abandoned) return;
-    // The starter's request is gone and its ensure with it. Drop the dead entry if no other
-    // waiter has yet; the retry then either starts the replacement or joins the one another
-    // waiter just registered.
-    if (inFlight.get(doId) === pending) inFlight.delete(doId);
-    return ensureOnce(env, doId, ensure, joinAttempt + 1);
-  }
-
-  if (pending) {
-    // Past the bound: run this caller's ensure unregistered, so it cannot displace a live entry.
-    await ensure();
-    remember(env, doId);
-    return;
-  }
-
-  const entry = {
-    startedAt: Date.now(),
-    promise: (async () => {
-      await ensure();
-      remember(env, doId);
-    })().finally(() => {
-      if (inFlight.get(doId) === entry) inFlight.delete(doId);
-    }),
-  };
-
-  inFlight.set(doId, entry);
-  return entry.promise;
+  await ensure();
+  remember(env, doId);
 }
 
 function remember(env: ProjectDataEnsureMemoEnv, doId: string): void {
@@ -172,7 +108,6 @@ export function forgetEnsuredProjectData(doId: string): void {
 /** Test-only: reset isolate-local memo state between cases. */
 export function resetProjectDataEnsureMemo(): void {
   ensured.clear();
-  inFlight.clear();
 }
 
 /** Test-only: current memo size. */

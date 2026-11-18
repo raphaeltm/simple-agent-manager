@@ -1,8 +1,8 @@
 /**
  * A failed model call to an admin-configured OpenAI-compatible endpoint must not put that
  * endpoint's response body in the logs: it can echo the configured key or the prompt. Both
- * callers (the SAM agent loop and the /ai/v1 Workers AI route) log the status and a bounded,
- * sanitized reason instead. Cloudflare's own routes keep logging the body, as before.
+ * callers (the SAM agent loop and the /ai/v1 Workers AI route) log the status with the body
+ * replaced by a fixed placeholder. Cloudflare's own routes keep logging the body, as before.
  */
 import type { SamConfig } from '@simple-agent-manager/shared';
 import type Database from 'better-sqlite3';
@@ -17,6 +17,7 @@ import {
 } from '../../../src/services/admin-settings';
 import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
 
+const OMITTED = '[external endpoint body omitted]';
 const CLOUDFLARE = { CF_ACCOUNT_ID: 'account-1', CF_API_TOKEN: 'cf-token', AI_GATEWAY_ID: 'sam' };
 const ENDPOINT_KEY = 'sk-endpoint-secret-key';
 /** An error body that echoes the key and the prompt, as some self-hosted servers do. */
@@ -98,16 +99,13 @@ async function runAgentTurn() {
 }
 
 describe('SAM agent loop model error logging', () => {
-  it('logs status and a sanitized reason, never the endpoint body, for a configured endpoint', async () => {
+  it('logs status and omits the endpoint body for a configured endpoint', async () => {
     await configureEndpoint();
     await runAgentTurn();
 
     const record = loggedRecord('sam.llm_error');
     expect(record.status).toBe(400);
-    expect(record.reason).toBe(
-      'code=context_length_exceeded type=invalid_request_error message=provider rejected request'
-    );
-    expect(record).not.toHaveProperty('body');
+    expect(record.body).toBe(OMITTED);
     expect(allErrorLogText()).not.toContain(ENDPOINT_KEY);
     expect(allErrorLogText()).not.toContain('my private prompt text');
   });
@@ -119,12 +117,11 @@ describe('SAM agent loop model error logging', () => {
     expect(record.status).toBe(400);
     // The logger still redacts bearer tokens inside it; the body itself is logged as before.
     expect(record.body).toContain('my private prompt text');
-    expect(record).not.toHaveProperty('reason');
   });
 });
 
 describe('a long, message-first error body', () => {
-  it('still yields the code and type as the reason, never the message', async () => {
+  it('is omitted whole for a configured endpoint, message included', async () => {
     await configureEndpoint();
     // OpenAI-style: a long message first, the classifying fields last, well past 256 bytes.
     const body = JSON.stringify({
@@ -142,33 +139,29 @@ describe('a long, message-first error body', () => {
 
     const record = loggedRecord('sam.llm_error');
     expect(record.status).toBe(404);
-    expect(record.reason).toContain('code=model_not_found');
-    expect(record.reason).toContain('type=invalid_request_error');
-    expect(String(record.reason).length).toBeLessThanOrEqual(256);
+    expect(record.body).toBe(OMITTED);
     expect(allErrorLogText()).not.toContain('my private prompt text');
   });
 });
 
 describe('/ai/v1 Workers AI route error logging', () => {
-  it('logs status and a sanitized reason, never the endpoint body, for a configured endpoint', async () => {
+  it('logs status and omits the endpoint body for a configured endpoint', async () => {
     await configureEndpoint();
-    const { response: res } = await forwardToWorkersAI(env, { messages: [] }, '@cf/m/x', '{}');
+    const res = await forwardToWorkersAI(env, { messages: [] }, '@cf/m/x', '{}');
 
     expect(res.status).toBe(400);
     const record = loggedRecord('ai_proxy.workers_ai_error');
-    expect(record).toMatchObject({ status: 400, target: 'openai-compatible' });
-    expect(record.reason).toContain('code=context_length_exceeded');
-    expect(record).not.toHaveProperty('body');
+    expect(record).toMatchObject({ status: 400, body: OMITTED });
     expect(allErrorLogText()).not.toContain(ENDPOINT_KEY);
     expect(allErrorLogText()).not.toContain('my private prompt text');
   });
 
   it('keeps logging the body for the Cloudflare gateway route (unchanged)', async () => {
-    const { response: res } = await forwardToWorkersAI(env, { messages: [] }, '@cf/m/x', '{}');
+    const res = await forwardToWorkersAI(env, { messages: [] }, '@cf/m/x', '{}');
 
     expect(res.status).toBe(400);
     const record = loggedRecord('ai_proxy.workers_ai_error');
-    expect(record).toMatchObject({ status: 400, target: 'cloudflare-gateway' });
+    expect(record).toMatchObject({ status: 400 });
     expect(record.body).toContain('my private prompt text');
   });
 });

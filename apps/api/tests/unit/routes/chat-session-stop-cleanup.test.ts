@@ -20,6 +20,16 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('drizzle-orm/d1');
+vi.mock('../../../src/services/task-cancellation-prompts', () => ({
+  retireTaskCancellationPrompts: vi.fn(async () => ({
+    matched: true,
+    cancelled: 0,
+    sessionId: null,
+  })),
+}));
+vi.mock('../../../src/services/task-recovery-cancellation', () => ({
+  taskRecoveryCancellationQuery: vi.fn(() => Promise.resolve()),
+}));
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
   requireApproved: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
@@ -95,7 +105,7 @@ function buildDb(selectResults: unknown[][]) {
 
   const update = vi.fn(() => ({
     set: vi.fn(() => ({
-      where: vi.fn(() => Promise.resolve()),
+      where: vi.fn(() => ({ returning: vi.fn(async () => [{ id: 'task' }]) })),
     })),
   }));
 
@@ -103,7 +113,7 @@ function buildDb(selectResults: unknown[][]) {
     values: vi.fn(() => Promise.resolve()),
   }));
 
-  return { insert, select, update };
+  return { insert, select, update, batch: vi.fn(async () => [[{ id: 'task' }], {}]) };
 }
 
 function createApp() {

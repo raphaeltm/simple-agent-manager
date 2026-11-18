@@ -71,7 +71,7 @@ describe('ai token usage accounting helpers', () => {
       '',
     ].join('\n')), 'openai');
 
-    expect(usage).toEqual({ inputTokens: 40, outputTokens: 9, cachedInputTokens: 30 });
+    expect(usage).toEqual({ inputTokens: 40, outputTokens: 9, cacheReadTokens: 30 });
   });
 
   it('extracts Anthropic prompt-cache reads and writes for pricing', () => {
@@ -85,8 +85,8 @@ describe('ai token usage accounting helpers', () => {
     }, 'anthropic')).toEqual({
       inputTokens: 20,
       outputTokens: 9,
-      cachedInputTokens: 100,
-      cacheWriteInputTokens: 10,
+      cacheReadTokens: 100,
+      cacheWriteTokens: 10,
     });
   });
 

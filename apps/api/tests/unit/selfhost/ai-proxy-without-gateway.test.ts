@@ -48,7 +48,8 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => USER,
 }));
 
-import { priceModelUsageUsd } from '@simple-agent-manager/ai-proxy';
+import { getLocalMonthlyAiCostUsd, priceModelUsageUsd } from '@simple-agent-manager/ai-proxy';
+import { buildMonthlyCostCacheKey } from '@simple-agent-manager/ai-proxy/internal/ai-monthly-cost-cap';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
@@ -58,10 +59,6 @@ import { aiProxyAnthropicRoutes } from '../../../src/routes/ai-proxy-anthropic';
 import { usageRoutes } from '../../../src/routes/usage';
 import { updateAdminSettings } from '../../../src/services/admin-settings-mutations';
 import { __resetAdminSettingsCacheForTest } from '../../../src/services/admin-settings-resolution';
-import {
-  buildMonthlyCostCacheKey,
-  getLocalMonthlyAiCostUsd,
-} from '../../../src/services/ai-token-budget';
 import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
 import { createSchemaTables } from '../../helpers/sqlite-d1';
 
@@ -176,13 +173,13 @@ afterEach(() => {
 });
 
 describe('AI proxy without AI Gateway: admin switch (A1)', () => {
-  it('is off by default and says which admin setting turns it on', async () => {
+  it('is off by default', async () => {
     const { env } = boxEnv();
     const res = await sendMessage(env);
 
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toContain('aiProxy.directUpstreamEnabled');
+    expect(body.error.message).toBe('AI proxy is disabled');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -318,10 +315,10 @@ describe('AI cost without AI Gateway: SAM meters spend and enforces the monthly 
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       monthCostUsd: number;
-      monthlyCostCapAvailable: boolean;
+      monthlyCostCap: { available: boolean };
       utilization: { monthlyCostPercent: number | null };
     };
-    expect(body.monthlyCostCapAvailable).toBe(true);
+    expect(body.monthlyCostCap.available).toBe(true);
     expect(body.monthCostUsd).toBeCloseTo(COST_PER_CALL, 6);
     expect(body.utilization.monthlyCostPercent).toBeCloseTo(25, 0);
   });
@@ -335,18 +332,11 @@ describe('AI cost without AI Gateway: SAM meters spend and enforces the monthly 
     const body = (await res.json()) as {
       totalCostUsd: number;
       totalRequests: number;
-      byModel: { model: string; requests: number; costUsd: number }[];
-      byDay: { date: string; requests: number; costUsd: number }[];
     };
     expect(body.totalRequests).toBe(1);
     expect(body.totalCostUsd).toBeCloseTo(COST_PER_CALL, 6);
-    // Per-model and per-day views from SAM's own records (no gateway logs here).
-    expect(body.byModel).toHaveLength(1);
-    expect(body.byModel[0]).toMatchObject({ model: MODEL.id, requests: 1 });
-    expect(body.byModel[0]?.costUsd).toBeCloseTo(COST_PER_CALL, 6);
-    expect(body.byDay).toEqual([
-      expect.objectContaining({ date: new Date().toISOString().slice(0, 10), requests: 1 }),
-    ]);
+    // Per-model and per-day rows live only in the AiTokenBudgetCounter Durable Object, which this
+    // KV-fallback fixture does not bind (covered by ai-token-budget-counter-model-usage.test.ts).
   });
 });
 

@@ -1,10 +1,13 @@
 import type { AgentType } from '@simple-agent-manager/shared';
 import { AGENT_CATALOG, getAgentDefinition } from '@simple-agent-manager/shared';
 import { Button, SegmentedControl } from '@simple-agent-manager/ui';
+import { useQuery } from '@tanstack/react-query';
 import { ArrowRight, Check } from 'lucide-react';
-import { type Dispatch, type SetStateAction, useEffect } from 'react';
+import type { Dispatch, SetStateAction } from 'react';
 
-import { usePlatformCapabilities } from '../../../hooks/usePlatformCapabilities';
+import { useQueryScope } from '../../../hooks/useQueryScope';
+import { fetchUserAiBudget } from '../../../lib/api';
+import { formatCost } from '../../ai-usage/format';
 import { FieldLabel, WELL_INPUT_CLASS } from './OnboardingParts';
 import { type AuthMethod, authMethodsForAgent, type StepFormState } from './step-actions';
 import { SubscriptionConnect } from './SubscriptionConnect';
@@ -40,6 +43,12 @@ export function AgentStep({
   const agentDef = agentId ? getAgentDefinition(agentId as AgentType) : undefined;
   const methods = agentId ? authMethodsForAgent(agentId, { samAvailable }) : [];
   const method = form.selectedAuthMethod;
+  const queryScope = useQueryScope();
+  const budgetQuery = useQuery({
+    queryKey: ['auth', queryScope, 'ai-budget', 'onboarding'],
+    queryFn: fetchUserAiBudget,
+    enabled: Boolean(queryScope) && method === 'sam',
+  });
 
   // A new agent starts on its first (quickest) way in and forgets any secret typed for another.
   const selectAgent = (id: AgentType) => {
@@ -136,7 +145,22 @@ export function AgentStep({
           </div>
         )}
 
-        {method === 'sam' && <SamBudget form={form} setForm={setForm} />}
+        {method === 'sam' && (
+          <SamBudget form={form} setForm={setForm} monthlyCap={budgetQuery.data?.monthlyCostCap} />
+        )}
+        {method === 'sam' && budgetQuery.isError && (
+          <p role="status" className="text-sm text-fg-muted">
+            Monthly limits could not be loaded. You can continue with defaults or{' '}
+            <button
+              type="button"
+              className="text-accent underline"
+              onClick={() => void budgetQuery.refetch()}
+            >
+              try again
+            </button>
+            .
+          </p>
+        )}
       </div>
 
       {/* With a subscription the guided sign-in is the action; saving appears once a token is pasted. */}
@@ -161,28 +185,16 @@ export function AgentStep({
 function SamBudget({
   form,
   setForm,
+  monthlyCap,
 }: {
   form: StepFormState;
   setForm: Dispatch<SetStateAction<StepFormState>>;
+  monthlyCap?: { available: boolean; ceilingUsd: number | null };
 }) {
-  // No monthly cap field where the installation cannot enforce one (no Cloudflare AI Gateway).
-  const { monthlyCostCap } = usePlatformCapabilities();
-  // A cap typed while the answer was still assumed must not be sent once the field is gone:
-  // the budget API refuses it, and the user could no longer see what was refused.
-  const typedCap = form.monthlyCostCapUsd;
-  useEffect(() => {
-    if (!monthlyCostCap && typedCap !== '') {
-      setForm((prev) => ({ ...prev, monthlyCostCapUsd: '' }));
-    }
-  }, [monthlyCostCap, typedCap, setForm]);
   const fields = [
     { id: 'onboarding-daily-input', key: 'dailyInputTokenLimit', label: 'Daily input tokens' },
     { id: 'onboarding-daily-output', key: 'dailyOutputTokenLimit', label: 'Daily output tokens' },
-    ...(monthlyCostCap
-      ? ([
-          { id: 'onboarding-monthly-cap', key: 'monthlyCostCapUsd', label: 'Monthly cap (USD)' },
-        ] as const)
-      : []),
+    { id: 'onboarding-monthly-cap', key: 'monthlyCostCapUsd', label: 'Monthly cap (USD)' },
   ] as const;
   return (
     <div className="mb-3">
@@ -190,25 +202,47 @@ function SamBudget({
         I route this agent through SAM&apos;s AI proxy and bill usage per task. Limits are optional;
         leave them empty for the defaults.
       </p>
-      <div
-        className={`grid grid-cols-1 gap-3 ${monthlyCostCap ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}
-      >
-        {fields.map((field) => (
-          <div key={field.id}>
-            <FieldLabel htmlFor={field.id}>{field.label}</FieldLabel>
-            <input
-              id={field.id}
-              type="number"
-              inputMode="numeric"
-              min={0}
-              value={form[field.key]}
-              onChange={(e) => setForm((prev) => ({ ...prev, [field.key]: e.target.value }))}
-              placeholder={field.key === 'monthlyCostCapUsd' ? 'No cap' : 'Default'}
-              className={WELL_INPUT_CLASS}
-            />
-          </div>
-        ))}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {fields
+          .filter((field) => field.key !== 'monthlyCostCapUsd' || monthlyCap?.available)
+          .map((field) => (
+            <div key={field.id}>
+              <FieldLabel htmlFor={field.id}>{field.label}</FieldLabel>
+              <input
+                id={field.id}
+                type="number"
+                inputMode="numeric"
+                min={0}
+                aria-describedby={
+                  field.key === 'monthlyCostCapUsd' && monthlyCap?.ceilingUsd != null
+                    ? 'onboarding-monthly-ceiling'
+                    : undefined
+                }
+                max={
+                  field.key === 'monthlyCostCapUsd'
+                    ? (monthlyCap?.ceilingUsd ?? undefined)
+                    : undefined
+                }
+                step={field.key === 'monthlyCostCapUsd' ? 'any' : 1}
+                value={form[field.key]}
+                onChange={(e) => setForm((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                placeholder={field.key === 'monthlyCostCapUsd' ? 'No cap' : 'Default'}
+                className={WELL_INPUT_CLASS}
+              />
+            </div>
+          ))}
       </div>
+      {monthlyCap?.available && monthlyCap.ceilingUsd !== null && (
+        <p id="onboarding-monthly-ceiling" className="mt-2 text-sm text-fg-muted">
+          Your administrator limits everyone to {formatCost(monthlyCap.ceilingUsd)} a month.
+        </p>
+      )}
+      {monthlyCap?.available === false && (
+        <p className="mt-2 text-sm text-fg-muted">
+          Monthly caps are unavailable because AI spend cannot be priced on this server. Daily token
+          limits still apply.
+        </p>
+      )}
     </div>
   );
 }

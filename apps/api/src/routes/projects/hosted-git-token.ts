@@ -15,7 +15,7 @@ import type { Env } from '../../env';
 import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
-import { hostedGitHost, isLocalHostedGitActive } from '../../services/hosted-git/backend';
+import { hostedGitHost, isLocalHostedGitActive } from '../../services/hosted-git/local-backend';
 import { mintHostedGitToken } from '../../services/hosted-git/tokens';
 
 const hostedGitTokenRoutes = new Hono<{ Bindings: Env }>();

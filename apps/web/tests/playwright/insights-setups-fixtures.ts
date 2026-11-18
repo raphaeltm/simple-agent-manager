@@ -12,7 +12,7 @@ import type {
   ProjectSetupsResponse,
 } from '@simple-agent-manager/shared';
 
-export type SetupsScene = 'realistic' | 'stress' | 'empty';
+export type SetupsScene = 'realistic' | 'stress' | 'empty' | 'admission-hit';
 
 const GIB = 1024 ** 3;
 const MIN = 60_000;
@@ -290,6 +290,7 @@ export function makeSetups(
     groups,
     suggestions,
     suggestionMinRuns: 10,
+    usageAdmissionLimited: scene === 'admission-hit',
     unavailable: [],
     generatedAt: '2026-11-16T12:00:00.000Z',
   };

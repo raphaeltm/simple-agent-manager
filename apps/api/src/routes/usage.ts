@@ -33,11 +33,13 @@ import {
 } from '../services/ai-gateway-logs';
 import {
   deleteUserBudgetSettings,
+  effectiveMonthlyCostCapUsd,
   getAdminAiAllowance,
   getProviderUsage,
   getTokenUsage,
   getUserBudgetSettings,
   resolveEffectiveLimits,
+  resolveMonthlyCostCeilingUsd,
   saveUserBudgetSettings,
   validateBudgetUpdate,
 } from '../services/ai-token-budget';
@@ -276,9 +278,10 @@ function mergeLocalProviderUsage(
 usageRoutes.get('/ai/budget', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
 
-  const [userSettings, dailyUsage] = await Promise.all([
+  const [userSettings, dailyUsage, ceilingUsd] = await Promise.all([
     getUserBudgetSettings(c.env.KV, userId),
     getTokenUsage(c.env.KV, userId, c.env),
+    resolveMonthlyCostCeilingUsd(c.env),
   ]);
 
   const effectiveLimits = resolveEffectiveLimits(userSettings, c.env);
@@ -318,12 +321,14 @@ usageRoutes.get('/ai/budget', requireAuth(), requireApproved(), async (c) => {
     effectiveLimits.dailyOutputTokenLimit > 0
       ? Math.min(100, (dailyUsage.outputTokens / effectiveLimits.dailyOutputTokenLimit) * 100)
       : 0;
-  // A gateway without the account API cannot price spend, so its cap has no utilization.
-  const monthlyCostCapAvailable = isMonthlyCostCapAvailable(c.env);
+  // The same cap the gate enforces (checkMonthlyCostCap); a gateway without the account API
+  // cannot price spend, so there the cap has no utilization.
+  const capAvailable = isMonthlyCostCapAvailable(c.env);
+  const effectiveCapUsd = capAvailable
+    ? effectiveMonthlyCostCapUsd(settings.monthlyCostCapUsd, ceilingUsd)
+    : null;
   const monthlyCostPercent =
-    monthlyCostCapAvailable && settings.monthlyCostCapUsd !== null && settings.monthlyCostCapUsd > 0
-      ? Math.min(100, (monthCostUsd / settings.monthlyCostCapUsd) * 100)
-      : null;
+    effectiveCapUsd !== null ? Math.min(100, (monthCostUsd / effectiveCapUsd) * 100) : null;
 
   const exceeded =
     dailyInputPercent >= 100 ||
@@ -339,7 +344,7 @@ usageRoutes.get('/ai/budget', requireAuth(), requireApproved(), async (c) => {
     },
     effectiveLimits,
     monthCostUsd,
-    monthlyCostCapAvailable,
+    monthlyCostCap: { available: capAvailable, ceilingUsd, effectiveCapUsd },
     utilization: {
       dailyInputPercent: Math.round(dailyInputPercent * 10) / 10,
       dailyOutputPercent: Math.round(dailyOutputPercent * 10) / 10,
@@ -365,12 +370,15 @@ usageRoutes.put('/ai/budget', requireAuth(), requireApproved(), async (c) => {
     return c.json({ error: 'INVALID_JSON', message: 'Invalid JSON body' }, 400);
   }
 
-  // Fetch admin allowance to enforce ceilings on user-set limits
-  const adminAllowance = await getAdminAiAllowance(c.env.KV, userId);
+  // Admin allowance (per user) and installation ceiling bound what the user may set.
+  const [adminAllowance, ceilingUsd] = await Promise.all([
+    getAdminAiAllowance(c.env.KV, userId),
+    resolveMonthlyCostCeilingUsd(c.env),
+  ]);
 
   let settings;
   try {
-    settings = validateBudgetUpdate(body, c.env, adminAllowance);
+    settings = validateBudgetUpdate(body, c.env, adminAllowance, ceilingUsd);
   } catch (err) {
     return c.json(
       { error: 'VALIDATION_ERROR', message: err instanceof Error ? err.message : String(err) },

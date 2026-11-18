@@ -8,7 +8,7 @@ import {
   __resetAdminSettingsCacheForTest,
   updateAdminSettings,
 } from '../../../src/services/admin-settings';
-import { buildBudgetKey } from '../../../src/services/ai-token-budget';
+import { buildBudgetKey } from '@simple-agent-manager/ai-proxy/internal/ai-token-budget';
 import { estimateTokensFromText } from '../../../src/services/ai-token-usage-accounting';
 import {
   chatTargetHeaders,

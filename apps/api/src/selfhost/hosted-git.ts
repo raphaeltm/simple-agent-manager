@@ -9,17 +9,26 @@
  * binding and the class's migration (`SELFHOST_DURABLE_OBJECTS` in
  * scripts/selfhost/selfhost-durable-objects.ts); `apps/api/wrangler.toml` does not.
  *
- * The rest of hosted git is shared code: `services/hosted-git/` selects Cloudflare Artifacts or
- * this git server (`resolveArtifactsBackend`) and reaches the Durable Object only through the
+ * Loading this module also registers SAM's own git server as the Artifacts fallback in the shared
+ * seam (`registerArtifactsBackendFallback` in `services/hosted-git/backend.ts`), so project
+ * creation, browsing, git tokens and deletion use it when no Cloudflare Artifacts binding exists.
+ * The backend (`services/hosted-git/local-backend.ts`) reaches the Durable Object only through the
  * `HOSTED_GIT` namespace binding, which exists only on a self-host deployment.
  */
 import type { Hono } from 'hono';
 
 import type { Env } from '../env';
-import { isLocalHostedGitActive } from '../services/hosted-git/backend';
+import { registerArtifactsBackendFallback } from '../services/hosted-git/backend';
 import { handleHostedGitRequest, HOSTED_GIT_PATH_PREFIX } from '../services/hosted-git/http';
+import {
+  isLocalHostedGitActive,
+  localHostedGitBackendFallback,
+} from '../services/hosted-git/local-backend';
 
 export { HostedGitRepo } from '../durable-objects/hosted-git-repo';
+
+// Once, at module load: the celld entry imports this module before any request is served.
+registerArtifactsBackendFallback(localHostedGitBackendFallback);
 
 /**
  * Mounts git smart HTTP for SAM-hosted repositories (`/git/<repo>.git/...`). Authenticated per

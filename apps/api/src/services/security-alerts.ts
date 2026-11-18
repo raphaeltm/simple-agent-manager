@@ -39,9 +39,6 @@ export const SECURITY_ALERT_LOCAL_PART = 'security';
 /** Account provider ids that are not a social sign-in, so linking them is not alerted. */
 const NON_SOCIAL_PROVIDER_IDS = new Set(['credential']);
 
-/** Roles whose newly linked sign-ins are alerted: an extra way into an admin account. */
-const ALERTED_ROLES = new Set(['admin', 'superadmin']);
-
 export type SecurityAlert =
   | {
       kind: 'integration-changed';
@@ -112,7 +109,7 @@ export function integrationSettingChanges(
     }));
 }
 
-/** Builds and sends one alert to every active superadmin. Never throws. */
+/** Sends account-link alerts to the affected owner; installation alerts to superadmins. Never throws. */
 export async function deliverSecurityAlert(
   env: Env,
   alert: SecurityAlert,
@@ -127,7 +124,15 @@ export async function deliverSecurityAlert(
     }
     const email = await buildSecurityAlertEmail(env, alert, now);
     if (!email) return;
-    const recipients = await ownerRecipients(env);
+    const linkedOwner =
+      alert.kind === 'account-linked'
+        ? await env.DATABASE.prepare('SELECT email FROM users WHERE id = ?')
+            .bind(alert.userId)
+            .first<{ email: string }>()
+        : null;
+    const linkedRecipients = linkedOwner?.email ? [linkedOwner.email] : [];
+    const recipients =
+      alert.kind === 'account-linked' ? linkedRecipients : await ownerRecipients(env);
     if (recipients.length === 0) {
       log.error('security_alert.no_recipients', { kind: alert.kind });
       return;
@@ -174,7 +179,7 @@ async function ownerRecipients(env: Env): Promise<string[]> {
   return owner ? [owner] : [];
 }
 
-/** The email for an alert, or null when there is nothing to tell (e.g. a non-admin link). */
+/** The email for an alert, or null when there is nothing to tell (e.g. a non-social link). */
 export async function buildSecurityAlertEmail(
   env: Env,
   alert: SecurityAlert,
@@ -235,10 +240,10 @@ async function accountLinkedEmail(
   const user = await env.DATABASE.prepare('SELECT role, email, name FROM users WHERE id = ?')
     .bind(alert.userId)
     .first<{ role: string; email: string | null; name: string | null }>();
-  if (!user || !ALERTED_ROLES.has(user.role)) return null;
+  if (!user) return null;
   const who = formatPersonLabel(user.name, user.email, alert.userId);
   const provider = providerTitle(alert.providerId);
-  const roleLabel = `${/^[aeiou]/.test(user.role) ? 'an' : 'a'} ${user.role}`;
+  const roleLabel = `${user.role === 'admin' ? 'an' : 'a'} ${user.role}`;
   return {
     subject: `SAM security alert: a ${provider} sign-in was linked to ${roleLabel} account`,
     text: [
@@ -250,8 +255,7 @@ async function accountLinkedEmail(
       '',
       'From now on, signing in with that provider opens this account.',
       '',
-      `Review users: ${appUrl}/admin/users`,
-      `Review integrations: ${appUrl}/admin/integrations`,
+      `Review connected accounts and disconnect an unrecognized provider: ${appUrl}/settings/github`,
       '',
       'If you did not just sign in with this provider, check that its integration settings are',
       'yours and clear anything you do not recognise.',

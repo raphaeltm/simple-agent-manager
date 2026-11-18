@@ -19,12 +19,10 @@ import {
   requireGitLabUserAccessTokenResultForOwner,
   verifyGitLabProjectAccess,
 } from '../../services/gitlab';
-import {
-  hostedGitHost,
-  isLocalHostedGitActive,
-  resolveArtifactsBackend,
-} from '../../services/hosted-git/backend';
+import { resolveArtifactsBackend } from '../../services/hosted-git/backend';
+import { isLocalHostedGitActive } from '../../services/hosted-git/local-backend';
 import { mintHostedGitToken } from '../../services/hosted-git/tokens';
+import { boundArtifactsRepositoryHost } from '../../services/workspace-git-source';
 import { assertRepositoryAccess } from '../projects/_helpers';
 import {
   assertWorkspaceAcceptsCallback,
@@ -228,13 +226,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       throw errors.forbidden('Artifacts provider is not enabled');
     }
     const artifacts = resolveArtifactsBackend(c.env);
-    if (!artifacts) {
-      throw errors.featureUnavailable(
-        'artifacts',
-        'SAM-native Git repositories are not available on this installation'
-      );
-    }
-    if (!artifactsRepoId) {
+    if (!artifacts || !artifactsRepoId) {
       throw errors.internal('Artifacts binding or repo ID missing');
     }
 
@@ -298,9 +290,10 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       token: tokenSecret,
       expiresAt: tokenResult.expiresAt ?? tokenResult.expires_at,
       cloneUrl,
-      // The VM agent's credential helper answers for this host with this username; a hosted
-      // repository's host (api.<BASE_DOMAIN>) is not one it recognizes by name.
-      ...(localHostedGit ? { host: hostedGitHost(c.env), username: 'x' } : {}),
+      // The VM agent's credential helper answers with username "x" only for Cloudflare Artifacts
+      // hosts it knows by name. For a bound self-hosted host, name it here so a refresh presents
+      // the same username the clone used. Cloudflare responses are unchanged.
+      ...(boundArtifactsRepositoryHost(cloneUrl) ? { username: 'x' } : {}),
     });
   }
 

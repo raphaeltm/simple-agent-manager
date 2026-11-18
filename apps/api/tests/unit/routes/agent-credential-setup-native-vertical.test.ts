@@ -110,6 +110,9 @@ function createDoContext() {
           provider,
           agent_name: agentName,
           status: 'provisioning',
+          cleanup_sandbox_io_pending: 0,
+          cleanup_recovery_max_attempts: null,
+          cleanup_settlement_credit: null,
           pool_lease_id: poolLeaseId,
           codex_home: codexHome,
           expires_at: expiresAt,
@@ -127,6 +130,35 @@ function createDoContext() {
         row = { ...row, cleanup_pending: 1, cleanup_from_status: args[0], cleanup_attempts: 0 };
       } else if (normalized.includes('set cleanup_pending = 0') && row) {
         row = { ...row, cleanup_pending: 0 };
+      } else if (normalized.includes('set cleanup_scrub_state = 1') && row) {
+        row = { ...row, cleanup_scrub_state: 1 };
+      } else if (normalized.includes('set cleanup_scrub_state = ?') && row) {
+        row = {
+          ...row,
+          cleanup_scrub_state: args[0],
+          cleanup_settlement_credit: args[1] === 1 ? 1 : row.cleanup_settlement_credit,
+        };
+      } else if (normalized.includes('set cleanup_sandbox_io_pending = coalesce') && row) {
+        row = {
+          ...row,
+          cleanup_sandbox_io_pending: Number(row.cleanup_sandbox_io_pending ?? 0) + 1,
+        };
+      } else if (normalized.includes('set cleanup_sandbox_io_pending = max') && row) {
+        row = {
+          ...row,
+          cleanup_sandbox_io_pending: Math.max(0, Number(row.cleanup_sandbox_io_pending ?? 0) - 1),
+        };
+      } else if (normalized.includes('set cleanup_sandbox_destroyed = 1') && row) {
+        row = {
+          ...row,
+          cleanup_sandbox_destroyed: 1,
+          cleanup_settlement_credit: args[0] === 1 ? 1 : row.cleanup_settlement_credit,
+        };
+      } else if (normalized.includes('set cleanup_settlement_credit = 0') && row) {
+        row = { ...row, cleanup_settlement_credit: 0 };
+      } else if (normalized.includes('set cleanup_recovery_max_attempts = ?') && row) {
+        if (row.cleanup_recovery_max_attempts == null)
+          row = { ...row, cleanup_recovery_max_attempts: args[0] };
       } else if (normalized.includes('set cleanup_attempts = ?') && row) {
         row = { ...row, cleanup_attempts: args[0] };
       } else if (normalized.includes('update setup_session') && row) {
@@ -141,18 +173,42 @@ function createDoContext() {
       if (normalized.includes('select * from setup_session')) {
         return { toArray: () => (row ? [{ ...row }] : []) };
       }
+      if (normalized.startsWith('select cleanup_scrub_state'))
+        return {
+          toArray: () => (row ? [{ cleanup_scrub_state: row.cleanup_scrub_state ?? null }] : []),
+        };
+      if (normalized.startsWith('select cleanup_pending, cleanup_attempts'))
+        return {
+          toArray: () =>
+            row
+              ? [
+                  {
+                    cleanup_pending: row.cleanup_pending ?? null,
+                    cleanup_attempts: row.cleanup_attempts ?? null,
+                    cleanup_recovery_max_attempts: row.cleanup_recovery_max_attempts ?? null,
+                  },
+                ]
+              : [],
+        };
       if (normalized.includes('select verification_url, user_code')) {
         return { toArray: () => (details ? [{ ...details }] : []) };
       }
       return { toArray: () => [] };
     }),
   };
+  let alarm: number | null = null;
   return {
     storage: {
       sql,
-      setAlarm: vi.fn().mockResolvedValue(undefined),
-      deleteAlarm: vi.fn().mockResolvedValue(undefined),
+      setAlarm: vi.fn(async (time: number | Date) => {
+        alarm = Number(time);
+      }),
+      deleteAlarm: vi.fn(async () => {
+        alarm = null;
+      }),
+      getAlarm: vi.fn(async () => alarm),
     },
+    waitUntil: vi.fn(),
     blockConcurrencyWhile: vi.fn(async (callback: () => Promise<unknown>) => callback()),
   };
 }
@@ -324,7 +380,7 @@ describe('native Codex setup route vertical slice', () => {
       );
       await ready;
       const sandbox = {
-        exec: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
+        exec: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0, success: true }),
         writeFile: vi.fn(async (path: string, value: string) => {
           files.set(path, value);
         }),
@@ -494,7 +550,7 @@ describe('native Codex setup route vertical slice', () => {
         writeFile: vi.fn(async (path: string, content: string) => {
           files.set(path, content);
         }),
-        exec: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
+        exec: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0, success: true }),
         exists: vi.fn(async (path: string) => ({ exists: files.has(path) })),
         readFile: vi.fn(async (path: string) => ({ content: files.get(path) ?? '' })),
       };

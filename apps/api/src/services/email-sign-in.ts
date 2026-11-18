@@ -122,33 +122,30 @@ export async function emailSignUpAllowed(env: Env, email: string): Promise<boole
 export async function emailCodeRedemptionAllowed(env: Env, email: string): Promise<boolean> {
   const normalized = email.trim().toLowerCase();
   const account = await findAccountByEmail(env, normalized);
-  if (account) return !account.providerOnly;
-  return emailSignUpAllowed(env, normalized);
+  return account ? !account.providerOnly : emailSignUpAllowed(env, normalized);
 }
 
-/**
- * An account that a provider sign-in created with an unproven email, and that still has its
- * provider link. SAM stores a GitHub user's email as unverified when GitHub's `/user/emails`
- * call fails (`getUserInfo` in `../auth.ts`). Redeeming an email code for such an account makes
- * BetterAuth's emailOTP route call `revokeUnprovenAccountAccess`, which deletes every provider
- * link and session of the account (deliberate anti-takeover behaviour), so the user would
- * silently lose GitHub. These accounts get no code: `deliverSignInCode` mails a note telling
- * them to sign in with their provider, and redemption is refused like a wrong code.
- */
-interface EmailAccountState {
-  providerOnly: boolean;
-}
-
-async function findAccountByEmail(env: Env, email: string): Promise<EmailAccountState | null> {
+/** An OTP would make BetterAuth revoke this unproven account's provider links and sessions. */
+async function findAccountByEmail(
+  env: Env,
+  email: string
+): Promise<{ providerOnly: boolean } | null> {
   const row = await env.DATABASE.prepare(
     `SELECT u.email_verified AS emailVerified,
-            EXISTS (SELECT 1 FROM accounts a WHERE a.user_id = u.id) AS linked
+      EXISTS (SELECT 1 FROM accounts a WHERE a.user_id = u.id AND a.provider_id != 'credential') AS linked
      FROM users u WHERE lower(u.email) = ? LIMIT 1`
   )
     .bind(email)
     .first<{ emailVerified: number | null; linked: number }>();
   if (!row) return null;
   return { providerOnly: !row.emailVerified && Boolean(row.linked) };
+}
+
+export function providerSignInRequiredEmail(baseDomain: string) {
+  return {
+    subject: 'Sign in to SAM with your connected provider',
+    text: `Someone requested a SAM sign-in code. This account's email has not been confirmed by its sign-in provider. To keep your connected accounts safe, use GitHub, GitLab or the provider you previously used at https://app.${baseDomain}. No sign-in code was sent. If you did not request this, ignore this email.`,
+  };
 }
 
 async function sha256Hex(value: string): Promise<string> {
@@ -223,24 +220,6 @@ export function signInCodeEmail(baseDomain: string, code: string) {
   };
 }
 
-/** Sent instead of a code to an account that must sign in with its provider (see above). */
-export function providerSignInRequiredEmail(baseDomain: string) {
-  const appUrl = `https://app.${baseDomain}`;
-  return {
-    subject: 'Sign in to SAM with GitHub',
-    text: [
-      `Someone asked for a code to sign in to SAM at ${appUrl} with this address.`,
-      '',
-      'This account was created by signing in with GitHub (or another provider), and its email',
-      'address has not been confirmed, so SAM does not send it sign-in codes: using one would',
-      'disconnect the account from GitHub. Open the sign-in page and choose "Sign in with GitHub"',
-      '(or the provider you used before) instead.',
-      '',
-      "If you didn't ask for a code, you can ignore this email.",
-    ].join('\n'),
-  };
-}
-
 /**
  * Sends the code when the address may sign in, a provider sign-in note to an account that must
  * use its provider, and nothing otherwise. Never throws.
@@ -261,7 +240,6 @@ export async function deliverSignInCode(env: Env, email: string, code: string): 
     const message = account?.providerOnly
       ? providerSignInRequiredEmail(env.BASE_DOMAIN)
       : signInCodeEmail(env.BASE_DOMAIN, code);
-    if (account?.providerOnly) log.info('email_sign_in.code_not_sent', { reason: 'provider_only' });
     await transport.sender.send({
       from: { email: transport.systemFrom(EMAIL_SIGN_IN_LOCAL_PART), name: 'SAM' },
       to: email,
@@ -269,9 +247,12 @@ export async function deliverSignInCode(env: Env, email: string, code: string): 
       text: message.text,
       headers: {},
     });
-    if (!account?.providerOnly) {
-      log.info('email_sign_in.code_sent', { newAccount: !known, transport: transport.kind });
-    }
+    log.info(
+      account?.providerOnly
+        ? 'email_sign_in.provider_required_note_sent'
+        : 'email_sign_in.code_sent',
+      { newAccount: !known, transport: transport.kind }
+    );
   } catch (error) {
     log.error('email_sign_in.send_failed', {
       error: error instanceof Error ? error.message : String(error),

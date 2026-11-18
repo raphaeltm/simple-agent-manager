@@ -28,7 +28,7 @@ import { emailTransportKind } from './agent-email/provider';
 import { hasInboundAgentEmail } from './agent-email/self-host-inbound';
 import { isAnalyticsD1SinkEnabled } from './analytics-d1-sink';
 import { cache } from './admin-settings-resolution';
-import { resolveArtifactsBackend } from './hosted-git/backend';
+import { isArtifactsAvailable } from './hosted-git/backend';
 import { validLlmBaseUrl } from './llm-endpoint-settings';
 import { resolveR2PresignConfig } from './r2-presign-config';
 import { getTTSConfig } from './tts-config';
@@ -56,46 +56,11 @@ export type PlatformCapability =
 
 export type PlatformCapabilities = Readonly<Record<PlatformCapability, boolean>>;
 
-type CapabilityEnv = Pick<
-  Env,
-  | 'AI'
-  | 'AI_GATEWAY_ID'
-  | 'CF_ACCOUNT_ID'
-  | 'CF_API_TOKEN'
-  | 'CF_ZONE_ID'
-  | 'ANALYTICS'
-  | 'ANALYTICS_SINK'
-  | 'OBSERVABILITY_DATABASE'
-  | 'ARTIFACTS'
-  | 'ARTIFACTS_ENABLED'
-  | 'HOSTED_GIT'
-  | 'HOSTED_GIT_BACKEND'
-  | 'CONTAINER_RUNTIME_AVAILABLE'
-  | 'SANDBOX_CONTAINER_RUNTIME_AVAILABLE'
-  | 'LOG_TAIL_AVAILABLE'
-  | 'SANDBOX'
-  | 'CREDENTIAL_SETUP_SESSION'
-  | 'SETUP_SESSION_POOL'
-  | 'AGENT_EMAIL'
-  | 'BASE_DOMAIN'
-  | 'SMTP_HOST'
-  | 'SMTP_PORT'
-  | 'SMTP_TLS'
-  | 'SMTP_USERNAME'
-  | 'SMTP_PASSWORD'
-  | 'SMTP_FROM'
-  | 'AGENT_EMAIL_INBOUND_SMTP'
-  | 'REVERSE_TUNNEL_GATEWAY_SECRET'
-  | 'TTS_ENABLED'
-  | 'R2_ACCESS_KEY_ID'
-  | 'R2_SECRET_ACCESS_KEY'
-  | 'R2_BUCKET_NAME'
-  | 'R2_S3_ENDPOINT'
-  | 'R2_S3_BUCKET'
-  | 'R2_S3_KEY_PREFIX'
-  | 'R2_S3_REGION'
-  | 'R2_S3_FORCE_PATH_STYLE'
->;
+/**
+ * The Worker environment. Artifacts availability (`hosted-git/backend.ts`) can consult a backend
+ * the self-host build registers, which reads its own bindings, so this takes the whole Env.
+ */
+type CapabilityEnv = Env;
 
 // The AI Gateway helpers are pure functions of the environment and live in the AI proxy
 // package, which needs them too. Re-exported so this module stays the one place to ask.
@@ -185,19 +150,6 @@ export function isGuidedCredentialSetupAvailable(
     !!env.CREDENTIAL_SETUP_SESSION &&
     !!env.SETUP_SESSION_POOL
   );
-}
-
-/**
- * SAM-native Git repositories: Cloudflare Artifacts, or on self-host the local Durable Object git
- * server (`services/hosted-git/backend.ts`, the one resolver for both).
- */
-export function isArtifactsAvailable(
-  env: Pick<
-    Env,
-    'ARTIFACTS' | 'ARTIFACTS_ENABLED' | 'HOSTED_GIT' | 'HOSTED_GIT_BACKEND' | 'BASE_DOMAIN'
-  >
-): boolean {
-  return resolveArtifactsBackend(env) !== null;
 }
 
 /** Resolve every capability from bindings and settings. Pure and synchronous. */

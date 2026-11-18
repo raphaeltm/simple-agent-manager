@@ -1,6 +1,6 @@
 /**
- * MCP adapters for the agent inbox tools (slices D and H1): `inbox_write` (ask, review, assign,
- * comment, attach, update, cancel)
+ * MCP adapters for the agent inbox tools (slices D and H1): `inbox_write` (ask, review, result,
+ * assign, comment, attach, update, cancel)
  * and `inbox_read` (list, get). Each one resolves where the call came from (project, chat, task,
  * person) from the verified token, runs the shared operation (`fileAgentAsk`, ...), and formats
  * the result. No inbox rule lives here.
@@ -14,6 +14,7 @@ import {
   cancelAgentAsk,
   commentAgentTask,
   fileAgentAsk,
+  fileAgentResult,
   fileAgentReview,
   getAgentItem,
   listAgentAsks,
@@ -154,7 +155,9 @@ function filed(result: AgentFileResult) {
     ? `This idempotencyKey already filed ${result.ref}; nothing new was filed.`
     : result.blocking
       ? 'Filed in the person’s inbox. End your turn if you cannot continue: you will be woken in this chat when they answer.'
-      : 'Filed in the person’s inbox. Keep working: you will be told in this chat when they answer.';
+      : result.kind === 'result'
+        ? 'Filed in the person’s inbox. If they reply while your task is still running, you will be woken in this chat with the reply; "Got it" does not wake you.'
+        : 'Filed in the person’s inbox. Keep working: you will be told in this chat when they answer.';
   const duplicateHint =
     result.similar.length > 0
       ? ' Similar open items exist (see `similar`): if one already covers this, cancel yours with inbox_write method cancel and say which one to use.'
@@ -189,6 +192,11 @@ export const handleInboxAsk: Handler = (requestId, params, tokenData, env) =>
 export const handleInboxReview: Handler = (requestId, params, tokenData, env) =>
   run(requestId, 'inbox_write review', tokenData, env, async (ctx, source) =>
     filed(await fileAgentReview(ctx, source, params as Parameters<typeof fileAgentReview>[2]))
+  );
+
+export const handleInboxResult: Handler = (requestId, params, tokenData, env) =>
+  run(requestId, 'inbox_write result', tokenData, env, async (ctx, source) =>
+    filed(await fileAgentResult(ctx, source, params as Parameters<typeof fileAgentResult>[2]))
   );
 
 export const handleInboxUpdateItem: Handler = (requestId, params, tokenData, env) =>

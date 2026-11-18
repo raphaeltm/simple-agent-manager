@@ -12,7 +12,7 @@ import {
   DEFAULT_AI_USAGE_MIN_DAILY_TOKEN_LIMIT,
   DEFAULT_AI_USAGE_MIN_MONTHLY_COST_CAP_USD,
 } from '@simple-agent-manager/shared';
-import { expectJsonRecord } from '@simple-agent-manager/worker-core';
+import { expectJsonRecord, log, parseJsonRecord } from '@simple-agent-manager/worker-core';
 
 import { isMonthlyCostCapAvailable } from './ai-gateway-availability';
 import type { AiProxyEnv } from './env';
@@ -48,13 +48,56 @@ export function buildBudgetSettingsKey(userId: string): string {
   return `${AI_BUDGET_SETTINGS_KV_PREFIX}:${userId}`;
 }
 
-/** Get a user's custom budget settings, or null if none set. */
+function nullableFiniteNumber(value: unknown): number | null | undefined {
+  if (value === null || value === undefined) return null;
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * Parse a stored settings row. A row that is not JSON, or whose fields have the wrong types, is
+ * treated as absent (platform defaults) and logged, never thrown: every AI call reads this row, so
+ * one malformed value must not fail them (rules 41 and 50). The installation ceiling still applies
+ * to such a user, because it does not come from this row.
+ */
+export function parseStoredBudgetSettings(
+  raw: string,
+  userId: string
+): UserAiBudgetSettings | null {
+  try {
+    const record = parseJsonRecord(raw, 'ai-budget-settings');
+    const dailyInputTokenLimit = nullableFiniteNumber(record.dailyInputTokenLimit);
+    const dailyOutputTokenLimit = nullableFiniteNumber(record.dailyOutputTokenLimit);
+    const monthlyCostCapUsd = nullableFiniteNumber(record.monthlyCostCapUsd);
+    const alertThresholdPercent = nullableFiniteNumber(record.alertThresholdPercent);
+    const bad = Object.entries({
+      dailyInputTokenLimit,
+      dailyOutputTokenLimit,
+      monthlyCostCapUsd,
+    }).find(([, value]) => value === undefined);
+    if (bad) throw new Error(`invalid ${bad[0]}`);
+    return {
+      dailyInputTokenLimit: dailyInputTokenLimit ?? null,
+      dailyOutputTokenLimit: dailyOutputTokenLimit ?? null,
+      monthlyCostCapUsd: monthlyCostCapUsd ?? null,
+      alertThresholdPercent: alertThresholdPercent ?? DEFAULT_AI_USAGE_ALERT_THRESHOLD_PERCENT,
+    };
+  } catch (err) {
+    log.warn('ai_proxy.budget_settings_row_skipped', {
+      userId,
+      error: err instanceof Error ? err.message : String(err),
+      action: 'using_platform_defaults',
+    });
+    return null;
+  }
+}
+
+/** Get a user's custom budget settings, or null if none set (or the stored row is malformed). */
 export async function getUserBudgetSettings(
   kv: KVNamespace,
   userId: string
 ): Promise<UserAiBudgetSettings | null> {
-  const key = buildBudgetSettingsKey(userId);
-  return kv.get<UserAiBudgetSettings>(key, 'json');
+  const raw = await kv.get(buildBudgetSettingsKey(userId));
+  return raw === null ? null : parseStoredBudgetSettings(raw, userId);
 }
 
 /** Save a user's budget settings. */
@@ -81,7 +124,7 @@ export async function getAdminAiAllowance(
   return kv.get<AdminAiAllowance>(`${AI_ADMIN_ALLOWANCE_KV_PREFIX}:${userId}`, 'json');
 }
 
-/** Why a monthly cap cannot be set or enforced on an installation without AI Gateway. */
+/** Why a monthly cap cannot be set: this installation has a gateway it cannot price. */
 export const MONTHLY_COST_CAP_UNAVAILABLE_MESSAGE =
   'Monthly cost caps are not available on this installation: they are priced from Cloudflare AI Gateway logs (AI_GATEWAY_ID, CF_ACCOUNT_ID and CF_API_TOKEN). Daily token limits still apply.';
 
@@ -89,12 +132,15 @@ export const MONTHLY_COST_CAP_UNAVAILABLE_MESSAGE =
  * Validate and normalize budget update request. Returns validated settings or throws.
  *
  * When `adminAllowance` is provided, the user's limits are capped at the
- * admin-set ceiling instead of the platform maximum.
+ * admin-set ceiling instead of the platform maximum. `monthlyCostCeilingUsd` is the
+ * installation-wide ceiling where it applies (`resolveMonthlyCostCeilingUsd`): a cap above it is
+ * refused. Clearing the cap is allowed; the ceiling still applies (`effectiveMonthlyCostCapUsd`).
  */
 export function validateBudgetUpdate(
   body: unknown,
   env: AiProxyEnv,
-  adminAllowance?: AdminAiAllowance | null
+  adminAllowance: AdminAiAllowance | null,
+  monthlyCostCeilingUsd: number | null
 ): UserAiBudgetSettings {
   const request = expectJsonRecord(body, 'usage.ai.budget');
   const {
@@ -107,7 +153,10 @@ export function validateBudgetUpdate(
   // Admin ceilings take precedence over platform maximums when set
   const maxDailyInputTokens = adminAllowance?.maxDailyInputTokens ?? platformMaxDailyTokens;
   const maxDailyOutputTokens = adminAllowance?.maxDailyOutputTokens ?? platformMaxDailyTokens;
-  const maxMonthlyCap = adminAllowance?.maxMonthlyCostCapUsd ?? platformMaxMonthlyCap;
+  const maxMonthlyCap = Math.min(
+    adminAllowance?.maxMonthlyCostCapUsd ?? platformMaxMonthlyCap,
+    monthlyCostCeilingUsd ?? Number.POSITIVE_INFINITY
+  );
 
   const settings: UserAiBudgetSettings = {
     dailyInputTokenLimit: null,

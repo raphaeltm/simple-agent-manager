@@ -625,19 +625,26 @@ describe('ProjectData idle-cleanup liveness for a stale VM node heartbeat', () =
   });
 
   it('uses the successful node health probe, then proves the task live from local ACP state', async () => {
-    const verdict = await getLocalTaskRuntimeLiveness(sqlWithLiveAcpSession(), doEnv(), doTask);
+    // Route resolution consumes the shared probe budget. This case models no elapsed
+    // time, so the exact fetch timeout must not depend on runner scheduling jitter.
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    try {
+      const verdict = await getLocalTaskRuntimeLiveness(sqlWithLiveAcpSession(), doEnv(), doTask);
 
-    expect(fetchWithTimeoutMock).toHaveBeenCalledWith(
-      'https://01m064tg56ecjw1d127h32brvj.vm.example.test:8443/health',
-      { method: 'GET', redirect: 'manual' },
-      5_000
-    );
-    expect(verdict).toMatchObject({
-      live: true,
-      conclusive: true,
-      reason: 'task_agent_host_running',
-      activeAcpSessionId: 'acp-live',
-    });
+      expect(fetchWithTimeoutMock).toHaveBeenCalledWith(
+        'https://01m064tg56ecjw1d127h32brvj.vm.example.test:8443/health',
+        { method: 'GET', redirect: 'manual' },
+        5_000
+      );
+      expect(verdict).toMatchObject({
+        live: true,
+        conclusive: true,
+        reason: 'task_agent_host_running',
+        activeAcpSessionId: 'acp-live',
+      });
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   /** The node as reverse-tunnel provisioning leaves it: transport, incarnation, active lease. */

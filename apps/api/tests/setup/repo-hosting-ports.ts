@@ -5,7 +5,7 @@
  * have registered, so the ports delegate to whatever worker modules the test mocked (most often
  * `services/platform-config` and `auth`), as when repo hosting imported them directly. Each port
  * loads on its own, so a test whose partial mocks break one port's module graph still gets the
- * other, and fails only if it reaches the port it broke.
+ * others, and fails only if it reaches the port it broke.
  */
 import { beforeAll } from 'vitest';
 

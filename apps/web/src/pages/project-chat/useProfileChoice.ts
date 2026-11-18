@@ -6,7 +6,8 @@ import type {
   UpdateAgentProfileRequest,
   VMSize,
 } from '@simple-agent-manager/shared';
-import { useCallback, useEffect, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { selectProfileId } from '../../components/project-chat/profile-picker/model';
 import {
@@ -16,6 +17,7 @@ import {
 } from '../../components/resource-requirements';
 import { useAgentProfiles } from '../../hooks/useAgentProfiles';
 import { useProfilePicker } from '../../hooks/useProfilePicker';
+import { instantRuntimeEnabledQueryOptions } from '../../lib/query-options';
 import {
   resolveWizardRuntime,
   resolveWizardTaskMode,
@@ -35,8 +37,11 @@ export interface ProfileWizardState {
   profileName: string;
   saving: boolean;
   error: string | null;
-  /** Whether Instant can run on this installation; the runtime step offers it only then. */
-  instantAvailable: boolean;
+  /**
+   * Whether Instant can run on this installation (`null` while unknown). Read live from the
+   * shared query, never stored, so a wizard opened on a cold cache still learns the answer.
+   */
+  instantAvailable: boolean | null;
 }
 
 /** Where the picker sheet opens: above its trigger, or centered when anchor is null. */
@@ -56,7 +61,7 @@ const CLOSED_WIZARD: ProfileWizardState = {
   profileName: '',
   saving: false,
   error: null,
-  instantAvailable: true,
+  instantAvailable: null,
 };
 
 /**
@@ -69,14 +74,11 @@ export function useProfileChoice({
   queryScope,
   configuredAgents,
   selectedAgentType,
-  instantEnabled,
 }: Readonly<{
   projectId: string;
   queryScope: string;
   configuredAgents: AgentInfo[];
   selectedAgentType: string | null;
-  /** Whether Instant (cf-container) workspaces can run on this installation. */
-  instantEnabled: boolean;
 }>) {
   const {
     profiles: agentProfiles,
@@ -92,6 +94,15 @@ export function useProfileChoice({
     anchor: null,
   });
   const [profileWizard, setProfileWizard] = useState<ProfileWizardState>(CLOSED_WIZARD);
+  const queryClient = useQueryClient();
+  // Whether this installation can run Instant (Cloudflare Containers); null until known. The
+  // wizard offers Instant only once it is known to work; the one-click profile below waits
+  // for the answer.
+  const instantQuery = useQuery({
+    ...instantRuntimeEnabledQueryOptions(queryScope),
+    enabled: Boolean(queryScope),
+  });
+  const instantAvailable = instantQuery.data ?? null;
 
   // Fill in a default once profiles and picker state are known. Guarded on the current
   // selection, so it never overrides a profile the person picked
@@ -132,9 +143,8 @@ export function useProfileChoice({
       open: true,
       step: soleAgent ? 'work-type' : 'agent',
       selectedAgentType: initialAgentType,
-      instantAvailable: instantEnabled,
     });
-  }, [configuredAgents, instantEnabled, selectedAgentType]);
+  }, [configuredAgents, selectedAgentType]);
 
   const closeProfileWizard = useCallback(() => {
     setProfileWizard((current) => ({ ...current, open: false, saving: false, error: null }));
@@ -156,15 +166,19 @@ export function useProfileChoice({
   );
 
   /**
-   * A project with no profiles and exactly one configured agent needs no choices, so the
-   * first message creates the chat profile the wizard would have suggested instead of
-   * stopping at "Create a profile". Instant only where this installation can run it; a
-   * self-hosted install without a container runtime gets a Cloud VM profile.
+   * One click on the no-profiles gate when the project has exactly one configured agent: create
+   * the single chat profile the wizard would have suggested. Never runs on its own (policy:
+   * fresh installs do not get seeded profiles). Instant only where this installation can run
+   * it, read at click time so a cold cache cannot pick the wrong runtime.
    */
   const createDefaultChatProfile = useCallback(async () => {
     const soleAgent = configuredAgents.length === 1 ? configuredAgents[0] : null;
     if (!soleAgent) return null;
-    const runtime: AgentProfileRuntime = instantEnabled ? 'cf-container' : 'vm';
+    const instantEnabled = await queryClient.fetchQuery({
+      ...instantRuntimeEnabledQueryOptions(queryScope),
+      staleTime: 0,
+    });
+    const runtime = resolveWizardRuntime('conversation', null, instantEnabled);
     return createProfile({
       name: suggestProfileName(soleAgent.id, 'conversation'),
       description: 'Chat and explore with a lightweight workspace',
@@ -173,7 +187,7 @@ export function useProfileChoice({
       workspaceProfile: resolveWizardWorkspaceProfile(runtime, 'conversation'),
       taskMode: resolveWizardTaskMode(runtime, 'conversation'),
     });
-  }, [configuredAgents, createProfile, instantEnabled, suggestProfileName]);
+  }, [configuredAgents, createProfile, queryClient, queryScope, suggestProfileName]);
 
   const createProfileFromWizard = useCallback(async () => {
     const name = profileWizard.profileName.trim();
@@ -194,9 +208,17 @@ export function useProfileChoice({
       return null;
     }
     const workType = profileWizard.workType ?? 'conversation';
+    if (profileWizard.runtime === 'cf-container' && instantAvailable !== true) {
+      setProfileWizard((current) => ({
+        ...current,
+        error: 'Instant is not available on this installation. Choose Cloud VM.',
+      }));
+      return null;
+    }
     const runtime = resolveWizardRuntime(
       workType,
-      profileWizard.runtime ?? (instantEnabled ? null : 'vm')
+      profileWizard.runtime,
+      instantAvailable === true
     );
     setProfileWizard((current) => ({ ...current, saving: true, error: null }));
     try {
@@ -230,13 +252,18 @@ export function useProfileChoice({
     agentProfiles,
     configuredAgents,
     createProfile,
-    instantEnabled,
+    instantAvailable,
     profileWizard.profileName,
     profileWizard.runtime,
     profileWizard.selectedAgentType,
     profileWizard.resourceReqs,
     profileWizard.workType,
   ]);
+
+  const profileWizardView = useMemo(
+    () => ({ ...profileWizard, instantAvailable }),
+    [profileWizard, instantAvailable]
+  );
 
   return {
     agentProfiles,
@@ -249,7 +276,7 @@ export function useProfileChoice({
     openProfileSheet,
     closeProfileSheet,
     handleUpdateProfile,
-    profileWizard,
+    profileWizard: profileWizardView,
     openProfileWizard,
     closeProfileWizard,
     updateProfileWizard,

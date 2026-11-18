@@ -359,6 +359,7 @@ export function ProjectChat() {
               projectId={state.projectId}
               agents={state.configuredAgents}
               agentProfiles={state.agentProfiles}
+              profilesLoading={state.profilesLoading}
               selectedProfileId={state.selectedProfileId}
               onProfileChange={state.setSelectedProfileId}
               profilePicker={state.profilePicker}

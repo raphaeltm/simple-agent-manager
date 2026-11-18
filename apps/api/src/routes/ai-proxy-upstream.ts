@@ -7,11 +7,12 @@ export const customEndpointResponses = new WeakSet<Response>();
  * Split out of ai-proxy.ts per .claude/rules/18-file-size-limits.md — pure
  * extraction, no behavior change.
  */
+import { AI_PROVIDER_BASE_URLS } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { maybeJsonRecord, readResponseJson } from '../lib/runtime-validation';
+import { readResponseJson } from '../lib/runtime-validation';
 import {
   createAnthropicToOpenAIStream,
   translateRequestToAnthropic,
@@ -27,11 +28,7 @@ import {
   LlmUnavailableError,
   resolveWorkersAiChatTarget,
 } from '../services/llm-chat-target';
-import {
-  aiGatewayOnlyHeaders,
-  hasLocalAiCostMetering,
-  resolveAiGatewayId,
-} from '../services/platform-capabilities';
+import { aiGatewayOnlyHeaders, resolveAiGatewayId } from '../services/platform-capabilities';
 
 const anthropicContentBlockSchema = v.variant('type', [
   v.object({ type: v.literal('text'), text: v.string() }),
@@ -62,7 +59,7 @@ function buildOpenAIUrl(env: Env): string {
     return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/openai/v1/chat/completions`;
   }
   // Fallback: direct OpenAI API (no gateway monitoring)
-  return 'https://api.openai.com/v1/chat/completions';
+  return `${AI_PROVIDER_BASE_URLS.openai}/chat/completions`;
 }
 
 /** Build upstream URL for OpenAI Responses API via AI Gateway. */
@@ -71,7 +68,7 @@ function buildOpenAIResponsesUrl(env: Env): string {
   if (gatewayId) {
     return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/openai/v1/responses`;
   }
-  return 'https://api.openai.com/v1/responses';
+  return `${AI_PROVIDER_BASE_URLS.openai}/responses`;
 }
 
 // =============================================================================
@@ -233,18 +230,6 @@ export async function forwardToAnthropic(
   return new Response(translatedBody, { status: 200, headers: responseHeaders });
 }
 
-/**
- * Without AI Gateway, SAM's own metering is the only spend record (`hasLocalAiCostMetering`), and
- * OpenAI reports a stream's usage only when asked (`stream_options.include_usage`). Ask on every
- * direct streamed call so a client that omits it cannot stream unmetered output. Gateway calls are
- * sent byte for byte as before.
- */
-function withDirectStreamUsage(env: Env, body: Record<string, unknown>): Record<string, unknown> {
-  if (!hasLocalAiCostMetering(env) || body.stream !== true) return body;
-  const streamOptions = maybeJsonRecord(body.stream_options) ?? {};
-  return { ...body, stream_options: { ...streamOptions, include_usage: true } };
-}
-
 /** Forward request to OpenAI via AI Gateway (OpenAI-native format, no translation needed). */
 export async function forwardToOpenAI(
   env: Env,
@@ -254,7 +239,7 @@ export async function forwardToOpenAI(
   openaiApiKey: string
 ): Promise<Response> {
   const gatewayUrl = buildOpenAIUrl(env);
-  const gatewayBody = withDirectStreamUsage(env, { ...body, model: modelId });
+  const gatewayBody = { ...body, model: modelId };
 
   // Use cf-aig-authorization for Unified Billing when available, otherwise standard Bearer
   const cfToken = resolveUnifiedBillingToken(env);

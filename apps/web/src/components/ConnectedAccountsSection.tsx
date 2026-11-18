@@ -1,10 +1,19 @@
 import { Alert, Button, Spinner } from '@simple-agent-manager/ui';
-import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 
 import { useLoginProviders } from '../hooks/useLoginProviders';
 import { useQueryScope } from '../hooks/useQueryScope';
-import { connectProvider, type LinkableProvider, listConnectedProviders } from '../lib/auth';
+import {
+  connectProvider,
+  disconnectProvider,
+  type LinkableProvider,
+  listConnectedProviders,
+  requestProviderConnection,
+  SessionNotFreshError,
+  signOut,
+} from '../lib/auth';
+import { githubQueryKeys } from '../lib/query-options';
 
 /** One cache entry for "which providers this account has connected", shared by every reader. */
 export function connectedProvidersQueryOptions(queryScope: string) {
@@ -25,12 +34,29 @@ const PROVIDER_LABELS: Record<LinkableProvider, string> = {
  *
  * An account that signed in by email has no GitHub link, and SAM needs the user's own GitHub
  * token to start work on a GitHub project. This links the provider through BetterAuth's
- * `/link-social` flow. Unlinking is not offered.
+ * `/link-social` flow after an action-specific email sign-in check.
  */
 export function ConnectedAccountsSection() {
   const queryScope = useQueryScope();
+  const queryClient = useQueryClient();
+  const [notice, setNotice] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).has('error')
+      ? 'The connection was not completed. Request a new confirmation email to try again.'
+      : null
+  );
+  const [confirmation, setConfirmation] = useState(() => {
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    const provider = params.get('provider');
+    const token = params.get('linkToken');
+    return token && (provider === 'github' || provider === 'gitlab') ? { token, provider } : null;
+  });
+  useEffect(() => {
+    if (confirmation)
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  }, [confirmation]);
   const { providers } = useLoginProviders();
   const [connectError, setConnectError] = useState<string | null>(null);
+  const [needsFreshSignIn, setNeedsFreshSignIn] = useState(false);
   const [connecting, setConnecting] = useState<LinkableProvider | null>(null);
   const connected = useQuery(connectedProvidersQueryOptions(queryScope));
 
@@ -41,25 +67,74 @@ export function ConnectedAccountsSection() {
     setConnectError(null);
     setConnecting(provider);
     try {
-      await connectProvider(provider);
+      if (confirmation?.provider === provider) {
+        await connectProvider(
+          provider,
+          window.location.origin + '/settings/github',
+          confirmation.token
+        );
+      } else {
+        await requestProviderConnection(provider);
+        setNotice(
+          `Check your account email to confirm connecting ${PROVIDER_LABELS[provider]}. Open the link in this browser.`
+        );
+        setConnecting(null);
+      }
     } catch (err) {
+      setConfirmation(null);
       setConnectError(err instanceof Error ? err.message : 'Could not connect');
       setConnecting(null);
     }
   };
 
+  const handleDisconnect = async (provider: LinkableProvider) => {
+    setConnectError(null);
+    setNeedsFreshSignIn(false);
+    setConnecting(provider);
+    try {
+      await disconnectProvider(provider);
+      if (provider === 'github')
+        void queryClient.invalidateQueries({ queryKey: githubQueryKeys.all(queryScope) });
+      await queryClient.invalidateQueries({
+        queryKey: connectedProvidersQueryOptions(queryScope).queryKey,
+      });
+      setNotice(
+        `${PROVIDER_LABELS[provider]} disconnected. Existing repository work may need authorization again.`
+      );
+    } catch (err) {
+      setConnectError(err instanceof Error ? err.message : 'Could not disconnect');
+      setNeedsFreshSignIn(err instanceof SessionNotFreshError);
+    } finally {
+      setConnecting(null);
+    }
+  };
+
   return (
-    <div className="glass-surface rounded-lg p-4 flex flex-col gap-3">
+    <div
+      data-testid="connected-accounts"
+      className="sam-glass sam-glass-rim rounded-[var(--sam-radius-pane)] p-4 flex flex-col gap-3 min-w-0"
+    >
       <div>
-        <p className="font-medium text-fg-primary">Your account</p>
+        <p className="font-medium text-fg-primary">Connected accounts</p>
         <p className="text-sm text-fg-muted">
           SAM uses your own GitHub (or GitLab) authorization to start work on a project&apos;s
           repository. Connect it here if you signed in with an email code.
         </p>
       </div>
+      {notice && <Alert variant="info">{notice}</Alert>}
+      {confirmation && (
+        <Alert variant="info">
+          Confirm the connection below to finish the email sign-in check.
+        </Alert>
+      )}
       {connectError && (
         <Alert variant="error" onDismiss={() => setConnectError(null)}>
           {connectError}
+          {needsFreshSignIn && (
+            <Button variant="raised" size="sm" onClick={() => void signOut()}>
+              Sign out to verify again
+            </Button>
+          )}
         </Alert>
       )}
       {connected.isLoading ? (
@@ -69,6 +144,12 @@ export function ConnectedAccountsSection() {
           {offered.map((provider) => {
             const isConnected = connected.data?.includes(provider) ?? false;
             const label = PROVIDER_LABELS[provider];
+            let statusLabel = 'Status unavailable';
+            if (connected.isSuccess) statusLabel = isConnected ? 'Connected' : 'Not connected';
+            let connectLabel = `Connect ${label}`;
+            if (confirmation?.provider === provider)
+              connectLabel = `Confirm connection to ${label}`;
+            if (connecting === provider) connectLabel = 'Please wait…';
             return (
               <li
                 key={provider}
@@ -77,17 +158,29 @@ export function ConnectedAccountsSection() {
               >
                 <span className="text-sm text-fg-primary">
                   {label}
-                  <span className="ml-2 text-xs text-fg-muted">
-                    {isConnected ? 'Connected' : 'Not connected'}
-                  </span>
+                  <span className="ml-2 text-xs text-fg-muted">{statusLabel}</span>
                 </span>
-                {!isConnected && (
+                {!isConnected ? (
                   <Button
+                    variant={
+                      provider === (confirmation?.provider ?? 'github') ? 'accent' : 'raised'
+                    }
+                    className="min-h-11"
                     size="sm"
-                    disabled={connecting !== null}
+                    disabled={connecting !== null || !connected.isSuccess}
                     onClick={() => void handleConnect(provider)}
                   >
-                    {connecting === provider ? 'Redirecting…' : `Connect ${label}`}
+                    {connectLabel}
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    className="min-h-11"
+                    variant="raised"
+                    disabled={connecting !== null || !connected.isSuccess}
+                    onClick={() => void handleDisconnect(provider)}
+                  >
+                    Disconnect {label}
                   </Button>
                 )}
               </li>
@@ -96,7 +189,12 @@ export function ConnectedAccountsSection() {
         </ul>
       )}
       {connected.isError && (
-        <p className="m-0 text-xs text-fg-muted">Could not read your connected accounts.</p>
+        <Alert variant="error">
+          Could not read your connected accounts.{' '}
+          <Button variant="raised" size="sm" onClick={() => void connected.refetch()}>
+            Try again
+          </Button>
+        </Alert>
       )}
     </div>
   );

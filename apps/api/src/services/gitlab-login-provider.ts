@@ -63,14 +63,8 @@ export function gitLabLoginProvider(env: Env, config: GitLabOAuthConfig): Gitlab
             if (!response.ok) return null;
             const profile = await readResponseJson(response, gitlabUserSchema, 'gitlab.user');
             if (profile.state !== 'active' || profile.locked || !profile.email) return null;
-            // A trusted host's linked account keeps its own verified SAM email
-            // (`keepLinkedAccountEmail`); an untrusted host never vouches for one.
-            const identity = config.identityTrusted
-              ? await keepLinkedAccountEmail(env, 'gitlab', String(profile.id), {
-                  email: profile.email,
-                  emailVerified: profile.email_verified ?? false,
-                })
-              : { email: profile.email, emailVerified: false };
+            const accountId = config.identityTrusted ? String(profile.id) : untrustedGitLabAccountSubject(config.host, profile.id);
+            const identity = await keepLinkedAccountEmail(env, 'gitlab', accountId, { email: profile.email, emailVerified: config.identityTrusted && (profile.email_verified ?? false) });
             return {
               user: {
                 name: profile.name ?? profile.username ?? '',

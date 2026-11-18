@@ -6,6 +6,7 @@ import type { Env } from '../../../src/env';
 import { runtimeRoutes } from '../../../src/routes/workspaces/runtime';
 import { getInstallationToken } from '../../../src/services/github-app';
 import { GitHubCliPolicyError } from '../../../src/services/github-cli-policy';
+import { registerArtifactsBackendFallback } from '../../../src/services/hosted-git/backend';
 
 const mocks = vi.hoisted(() => ({
   getInstallationToken: vi.fn(),
@@ -477,6 +478,47 @@ describe('workspace git-token GitHub scoping', () => {
       cloneUrl: 'https://acct123.artifacts.cloudflare.net/git/default/artifacts-repo-1.git',
     });
     expect(getInstallationToken).not.toHaveBeenCalled();
+  });
+
+  it('mints through a registered self-host backend when no Artifacts binding exists', async () => {
+    const remote = 'https://api.sam.example/git/artifacts-repo-1.git';
+    const createToken = vi.fn().mockResolvedValue({
+      plaintext: 'hosted-token',
+      expiresAt: '2026-06-06T20:00:00.000Z',
+    });
+    const get = vi.fn().mockResolvedValue({ remote, createToken });
+    registerArtifactsBackendFallback(() => ({ get, create: vi.fn(), delete: vi.fn() }) as never);
+    try {
+      const hostedEnv = { ...mockEnv, ARTIFACTS_ENABLED: 'true' } as Env;
+      limitResponses.push([workspaceRow()], [artifactsProjectRow({ repository: remote })]);
+
+      const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, hostedEnv);
+
+      expect(res.status).toBe(200);
+      expect(get).toHaveBeenCalledWith('artifacts-repo-1');
+      await expect(res.json()).resolves.toEqual({
+        token: 'hosted-token',
+        expiresAt: '2026-06-06T20:00:00.000Z',
+        cloneUrl: remote,
+        // The bound self-hosted host gets the same username the clone used.
+        username: 'x',
+      });
+    } finally {
+      registerArtifactsBackendFallback(null);
+    }
+  });
+
+  it('refuses an Artifacts token when the flag is off, even with a registered backend', async () => {
+    const get = vi.fn();
+    registerArtifactsBackendFallback(() => ({ get, create: vi.fn(), delete: vi.fn() }) as never);
+    try {
+      limitResponses.push([workspaceRow()], [artifactsProjectRow()]);
+      const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+      expect(res.status).toBe(403);
+      expect(get).not.toHaveBeenCalled();
+    } finally {
+      registerArtifactsBackendFallback(null);
+    }
   });
 
   it('does not return an artifacts token when deletion wins after minting', async () => {

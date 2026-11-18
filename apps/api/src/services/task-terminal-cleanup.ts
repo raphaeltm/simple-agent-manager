@@ -12,6 +12,7 @@ import {
 } from './failed-task-preservation';
 import * as projectDataService from './project-data';
 import { queueWorkspaceSessionSleep } from './session-sleep';
+import { retireTaskCancellationPrompts } from './task-cancellation-prompts';
 import { cleanupTaskRun } from './task-runner';
 import { cancelVmTaskAdmission } from './vm-admission-control';
 import { cleanupWorkspaceForDeletion } from './workspace-cleanup';
@@ -71,6 +72,7 @@ export async function cleanupTerminalTaskResources(
   const [task] = await db
     .select({
       id: schema.tasks.id,
+      userId: schema.tasks.userId,
       projectId: schema.tasks.projectId,
       workspaceId: schema.tasks.workspaceId,
       chatSessionId: schema.tasks.chatSessionId,
@@ -101,7 +103,32 @@ export async function cleanupTerminalTaskResources(
   if (options.requireStopAcknowledgement && (!task || !task.projectId)) {
     throw new Error('SAM stop target identity is unconfirmed');
   }
+  // Session persistence failure must not leave terminal compute running. Never
+  // publish turn-end unless prompt retirement succeeded; surface the error only
+  // after the independently authorized compute cleanup has been attempted.
+  let cancellationSessionError: unknown;
+  if (options.status === 'cancelled' && task?.projectId) {
+    try {
+      const retirement = await retireTaskCancellationPrompts(env, task, options.beforeSideEffect);
+      if (retirement.matched && retirement.sessionId) {
+        await options.beforeSideEffect?.();
+        await projectDataService.stopSession(env, task.projectId, retirement.sessionId, {
+          guard: { taskId: task.id },
+        });
+      }
+    } catch (error) {
+      cancellationSessionError = error;
+      log.warn('task.terminal_cleanup.session_update_failed', {
+        taskId,
+        projectId: task.projectId,
+        status: options.status,
+        error: error instanceof Error ? error.message : String(error),
+        ...options.logContext,
+      });
+    }
+  }
   if (!task?.workspaceId || !task.projectId) {
+    if (cancellationSessionError) throw cancellationSessionError;
     return;
   }
 
@@ -177,6 +204,7 @@ export async function cleanupTerminalTaskResources(
         'Session archive cleanup is pending; saved workspace data is retained for retry'
       );
     }
+    if (cancellationSessionError) throw cancellationSessionError;
     return;
   }
   if (workspace && options.destructiveSessionEnd && options.requiredUserId !== workspace.userId) {
@@ -188,7 +216,7 @@ export async function cleanupTerminalTaskResources(
     });
   }
 
-  if (workspace?.chatSessionId) {
+  if (workspace?.chatSessionId && options.status !== 'cancelled') {
     try {
       await options.beforeSideEffect?.();
       if (options.status === 'failed') {
@@ -222,4 +250,5 @@ export async function cleanupTerminalTaskResources(
   } else {
     await cleanupTaskRun(taskId, env, undefined, options.requiredUserId);
   }
+  if (cancellationSessionError) throw cancellationSessionError;
 }

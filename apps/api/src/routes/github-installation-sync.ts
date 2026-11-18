@@ -5,7 +5,6 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
-import { errors } from '../middleware/error';
 import {
   type AuthenticatedGitHubUser,
   getAuthenticatedUserOrganizations,
@@ -57,10 +56,7 @@ export async function getRequiredGitHubUserAccessToken(
     tokenPresent: Boolean(accessToken),
   });
   if (!accessToken) {
-    // Never linked (an email-signed account): say what fixes it. Otherwise keep the 403.
-    const unavailable = await githubUserTokenUnavailableError(c.env, userId);
-    if (unavailable.error === 'GITHUB_NOT_CONNECTED') throw unavailable;
-    throw errors.forbidden('GitHub user token unavailable');
+    throw await githubUserTokenUnavailableError(c.env, userId);
   }
   return accessToken;
 }

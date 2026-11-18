@@ -34,6 +34,7 @@ import {
   handleInboxComment,
   handleInboxGetItem,
   handleInboxListItems,
+  handleInboxResult,
   handleInboxReview,
   handleInboxUpdateItem,
 } from './inbox-tools';
@@ -213,6 +214,7 @@ export const MCP_TOOL_HANDLERS: ReadonlyMap<string, McpToolHandler> = new Map<
   ['request_human_input', handleRequestHumanInput],
   ['inbox_ask', handleInboxAsk],
   ['inbox_review', handleInboxReview],
+  ['inbox_result', handleInboxResult],
   ['inbox_update_item', handleInboxUpdateItem],
   ['inbox_cancel_item', handleInboxCancelItem],
   ['inbox_assign', handleInboxAssign],

@@ -42,13 +42,13 @@ export type RunUsageSpend =
   | { state: 'private' };
 
 export type RunReceiptTokens =
-  | { state: 'not_reported' }
+  | { state: 'not_reported'; limited?: boolean }
   | {
       state: 'reported';
       source: RunUsageSource;
       models: RunModelUsage[];
       total: RunTokenCounts;
       spend: RunUsageSpend;
-      /** True when the run had more model rows than one read returns; totals are a floor. */
+      /** True when admission or a read cap omitted usage; totals are a floor. */
       limited: boolean;
     };

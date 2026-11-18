@@ -152,7 +152,10 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
 
   const usageGate = await checkAiUsageGate(c.env.KV, userId, c.env);
   if (!usageGate.allowed) {
-    return anthropicUsageGateError(usageGate.reason);
+    return anthropicUsageGateError(
+      usageGate.reason,
+      usageGate.reason === 'monthly-cost-cap' ? usageGate.monthlyCap : undefined
+    );
   }
 
   // --- Resolve upstream auth (Unified Billing or platform key) ---
@@ -382,7 +385,10 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
 
   const usageGate = await checkAiUsageGate(c.env.KV, userId, c.env);
   if (!usageGate.allowed) {
-    return anthropicUsageGateError(usageGate.reason);
+    return anthropicUsageGateError(
+      usageGate.reason,
+      usageGate.reason === 'monthly-cost-cap' ? usageGate.monthlyCap : undefined
+    );
   }
 
   // --- Resolve upstream auth (Unified Billing or platform key) ---

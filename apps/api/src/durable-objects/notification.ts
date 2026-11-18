@@ -167,33 +167,38 @@ export class NotificationService extends DurableObject<Env> {
       }
     }
 
-    // Suppression: deduplicate needs_input notifications for the same task (prevent notification spam)
+    // Suppression: deduplicate needs_input notifications for the same task (prevent notification spam).
+    // Only within one inbox kind, so a non-blocking result never rewrites an open question's.
     if (request.type === 'needs_input' && request.taskId) {
+      const inboxKind = request.metadata?.inboxKind;
       const dedupWindow =
         parseInt(this.env.NOTIFICATION_DEDUP_WINDOW_MS || '') ||
         DEFAULT_NOTIFICATION_DEDUP_WINDOW_MS;
       const cutoff = now - dedupWindow;
       const existing = this.sql
         .exec(
-          `SELECT id FROM notifications WHERE user_id = ? AND type = 'needs_input' AND task_id = ? AND created_at > ? AND read_at IS NULL AND dismissed_at IS NULL`,
+          `SELECT id FROM notifications WHERE user_id = ? AND type = 'needs_input' AND task_id = ? AND created_at > ? AND read_at IS NULL AND dismissed_at IS NULL
+             AND COALESCE(json_extract(metadata, '$.inboxKind'), '') = ?`,
           userId,
           request.taskId,
-          cutoff
+          cutoff,
+          typeof inboxKind === 'string' ? inboxKind : ''
         )
         .toArray();
       if (existing.length > 0) {
         // Update the existing unread needs_input notification instead of creating a new one.
-        // The metadata moves with the text: its attentionMarkerId and options must name the
-        // newest question, or answering from the notification would target the old one.
+        // The metadata and link move with the text: they must name the newest ask, or answering
+        // or opening from the notification would target the old one.
         const existingId = parseIdRow(existing[0], 'notification.needs_input_dedup');
         this.sql.exec(
           `UPDATE notifications
-           SET body = ?, title = ?, metadata = ?, read_at = NULL,
-               in_app_visible = MAX(in_app_visible, ?)
+           SET body = ?, title = ?, metadata = ?, action_url = COALESCE(?, action_url),
+               read_at = NULL, in_app_visible = MAX(in_app_visible, ?)
            WHERE id = ?`,
           request.body ?? null,
           request.title,
           request.metadata ? JSON.stringify(request.metadata) : null,
+          request.actionUrl ?? null,
           inAppEnabled ? 1 : 0,
           existingId
         );

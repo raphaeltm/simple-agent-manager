@@ -134,8 +134,8 @@ describe('email code for an account created by GitHub sign-in', () => {
     expect(response.status).toBe(200);
     expect(sent).toHaveLength(1);
     expect(sent[0]?.to).toBe(ADDRESS);
-    expect(sent[0]?.subject).toBe('Sign in to SAM with GitHub');
-    expect(sent[0]?.text).toContain('Sign in with GitHub');
+    expect(sent[0]?.subject).toBe('Sign in to SAM with your connected provider');
+    expect(sent[0]?.text).toContain('use GitHub');
     expect(codeFrom(sent[0])).toBeNull();
   });
 

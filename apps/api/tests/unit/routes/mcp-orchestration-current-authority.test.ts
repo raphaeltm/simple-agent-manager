@@ -34,6 +34,15 @@ const mocks = vi.hoisted(() => ({
   cleanupTerminalTaskResources: vi.fn(),
 }));
 
+// This suite observes current actor and parent authority; retirement SQL is covered by Workers slices.
+vi.mock('../../../src/services/task-cancellation-prompts', () => ({
+  retireTaskCancellationPrompts: vi.fn(async () => ({
+    matched: true,
+    cancelled: 0,
+    sessionId: null,
+  })),
+}));
+
 vi.mock('../../../src/services/project-data', () => ({
   createSession: mocks.createSession,
   persistMessage: mocks.persistMessage,

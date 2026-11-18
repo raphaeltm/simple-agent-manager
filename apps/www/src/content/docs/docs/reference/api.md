@@ -543,7 +543,7 @@ The list returns `{ pending, settled, cursor }` and needs `task:read` on the pro
 Everything agents are waiting on from you, one item per ask, across projects
 (`apps/api/src/routes/inbox.ts`, operations in `packages/operations/src/inbox-*.ts`). The list reads
 each ask where it is stored: inbox asks (questions agents ask with `request_human_input`, and the
-reviews and tasks they file), permission requests from the chat index (`session_summaries`),
+reviews, results and tasks they file), permission requests from the chat index (`session_summaries`),
 [secret requests](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret) and Operations
 approvals. Nothing is copied.
 
@@ -590,7 +590,7 @@ from the chat index (`attention:` ref, the newest one per chat) until it is answ
 
 Each item has a `ref` naming its store (`ask:<id>`, `attention:<sessionId>:<markerId>`,
 `secret:<id>`, `approval:<id>`), `kind` (`question`, `permission`, `form`, `url`, `secret`,
-`approval`, `review`, `task`, `error`), project and chat, `title` and `body` (agent text, untrusted),
+`approval`, `review`, `result`, `task`, `error`), project and chat, `title` and `body` (agent text, untrusted),
 `blocking`, `agentState` (`waiting`, `working`, `finished`, `not_started`, `unknown`), `status`,
 `createdAt`, `updatedAt`, `failureCount` (error items only, otherwise `null`), `expiresAt`, `dueAt`,
 `links`, `canAct`, and `answerSpec`, which says what an answer
@@ -610,8 +610,11 @@ the same right to wake that chat's agent as answering in the chat.
 Archive closes an item for every kind: an inbox ask (a question too) becomes `archived`, a
 question asked before that change is resolved with reason `archived`, a permission or approval is denied, and a secret request is declined. Each
 tells the agent you will not act. Both writes return `{ ref, outcome, agentNotified }`;
-`agentNotified: false` on an ask means its notice was not queued yet, and SAM retries it for
-`inbox.noticeRetryMinutes`. Writes must come from the app's own origin with
+`agentNotified: false` on an ask usually means its notice was not queued yet, and SAM retries it
+for `inbox.noticeRetryMinutes`. The exception is **Got it** on a result (an empty `acknowledge`
+answer): it closes the item without telling the agent, by design, so nothing is retried. A
+non-empty reply to a review or result whose agent has finished returns `400`, because it could not
+be delivered. Writes must come from the app's own origin with
 `Content-Type: application/json`, like the other answer routes. A missing item and one in another
 project both return `404`; an item that is already closed returns `409`, and one you cannot act
 on returns `403`. The transcript context is returned only to a member who can read the source chat.
@@ -1096,7 +1099,7 @@ Query `range` is `7d`, `30d` or `90d` (default `30d`; anything else is `400`). R
 membership. Sent with `Cache-Control: private, no-store`: the body carries the caller's own account
 names and limit windows. Returns `ProjectAccountsResponse`
 (`packages/shared/src/types/insights-accounts.ts`):
-`{ projectId, range, since, until, bucket, buckets, accounts, stallEpisodes, totals, usageLimited, unavailable, generatedAt }`.
+`{ projectId, range, since, until, bucket, buckets, accounts, stallEpisodes, totals, usageLimited, usageAdmissionLimited?, unavailable, generatedAt }`.
 
 - `accounts`: most runs first. Each is `{ key, name, owner, kind, agentType, credentials, runs, merged, runsByBucket, stalls, usage, tokens, spend }`.
   `owner` is `you`, `teammate`, `project`, `platform` or `not_recorded`; `kind` is `subscription`,
@@ -1118,6 +1121,8 @@ names and limit windows. Returns `ProjectAccountsResponse`
   `outcome` is `resumed`, `ended` (the run ended while waiting), `blocked` or `ongoing`. `truncated` means the scan cap
   (`insights.accountsStallScanCap`) left older limit waits out.
 - `usageLimited`: the usage read hit `insights.accountsUsageRowCap`, so tokens and spend are a floor.
+- `usageAdmissionLimited`: some run in the usage window lost harness usage. This optional page-level
+  warning does not mark every account as incomplete; complete account labels stay exact.
 - `unavailable`: sections whose read failed this time (`runs`, `stalls`, `usage`, `tokens`).
 
 ### `GET /api/projects/:projectId/insights/setups`
@@ -1127,7 +1132,7 @@ Query `range` is `7d`, `30d` or `90d` (default `30d`) and `groupBy` is `profile`
 `model` (default `profile`); anything else is `400`. Requires project membership. Sent with
 `Cache-Control: private, no-store`: the body names the caller's own personal profiles and skills.
 Returns `ProjectSetupsResponse` (`packages/shared/src/types/insights-setups.ts`):
-`{ projectId, range, groupBy, since, until, rework, sample, groups, suggestions, suggestionMinRuns, unavailable, generatedAt }`.
+`{ projectId, range, groupBy, since, until, rework, sample, groups, suggestions, suggestionMinRuns, usageAdmissionLimited?, unavailable, generatedAt }`.
 
 - `groups`: most runs first, with the rows for no profile/skill and an unrecorded model last. Each
   is `{ key, label, owner, agentType, usedFor, runs, finished, mergedClean, mergedCleanRate, merged, medianToPullRequestMs, pullRequests, nudges, tokens, memory }`.
@@ -1141,6 +1146,9 @@ Returns `ProjectSetupsResponse` (`packages/shared/src/types/insights-setups.ts`)
 - `suggestions`: each is `default_profile` (`{ skill, profile, compared, currentDefault, apply }`) or
   `request_size` (`{ skill, currentGb, suggestedGb, runs, p90Bytes, maxBytes, oomKills, apply }`).
   `apply` is `{ skillId, patch }`, the body to send to `PATCH /api/projects/:projectId/skills/:skillId`.
+- `usageAdmissionLimited`: a selected run has incomplete harness token data; the page warns that
+  token totals and comparisons may be understated. Complete proxy measurements take precedence.
+  Older servers may omit this field.
 - `unavailable`: sections whose read failed this time (`runs`, `nudges`).
 
 ### `GET /api/projects/:projectId/insights/people`

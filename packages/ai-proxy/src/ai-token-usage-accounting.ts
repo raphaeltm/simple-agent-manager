@@ -3,7 +3,6 @@ import { maybeJsonRecord } from '@simple-agent-manager/worker-core';
 
 import { findPricedModel, priceModelUsageUsd } from './ai-cost-pricing';
 import { hasLocalAiCostMetering } from './ai-gateway-availability';
-import { incrementModelUsage } from './ai-model-usage';
 import {
   type AiProviderUsageAttribution,
   incrementProviderUsage,
@@ -64,7 +63,7 @@ export async function accountTokenUsageFromJson(
 ): Promise<void> {
   const usage = extractJsonTokenUsage(payload, options.format);
   if (options.estimateMissingUsage && usage.outputTokens === undefined)
-    usage.outputBytes = jsonOutputByteLength(payload);
+    usage.outputBytes = jsonOutputByteLength(payload, options.format);
   await incrementExtractedUsage(usage, options);
 }
 
@@ -209,6 +208,15 @@ export function estimateInputTokensFromMessages(messages: unknown): number {
   return Math.ceil(totalChars / 4);
 }
 
+/**
+ * Missing-usage estimate for a parsed passthrough request. Include system prompts, schemas,
+ * names and structured tool history, not only message text. Serialized control fields add
+ * small overhead; their numeric values never multiply the estimate. Measured usage wins.
+ */
+export function estimateInputTokensFromRequest(body: Record<string, unknown>): number {
+  return Math.ceil(utf8ByteLength(JSON.stringify(body)) / 4);
+}
+
 export async function collectStreamTokenUsage(
   stream: ReadableStream<Uint8Array>,
   format: TokenUsageFormat,
@@ -271,27 +279,11 @@ async function incrementExtractedUsage(
           cacheWriteInputTokens: writes,
         })
       : 0;
-    await incrementProviderUsage(
-      options.env.KV,
-      options.userId,
-      provider,
-      inputTokens,
-      outputTokens,
-      options.env,
-      ...(options.costModelId ? ([costUsd] as const) : [])
-    );
+    const args = [options.env.KV, options.userId, provider, inputTokens, outputTokens] as const;
     // A priced call also records its catalog model (per-model breakdown without a gateway).
-    if (model) {
-      await incrementModelUsage(
-        options.env,
-        options.userId,
-        model.id,
-        provider.providerId,
-        inputTokens,
-        outputTokens,
-        costUsd
-      );
-    }
+    if (model) await incrementProviderUsage(...args, options.env, costUsd, model.id);
+    else if (options.costModelId) await incrementProviderUsage(...args, options.env, costUsd);
+    else await incrementProviderUsage(...args, options.env);
   }
   // Budget accounting is the billing control and runs first; run usage is telemetry and must
   // never delay or starve it.
@@ -379,6 +371,13 @@ function applyStreamUsage(
     usage.cacheWriteTokens =
       numberValue(startUsage?.cache_creation_input_tokens) ?? usage.cacheWriteTokens;
     usage.outputTokens = numberValue(deltaUsage?.output_tokens) ?? usage.outputTokens;
+    if (usage.outputBytes !== undefined) {
+      const delta = maybeJsonRecord(record.delta);
+      for (const key of ['text', 'thinking', 'partial_json'] as const) {
+        if (typeof delta?.[key] === 'string') usage.outputBytes += utf8ByteLength(delta[key]);
+      }
+      usage.outputBytes += anthropicOutputByteLength([record.content_block]);
+    }
     return;
   }
 
@@ -417,12 +416,35 @@ function choicesOutputByteLength(choices: unknown, field: 'message' | 'delta'): 
       if (typeof part[key] === 'string') bytes += utf8ByteLength(part[key]);
     }
     if (Array.isArray(part.tool_calls)) bytes += utf8ByteLength(JSON.stringify(part.tool_calls));
+    const functionCall = maybeJsonRecord(part.function_call);
+    for (const key of ['name', 'arguments'] as const) {
+      if (typeof functionCall?.[key] === 'string') bytes += utf8ByteLength(functionCall[key]);
+    }
   }
   return bytes;
 }
 
-function jsonOutputByteLength(payload: unknown): number {
-  return choicesOutputByteLength(maybeJsonRecord(payload)?.choices, 'message');
+function anthropicOutputByteLength(content: unknown): number {
+  if (!Array.isArray(content)) return 0;
+  let bytes = 0;
+  for (const block of content) {
+    const part = maybeJsonRecord(block);
+    if (!part) continue;
+    for (const key of ['text', 'thinking'] as const) {
+      if (typeof part[key] === 'string') bytes += utf8ByteLength(part[key]);
+    }
+    if (part.type === 'tool_use' && part.input !== undefined) {
+      bytes += utf8ByteLength(JSON.stringify(part.input));
+    }
+  }
+  return bytes;
+}
+
+function jsonOutputByteLength(payload: unknown, format: TokenUsageFormat): number {
+  const record = maybeJsonRecord(payload);
+  return format === 'anthropic'
+    ? anthropicOutputByteLength(record?.content)
+    : choicesOutputByteLength(record?.choices, 'message');
 }
 
 function isStreamingResponse(response: Response): boolean {

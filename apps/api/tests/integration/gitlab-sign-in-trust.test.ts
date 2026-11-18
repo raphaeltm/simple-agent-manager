@@ -141,6 +141,15 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
     sqlite.close();
   });
 
+  function seedExistingPublicGitLab() {
+    sqlite
+      .prepare(
+        `INSERT INTO accounts (id, account_id, provider_id, user_id, scope, created_at, updated_at)
+      VALUES ('owner-gitlab', '424242', 'gitlab', ?, 'read_user', 1, 1)`
+      )
+      .run(OWNER.id);
+  }
+
   function baseEnv(overrides: Partial<Env> = {}): Env {
     return {
       DATABASE: createSqliteD1(sqlite),
@@ -271,6 +280,7 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
 
   it('profile redirects drop Authorization before the cross-origin hop', async () => {
     const env = await runtimeGitLabEnv(PUBLIC_HOST);
+    seedExistingPublicGitLab();
     const gitlab = createFakeGitLab(PUBLIC_HOST, profileClaiming(OWNER.email));
     const requests: Request[] = [];
     vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -320,6 +330,7 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
 
   it.each([200, 307])('BetterAuth refresh handles %s using manual token fetch', async (status) => {
     const env = await runtimeGitLabEnv(PUBLIC_HOST);
+    seedExistingPublicGitLab();
     vi.stubGlobal('fetch', createFakeGitLab(PUBLIC_HOST, profileClaiming(OWNER.email)).fetch);
     await signInWithGitLab(env, PUBLIC_HOST);
     const now = Date.now();
@@ -435,6 +446,7 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
     // to, whatever GitLab host is configured now. SAM reads tokens only server-side, scoped to
     // the configured host (getBetterAuthAccessTokenForProvider).
     const env = await runtimeGitLabEnv(PUBLIC_HOST);
+    seedExistingPublicGitLab();
     vi.stubGlobal('fetch', createFakeGitLab(PUBLIC_HOST, profileClaiming(OWNER.email)).fetch);
     await signInWithGitLab(env, PUBLIC_HOST);
     expect(await currentUserId(env)).toBe(OWNER.id);
@@ -460,7 +472,7 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
     expect(await currentUserId(env)).toBe(OWNER.id);
   });
 
-  it('trusts a runtime-saved host that equals the GITLAB_HOST the deployer pinned', async () => {
+  it('requires explicit linking even for a runtime host pinned by the deployer', async () => {
     const env = await runtimeGitLabEnv(SELF_MANAGED_HOST, {
       GITLAB_HOST: `${SELF_MANAGED_HOST}/`,
     } as Partial<Env>);
@@ -468,9 +480,9 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
 
     const callback = await signInWithGitLab(env, SELF_MANAGED_HOST);
 
-    expect(callback.headers.get('location')).toBe(CALLBACK_URL);
-    expect(await currentUserId(env)).toBe(OWNER.id);
-    expect(gitlabAccounts()).toEqual([{ account_id: '424242', user_id: OWNER.id }]);
+    expect(callback.headers.get('location')).toContain('error=');
+    expect(await currentUserId(env)).toBeNull();
+    expect(gitlabAccounts()).toEqual([]);
   });
 
   it('still refuses a runtime-saved host that differs from the pinned GITLAB_HOST', async () => {
@@ -486,15 +498,15 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
     expect(gitlabAccounts()).toEqual([]);
   });
 
-  it('links gitlab.com to the owner even when it was configured at runtime', async () => {
+  it('requires explicit linking for runtime-configured gitlab.com', async () => {
     const env = await runtimeGitLabEnv(PUBLIC_HOST);
     vi.stubGlobal('fetch', createFakeGitLab(PUBLIC_HOST, profileClaiming(OWNER.email)).fetch);
 
     const callback = await signInWithGitLab(env, PUBLIC_HOST);
 
-    expect(callback.headers.get('location')).toBe(CALLBACK_URL);
-    expect(await currentUserId(env)).toBe(OWNER.id);
-    expect(gitlabAccounts()).toEqual([{ account_id: '424242', user_id: OWNER.id }]);
+    expect(callback.headers.get('location')).toContain('error=');
+    expect(await currentUserId(env)).toBeNull();
+    expect(gitlabAccounts()).toEqual([]);
   });
 
   // Box round R17 (D1): on a self-hosted box (SMTP, no AGENT_EMAIL) the owner alert for a newly
@@ -526,7 +538,7 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
     }
   });
 
-  it('links a self-managed host the deployer pinned in the Worker environment', async () => {
+  it('requires explicit linking for a self-managed host pinned in Worker environment', async () => {
     const env = baseEnv({
       GITLAB_HOST: SELF_MANAGED_HOST,
       GITLAB_CLIENT_ID: CLIENT_ID,
@@ -536,9 +548,9 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
 
     const callback = await signInWithGitLab(env, SELF_MANAGED_HOST);
 
-    expect(callback.headers.get('location')).toBe(CALLBACK_URL);
-    expect(await currentUserId(env)).toBe(OWNER.id);
-    expect(gitlabAccounts()).toEqual([{ account_id: '424242', user_id: OWNER.id }]);
+    expect(callback.headers.get('location')).toContain('error=');
+    expect(await currentUserId(env)).toBeNull();
+    expect(gitlabAccounts()).toEqual([]);
   });
 
   it('still signs a user linked through that same untrusted host back in', async () => {

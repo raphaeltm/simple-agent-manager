@@ -16,18 +16,12 @@
  * interval past the bound before it reads the answers.
  *
  * Proven discriminating (F1): removing the abandonment retry in `credentialRows` / `legacyKv` /
- * `resolveLegacyPlatformConfig` turns the matching case red; registering nothing on abandonment
- * in `ensureOncePerIsolate` turns the ensure case red (three extra ensures instead of one).
+ * `resolveLegacyPlatformConfig` turns the matching case red. (The ProjectData ensure memo no
+ * longer shares in-flight ensures, so it has no abandonment branch to test here.)
  */
-import {
-  DEFAULT_PROJECT_DATA_ENSURE_JOIN_WAIT_MS,
-  ensureOncePerIsolate,
-  resetProjectDataEnsureMemo,
-} from '@simple-agent-manager/project-data/internal/client/project-data-ensure-memo';
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Env } from '../../../src/env';
 import {
   __setSharedFlightResumeOnOwnTimerForTest,
   DEFAULT_SHARED_FLIGHT_JOIN_GRACE_MS,
@@ -55,7 +49,6 @@ beforeEach(() => {
   vi.useFakeTimers();
   __resetAdminSettingsCacheForTest();
   __resetPlatformConfigCacheForTest();
-  resetProjectDataEnsureMemo();
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -228,34 +221,6 @@ describe.each([
       counter.reset();
       await untilSettled(resolvePlatformConfig(env));
       expect(legacyReads()).toBe(0);
-    });
-  });
-
-  describe('ensureOncePerIsolate: waiters on a dropped ensure', () => {
-    it('send the slow Durable Object one extra ensure, not one per waiter', async () => {
-      let calls = 0;
-      const ensure = () => {
-        calls += 1;
-        return calls === 1 ? never<void>() : Promise.resolve();
-      };
-      const memoEnv = {} as Env;
-
-      void ensureOncePerIsolate(memoEnv, 'do-1', ensure);
-      await vi.advanceTimersByTimeAsync(0);
-      const waiters = [1, 2, 3].map(() => ensureOncePerIsolate(memoEnv, 'do-1', ensure));
-      const settled = watch(waiters);
-      await vi.advanceTimersByTimeAsync(
-        DEFAULT_PROJECT_DATA_ENSURE_JOIN_WAIT_MS + DEFAULT_SHARED_FLIGHT_JOIN_GRACE_MS - 1
-      );
-      expect(settled).toEqual([false, false, false]);
-      expect(calls).toBe(1);
-
-      await vi.advanceTimersByTimeAsync(1 + SHARED_FLIGHT_POLL_MS);
-      await Promise.all(waiters);
-      expect(calls).toBe(2);
-      // Remembered: a later caller pays nothing.
-      await ensureOncePerIsolate(memoEnv, 'do-1', ensure);
-      expect(calls).toBe(2);
     });
   });
 });

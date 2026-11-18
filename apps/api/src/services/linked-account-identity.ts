@@ -12,7 +12,7 @@
  * The providers' `getUserInfo` calls this with the provider account id: when that account is
  * already linked to a user whose email is verified, the user's stored email is reported instead,
  * so the override leaves it unchanged. Name and avatar still refresh. New users, implicit
- * same-email linking and unverified accounts are unchanged. A failed read changes nothing.
+ * same-email linking and unverified accounts are unchanged. A failed read aborts sign-in rather than risking an identity overwrite.
  */
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
@@ -40,15 +40,12 @@ export async function keepLinkedAccountEmail(
       .bind(providerId, accountId)
       .first<{ email: string }>();
     if (!row?.email) return incoming;
-    if (incoming.email && incoming.email.trim().toLowerCase() === row.email.toLowerCase()) {
-      return incoming;
-    }
     return { email: row.email, emailVerified: true };
   } catch (err) {
     log.warn('linked_account_identity.lookup_failed', {
       providerId,
       error: err instanceof Error ? err.message : String(err),
     });
-    return incoming;
+    throw new Error('Could not preserve linked account identity');
   }
 }
