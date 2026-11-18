@@ -57,8 +57,10 @@ export const REVERSE_TUNNEL_CONNECTOR_RUNCMD = `  - 'logger -t sam-boot "PHASE S
  * when the pool refills, not on the path of each proxied connection.
  * loginFailExit=false + Restart=always: frpc keeps
  * retrying (an frps restart, a Caddy restart, an authz rejection while the lease is being
- * fixed) instead of exiting. useSystemCa: frpc verifies the box's public certificate; without
- * it frpc would accept any certificate.
+ * fixed) instead of exiting. Type=exec makes `systemctl enable --now` fail when the binary
+ * cannot be executed, so the connector runcmd reports tunnel_connector rather than booting
+ * without a connector. useSystemCa: frpc verifies the box's public certificate; without it
+ * frpc would accept any certificate.
  */
 export const REVERSE_TUNNEL_WRITE_FILES = `${TUNNEL_LISTENER_WAIT_WRITE_FILE}
 
@@ -104,6 +106,7 @@ export const REVERSE_TUNNEL_WRITE_FILES = `${TUNNEL_LISTENER_WAIT_WRITE_FILE}
       StartLimitIntervalSec=0
 
       [Service]
+      Type=exec
       User=sam-frpc
       EnvironmentFile=/etc/sam/frpc/credential.env
       ExecStartPre=/usr/local/sbin/sam-wait-tunnel-listener

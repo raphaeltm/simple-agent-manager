@@ -123,7 +123,10 @@ export function reverseTunnelReplacements(variables: CloudInitVariables): Record
   const server = reverseTunnelServerAddress(variables.controlPlaneUrl) ?? { host: '', port: '443' };
   return {
     '{{ reverse_tunnel_credential }}': reverse ? (variables.reverseTunnelCredential ?? '') : '',
-    '{{ reverse_tunnel_remote_port }}': reverse ? (variables.reverseTunnelRemotePort ?? '') : '',
+    // Canonical decimal: frpc's TOML rejects a leading zero (validated numeric before render).
+    '{{ reverse_tunnel_remote_port }}': reverse
+      ? String(Number(variables.reverseTunnelRemotePort ?? ''))
+      : '',
     '{{ reverse_tunnel_server_addr }}': server.host,
     '{{ reverse_tunnel_server_port }}': server.port,
     '{{ reverse_tunnel_proxy_name }}': REVERSE_TUNNEL_PROXY_NAME,

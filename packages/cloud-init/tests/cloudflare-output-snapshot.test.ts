@@ -1,5 +1,6 @@
 /**
- * Byte-identity guard for the Cloudflare deployment's boot output.
+ * Byte-identity guard for the Cloudflare deployment's boot output. The baselines are committed
+ * files compared byte for byte; there is no update mode.
  *
  * The self-host reverse-tunnel mode (reverse-tunnel.ts) shares the tunnel firewall, the
  * loopback listener wait gate and the replacement table with the Cloudflare modes. These
@@ -8,6 +9,8 @@
  * Do not update them to make a reverse-tunnel change pass: a Cloudflare node must render
  * exactly what it rendered before.
  */
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import { generateCloudInit } from '../src/generate';
@@ -102,9 +105,14 @@ const cases: Array<[string, CloudInitVariables]> = [
 ];
 
 describe('Cloudflare cloud-init output is byte-identical to main', () => {
-  it.each(cases)('%s', async (name, variables) => {
-    const rendered = generateCloudInit(variables);
-    await expect(rendered).toMatchFileSnapshot(`./__snapshots__/cloudflare-output/${name}.yaml`);
+  // Read-only byte comparison: a missing baseline fails (readFileSync throws) instead of being
+  // written from the current output, and no line-ending normalization applies.
+  it.each(cases)('%s', (name, variables) => {
+    const baseline = readFileSync(
+      new URL(`./__snapshots__/cloudflare-output/${name}.yaml`, import.meta.url)
+    );
+    const rendered = Buffer.from(generateCloudInit(variables), 'utf8');
+    expect(rendered.equals(baseline)).toBe(true);
   });
 
   it('no Cloudflare rendering mentions the reverse-tunnel connector', () => {
