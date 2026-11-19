@@ -1250,6 +1250,7 @@ describe('push connectivity admission (closure must be complete per command)', (
     };
     const sig = 'Test <test@example.com> 0 +0000';
     const authorFirst = literal('commit', `author ${sig}\ntree ${plain.tree}\ncommitter ${sig}\n\nauthor first\n`);
+    const leading = literal('commit', ` junk\ntree ${plain.tree}\nauthor ${sig}\ncommitter ${sig}\n\nleading continuation\n`);
     const typeFirstTag = literal('tag', `type commit\nobject ${plain.commit}\ntag odd\ntagger ${sig}\n\nodd\n`);
     const badModeTree = literal('tree', Buffer.concat([Buffer.from('8 f\0'), Buffer.from(blob, 'hex')]));
     const badModeCommit = literal('commit', `tree ${badModeTree}\nauthor ${sig}\ncommitter ${sig}\n\nbad mode\n`);
@@ -1258,13 +1259,15 @@ describe('push connectivity admission (closure must be complete per command)', (
       token,
       [
         [ZERO, authorFirst, 'refs/heads/author-first'],
+        [ZERO, leading, 'refs/heads/leading'],
         [ZERO, typeFirstTag, 'refs/tags/type-first'],
         [ZERO, badModeCommit, 'refs/heads/bad-mode'],
         [ZERO, plain.commit, 'refs/heads/plain'],
       ],
-      packOf(work, [authorFirst, typeFirstTag, badModeTree, badModeCommit, plain.commit, plain.tree, blob])
+      packOf(work, [authorFirst, leading, typeFirstTag, badModeTree, badModeCommit, plain.commit, plain.tree, blob])
     );
     expect(out).toContain('ng refs/heads/author-first missing necessary objects');
+    expect(out).toContain('ng refs/heads/leading missing necessary objects');
     expect(out).toContain('ng refs/tags/type-first missing necessary objects');
     expect(out).toContain('ng refs/heads/bad-mode missing necessary objects');
     expect(out).toContain('ok refs/heads/plain');

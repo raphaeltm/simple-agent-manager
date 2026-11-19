@@ -44,4 +44,6 @@ Who can trigger them:
 - [ ] Decide on and implement per-token push rate limiting, or record why not.
 - [ ] Every malformed command line is answered with `ng` or a refusal, never dropped.
 - [ ] A push forking from an old, heavy commit succeeds within the budget. A real-git test proves it, and a stale or poisoned cache cannot vouch for a missing object.
+- [ ] Decide whether to bound tree depth or total path length; 1,500 nested directories break checkout of the default branch.
+- [ ] Optionally accept uppercase-hex oids in commit and tag headers, as git does (`isOid` is lowercase-only).
 - [ ] Optionally reject the remaining fsck error-level shapes that default clients tolerate but `transfer.fsckObjects=true` clients refuse: unsorted trees, malformed idents, CR in headers.

@@ -1280,9 +1280,15 @@ function headerKeyList(lines: string[]): string[] {
   return lines.filter((l) => !l.startsWith(" ")).map((l) => (l.includes(" ") ? l.slice(0, l.indexOf(" ")) : l));
 }
 
+/** `.git` as git's own path checks see it: case, trailing dots/spaces, NTFS short name and streams. */
 function isDotGitName(name: string): boolean {
-  return name.toLowerCase().replace(/[ .]+$/, "") === ".git";
+  const n = name.toLowerCase().replace(/[ .]+$/, "");
+  return n === ".git" || n === "git~1" || n.startsWith(".git:");
 }
+
+const OID_LINE = /^[0-9a-f]{40}$/;
+/** Longest single path component git checks out (NAME_MAX). */
+const MAX_TREE_NAME_BYTES = 255;
 
 /**
  * SAM: refuse objects git itself cannot read, so a pushed object can never make the
@@ -1297,6 +1303,12 @@ function assertGitObjectShape(obj: { type: ObjType; data: Uint8Array }): void {
     const lines = rawHeaderLines(obj.data);
     if (!lines) throw new GitParseError(`${obj.type} headers are not newline-terminated`);
     if (lines.some((l) => l.includes("\0"))) throw new GitParseError(`${obj.type} header contains NUL`);
+    // Git reads the first line by position: it must be the object's own first header, never a
+    // continuation line that the key list below would skip.
+    const first = obj.type === "commit" ? "tree " : "object ";
+    if (!lines[0]?.startsWith(first) || !OID_LINE.test(lines[0].slice(first.length))) {
+      throw new GitParseError(`${obj.type} must start with a ${first.trim()} line`);
+    }
     const keys = headerKeyList(lines);
     if (obj.type === "commit") {
       let i = 0;
@@ -1328,8 +1340,19 @@ function assertGitObjectShape(obj: { type: ObjType; data: Uint8Array }): void {
       const name = byteString(data, sp + 1, nul);
       pos = nul + 21;
       if (!TREE_MODE.test(mode)) throw new GitParseError("tree entry has an invalid mode");
-      if (!name || name.includes("/") || name === "." || name === ".." || isDotGitName(name) || names.has(name)) {
+      if (
+        !name ||
+        name.length > MAX_TREE_NAME_BYTES ||
+        name.includes("/") ||
+        name === "." ||
+        name === ".." ||
+        isDotGitName(name) ||
+        names.has(name)
+      ) {
         throw new GitParseError("tree entry has an invalid or duplicate name");
+      }
+      if (mode === "120000" && name.toLowerCase().replace(/[ .]+$/, "") === ".gitmodules") {
+        throw new GitParseError("tree has a .gitmodules symlink");
       }
       names.add(name);
     }

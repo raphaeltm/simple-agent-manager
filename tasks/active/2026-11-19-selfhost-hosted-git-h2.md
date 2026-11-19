@@ -115,3 +115,14 @@ The narrow verification found a HIGH regression introduced by the cache stop in 
 The shape check moved to raw bytes. Lossy UTF-8 decoding hid BOM-prefixed commits and tags (clone-breaking) and falsely merged distinct non-UTF-8 names. Header sections must be newline-terminated, header NUL is refused, `.`, `..` and `.git` variants are refused, and every `100xxx` file mode is accepted. The budget-tolerant ancestry check was confirmed sound (verdict D: PASS).
 
 Unit tests cover each fix: an absent cached parent is refused, with a control; the stamp guard; GC invalidation, with a control; BOM, unterminated, NUL, `.git` and `..` cases, plus accepted Latin-1, BOM-only and `100600` names. Each fix was mutated once and its test went red.
+
+## Final re-verification of 77e55dbb (00:10 UTC)
+
+The original HIGH is closed. The race reproduced in 5 of 11 runs on 8bc9a3af4 and never on 77e55dbb. No admission path reads the reachable cache, and the shape check accepts everything git handles.
+
+New findings, fixed:
+- HIGH: a leading continuation line before `tree`/`object` was skipped by the key list, but git rejects such an object. The first header line must now be exactly `tree <oid>` or `object <oid>`.
+- MEDIUM: a second cold clone rewriting a stamped cache left it partial during a yield, and a push in that window could stamp the partial set valid. `saveReachable` now unstamps before rewriting.
+- LOW: `git~1`, `.git:` streams, a `.gitmodules` symlink and names over 255 bytes are now refused.
+
+Deferred to the backlog: path depth, and accepting uppercase-hex oids. Each guard was mutated once and its test went red. The real-git shape test also pushes the leading-continuation commit.

@@ -357,6 +357,48 @@ describe('push admission: object shapes git can read', () => {
     ]);
   });
 
+  it('refuses a leading continuation line and checkout-breaking names, with controls accepted', async () => {
+    const repo = new Repo();
+    const blob = repo.blob('lead-blob');
+    const tree = repo.tree('lead-tree', [treeEntry('100644', 'f', blob)]);
+    const good = repo.commit('lead-good', tree);
+    const sigLines = `author ${SIG}\ncommitter ${SIG}\n`;
+    const leadCommit = repo.put(
+      'lead-commit',
+      'commit',
+      enc.encode(` junk\ntree ${tree}\n${sigLines}\nx\n`)
+    );
+    const leadTag = repo.put(
+      'lead-tag',
+      'tag',
+      enc.encode(` junk\nobject ${good}\ntype commit\ntag t\n\nx\n`)
+    );
+    const named = (label: string, mode: string, name: string, oid: string) =>
+      repo.commit(label, repo.tree(`${label}-tree`, [treeEntry(mode, name, oid)]));
+    const plan = await decide(repo, [
+      [ZERO, leadCommit, 'refs/heads/lead'],
+      [ZERO, leadTag, 'refs/tags/lead'],
+      [ZERO, named('short', '40000', 'GIT~1', tree), 'refs/heads/short'],
+      [ZERO, named('stream', '100644', '.git:x', blob), 'refs/heads/stream'],
+      [ZERO, named('modules', '120000', '.gitmodules', blob), 'refs/heads/modules'],
+      [ZERO, named('long', '100644', 'n'.repeat(256), blob), 'refs/heads/long'],
+      [ZERO, named('limit', '100644', 'n'.repeat(255), blob), 'refs/heads/limit'],
+      [ZERO, named('modules-file', '100644', '.gitmodules', blob), 'refs/heads/modules-file'],
+      [ZERO, named('gitignore', '100644', '.gitignore', blob), 'refs/heads/gitignore'],
+    ]);
+    expect(plan.decisions.map((d) => (d.reject ? 'reject' : 'set'))).toEqual([
+      'reject',
+      'reject',
+      'reject',
+      'reject',
+      'reject',
+      'reject',
+      'set',
+      'set',
+      'set',
+    ]);
+  });
+
   it('refuses commits, tags and trees git cannot parse, with git-shaped controls accepted', async () => {
     const repo = new Repo();
     const tree = repo.tree('shape-tree', [treeEntry('100644', 'f', repo.blob('shape-blob'))]);
@@ -515,7 +557,11 @@ describe('reachable cache stamping and GC', () => {
     expect(moved.sql.exec).not.toHaveBeenCalled();
     const steady = fakeThis('same');
     await GitStore.prototype.saveReachable.call(steady as unknown as GitStore, set, 'same');
-    expect(steady.setMeta).toHaveBeenCalledWith('reachable-version', 'same');
+    // Unstamped before the rewrite, restamped only after it completes.
+    expect(steady.setMeta.mock.calls).toEqual([
+      ['reachable-version', ''],
+      ['reachable-version', 'same'],
+    ]);
   });
 
   it('invalidates the reachable cache when GC deletes objects, and only then', async () => {

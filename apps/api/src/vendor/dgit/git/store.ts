@@ -333,6 +333,10 @@ export class GitStore {
     // describe old refs; stamping it with the new version would let a stranded,
     // later-collected object pass for reachable.
     if (this.reachableVersion() !== version) return;
+    // Unstamp before rewriting: while this rewrite yields, a stamp left from an earlier
+    // save would present the partial table as the whole reachable set, and a push in the
+    // window would extend that partial table and re-stamp it valid.
+    this.setMeta("reachable-version", "");
     this.sql.exec("DELETE FROM reachable");
     const n = set.markedSize;
     for (let i = 0; i < n; i++) {
