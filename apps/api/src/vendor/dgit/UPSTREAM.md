@@ -6,29 +6,29 @@
 
 ## What is here
 
-Local change to every vendored file: two header lines, `// @ts-nocheck` and
-`/* eslint-disable */`. Upstream typechecks under `strict` but not SAM's
+Vendored files carry `/* eslint-disable */` and `// @ts-nocheck` headers. Upstream typechecks under `strict` but not SAM's
 `noUncheckedIndexedAccess`, and follows its own lint style. `protocol.ts` and `packstore.ts` also
-carry a `// FILE SIZE EXCEPTION` line. Nothing else differs from upstream.
+carry a `// FILE SIZE EXCEPTION` line. SAM security adaptations are listed below.
 
-`git/` is upstream `src/git/` copied byte for byte, minus the three modules only the web UI
+`git/` is adapted from upstream `src/git/`, minus the three modules only the web UI
 used (`blame.ts`, `diff.ts`, `snapshot.ts`). Upstream's Worker router (`mod.ts`), registry
 Durable Object (`registry.ts`), cgit-style UI (`ui/`) and its `RepoCell` class are not vendored.
 
 Only the self-host build contains this code; the Cloudflare Worker's entry never imports it (see
 `apps/api/src/selfhost/hosted-git.ts`).
 
-SAM's Durable Object, `apps/api/src/durable-objects/hosted-git-repo.ts`, is adapted from
+SAM's Durable Object, `apps/api/src/selfhost/hosted-git/hosted-git-repo.ts`, is adapted from
 upstream `src/repo.ts` (`RepoCell`): it keeps the smart-HTTP protocol paths (`info/refs`,
 `git-upload-pack`, `git-receive-pack`), delete and the GC alarm, and adds SAM's push and
-repository caps. Authentication is SAM's (`apps/api/src/services/hosted-git/`), not upstream's.
+repository caps. Authentication is SAM's (`apps/api/src/selfhost/hosted-git/`), not upstream's.
 
 ## Updating
 
 Copy the same files from a newer upstream commit, update the commit above, and run the hosted git
-conformance suite (`pnpm --filter @simple-agent-manager/api test:hosted-git`). Do not edit files
-under `git/` beyond those two header lines: keep local behaviour in the Durable Object so the next update is a copy.
+conformance suite (`pnpm --filter @simple-agent-manager/api test:hosted-git`). Preserve and reapply the SAM resource policy and SQL safety changes below; an upstream copy alone would remove these protections. Keep repository authentication and lifecycle policy in the self-host adapter.
 
 ## H2 resource policy
 
 SAM adds `git/budget.ts` around pack ingest, reads and delta application. Every request and GC invocation carries a separate cumulative decompression and deadline budget, including streamed responses. Object size is checked before allocation and while inflating, delta targets before allocation, and delta depth before traversal. Policy values come from the optional repository backend's typed admin settings. These are deliberate security changes to the vendored code; this directory is not byte-for-byte upstream.
+
+SQL identifiers use static allowlisted statements, and variable-sized bind lists are split below the runtime parameter ceiling. The additional GC admission and response accounting checks are covered by the hosted git suite.
