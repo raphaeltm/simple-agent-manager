@@ -761,13 +761,21 @@ describe('compact archive bounded failures', () => {
     const starter = writeImmutableJson(bucket, 'own-timer.json', { ok: true }, 2_000);
     await flush();
     expect(bucket.put).toHaveBeenCalledTimes(1);
+    // Wait until the joiner is parked on the pending PUT, signalled by the timer it registers
+    // there (its poll timer on celld, its deadline timer otherwise). It hashes its body with
+    // real async crypto first, so a fixed number of ticks is not enough under load.
+    const timersBefore = vi.getTimerCount();
     const joiner = writeImmutableJson(bucket, 'own-timer.json', { ok: true }, 2_000);
     let joinerSettled = false;
     void joiner.then(
       () => (joinerSettled = true),
       () => (joinerSettled = true)
     );
-    await flush();
+    for (let i = 0; i < 1_000 && vi.getTimerCount() <= timersBefore; i++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    expect(vi.getTimerCount()).toBeGreaterThan(timersBefore);
+    expect(joinerSettled).toBe(false);
 
     finishPut?.({} as R2Object);
     await expect(starter).resolves.toBeUndefined();
