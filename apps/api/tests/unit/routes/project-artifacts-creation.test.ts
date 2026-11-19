@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { registerProjectCreateRoute } from '../../../src/routes/projects/project-create';
-import { registerArtifactsBackendFallback } from '../../../src/services/hosted-git/backend';
+import { registerArtifactsBackendFallback } from '../../../src/services/artifacts/backend';
 
 /**
  * The Artifacts branch of `POST /api/projects` resolves its backend through

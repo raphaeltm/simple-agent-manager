@@ -1,5 +1,6 @@
 // @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
 /* eslint-disable */
+import { gitWorkLimits } from "./budget";
 import { concat, te, sha1hex } from "./util";
 import { deflate, inflate } from "./zlib";
 import { ObjType } from "./objects";
@@ -115,6 +116,10 @@ export class GitStore {
       .exec<{ type: ObjType; size: number }>("SELECT type, size FROM objects WHERE oid = ?", oid)
       .toArray();
     if (!rows.length) return null;
+    const size = rows[0].size;
+    if (!Number.isSafeInteger(size) || size < 0 || size > gitWorkLimits().maxObjectBytes) {
+      throw new Error("git object exceeds inflated size limit");
+    }
     const chunks = this.sql
       .exec<{ data: ArrayBuffer }>("SELECT data FROM chunks WHERE oid = ? ORDER BY seq", oid)
       .toArray();

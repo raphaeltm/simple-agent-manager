@@ -5,11 +5,23 @@ import {
   readGitChunk,
   withGitWorkBudget,
 } from '../../../src/vendor/dgit/git/budget';
+import { deflate, inflate } from '../../../src/vendor/dgit/git/zlib';
 import { applyDelta } from '../../../src/vendor/dgit/git/pack';
 
 const limits = { maxObjectBytes: 32, maxInflatedBytes: 48, maxDeltaDepth: 2, workTimeoutMs: 1000 };
 
 describe('hosted git work budget', () => {
+  it('bounds loose-object reads after garbage collection and charges repeated inflations', () => {
+    const small = deflate(new Uint8Array(24));
+    const large = deflate(new Uint8Array(33));
+    withGitWorkBudget(limits, () => {
+      expect(() => inflate(large)).toThrow('inflated size limit');
+      expect(inflate(small)).toHaveLength(24);
+      expect(inflate(small)).toHaveLength(24);
+      expect(() => inflate(small)).toThrow('decompression budget');
+    });
+  });
+
   it('rejects a delta target before allocation, while a valid delta works', () => {
     withGitWorkBudget(limits, () => {
       expect(() => applyDelta(new Uint8Array(), new Uint8Array([0, 33]))).toThrow(

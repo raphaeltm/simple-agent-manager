@@ -1,6 +1,7 @@
 // @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
 /* eslint-disable */
 import pako from "pako";
+import { chargeGitWork, gitWorkLimits } from "./budget";
 import { concat } from "./util";
 
 /** Deflate with a zlib wrapper (what git uses for loose objects and pack entries). */
@@ -9,7 +10,18 @@ export function deflate(data: Uint8Array): Uint8Array {
 }
 
 export function inflate(data: Uint8Array): Uint8Array {
-  return pako.inflate(data);
+  const inf = new pako.Inflate({ chunkSize: 16 * 1024 });
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  inf.onData = (chunk: Uint8Array) => {
+    size += chunk.length;
+    if (size > gitWorkLimits().maxObjectBytes) throw new Error("git object exceeds inflated size limit");
+    chargeGitWork(chunk.length);
+    parts.push(chunk);
+  };
+  inf.push(data, true);
+  if (inf.err) throw new Error(`inflate failed: ${inf.msg}`);
+  return concat(parts);
 }
 
 /**

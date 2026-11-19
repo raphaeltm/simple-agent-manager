@@ -6,7 +6,7 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { errors } from '../../middleware/error';
-import { resolveArtifactsBackend } from '../../services/artifacts/backend';
+import { createArtifactsRuntimeToken, resolveArtifactsBackend } from '../../services/artifacts/backend';
 import { getInstallationToken, getUserInstallationRepositories } from '../../services/github-app';
 import {
   GitHubCliPolicyError,
@@ -237,7 +237,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     const requestedScope = c.req.query('scope') === 'read' ? ('read' as const) : ('write' as const);
     const repo = await artifacts.get(artifactsRepoId);
     await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'git_token');
-    const tokenResult = await repo.createToken(requestedScope, ttl, {
+    const tokenResult = await createArtifactsRuntimeToken(c.env, repo, requestedScope, ttl, {
       userId: workspace.userId,
       workspaceId: workspace.workspaceId,
       callbackGeneration: workspace.callbackGeneration ?? null,

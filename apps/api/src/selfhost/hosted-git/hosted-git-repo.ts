@@ -216,6 +216,12 @@ export class HostedGitRepo extends DurableObject {
     let result: HostedGitGcResult = { removed: 0, kept: 0 };
     const run = this.receiveChain.then(() =>
       this.ctx.blockConcurrencyWhile(async () => {
+        // Recheck after acquiring the push slot: a clone may have started while GC queued.
+        if (this.activeUploads > 0) {
+          this.store.setMeta('gc-pending', '1');
+          await this.ctx.storage.setAlarm(Date.now() + GC_DELAY_MS);
+          return;
+        }
         result = await runHostedGitGc(this.store);
       })
     );

@@ -2,6 +2,7 @@
 /* eslint-disable */
 // FILE SIZE EXCEPTION: vendored third-party code kept identical to upstream dgit (see ../UPSTREAM.md)
 import pako from "pako";
+import { inflate as inflateAll } from "./zlib";
 import { chargeGitWork, gitWorkLimits, readGitChunk } from "./budget";
 import { td, concat, toHex, Sha1 } from "./util";
 import { Sha1Dc, Sha1CollisionError } from "./sha1";
@@ -45,20 +46,6 @@ const RAW_CHUNK_CACHE = TIGHT_MEMORY ? 4 : 8;
  * size.
  */
 const INFLATE_CHUNK = 16 * 1024;
-const inflateAll = (data: Uint8Array): Uint8Array => {
-  const inf = new pako.Inflate({ chunkSize: INFLATE_CHUNK });
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  inf.onData = (chunk: Uint8Array) => {
-    size += chunk.length;
-    if (size > gitWorkLimits().maxObjectBytes) throw new Error("git object exceeds inflated size limit");
-    chargeGitWork(chunk.length);
-    chunks.push(chunk);
-  };
-  inf.push(data, true);
-  if (inf.err) throw new Error(`inflate failed: ${inf.msg}`);
-  return concat(chunks);
-};
 
 export interface ObjRec {
   type: ObjType;
