@@ -37,7 +37,9 @@ import { AppError } from '../middleware/error';
 import { resolveAdminSetting } from './admin-settings-resolution';
 import { decrypt } from './encryption';
 import {
-  CLAIM_POOL_SQL,
+  CLAIM_NEW_POOL_SQL,
+  CLAIM_STORED_POOL_SQL,
+  LIST_UNREADABLE_FOREIGN_ROWS_SQL,
   POOL_HOLDERS_SQL,
   READ_CLAIM_SQL,
   UNINDEXED_ROWS_SQL,
@@ -147,12 +149,24 @@ export class GcpWifPoolIndexUnavailableError extends AppError {
   }
 }
 
+export class GcpWifPoolOwnershipUnresolvedError extends AppError {
+  constructor() {
+    super(
+      503,
+      'GCP_WIF_POOL_OWNERSHIP_UNRESOLVED',
+      'SAM cannot read a stored Google Cloud credential that might use this workload identity pool, so it cannot record a new owner for the pool yet. An administrator must fix the encryption key or remove that credential.'
+    );
+    this.name = 'GcpWifPoolOwnershipUnresolvedError';
+  }
+}
+
 /** True for the refusals this module raises, which callers must surface unchanged. */
 export function isGcpWifPoolOwnershipError(err: unknown): boolean {
   return (
     err instanceof GcpWifPoolOwnedByAnotherOwnerError ||
     err instanceof GcpWifPoolInvalidError ||
-    err instanceof GcpWifPoolIndexUnavailableError
+    err instanceof GcpWifPoolIndexUnavailableError ||
+    err instanceof GcpWifPoolOwnershipUnresolvedError
   );
 }
 
@@ -254,14 +268,14 @@ function ownerBinds(kind: 'user' | 'platform', userId: string | null): [string, 
   return [kind, userId ?? ''];
 }
 
-function claimStatement(
+function newClaimStatement(
   env: Env,
   poolKey: string,
   kind: 'user' | 'platform',
   userId: string | null,
   now: string
 ): D1PreparedStatement {
-  return env.DATABASE.prepare(CLAIM_POOL_SQL).bind(
+  return env.DATABASE.prepare(CLAIM_NEW_POOL_SQL).bind(
     poolKey,
     kind,
     userId,
@@ -287,8 +301,8 @@ async function indexRows(env: Env, rows: UnindexedRow[]): Promise<number> {
     } catch (err) {
       // An unreadable row cannot be exchanged either. It is retried after
       // `gcpWif.poolIndexUnreadableRetryMinutes` (a key fix makes it readable without a new IV),
-      // not on every check. Until then it withholds first claims for other owners
-      // (CLAIM_POOL_SQL), because it might name the pool being claimed (rule 41, rule 47).
+      // not on every check. Until then it withholds NEW first claims by other owners
+      // (CLAIM_NEW_POOL_SQL), because it might name the pool being claimed (rule 41, rule 47).
       unreadable = 1;
       log.error('gcp_wif_pool_index.row_unreadable', {
         sourceTable: row.sourceTable,
@@ -309,7 +323,16 @@ async function indexRows(env: Env, rows: UnindexedRow[]): Promise<number> {
         now
       )
     );
-    if (poolKey) statements.push(claimStatement(env, poolKey, row.ownerKind, row.ownerUserId, now));
+    if (poolKey) {
+      statements.push(
+        env.DATABASE.prepare(CLAIM_STORED_POOL_SQL).bind(
+          poolKey,
+          row.ownerKind,
+          row.ownerUserId,
+          now
+        )
+      );
+    }
   }
   if (statements.length > 0) await env.DATABASE.batch(statements);
   return statements.length;
@@ -495,7 +518,7 @@ export async function assertGcpWifPoolOwnership(
   const [, claimRows] = await runPair(
     env,
     [
-      claimStatement(env, identity.key, ownerKind, ownerUserId, new Date().toISOString()),
+      newClaimStatement(env, identity.key, ownerKind, ownerUserId, new Date().toISOString()),
       env.DATABASE.prepare(READ_CLAIM_SQL).bind(identity.key),
     ],
     `${context}:claim`
@@ -504,13 +527,23 @@ export async function assertGcpWifPoolOwnership(
   const [winner] = claim;
   if (!winner) {
     // No claim was written: another owner's credential is unreadable and might name this pool.
-    log.warn('gcp_wif_pool.claim_withheld_unreadable', {
+    // Needs an operator (fix the key, or remove the corrupt credential), so log it at error level
+    // with the rows to look at.
+    const unreadable = await env.DATABASE.prepare(LIST_UNREADABLE_FOREIGN_ROWS_SQL)
+      .bind(...ownerBinds(ownerKind, ownerUserId))
+      .all<Record<string, unknown>>()
+      .then((result) => result.results ?? [])
+      .catch(() => []);
+    log.error('gcp_wif_pool.claim_withheld_unreadable', {
       context,
       poolKey: identity.key,
       owner: ownerLabel(owner),
+      unreadableCredentials: unreadable.map(
+        (row) => `${String(row.sourceTable)}:${String(row.sourceId)}`
+      ),
       action: 'refused',
     });
-    throw new GcpWifPoolIndexUnavailableError();
+    throw new GcpWifPoolOwnershipUnresolvedError();
   }
   if (claim.length !== 1) throw new GcpWifPoolIndexUnavailableError();
   if (!heldBy(winner, owner)) refuse(context, identity, owner, claim);

@@ -4,7 +4,7 @@ import type { Env } from '../env';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { encrypt } from './encryption';
-import { assertGcpWifPoolOwnership } from './gcp-wif-pool-ownership';
+import { assertGcpWifPoolOwnership, reconcileGcpWifPoolIndex } from './gcp-wif-pool-ownership';
 import { serializeGcpCredential } from './provider-credentials';
 
 export interface StoredGcpCredentialResult {
@@ -118,6 +118,10 @@ export async function replaceUserGcpCredential(
       { kind: 'user', userId },
       'save_user_gcp_credential'
     );
+  } else {
+    // Replacing a WIF connection with a key: record the outgoing pool's claim first, because
+    // Google may still trust it after the SAM row changes.
+    await reconcileGcpWifPoolIndex(env, 'replace_user_gcp_credential');
   }
   const now = new Date().toISOString();
   const legacyId = ulid();

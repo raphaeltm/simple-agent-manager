@@ -37,6 +37,7 @@ const { credentialsRoutes } = await import('../../../src/routes/credentials');
 const { ccRoutes } = await import('../../../src/routes/composable-credentials');
 const { runGcpSetup } = await import('../../../src/services/gcp-setup');
 const {
+  GcpWifPoolOwnershipUnresolvedError,
   assertGcpWifPayloadOwnership,
   GcpWifPoolIndexUnavailableError,
   GcpWifPoolInvalidError,
@@ -939,14 +940,15 @@ describe('review round 3: unresolved rows, budgets, deletes and deployments', ()
       .run(id, ownerId, foreign.ciphertext, foreign.iv, NOW, NOW);
   }
 
-  it('withholds a first claim while another owner’s credential is unreadable', async () => {
+  it('withholds a NEW first claim while another owner’s credential is unreadable', async () => {
     // A's credential for POOL_A cannot be decrypted (for example a key misconfiguration).
     await storeUnreadableCc('cc-a-unreadable', 'user-a');
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
 
+    // B names POOL_A with a credential SAM has not stored: a new first claim.
     await expect(exchange(user('user-b'), wif(POOL_A))).rejects.toBeInstanceOf(
-      GcpWifPoolIndexUnavailableError
+      GcpWifPoolOwnershipUnresolvedError
     );
     expect(signIdentityToken).not.toHaveBeenCalled();
     expect(sqlite.prepare('SELECT count(*) AS n FROM gcp_wif_pool_claims').get()).toEqual({
@@ -1070,5 +1072,76 @@ describe('review round 3: unresolved rows, budgets, deletes and deployments', ()
       })
     ).rejects.toBeInstanceOf(GcpWifPoolOwnedByAnotherOwnerError);
     expect(google).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('an unreadable row does not refuse stored credentials (rule 41)', () => {
+  it('claims every stored readable credential in the page, before and after the unreadable one', async () => {
+    const otherKey = Buffer.from('fedcba9876543210fedcba9876543210').toString('base64');
+    // Insert order puts the unreadable row between two readable ones of other owners.
+    await storeCcRow('cc-1-a', 'user-a', JSON.stringify(wif(POOL_A)));
+    const bad = await encrypt(JSON.stringify(wif(POOL_PLATFORM)), otherKey);
+    sqlite
+      .prepare(
+        `INSERT INTO cc_credentials (id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at)
+         VALUES ('cc-2-m', 'user-m', 'x', 'cloud-provider', ?, ?, 1, ?, ?)`
+      )
+      .run(bad.ciphertext, bad.iv, NOW, NOW);
+    await storeCcRow('cc-3-b', 'user-b', JSON.stringify(wif(POOL_B)));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    // Both stored owners exchange normally despite user-m's unreadable row.
+    await expect(exchange(user('user-a'), wif(POOL_A))).resolves.toBe('sa-token');
+    await expect(exchange(user('user-b'), wif(POOL_B))).resolves.toBe('sa-token');
+    expect(
+      sqlite
+        .prepare('SELECT pool_key, owner_user_id FROM gcp_wif_pool_claims ORDER BY pool_key')
+        .all()
+    ).toEqual([
+      { pool_key: '111111111111/sam-pool', owner_user_id: 'user-a' },
+      { pool_key: '333333333333/sam-pool', owner_user_id: 'user-b' },
+    ]);
+  });
+
+  it('a disconnect with another owner’s unreadable row present still leaves the pool claimed', async () => {
+    const otherKey = Buffer.from('fedcba9876543210fedcba9876543210').toString('base64');
+    const bad = await encrypt(JSON.stringify(wif(POOL_PLATFORM)), otherKey);
+    sqlite
+      .prepare(
+        `INSERT INTO cc_credentials (id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at)
+         VALUES ('cc-m-bad', 'user-m', 'x', 'cloud-provider', ?, ?, 1, ?, ?)`
+      )
+      .run(bad.ciphertext, bad.iv, NOW, NOW);
+    await storeLegacyRow('cred-a', 'user-a', wif(POOL_A));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    auth.userId = 'user-a';
+    expect(
+      (await testApp().request('/api/credentials/gcp', { method: 'DELETE' }, env)).status
+    ).toBe(200);
+
+    auth.userId = 'user-b';
+    expect((await postGcpCredential(wif(POOL_A))).status).toBe(409);
+  });
+
+  it('replacing a WIF connection with a service-account key keeps the old pool claimed', async () => {
+    await storeLegacyRow('cred-a', 'user-a', wif(POOL_A));
+    await replaceUserGcpCredential(env, 'user-a', {
+      version: GCP_CREDENTIAL_VERSION,
+      provider: 'gcp',
+      authType: 'service-account-key',
+      gcpProjectId: 'gcp-a',
+      serviceAccountEmail: 'sa@gcp-a.iam.gserviceaccount.com',
+      privateKeyId: 'kid',
+      privateKey: 'not-a-real-key',
+      defaultZone: 'us-central1-a',
+    });
+    await expect(
+      assertGcpWifPayloadOwnership(
+        env,
+        JSON.stringify(wif(POOL_A)),
+        { kind: 'user', userId: 'user-b' },
+        't'
+      )
+    ).rejects.toBeInstanceOf(GcpWifPoolOwnedByAnotherOwnerError);
   });
 });

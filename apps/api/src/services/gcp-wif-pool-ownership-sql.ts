@@ -96,27 +96,44 @@ ON CONFLICT (source_table, source_id) DO UPDATE SET
   iv = excluded.iv, owner_kind = excluded.owner_kind, owner_user_id = excluded.owner_user_id,
   pool_key = excluded.pool_key, unreadable = excluded.unreadable, indexed_at = excluded.indexed_at`;
 
-// First owner wins: the primary key makes concurrent claims race-free. A claim is withheld while
-// a live credential of a different owner could not be decrypted: it might name this pool, and a
-// claim granted now would outlive the key fix. The unreadable row is retried after
-// `gcpWif.poolIndexUnreadableRetryMinutes`; an operator removes a permanently corrupt row.
+// Live credentials of a different owner that could not be decrypted, at their indexed IV.
+const UNREADABLE_FOREIGN_ROWS = `
+SELECT u.source_table AS sourceTable, u.source_id AS sourceId
+  FROM gcp_wif_pool_index u
+ WHERE u.unreadable = 1
+   AND NOT (u.owner_kind = ? AND COALESCE(u.owner_user_id, '') = ?)
+   AND (
+     (u.source_table = 'credentials' AND EXISTS (
+        SELECT 1 FROM credentials c WHERE c.id = u.source_id AND c.iv = u.iv))
+     OR (u.source_table = 'platform_credentials' AND EXISTS (
+        SELECT 1 FROM platform_credentials p WHERE p.id = u.source_id AND p.iv = u.iv))
+     OR (u.source_table = 'cc_credentials' AND EXISTS (
+        SELECT 1 FROM cc_credentials cc WHERE cc.id = u.source_id AND cc.iv = u.iv))
+   )`;
+
+// Index-time claim for a credential that is already stored: first owner wins. Stored rows predate
+// the check, so their claims are recorded unconditionally; withholding them would turn one
+// unreadable row into refused exchanges for every existing user (rule 41).
+// Binds: pool key, owner kind, owner user id, claimed at.
+export const CLAIM_STORED_POOL_SQL = `
+INSERT INTO gcp_wif_pool_claims (pool_key, owner_kind, owner_user_id, claimed_at)
+VALUES (?, ?, ?, ?)
+ON CONFLICT (pool_key) DO NOTHING`;
+
+// Check-time first claim (a new credential naming an unclaimed pool). The primary key makes
+// concurrent claims race-free. It is withheld while a live credential of a DIFFERENT owner could
+// not be decrypted: that row might name this pool, and a claim granted now would outlive the key
+// fix. The unreadable row is retried after `gcpWif.poolIndexUnreadableRetryMinutes`; an operator
+// removes a permanently corrupt row.
 // Binds: pool key, owner kind, owner user id, claimed at, owner kind, owner user id or ''.
-export const CLAIM_POOL_SQL = `
+export const CLAIM_NEW_POOL_SQL = `
 INSERT INTO gcp_wif_pool_claims (pool_key, owner_kind, owner_user_id, claimed_at)
 SELECT ?, ?, ?, ?
- WHERE NOT EXISTS (
-   SELECT 1 FROM gcp_wif_pool_index u
-    WHERE u.unreadable = 1
-      AND NOT (u.owner_kind = ? AND COALESCE(u.owner_user_id, '') = ?)
-      AND (
-        (u.source_table = 'credentials' AND EXISTS (
-           SELECT 1 FROM credentials c WHERE c.id = u.source_id AND c.iv = u.iv))
-        OR (u.source_table = 'platform_credentials' AND EXISTS (
-           SELECT 1 FROM platform_credentials p WHERE p.id = u.source_id AND p.iv = u.iv))
-        OR (u.source_table = 'cc_credentials' AND EXISTS (
-           SELECT 1 FROM cc_credentials cc WHERE cc.id = u.source_id AND cc.iv = u.iv))
-      ))
+ WHERE NOT EXISTS (${UNREADABLE_FOREIGN_ROWS})
 ON CONFLICT (pool_key) DO NOTHING`;
+
+// Binds: owner kind, owner user id or ''.
+export const LIST_UNREADABLE_FOREIGN_ROWS_SQL = `${UNREADABLE_FOREIGN_ROWS} LIMIT 5`;
 
 // Binds: pool key.
 export const READ_CLAIM_SQL = `
