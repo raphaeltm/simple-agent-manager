@@ -20,7 +20,7 @@ WIF lets Google trust tokens from an outside identity provider. Here, the identi
 2. Google's **Security Token Service** (STS) checks that token against a **provider** in a **workload identity pool** in your project. The provider has an _attribute condition_, a small [CEL](https://cel.dev/) expression the token must satisfy.
 3. If the token passes, Google lets it act as a **service account** in your project. Which identities may do that is set by an IAM binding on the service account.
 
-No secret is stored anywhere. The trust lives in your Google Cloud project, and SAM proves its identity by signing tokens.
+No Google key is stored in SAM. The trust lives in your Google Cloud project, and SAM proves its identity by signing tokens with its own signing key, which is the one secret this design depends on.
 
 ## The hole: every check was about SAM, none was about you
 
