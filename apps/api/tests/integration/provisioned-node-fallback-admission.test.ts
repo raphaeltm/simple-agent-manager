@@ -196,3 +196,74 @@ describe('normal admission after provisioned-node fallback', () => {
     ).toEqual({ count: 2 });
   });
 });
+
+// Security review (2026-11-19): the fallback stamps node-local provenance and releases the task
+// pointer. Each attack below must stamp nothing, release nothing and refuse the handoff, while the
+// owner path above (`fallback()`) proves the same fixture does stamp and release.
+describe('provisioned-node fallback ownership scoping', () => {
+  function stamped(nodeId = 'existing-node') {
+    const row = fixture.sqlite
+      .prepare('SELECT task_provisioned FROM nodes WHERE id = ?')
+      .get(nodeId) as { task_provisioned: number | null };
+    return row.task_provisioned === 1;
+  }
+  function pointer() {
+    return fixture.sqlite
+      .prepare('SELECT auto_provisioned_node_id FROM tasks WHERE id = ?')
+      .get(fixture.state.taskId);
+  }
+  function arm(state: TaskRunnerState, nodeId = 'existing-node') {
+    fixture.sqlite
+      .prepare('UPDATE tasks SET auto_provisioned_node_id = ? WHERE id = ?')
+      .run(nodeId, fixture.state.taskId);
+    state.stepResults.nodeId = nodeId;
+    state.stepResults.autoProvisioned = true;
+    state.rejectedAutoProvisionedNodeId = nodeId;
+  }
+
+  it('owner control: stamps the owned node and releases the pointer', async () => {
+    await fallback();
+    expect(stamped()).toBe(true);
+  });
+
+  it("refuses a pointer to another user's node", async () => {
+    fixture.sqlite.exec(`
+      INSERT INTO nodes (id, user_id, name, status, capacity_pool_id, runtime, node_role, node_class)
+        VALUES ('foreign-node', 'user-2', 'Foreign host', 'running', 'pool-1', 'vm', 'workspace', 'managed');
+    `);
+    arm(fixture.state, 'foreign-node');
+    await expect(resumeWorkspacePlacementFallback(fixture.state, fixture.rc)).rejects.toThrow();
+    expect(stamped('foreign-node')).toBe(false);
+    expect(pointer()).toEqual({ auto_provisioned_node_id: 'foreign-node' });
+  });
+
+  it('refuses a task row owned by another user', async () => {
+    arm(fixture.state);
+    fixture.sqlite
+      .prepare("UPDATE tasks SET user_id = 'user-2' WHERE id = ?")
+      .run(fixture.state.taskId);
+    await expect(resumeWorkspacePlacementFallback(fixture.state, fixture.rc)).rejects.toThrow();
+    expect(stamped()).toBe(false);
+    expect(pointer()).toEqual({ auto_provisioned_node_id: 'existing-node' });
+  });
+
+  it('refuses when both the task and the node belong to another user than the runner', async () => {
+    arm(fixture.state);
+    fixture.sqlite.exec("UPDATE nodes SET user_id = 'user-2' WHERE id = 'existing-node'");
+    fixture.sqlite
+      .prepare("UPDATE tasks SET user_id = 'user-2' WHERE id = ?")
+      .run(fixture.state.taskId);
+    await expect(resumeWorkspacePlacementFallback(fixture.state, fixture.rc)).rejects.toThrow();
+    expect(stamped()).toBe(false);
+    expect(pointer()).toEqual({ auto_provisioned_node_id: 'existing-node' });
+  });
+
+  it("refuses when the runner's project does not own the task", async () => {
+    const foreignProject = structuredClone(fixture.state);
+    foreignProject.projectId = 'project-2';
+    arm(foreignProject);
+    await expect(resumeWorkspacePlacementFallback(foreignProject, fixture.rc)).rejects.toThrow();
+    expect(stamped()).toBe(false);
+    expect(pointer()).toEqual({ auto_provisioned_node_id: 'existing-node' });
+  });
+});

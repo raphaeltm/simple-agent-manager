@@ -141,6 +141,14 @@ const LEGACY_ALLOWED_DUPLICATE_FILES = new Map<string, Map<string, Set<string>>>
         '0231',
         new Set(['0231_node_tunnel_pending_creates.sql', '0231_publish_job_context_shadow.sql']),
       ],
+      // PR #2855's provisioned-node ownership column was applied to staging2 on
+      // 2026-11-17 as d1_migrations id 276, after main's 0257 recovery-scan index
+      // (id 275) had claimed the prefix. Renumbering would replay ALTER TABLE nodes
+      // ADD COLUMN task_provisioned against staging2 and abort its migration run.
+      [
+        '0257',
+        new Set(['0257_node_task_provisioned.sql', '0257_provider_limit_recovery_scan_index.sql']),
+      ],
     ]),
   ],
 ]);
