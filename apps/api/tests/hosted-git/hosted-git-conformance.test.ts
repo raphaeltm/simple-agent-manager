@@ -775,6 +775,27 @@ describe('ref-only push admission', () => {
 });
 
 
+describe('Git ref-name admission through smart HTTP', () => {
+  it('rejects every .lock path component and accepts a similar valid ref', async () => {
+    const project = await createHostedProject(await createEmailOnlyUser(), 'Ref names');
+    const token = await mintToken(project, 'write');
+    const remote = localRemote(project.repository, token);
+    const oid = (await gitOk(['ls-remote', remote, 'refs/heads/main'])).stdout.split(/\s+/)[0]!;
+    const send = async (branch: string) => (await runtime.fetch(`/git/${project.artifactsRepoId}.git/git-receive-pack`, { method: 'POST', headers: { authorization: `Basic ${Buffer.from(`x:${token}`).toString('base64')}` }, body: buildReceivePackRequest(oid, branch, new Uint8Array()) as BodyInit })).text();
+    for (const branch of ['foo.lock/bar', 'foo.lock', 'ends-dot.']) {
+      expect((await git(['check-ref-format', `refs/heads/${branch}`])).code).not.toBe(0);
+      expect(await send(branch)).toContain(`ng refs/heads/${branch} funny refname`);
+    }
+    for (const branch of ['normal', 'feature/x', 'foo.lockish/bar']) {
+      expect((await git(['check-ref-format', `refs/heads/${branch}`])).code).toBe(0);
+      expect(await send(branch)).toContain(`ok refs/heads/${branch}`);
+    }
+    const refs = (await gitOk(['ls-remote', remote])).stdout;
+    expect(refs).toContain('refs/heads/foo.lockish/bar');
+    expect(refs).not.toContain('refs/heads/foo.lock/bar');
+  });
+});
+
 describe('repository cleanup through real SQLite', () => {
   it('schedules and reclaims an ingested pack whose only ref update is rejected', async () => {
     const owner = await createEmailOnlyUser();

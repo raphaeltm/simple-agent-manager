@@ -64,3 +64,12 @@ Incomplete rows now clear immediately after failed ingest before alarm schedulin
 Full real-git/SQLite suite24/24 passed; GC/deletion units8/8 passed, including transient recovery, four success/failure cycles, attempt exhaustion, and alarm-scheduling failure ordering. Negative controls independently failed: disabling immediate cleanup left2199552bytes==cap; disabling retry handling leftpending0 instead of1. Restored tests pass. Security delta review PASS, including serialized failure metadata. No implementation omission remains; fresh CI and zero unresolved threads must still be confirmed.
 
 Coordinator decision720e4e43-2b39-4979-a6e1-3024553dd7c8 explicitly waives repeating BOX if delta stays confined to these failure paths, full real-git+new SQLite tests/negative controls pass, security delta passes, and fresh CI is green with zero open threads. Existing BOX proof/cleanup remains valid under those conditions. Staging native seam is unchanged.
+
+
+## Ref-name review and complete rule audit (18:30 UTC)
+
+New current-head Codex r4633207972 found intermediate .lock components accepted by validatePush. Added the component suffix guard. Auditing every rule from https://git-scm.com/docs/git-check-ref-format also found missing whole-ref trailing-dot refusal; added that guard in the same fix. All other ten rules were already enforced in the refs/ namespace; conservative HTML/whitespace/255-character restrictions remain unchanged.
+
+Real raw smart-HTTP test refuses foo.lock/bar, foo.lock and ends-dot., and accepts normal, feature/x and foo.lockish/bar through the same validatePush/write path. Real validatePush rule matrix66/66 compares Git CLI outcomes (NUL checked directly since OS argv cannot carry it); full conformance25/25. Independent negative controls: remove component guard -> raw HTTP accepts the invalid ref; remove trailing-dot guard -> exactly1matrixfailure/65pass. Restored suite rerun. Security independently audited all ten rules and passed this delta.
+
+Coordinator decision5e57db22-5e40-46af-8aec-f1894395779f extends NOBOXREPEAT to this invalid-name admission tightening if ordinary+nested positive controls, negative control, full real-git, security delta, fresh CI and zero threads all pass. It rejects names the ordinary BOX branch never used; auth, happy-path valid names and deletion remain unchanged. Fresh CI remains required.

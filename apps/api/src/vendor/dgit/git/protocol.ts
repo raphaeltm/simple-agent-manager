@@ -1262,8 +1262,8 @@ export async function validatePush(
     }
     const bad = !cmd.ref.startsWith("refs/") || cmd.ref.includes("..") || BAD_REF.test(cmd.ref)
       || cmd.ref.endsWith(".lock") || cmd.ref.includes("@{") || cmd.ref.includes("//")
-      || cmd.ref.endsWith("/") || cmd.ref.length > 255
-      || cmd.ref.split("/").some((c) => c.startsWith("."));
+      || cmd.ref.endsWith("/") || cmd.ref.endsWith(".") || cmd.ref.length > 255
+      || cmd.ref.split("/").some((c) => c.startsWith(".") || c.endsWith(".lock"));
     if (bad) {
       decisions.push({ ref: cmd.ref, expectedOld: cmd.old, reject: "funny refname" });
       continue;

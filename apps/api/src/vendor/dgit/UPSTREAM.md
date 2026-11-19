@@ -34,3 +34,5 @@ SAM adds `git/budget.ts` around pack ingest, reads and delta application. Every 
 SQL identifiers use static allowlisted statements, and variable-sized bind lists are split below the runtime parameter ceiling. The additional GC admission and response accounting checks are covered by the hosted git suite.
 
 - PackStore exposes its existing incomplete-pack sweep as `cleanupOrphans`, so failed uploads can reclaim quota immediately and GC can retry storage cleanup independently of another admitted push.
+
+- Ref admission rejects `.lock` suffixes on every path component and a final dot, matching Git check-ref-format; the full rule matrix also retains SAM conservative character and length bounds.
