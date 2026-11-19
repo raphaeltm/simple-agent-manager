@@ -166,7 +166,9 @@ test.describe('Admin → Infrastructure → Stuck nodes', () => {
     await assertNoClippedOverflow(page);
   });
 
-  test('typed confirmation and note gate the removal, which posts and refreshes', async ({ page }) => {
+  test('typed confirmation and note gate the removal, which posts and refreshes', async ({
+    page,
+  }) => {
     const { removals } = await setupMocks(page);
     await openInfrastructure(page);
     await page.getByRole('button', { name: `Remove stuck node ${INCIDENT_ID}` }).click();
@@ -201,7 +203,11 @@ test.describe('Admin → Infrastructure → Stuck nodes', () => {
     expect(removals).toEqual([
       {
         id: INCIDENT_ID,
-        body: { confirmation: INCIDENT_ID, note: 'Searched the Hetzner console by name and label.' },
+        body: {
+          confirmation: INCIDENT_ID,
+          expectedBlockedReason: 'teardown_credential_generation_changed',
+          note: 'Searched the Hetzner console by name and label.',
+        },
       },
     ]);
     await expect(page.getByText(INCIDENT_ID, { exact: true })).toHaveCount(0);
