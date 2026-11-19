@@ -16,6 +16,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { decryptBackupTree, encryptBackupTree, readBackupKey } from './backup-encryption';
 import { readManifest } from './backup-manifest';
 import { assertBackupOutside, assertOperationPaths } from './backup-paths';
+import { requireRunningCelld } from './backup-runtime';
 import { composeProjectFor, expectedComposeProjectFor, recordBackup } from './install-record';
 import { assertOperatorExecution } from './operator-only';
 import { ensurePrivateDir, readPrivateJson } from './secret-files';
@@ -295,11 +296,11 @@ function runPlainBackup(
   // The pre-copy only shortens the downtime; the delta copy below, with celld stopped, is the one
   // that must succeed, and it fails loudly if the store itself is unreachable.
   //
-  // The pre-copy goes to its own directory. An aborted gcloud pass leaves state keyed by the
-  // destination path it was writing (resumable-download tracker files, `_.gstmp` temporaries), and
-  // the historical box failure reported a missing local nodes/node_<id>.json path. Tracker
-  // reuse is a hypothesis requiring live confirmation, so isolate the second pass from the
-  // first pass's destination paths and retain a clean-copy fallback. Only bytes carry over.
+  // BOX's failed stopped pass reached gcloud's POSIX-metadata step with a missing local node
+  // JSON file (SDK 523: finalize_download can return false, but its caller still stats the file).
+  // Keep partial live downloads and their destination-keyed resumable state out of the stopped
+  // pass: remove temporary files, move only completed bytes to fresh paths, and retain the
+  // untouched-directory fallback if that pass still fails.
   try {
     pullBucket(ctx, liveDir);
   } catch (err) {
@@ -454,6 +455,7 @@ export function runBackup(
       throw new Error('Keep the backup key outside installation state and backups');
   }
   ensurePrivateDir(dirname(resolve(dest)));
+  requireRunningCelld(ctx);
   const temp = backupScratch();
   try {
     const plain = join(temp, 'plain');

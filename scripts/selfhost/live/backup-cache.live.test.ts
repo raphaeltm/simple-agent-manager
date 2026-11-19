@@ -12,6 +12,7 @@ import {
   composeRunEnv,
   OBJECTSTORE_IMAGE,
 } from '../backup-lib';
+import { requireRunningCelld } from '../backup-runtime';
 import { recordInstall } from '../install-record';
 import { LIVE_TMP, skipWithoutDocker } from './harness';
 
@@ -76,10 +77,12 @@ describe.skipIf(skipWithoutDocker)(
       }
     });
     it('accepts canonical cache and rejects an overlay replacing the actual container mount', () => {
+      requireRunningCelld(context!);
       const proof = assertRollbackCacheReady(context!);
       expect(proof.name).toMatch(/^sam-selfhost-[a-f0-9]{12}_celld-data$/);
       expect(proof.container).toMatch(/^[a-f0-9]{64}$/);
       docker(['stop', 'celld']);
+      expect(() => requireRunningCelld(context!)).toThrow('exactly one running celld container');
       expect(assertRollbackCacheReady(context!).container).toBe(proof.container);
       const overlay = join(root, 'override.yml');
       writeFileSync(

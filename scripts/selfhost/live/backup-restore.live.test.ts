@@ -1,7 +1,7 @@
 /**
  * selfhost:backup -> selfhost:restore against the box's own object store: the MinIO image pinned
  * in docker-compose.yml, run on loopback in Docker, driven by the real `mc mirror` commands in
- * backup-lib.ts. Only `docker compose stop/start celld` is stubbed (there is no celld here).
+ * backup-lib.ts. Compose celld lifecycle and inventory are stubbed (there is no celld here).
  * Round trip: seed a fleet bucket, back it up, restore into a second empty bucket, pull that
  * bucket back and compare every object. Also proves restore refuses a non-empty bucket.
  */
@@ -38,6 +38,7 @@ const composeCalls: string[] = [];
 
 function run(command: string, args: string[], env?: NodeJS.ProcessEnv): RunResult {
   if (command === 'docker' && args[0] === 'compose') {
+    if (args.includes('ps')) return { status: 0, stdout: 'c'.repeat(64), stderr: '' };
     composeCalls.push(args.slice(-2).join(' '));
     return { status: 0, stdout: '', stderr: '' };
   }

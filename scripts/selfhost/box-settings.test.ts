@@ -1,15 +1,17 @@
 import {
   closeSync,
+  mkdirSync,
   mkdtempSync,
   openSync,
   readdirSync,
   readFileSync,
   readSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
@@ -429,6 +431,31 @@ describe('sam-mx listen address and unprivileged listeners (S4)', () => {
 });
 
 describe('loadBoxEnv (S4: checked before anything starts)', () => {
+  it('honors shell COMPOSE_PROJECT_NAME even when selected legacy YAML has only a static name', () => {
+    mkdirSync(resolve('.tmp'), { recursive: true });
+    const root = mkdtempSync(resolve('.tmp/legacy-compose-project-'));
+    try {
+      const compose = join(root, 'legacy.yml');
+      writeFileSync(compose, 'name: sam-selfhost\nservices:\n  celld:\n    image: fixture/celld\n');
+      const env = join(root, 'box.env');
+      writeFileSync(env, `COMPOSE_FILE=${compose}\nCOMPOSE_PROJECT_NAME=env-project\n`, {
+        mode: 0o600,
+      });
+      expect(composeFileVariables({ COMPOSE_FILE: compose }, root)).not.toContain(
+        'COMPOSE_PROJECT_NAME'
+      );
+      const overrides: string[] = [];
+      const selected = loadBoxEnv(env, root, { COMPOSE_PROJECT_NAME: 'sam-selfhost' }, (name) =>
+        overrides.push(name)
+      );
+      expect(selected.COMPOSE_PROJECT_NAME).toBe('sam-selfhost');
+      expect(overrides).toContain('COMPOSE_PROJECT_NAME');
+      expect(loadBoxEnv(env, root, {}).COMPOSE_PROJECT_NAME).toBe('env-project');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   const box = (lines: string[]) => {
     const file = join(mkdtempSync(join(tmpdir(), 'sam-box-env-')), '.env');
     writeFileSync(file, `${lines.join('\n')}\n`, { mode: 0o600 });

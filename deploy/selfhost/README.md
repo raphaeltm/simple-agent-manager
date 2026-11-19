@@ -99,7 +99,8 @@ From the repository root on the VM:
 
 The fleet bucket contains Worker secrets as well as application data. The backup command encrypts
 **the entire backup**, including the bucket, `.state/`, `.env` and its manifest, with AES-256-GCM.
-It briefly stops celld for a consistent second bucket copy and restarts it even if that copy
+It first requires exactly one running celld in the selected Compose project, then briefly stops
+it for a consistent second bucket copy and restarts it even if that copy
 fails (`scripts/selfhost/backup-lib.ts:runBackup`, `runPlainBackup`). Temporary plaintext lives
 under the private `.tmp/selfhost-backups/` directory and is removed on success or failure.
 Backup, restore, upgrade and teardown are operator-box commands. They refuse execution whenever

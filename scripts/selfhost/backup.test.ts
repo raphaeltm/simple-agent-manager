@@ -55,6 +55,7 @@ let mountInspections: number;
 let selectedProject: string;
 let replaceStateOnPush: boolean;
 let celldStopped: boolean;
+let runningCelldIds: string;
 let cacheInspections: number;
 let targetContainers: string;
 let occupiedProject: string | undefined;
@@ -80,6 +81,8 @@ function fakeRun(command: string, args: string[], env?: NodeJS.ProcessEnv): RunR
   clock += 1000; // every command takes one second of fake time
   const ok = { status: 0, stdout: '', stderr: '' };
   if (command === 'docker' && args[0] === 'compose') {
+    if (args.includes('ps') && args.includes('--status'))
+      return { ...ok, stdout: celldStopped ? '' : runningCelldIds };
     if (args.includes('ps') && args.includes('-q') && args.at(-1) === 'celld') {
       if (celldStopped && !args.includes('--all')) return ok;
       selectedProject = args[args.indexOf('--project-name') + 1] ?? '';
@@ -233,6 +236,7 @@ beforeEach(() => {
   selectedProject = '';
   replaceStateOnPush = false;
   celldStopped = false;
+  runningCelldIds = 'c'.repeat(64);
   cacheInspections = 0;
   targetContainers = '';
   occupiedProject = undefined;
@@ -261,6 +265,21 @@ function inspectBackup(dest: string, part: string): Record<string, string> {
 }
 
 describe('runBackup', () => {
+  it.each(['', `${'c'.repeat(64)}\n${'d'.repeat(64)}`, 'short-id'])(
+    'refuses missing or ambiguous running celld before any bucket copy (%s)',
+    (ids) => {
+      runningCelldIds = ids;
+      const snapshot = join(root, 'unobserved-writer-backup');
+      expect(() => runBackup(ctx('gs://fleet/celld', join(root, 'state')), snapshot)).toThrow(
+        /exactly one running celld/
+      );
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.args).toContain('--status');
+      expect(calls.some((call) => call.command === 'gcloud')).toBe(false);
+      expect(existsSync(snapshot)).toBe(false);
+    }
+  );
+
   it('backs up the real generated celld project while omitting its rebuildable source/migration symlinks', () => {
     const apiDir = resolve(import.meta.dirname, '../../apps/api');
     const source = TOML.parse(readFileSync(join(apiDir, 'wrangler.toml'), 'utf8')) as WranglerToml;
@@ -301,11 +320,13 @@ describe('runBackup', () => {
     const dest = join(root, 'backups/b1');
     const manifest = runBackup(ctx('s3://fleet/celld', join(root, 'state')), dest, 'a'.repeat(40));
 
-    const sequence = calls.map((c) =>
-      c.args[0] === 'compose'
-        ? `compose ${c.args.slice(-2).join(' ')}`
-        : `${c.command} ${c.args[0]}`
-    );
+    const sequence = calls
+      .filter((c) => !c.args.includes('--status'))
+      .map((c) =>
+        c.args[0] === 'compose'
+          ? `compose ${c.args.slice(-2).join(' ')}`
+          : `${c.command} ${c.args[0]}`
+      );
     expect(sequence).toEqual([
       'docker run', // live pre-copy
       'compose stop celld',
@@ -323,7 +344,7 @@ describe('runBackup', () => {
 
     // The store credential travels in the environment only, and never into the manifest.
     for (const call of calls) expect(call.args.join(' ')).not.toContain(SECRET);
-    expect(calls[0]!.env?.MC_HOST_src).toContain(SECRET);
+    expect(calls.find((c) => c.args[0] === 'run')!.env?.MC_HOST_src).toContain(SECRET);
     expect(readFileSync(join(dest, MANIFEST_NAME), 'utf8')).not.toContain(SECRET);
   });
 
@@ -391,7 +412,12 @@ describe('runBackup', () => {
       'current.json': '{"v":3}',
     });
     // celld stays stopped through both copies, and the downtime records both.
-    expect(calls.map((c) => c.args.at(-1)).filter((a) => a === 'celld')).toHaveLength(2);
+    expect(
+      calls
+        .filter((c) => !c.args.includes('--status'))
+        .map((c) => c.args.at(-1))
+        .filter((a) => a === 'celld')
+    ).toHaveLength(2);
     expect(manifest.downtimeMs).toBe(3000); // stop t+2s, failed delta t+3s, whole copy t+4s, start t+5s
   });
 
@@ -412,15 +438,54 @@ describe('runBackup', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('recovers the BOX gcloud post-download POSIX ENOENT without retaining a partial node file', () => {
+    let pulls = 0;
+    let running = true;
+    const run = (command: string, args: string[]) => {
+      calls.push({ command, args });
+      if (command === 'docker') {
+        if (args.includes('--status')) return { status: 0, stdout: 'c'.repeat(64), stderr: '' };
+        if (args.includes('stop')) running = false;
+        if (args.includes('start')) running = true;
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      const directory = args.at(-1)!;
+      mkdirSync(join(directory, 'nodes'), { recursive: true });
+      pulls++;
+      if (pulls === 1) {
+        writeFileSync(join(directory, 'nodes/stale.json_.gstmp'), 'partial download');
+        return { status: 1, stdout: '', stderr: 'HTTP 404: live object generation vanished' };
+      }
+      expect(running).toBe(false);
+      if (pulls === 2) {
+        expect(existsSync(join(directory, 'nodes/stale.json_.gstmp'))).toBe(false);
+        return {
+          status: 1,
+          stdout: '',
+          stderr: 'FileNotFoundError: POSIX os.stat destination nodes/stale.json [Errno 2]',
+        };
+      }
+      writeFileSync(join(directory, 'nodes/current.json'), 'consistent node data');
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const dest = join(root, 'backups/gcloud-posix');
+    const manifest = runBackup({ ...ctx('gs://fleet/celld', join(root, 'state')), run }, dest);
+    expect(manifest.objectCount).toBe(1);
+    expect(inspectBackup(dest, 'bucket')).toEqual({ 'nodes/current.json': 'consistent node data' });
+    expect(running).toBe(true);
+  });
+
   it('uses gcloud storage rsync for a gs:// bucket', () => {
     const run = (command: string, args: string[]) => {
       calls.push({ command, args });
-      return { status: 0, stdout: '', stderr: '' };
+      return { status: 0, stdout: args.includes('--status') ? 'c'.repeat(64) : '', stderr: '' };
     };
     runBackup({ ...ctx('gs://my-bucket/celld', join(root, 'state')), run }, join(root, 'b3'));
     // live pass into its own directory; the delta pass into `bucket`, a path gcloud never wrote
-    expect(basename(calls[2]?.args.at(-1) ?? '')).toBe('bucket');
-    expect(calls[0]).toMatchObject({
+    expect(basename(calls.filter((c) => c.command === 'gcloud')[1]?.args.at(-1) ?? '')).toBe(
+      'bucket'
+    );
+    expect(calls.find((c) => c.command === 'gcloud')).toMatchObject({
       command: 'gcloud',
       args: [
         'storage',

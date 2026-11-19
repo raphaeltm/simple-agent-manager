@@ -125,6 +125,43 @@ afterEach(() => {
 });
 
 describe('selfhost:backup and selfhost:restore (real entry points, fake gcloud)', () => {
+  it('backs up the actual legacy shell-selected project when its YAML has only a static name', () => {
+    const compose = join(root, 'legacy-compose.yml');
+    writeFileSync(compose, 'name: sam-selfhost\nservices:\n  celld:\n    image: fixture/celld\n');
+    env.COMPOSE_FILE = compose;
+    env.COMPOSE_PROJECT_NAME = 'sam-selfhost';
+    env.FAKE_COMPOSE_PROJECT = 'sam-selfhost';
+    const dest = join(root, 'legacy-project-backup');
+    const result = run('backup.ts', [
+      '--to',
+      dest,
+      '--box-env',
+      join(root, 'box.env'),
+      '--state-dir',
+      join(root, 'state'),
+      '--encryption-key-file',
+      join(root, 'backup-key'),
+    ]);
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+    const calls = readFileSync(join(root, 'fake/calls.log'), 'utf8').trim().split('\n');
+    const composeCalls = calls.filter((call) => call.startsWith('docker compose'));
+    expect(composeCalls).toHaveLength(3);
+    for (const call of composeCalls)
+      expect(call).toContain(`--project-name sam-selfhost -f ${compose}`);
+    expect(composeCalls[0]).toContain('ps --status running --quiet --no-trunc celld');
+    expect(composeCalls[1]).toMatch(/stop celld$/);
+    expect(composeCalls[2]).toMatch(/start celld$/);
+    const plain = join(root, 'legacy-inspection');
+    decryptBackupTree(dest, plain, join(root, 'backup-key'));
+    try {
+      expect(readFileSync(join(plain, 'bucket/nodes/node_live.json'), 'utf8')).toBe('{"lease":2}');
+    } finally {
+      rmSync(plain, { recursive: true, force: true });
+    }
+    expect(readFileSync(join(root, 'fake/celld'), 'utf8')).toBe('running');
+  }, 60_000);
+
   it('uses shell bucket overrides and the explicit custom state directory through real child commands', () => {
     env.CELLD_BUCKET = 'gs://override/celld';
     env.SAM_SELFHOST_STATE_DIR = join(root, 'wrong-state');
@@ -163,7 +200,7 @@ describe('selfhost:backup and selfhost:restore (real entry points, fake gcloud)'
     }
     expect(
       readFileSync(join(root, 'fake/compose-state-dirs.log'), 'utf8').trim().split('\n')
-    ).toEqual([custom, custom]);
+    ).toEqual([custom, custom, custom]);
   }, 60_000);
 
   // Runs the real backup and restore entry points as child processes: give them room under load.
@@ -203,14 +240,16 @@ describe('selfhost:backup and selfhost:restore (real entry points, fake gcloud)'
 
       rmSync(inspection, { recursive: true, force: true });
       const calls = readFileSync(join(root, 'fake/calls.log'), 'utf8').trim().split('\n');
-      expect(calls.map((c) => c.split(' ').slice(0, 3).join(' '))).toEqual([
+      expect(calls[0]).toContain('ps --status running --quiet --no-trunc celld');
+      const operations = calls.filter((call) => !call.includes(' ps --status running '));
+      expect(operations.map((c) => c.split(' ').slice(0, 3).join(' '))).toEqual([
         'gcloud storage rsync', // live
         'docker compose --project-name',
         'gcloud storage rsync', // delta, celld stopped
         'docker compose --project-name',
       ]);
-      expect(calls[1]).toMatch(/stop celld$/);
-      expect(calls[3]).toMatch(/start celld$/);
+      expect(operations[1]).toMatch(/stop celld$/);
+      expect(operations[3]).toMatch(/start celld$/);
 
       // Restore into an empty install: new bucket, no platform keys yet.
       writeFileSync(join(root, 'new.env'), 'CELLD_BUCKET=gs://fresh/celld\n', { mode: 0o600 });
