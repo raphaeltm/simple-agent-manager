@@ -378,6 +378,23 @@ describe('linked deployment node pool eligibility through release placement', ()
         'Deployment node placement failed: Existing exclusive deployment node is no longer eligible under the effective compute pool',
     });
   });
+  it('reports a direct placement mismatch without claiming pool ineligibility', async () => {
+    const f = fixture(true);
+    f.placement.capacityPoolSelection = null;
+    expect(await f.place()).toBeNull();
+    expect(
+      f.sqlite
+        .prepare(
+          "SELECT observed_error_message FROM deployment_environments WHERE id = 'environment'"
+        )
+        .get()
+    ).toEqual({
+      observed_error_message:
+        'Deployment node placement failed: Existing exclusive deployment node no longer matches the resolved direct placement',
+    });
+    expect(attach).not.toHaveBeenCalled();
+    expect(provision).not.toHaveBeenCalled();
+  });
   it('still checks credential authority at the final reservation', async () => {
     const f = fixture(true);
     f.sqlite.exec("UPDATE credentials SET is_active = 0 WHERE id = 'hetzner'");

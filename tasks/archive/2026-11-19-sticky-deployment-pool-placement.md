@@ -43,3 +43,5 @@ Implementation and completion review passed. Remaining staging cleanup, CI, Code
 
 - Addressed automated review4626349099: exclusive release errors now distinguish pool ineligibility, capacity refusal, unavailable node, and final reservation authority changes. Diagnostic classification reuses the scheduler eligibility predicate without the reservation only after its capacity-aware check refuses; admission decisions remain unchanged.
 - Added real SQLite release-path assertions for removed provider, exhausted capacity and credential revocation/final reservation refusal. 77 targeted tests PASS, incremental completion review PASS. Extracted existing-node reservation into a route helper to keep placement below800lines.
+
+- Classified direct-placement mismatch separately from pool ineligibility for environments with no effective pool (automated review4626434163). Added real SQLite exclusive release-path assertion for the specific direct-placement failure.

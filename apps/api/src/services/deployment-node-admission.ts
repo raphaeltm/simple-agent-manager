@@ -173,7 +173,9 @@ export async function findDeploymentNodeWithCapacity(
     rowsByNode.set(row.nodeId, rows);
   }
 
-  let rejection: DeploymentNodeAdmissionRejection = 'pool-ineligible';
+  let rejection: DeploymentNodeAdmissionRejection = placement.capacityPoolSelection
+    ? 'pool-ineligible'
+    : 'direct-placement';
   const scored = candidates.flatMap((node) => {
     const capacityPlacementSnapshot = resolveReusableNodeCapacitySnapshot({
       selection: placement.capacityPoolSelection,
@@ -196,6 +198,7 @@ export async function findDeploymentNodeWithCapacity(
       placement.capacityPoolSelection === null &&
       !directDeploymentNodeMatchesPlacement(node, placement)
     ) {
+      rejection = 'direct-placement';
       return [];
     }
 
