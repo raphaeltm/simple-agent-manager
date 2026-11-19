@@ -250,8 +250,17 @@ export async function findDeploymentNodeWithCapacity(
     ];
   });
 
+  return selectDeploymentNodeMatch(scored, () =>
+    options.onRejection?.(rejection, rejectedPlacement)
+  );
+}
+
+function selectDeploymentNodeMatch(
+  scored: Array<DeploymentNodeMatch & { remainingMemory: number; remainingCpu: number }>,
+  onRejection: () => void
+): DeploymentNodeMatch | null {
   if (scored.length === 0) {
-    options.onRejection?.(rejection, rejectedPlacement);
+    onRejection();
     return null;
   }
 
