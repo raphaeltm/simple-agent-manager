@@ -92,11 +92,15 @@ describe('tunnel port range', () => {
           })
         ).toThrow(new RegExp(`contains ${name} \\(${fallback}\\)`));
       }
-      expect(() => resolveTunnelPortRange({ [name]: '20500' })).toThrow(
+      const prefix = BOX_LISTEN_ADDRESSES.includes(name) ? ':' : '';
+      expect(() => resolveTunnelPortRange({ [name]: `${prefix}20500` })).toThrow(
         new RegExp(`contains ${name} \\(20500\\)`)
       );
       // Control: the same listener moved just outside the range is accepted.
-      expect(resolveTunnelPortRange({ [name]: '30000' })).toEqual({ start: 20000, end: 29999 });
+      expect(resolveTunnelPortRange({ [name]: `${prefix}30000` })).toEqual({
+        start: 20000,
+        end: 29999,
+      });
     }
   );
 
@@ -346,7 +350,7 @@ describe('composeVariableNames', () => {
 });
 
 describe('sam-mx listen address and unprivileged listeners (S4)', () => {
-  it.each([':20500', '0.0.0.0:20500', '[::]:20500', '20500'])(
+  it.each([':20500', '0.0.0.0:20500', '[::]:20500'])(
     'fails the deploy when SAM_MX_LISTEN=%s lies in the range',
     (listen) => {
       expect(() => resolveTunnelPortRange({ SAM_MX_LISTEN: listen })).toThrow(
@@ -361,6 +365,14 @@ describe('sam-mx listen address and unprivileged listeners (S4)', () => {
       start: 20000,
       end: 29999,
     });
+  });
+
+  // sam-mx hands it to Go's net.Listen, which refuses a bare port ("missing port in address"), so
+  // `2525` would leave the inbound-mail service restart-looping.
+  it.each(['2525', '20500', '25'])('refuses the bare port SAM_MX_LISTEN=%s', (listen) => {
+    expect(() => resolveTunnelPortRange({ SAM_MX_LISTEN: listen })).toThrow(
+      /SAM_MX_LISTEN must be a listen address \[host\]:port/
+    );
   });
 
   it.each(['0.0.0.0:', ':x', 'smtp'])('refuses a malformed SAM_MX_LISTEN %s', (listen) => {

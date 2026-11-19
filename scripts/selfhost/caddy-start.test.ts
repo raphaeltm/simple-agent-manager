@@ -64,7 +64,8 @@ describe('caddy/start.sh', () => {
   it.each(Object.keys(BOX_RESERVED_PORTS))(
     'refuses to start when %s lies inside the lease range',
     (name) => {
-      const run = startSh({ ...composeEnv(), [name]: '20001' });
+      const value = BOX_LISTEN_ADDRESSES.includes(name) ? ':20001' : '20001';
+      const run = startSh({ ...composeEnv(), [name]: value });
       expect(run.status).toBe(64);
       expect(run.out).toContain(`${name} (20001) lies inside the reverse-tunnel range 20000-29999`);
       expect(run.out).not.toContain('caddy run');
@@ -78,6 +79,26 @@ describe('caddy/start.sh', () => {
       const run = startSh({ ...composeEnv(), SAM_MX_LISTEN: listen });
       expect(run.status).toBe(64);
       expect(run.out).toContain('SAM_MX_LISTEN (20001) lies inside the reverse-tunnel range');
+    }
+  );
+
+  // sam-mx hands SAM_MX_LISTEN to Go's net.Listen, which refuses a bare port ("missing port in
+  // address"): accepting `2525` here let the inbound-mail service restart-loop.
+  it.each(['2525', '25', ''])(
+    'refuses SAM_MX_LISTEN=%j, which is not a listen address',
+    (listen) => {
+      const run = startSh({ ...composeEnv(), SAM_MX_LISTEN: listen });
+      expect(run.status).toBe(64);
+      expect(run.out).toContain('SAM_MX_LISTEN must be a listen address [host]:port');
+      expect(run.out).not.toContain('caddy run');
+    }
+  );
+
+  it.each([':2525', '0.0.0.0:2525', '[::]:2525'])(
+    'control: accepts the listen address SAM_MX_LISTEN=%s',
+    (listen) => {
+      const run = startSh({ ...composeEnv(), SAM_MX_LISTEN: listen });
+      expect(run.status, run.out).toBe(0);
     }
   );
 

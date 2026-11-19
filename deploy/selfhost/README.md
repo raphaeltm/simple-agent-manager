@@ -141,7 +141,9 @@ range to both the Worker and `.state/gateway.env`, and refuses a range that cont
 receive traffic meant for it. The deploy and upgrade check the ports as Docker Compose will run
 them (shell variables included, see below) as soon as they read `.env` and before anything starts,
 and Caddy's `start.sh` refuses to start when a port it is given lies in the range. celld, frps and
-the mail collector run without capabilities, so their ports must be 1024 or above. `gateway.env` also holds `REVERSE_TUNNEL_GATEWAY_SECRET`, the shared secret frps and
+the mail collector run without capabilities, so their ports must be 1024 or above.
+`SAM_MX_LISTEN` is a listen address, `[host]:port` (`:25`, `0.0.0.0:2525`, `[::]:2525`): a bare
+port is refused, because sam-mx cannot listen on one. `gateway.env` also holds `REVERSE_TUNNEL_GATEWAY_SECRET`, the shared secret frps and
 Caddy present to the Worker's loopback-only gateway routes (`/api/self-host/gateway/*`, which
 Caddy answers with 404 from outside). When `gateway.env` changes, the deploy stops until the
 stack is restarted (`docker compose up -d`), so the Worker never assumes settings frps is not

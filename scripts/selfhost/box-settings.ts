@@ -49,7 +49,8 @@ export const BOX_RESERVED_PORTS: Readonly<Record<string, number>> = {
 
 /**
  * Settings in BOX_RESERVED_PORTS that hold a listen address (`[host]:port`, sam-mx's `:25`)
- * rather than a bare port: the port is the part after the last ':'.
+ * rather than a bare port: the port is the part after the last ':', and a value without one is
+ * refused (caddy/start.sh refuses it too).
  */
 export const BOX_LISTEN_ADDRESSES: readonly string[] = ['SAM_MX_LISTEN'];
 
@@ -153,7 +154,14 @@ function boxPort(box: Readonly<Record<string, string>>, name: string, fallback: 
   if (!BOX_LISTEN_ADDRESSES.includes(name) || raw === undefined || raw === '') {
     return integer(raw, fallback, name, bounds);
   }
-  const port = raw.slice(raw.lastIndexOf(':') + 1);
+  // sam-mx passes it to Go's net.Listen, which refuses a bare port ("missing port in address").
+  const separator = raw.lastIndexOf(':');
+  if (separator < 0) {
+    throw new Error(
+      `${name} must be a listen address [host]:port (e.g. :${raw}), not a bare port: got ${raw}`
+    );
+  }
+  const port = raw.slice(separator + 1);
   if (port === '') throw new Error(`${name} must end in :<port>, got ${raw}`);
   return integer(port, fallback, name, bounds);
 }

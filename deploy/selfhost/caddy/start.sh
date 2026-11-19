@@ -71,7 +71,16 @@ for bound in "$start" "$end"; do
 		;;
 	esac
 done
-# SAM_MX_LISTEN is a listen address ([host]:port): its port is the part after the last ':'.
+# SAM_MX_LISTEN is a listen address ([host]:port): its port is the part after the last ':'. sam-mx
+# hands it to Go's net.Listen, which refuses a bare port, so the inbound-mail service would
+# restart-loop: refuse it here.
+case "${SAM_MX_LISTEN:-}" in
+*:*) ;;
+*)
+	echo "caddy: SAM_MX_LISTEN must be a listen address [host]:port (e.g. :25 or 0.0.0.0:2525), not a bare port" >&2
+	exit 64
+	;;
+esac
 for name in HTTP_PORT HTTPS_PORT CELLD_PORT CELLD_INTERNAL_PORT FRPS_BIND_PORT OBJECTSTORE_PORT \
 	OBJECTSTORE_CONSOLE_PORT MAIL_COLLECTOR_SMTP_PORT MAIL_COLLECTOR_UI_PORT SAM_MX_LISTEN; do
 	eval "port=\"\${$name:-}\""
