@@ -18,6 +18,7 @@ import {
   MIN_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
   REVERSE_TUNNEL_PORT_REUSE_HEARTBEAT_MULTIPLE,
 } from '../../apps/api/src/selfhost/reverse-tunnel/limits.js';
+import { composeFileVariables } from './compose-env.js';
 import {
   DEFAULT_MAIL_COLLECTOR_SMTP_PORT,
   DEFAULT_MAIL_COLLECTOR_UI_PORT,
@@ -65,20 +66,26 @@ const UNPRIVILEGED_LISTENERS: readonly string[] = [
 ];
 
 /**
- * The box settings with the port values docker compose will actually run with. Compose takes a
- * variable from the shell before the .env file, so `CELLD_INTERNAL_PORT=20001 docker compose up`
- * runs celld's operator API on 20001 whatever the .env says. The deploy and upgrade run in the
- * operator's shell, so they apply the same override to every box port before checking the lease
- * range, and report each one. (caddy/start.sh repeats the check inside the running stack, for a
- * compose command run from another shell.)
+ * The box settings with the values docker compose will actually run with. Compose takes every
+ * variable it interpolates from the shell before the .env file, so `CELLD_BUCKET=... docker
+ * compose up` runs celld on that bucket and `CELLD_INTERNAL_PORT=20001 docker compose up` runs
+ * celld's operator API on 20001, whatever the .env says. The deploy and upgrade run in the
+ * operator's shell, so they apply the same precedence to every name in `composeVariables` (what
+ * the box's compose files interpolate, composeFileVariables) and to every box port, and report
+ * each override by name. Other shell variables (PATH, ...) are not compose's and are ignored.
+ * (caddy/start.sh repeats the port check inside the running stack, for a compose command run
+ * from another shell.)
  */
-export function withComposePortOverrides(
+export function withComposeShellOverrides(
   box: Readonly<Record<string, string>>,
-  hostEnv: NodeJS.ProcessEnv
+  hostEnv: NodeJS.ProcessEnv,
+  composeVariables: Iterable<string>
 ): { box: Record<string, string>; overridden: string[] } {
   const effective: Record<string, string> = { ...box };
   const overridden: string[] = [];
-  for (const name of Object.keys(BOX_RESERVED_PORTS)) {
+  // Box ports stay covered even if a compose file stops referencing one.
+  const names = new Set([...composeVariables, ...Object.keys(BOX_RESERVED_PORTS)]);
+  for (const name of [...names].sort((a, b) => a.localeCompare(b))) {
     const value = hostEnv[name];
     if (value === undefined || value === box[name]) continue;
     effective[name] = value;
@@ -88,19 +95,23 @@ export function withComposePortOverrides(
 }
 
 /**
- * The box .env as docker compose will run it (`withComposePortOverrides`; `onOverride` hears each
- * shell override first), checked before anything starts: a box listener inside the lease range
+ * The box .env as docker compose will run it (`withComposeShellOverrides` over the variables of
+ * every compose file the .env selects from `composeDir`; `onOverride` hears each shell override,
+ * by name, first), checked before anything starts: a box listener inside the lease range
  * (resolveTunnelPortRange) fails here, so `selfhost:deploy` and `selfhost:upgrade` stop before
  * they write state or run docker compose, not only later inside Caddy's start.sh.
  */
 export function loadBoxEnv(
   envFile: string,
+  composeDir: string,
   hostEnv: NodeJS.ProcessEnv = process.env,
   onOverride: (name: string) => void = () => {}
 ): Record<string, string> {
-  const { box, overridden } = withComposePortOverrides(
-    parseDotenv(readFileSync(envFile, 'utf8'), envFile),
-    hostEnv
+  const fromFile = parseDotenv(readFileSync(envFile, 'utf8'), envFile);
+  const { box, overridden } = withComposeShellOverrides(
+    fromFile,
+    hostEnv,
+    composeFileVariables(fromFile, composeDir)
   );
   overridden.forEach(onOverride);
   resolveTunnelPortRange(box);

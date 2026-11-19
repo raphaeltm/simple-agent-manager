@@ -33,9 +33,10 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 
 import { loadBoxEnv } from './box-settings.js';
+import { composeFilesFor } from './compose-env.js';
 import { log, REPO_ROOT, SELFHOST_DIR } from './deploy-steps.js';
 import { COMPOSE_PATH, imageRebuilds } from './image-rebuilds.js';
 import { assertPrivateFile, replacePrivateFile } from './secret-files.js';
@@ -95,27 +96,6 @@ function runCommand(command: string, args: string[], env?: NodeJS.ProcessEnv): R
   return { status: result.status ?? 1, stdout: result.stdout, stderr: result.stderr };
 }
 
-/**
- * The compose files a box runs with. `COMPOSE_FILE` in .env adds files to the stack, and docker
- * compose reads it only when no `-f` is given: an explicit `-f docker-compose.yml` silently drops
- * every other file, so a recreate loses what they add. Scripted compose calls must therefore pass
- * this whole list. Split on COMPOSE_PATH_SEPARATOR (default `:`, as compose does on Linux);
- * relative entries are resolved against `composeDir`, the directory holding the compose files.
- */
-export function composeFilesFor(
-  box: Readonly<Record<string, string>>,
-  composeDir: string
-): string[] {
-  const separator = box.COMPOSE_PATH_SEPARATOR || ':';
-  const listed = (box.COMPOSE_FILE ?? '')
-    .split(separator)
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-  return (listed.length > 0 ? listed : ['docker-compose.yml']).map((entry) =>
-    isAbsolute(entry) ? entry : resolve(composeDir, entry)
-  );
-}
-
 /** `docker compose` arguments for this box: every compose file, then its .env, then `args`. */
 function composeArgs(ctx: Pick<BoxContext, 'composeFiles' | 'envFile'>, args: string[]): string[] {
   return [
@@ -135,9 +115,10 @@ export function loadBox(
 ): BoxContext {
   if (!existsSync(envFile)) throw new Error(`${envFile} does not exist`);
   assertPrivateFile(envFile);
-  // Ports as docker compose runs them (a shell override beats the .env), as deploy.ts reads them,
-  // and checked against the lease range before the upgrade touches the checkout or the stack.
-  const box = loadBoxEnv(envFile);
+  // The box as docker compose runs it (a shell variable any compose file interpolates beats the
+  // .env), as deploy.ts reads it, its ports checked against the lease range before the upgrade
+  // touches the checkout or the stack.
+  const box = loadBoxEnv(envFile, SELFHOST_DIR);
   if (!box.CELLD_BUCKET) throw new Error(`${envFile}: CELLD_BUCKET is required`);
   return {
     box,

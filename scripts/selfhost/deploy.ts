@@ -189,9 +189,9 @@ function readDeployInputs(): DeployInputs {
   const envFile = resolve(values['env-file'] ?? join(SELFHOST_DIR, '.env'));
   // The .env holds the bucket credential, which can read every deployed secret.
   assertPrivateFile(envFile);
-  // Box ports as docker compose will run them (a shell override beats the .env, F21 L5), checked
-  // against the lease range before anything is written.
-  const box = loadBoxEnv(envFile, process.env, (name) =>
+  // The box as docker compose will run it (a shell variable any compose file interpolates beats
+  // the .env, F21 L5), its ports checked against the lease range before anything is written.
+  const box = loadBoxEnv(envFile, SELFHOST_DIR, process.env, (name) =>
     log(`${name} from the shell environment overrides ${envFile}`)
   );
   // Same default and base directory docker compose uses for SAM_SELFHOST_STATE_DIR.

@@ -12,11 +12,11 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { composeFilesFor } from './compose-env.js';
 import { SELFHOST_DIR } from './deploy-steps.js';
 import { imageRebuilds } from './image-rebuilds.js';
 import {
   type BoxContext,
-  composeFilesFor,
   loadBox,
   type RunResult,
   runUpgrade,

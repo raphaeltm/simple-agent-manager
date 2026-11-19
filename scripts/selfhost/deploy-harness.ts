@@ -7,6 +7,8 @@ import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { BOX_RESERVED_PORTS } from './box-settings.js';
+import { composeFileVariables } from './compose-env.js';
+import { SELFHOST_DIR } from './deploy-steps.js';
 
 const DEPLOY = resolve(import.meta.dirname, 'deploy.ts');
 /** The repository's own tsx, not `npx tsx` (npx resolution costs seconds under load). */
@@ -36,10 +38,15 @@ export function runTsx(
   env: NodeJS.ProcessEnv = {}
 ): Promise<{ status: number; out: string }> {
   return new Promise((done, fail) => {
-    // The deploy honours shell port overrides as docker compose does (withComposePortOverrides),
-    // so the test runner's own environment must not leak any: only `env` sets them.
+    // The deploy honours a shell value for every variable compose interpolates, as docker compose
+    // does (withComposeShellOverrides), so the test runner's own environment must not leak any:
+    // only `env` sets them.
     const inherited = { ...process.env };
-    for (const name of Object.keys(BOX_RESERVED_PORTS)) delete inherited[name];
+    const composeNames = [
+      ...composeFileVariables({}, SELFHOST_DIR),
+      ...Object.keys(BOX_RESERVED_PORTS),
+    ];
+    for (const name of composeNames) delete inherited[name];
     const child = spawn(TSX, [script, ...args], { env: { ...inherited, ...env } });
     let out = '';
     child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString()));

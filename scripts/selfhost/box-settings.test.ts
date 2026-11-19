@@ -27,9 +27,10 @@ import {
   resolveTunnelSettings,
   trimSlashes,
   tunnelWorkerVars,
-  withComposePortOverrides,
+  withComposeShellOverrides,
 } from './box-settings.js';
-import { syncGatewayEnv } from './deploy-steps.js';
+import { composeFileVariables, composeVariableNames } from './compose-env.js';
+import { SELFHOST_DIR, syncGatewayEnv } from './deploy-steps.js';
 import { parseDotenv } from './secret-files.js';
 
 const SECRET = 'ab'.repeat(32);
@@ -259,27 +260,88 @@ describe('BOX_RESERVED_PORTS', () => {
   });
 });
 
-describe('withComposePortOverrides (F21 L5)', () => {
-  it('applies a shell port override, as docker compose does, and reports it', () => {
-    const { box, overridden } = withComposePortOverrides(
-      { CELLD_INTERNAL_PORT: '7001', SAM_DOMAIN: 'box.example' },
-      { CELLD_INTERNAL_PORT: '20001', SAM_DOMAIN: 'other.example', PATH: '/usr/bin' }
+// Compose takes every variable it interpolates from the shell before --env-file, so the deploy and
+// upgrade must too: a shell CELLD_BUCKET or SAM_DOMAIN would otherwise make the deploy publish with
+// the .env value while celld and Caddy run with the shell's.
+describe('withComposeShellOverrides (F21 L5)', () => {
+  const composeNames = composeFileVariables({}, SELFHOST_DIR);
+
+  it('applies a shell override of any compose variable, as docker compose does, and reports it', () => {
+    const { box, overridden } = withComposeShellOverrides(
+      { CELLD_BUCKET: 'gs://fleet/celld', SAM_DOMAIN: 'box.example', CELLD_INTERNAL_PORT: '7001' },
+      {
+        CELLD_BUCKET: 'gs://other/celld',
+        SAM_DOMAIN: 'other.example',
+        CELLD_INTERNAL_PORT: '7001',
+      },
+      composeNames
+    );
+    expect(overridden).toEqual(['CELLD_BUCKET', 'SAM_DOMAIN']);
+    expect(box).toEqual({
+      CELLD_BUCKET: 'gs://other/celld',
+      SAM_DOMAIN: 'other.example',
+      CELLD_INTERNAL_PORT: '7001',
+    });
+  });
+
+  it('applies a shell port override, so the range check sees the port compose will bind', () => {
+    const { box, overridden } = withComposeShellOverrides(
+      { CELLD_INTERNAL_PORT: '7001' },
+      { CELLD_INTERNAL_PORT: '20001' },
+      composeNames
     );
     expect(overridden).toEqual(['CELLD_INTERNAL_PORT']);
-    expect(box).toEqual({ CELLD_INTERNAL_PORT: '20001', SAM_DOMAIN: 'box.example' });
-    // ...so the range check sees the port compose will really bind.
     expect(() => resolveTunnelPortRange(box)).toThrow(/contains CELLD_INTERNAL_PORT \(20001\)/);
   });
 
+  it('ignores shell variables no compose file interpolates, even ones the .env sets', () => {
+    const { box, overridden } = withComposeShellOverrides(
+      { FOO_UNRELATED: 'from-env', SAM_DOMAIN: 'box.example' },
+      { FOO_UNRELATED: 'from-shell', PATH: '/usr/bin', HOME: '/root' },
+      composeNames
+    );
+    expect(overridden).toEqual([]);
+    expect(box).toEqual({ FOO_UNRELATED: 'from-env', SAM_DOMAIN: 'box.example' });
+  });
+
+  it('keeps every box port covered even when no compose file references it', () => {
+    const { box, overridden } = withComposeShellOverrides({}, { FRPS_BIND_PORT: '25000' }, []);
+    expect(overridden).toEqual(['FRPS_BIND_PORT']);
+    expect(() => resolveTunnelPortRange(box)).toThrow(/contains FRPS_BIND_PORT \(25000\)/);
+  });
+
   it('control: without a shell override the .env value is checked and passes', () => {
-    const { box, overridden } = withComposePortOverrides({ CELLD_INTERNAL_PORT: '7001' }, {});
+    const { box, overridden } = withComposeShellOverrides(
+      { CELLD_INTERNAL_PORT: '7001' },
+      {},
+      composeNames
+    );
     expect(overridden).toEqual([]);
     expect(resolveTunnelPortRange(box)).toEqual({ start: 20000, end: 29999 });
   });
+});
 
-  it('also catches a shell port for a name the .env never set', () => {
-    const { box } = withComposePortOverrides({}, { FRPS_BIND_PORT: '25000' });
-    expect(() => resolveTunnelPortRange(box)).toThrow(/contains FRPS_BIND_PORT \(25000\)/);
+describe('composeVariableNames', () => {
+  it('finds every interpolated value, not escapes, keys or comments', () => {
+    const names = composeVariableNames(
+      [
+        '# ${IN_A_COMMENT}',
+        'services:',
+        '  app:',
+        '    image: ${IMAGE:-x}',
+        '    command: ["$$ESCAPED", "$BARE", "${OUTER:-${INNER}}", "${REQUIRED:?set it}"]',
+        '    environment:',
+        '      ${AS_A_KEY}: plain',
+      ].join('\n')
+    );
+    expect([...names].sort()).toEqual(['BARE', 'IMAGE', 'INNER', 'OUTER', 'REQUIRED']);
+  });
+
+  it('covers the settings the deploy publishes from docker-compose.yml', () => {
+    const names = composeFileVariables({}, SELFHOST_DIR);
+    for (const name of ['CELLD_BUCKET', 'SAM_DOMAIN', 'SAM_TLS_MODE', 'SAM_MX_LISTEN']) {
+      expect(names.has(name), name).toBe(true);
+    }
   });
 });
 
@@ -331,13 +393,16 @@ describe('loadBoxEnv (S4: checked before anything starts)', () => {
   };
 
   it('refuses a box listener inside the lease range, from the .env or the shell', () => {
-    expect(() => loadBoxEnv(box(['SAM_MX_LISTEN=:20025']), {})).toThrow(
+    expect(() => loadBoxEnv(box(['SAM_MX_LISTEN=:20025']), SELFHOST_DIR, {})).toThrow(
       /contains SAM_MX_LISTEN \(20025\)/
     );
     const reported: string[] = [];
     expect(() =>
-      loadBoxEnv(box(['CELLD_INTERNAL_PORT=7001']), { CELLD_INTERNAL_PORT: '20001' }, (name) =>
-        reported.push(name)
+      loadBoxEnv(
+        box(['CELLD_INTERNAL_PORT=7001']),
+        SELFHOST_DIR,
+        { CELLD_INTERNAL_PORT: '20001' },
+        (name) => reported.push(name)
       )
     ).toThrow(/contains CELLD_INTERNAL_PORT \(20001\)/);
     // The override is reported before the refusal, so the operator sees where it came from.
@@ -346,8 +411,53 @@ describe('loadBoxEnv (S4: checked before anything starts)', () => {
 
   it('control: returns the box with shell overrides applied', () => {
     expect(
-      loadBoxEnv(box(['SAM_DOMAIN=box.example', 'CELLD_PORT=8080']), { CELLD_PORT: '8081' })
+      loadBoxEnv(box(['SAM_DOMAIN=box.example', 'CELLD_PORT=8080']), SELFHOST_DIR, {
+        CELLD_PORT: '8081',
+      })
     ).toEqual({ SAM_DOMAIN: 'box.example', CELLD_PORT: '8081' });
+  });
+
+  // docker-compose.yml passes CELLD_BUCKET to celld and SAM_DOMAIN to Caddy: the deploy must
+  // publish with the values they run with, and say which came from the shell (never the value).
+  it('applies and reports a shell CELLD_BUCKET and SAM_DOMAIN, ignoring unrelated variables', () => {
+    const reported: string[] = [];
+    const loaded = loadBoxEnv(
+      box(['CELLD_BUCKET=gs://fleet/celld', 'SAM_DOMAIN=box.example', 'FOO_UNRELATED=env']),
+      SELFHOST_DIR,
+      {
+        CELLD_BUCKET: 'gs://shell/celld',
+        SAM_DOMAIN: 'shell.example',
+        FOO_UNRELATED: 'shell',
+        PATH: '/usr/bin',
+      },
+      (name) => reported.push(name)
+    );
+    expect(reported).toEqual(['CELLD_BUCKET', 'SAM_DOMAIN']);
+    expect(loaded).toEqual({
+      CELLD_BUCKET: 'gs://shell/celld',
+      SAM_DOMAIN: 'shell.example',
+      FOO_UNRELATED: 'env',
+    });
+  });
+
+  it('includes the variables of an overlay the .env selects with COMPOSE_FILE', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sam-box-overlay-'));
+    const overlay = join(dir, 'overlay.yml');
+    writeFileSync(
+      overlay,
+      'services:\n  celld:\n    environment:\n      X: ${OVERLAY_SETTING:-x}\n'
+    );
+    const shell = { OVERLAY_SETTING: 'shell' };
+    const selected = loadBoxEnv(
+      box([`COMPOSE_FILE=docker-compose.yml:${overlay}`, 'OVERLAY_SETTING=env']),
+      SELFHOST_DIR,
+      shell
+    );
+    expect(selected.OVERLAY_SETTING).toBe('shell');
+    // Control: without the overlay selected, compose never reads the variable.
+    expect(loadBoxEnv(box(['OVERLAY_SETTING=env']), SELFHOST_DIR, shell).OVERLAY_SETTING).toBe(
+      'env'
+    );
   });
 });
 
