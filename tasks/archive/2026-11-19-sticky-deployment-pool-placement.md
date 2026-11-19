@@ -50,3 +50,9 @@ Implementation and completion review passed. Remaining staging cleanup, CI, Code
 
 - Addressed automated P1 review4626549493: retain actual eligible lower-priority node placement on capacity refusal, use it only for the old-node relocation claim, and retain the top candidate for fresh provisioning. Final credential/pool authority remains enforced.
 - Real SQLite release-placement regression failed before the fix because teardown/provisioning never ran, then passed after it; asserts actual relocation and fresh GCP provisioning despite old Hetzner node. All79 targeted tests PASS; incremental completion reviewer PASS.
+
+### Creating-node relocation authority
+
+- Addressed automated P1 review4626645015: relocation claims select allocation-plan authority for creating nodes and existing-node authority for running nodes. The final SQL mutation fences the node status read, preserving lifecycle race safety.
+- Real SQLite release tests for creating shared-node replacement with/without volume migration failed before the fix and pass after; stale allocation revision remains refused. All82 targeted tests PASS; incremental completion review covers all three claim callers and reports PASS.
+- Sonar confirmed final score-selection extraction at711c36e5a had zero open issues (09:17:40 scan), correcting the earlier insufficient complexity extraction.

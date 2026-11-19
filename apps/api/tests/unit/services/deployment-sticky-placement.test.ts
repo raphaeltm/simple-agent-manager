@@ -374,6 +374,57 @@ describe('linked deployment node pool eligibility through release placement', ()
       f.sqlite.prepare("SELECT node_id FROM deployment_environments WHERE id = 'environment'").get()
     ).toEqual({ node_id: null });
   });
+  it.each([
+    { requiresVolumes: false, revision: 2, admitted: true },
+    { requiresVolumes: true, revision: 2, admitted: true },
+    { requiresVolumes: false, revision: 1, admitted: false },
+  ])(
+    'checks creating-node allocation authority ($requiresVolumes/$revision)',
+    async ({ requiresVolumes, revision, admitted }) => {
+      const f = fixture();
+      const current = f.selection.candidates[1]!;
+      Object.assign(f.placement, {
+        provider: current.provider,
+        location: current.location,
+        credentialSource: 'user',
+        placementCredentialSource: 'user',
+        placementCredentialReference: current.placementCredentialReference,
+        providerInstanceType: current.providerInstanceType,
+        capacityPlacementSnapshot: capacityPlacementSnapshotForCandidate(f.selection, current),
+      });
+      f.sqlite
+        .prepare(
+          "UPDATE nodes SET status = 'creating', provider_instance_id = NULL, capacity_pool_revision = ?"
+        )
+        .run(revision);
+      await placeReleaseOnDeploymentNode({
+        db: f.db,
+        env: f.env,
+        envId: 'environment',
+        projectId: 'project',
+        userId: 'user',
+        releaseId: 'release',
+        requiresVolumes,
+        placement: f.placement,
+        reservation: { ...f.placement.reservation, exclusiveNode: requiresVolumes },
+      });
+      expect(provision).toHaveBeenCalledTimes(admitted ? 1 : 0);
+      if (admitted)
+        expect(provision).toHaveBeenCalledWith(
+          'environment',
+          'project',
+          'user',
+          f.env,
+          expect.objectContaining({ requiresVolumes })
+        );
+      expect(
+        f.sqlite
+          .prepare("SELECT node_id FROM deployment_environments WHERE id = 'environment'")
+          .get()
+      ).toEqual({ node_id: admitted ? null : 'node' });
+      expect(teardown).not.toHaveBeenCalled();
+    }
+  );
   it('does not admit a lower-priority provider for a fresh environment', async () => {
     const f = fixture();
     expect(await findDeploymentNodeWithCapacity(f.env, 'user', f.placement, false)).toBeNull();

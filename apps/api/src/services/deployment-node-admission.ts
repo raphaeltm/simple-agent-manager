@@ -557,6 +557,10 @@ export async function claimDeploymentEnvironmentRelocation(params: {
   reservation: ResolvedResourceReservation;
   releaseId?: string;
 }): Promise<string | null> {
+  const node = await params.env.DATABASE.prepare('SELECT status FROM nodes WHERE id = ?')
+    .bind(params.nodeId)
+    .first<{ status: string }>();
+  if (!node || (node.status !== 'creating' && node.status !== 'running')) return null;
   const authority = buildPlacementAuthoritySqlPredicate({
     nodeAlias: 'n',
     userId: params.userId,
@@ -565,7 +569,7 @@ export async function claimDeploymentEnvironmentRelocation(params: {
     workloadRole: 'deployment',
     capacityPlacementSnapshot: params.placement.capacityPlacementSnapshot,
     requireProjectMembership: true,
-    authorityMode: 'existing-node',
+    authorityMode: node.status === 'running' ? 'existing-node' : 'allocation-plan',
   });
   const claimJson = JSON.stringify({
     ...params.reservation,
@@ -592,7 +596,7 @@ export async function claimDeploymentEnvironmentRelocation(params: {
             : ''
         }
         AND de.node_id = ? AND de.resolved_reservation_json IS ?
-        AND n.id = de.node_id
+        AND n.id = de.node_id AND n.status = ?
         AND ${NO_DEPLOYMENT_RELOCATION_CLAIM_SQL}
         ${authority.sql}
       RETURNING id`
@@ -604,6 +608,7 @@ export async function claimDeploymentEnvironmentRelocation(params: {
       ...(params.releaseId ? [params.releaseId] : []),
       params.nodeId,
       params.expectedReservationJson,
+      node.status,
       ...authority.binds
     )
     .first<{ id: string }>();
