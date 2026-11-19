@@ -41,7 +41,7 @@ SAM tells you when this happens (`listGcpApiIssues()` in `apps/api/src/services/
 - **Settings → Infrastructure** shows a warning naming your Google Cloud project and the API.
   **Review** opens the Google Cloud connection.
 - The connection card lists each API with the reason and an **Enable in Google Cloud** link that opens that API's enable page for your project.
-- **Re-run Google setup** (Workload Identity) signs in to Google again and re-runs setup for the same project and zone. Setup reuses the existing pool, provider and service account, enables the full current API list, and narrows a provider or binding created by an older SAM version to your user.
+- **Re-run Google setup** (Workload Identity) signs in to Google again and re-runs setup for the same project and zone. Setup reuses the existing pool and service account, creates or updates this installation's provider with a condition scoped to your user, enables the full current API list, and removes a pool-wide binding created by an older SAM version. A provider left over from an older SAM version (`sam-oidc`) stays in Google, but the service account no longer trusts it. The button appears only when the connection reports an API issue; to re-run setup on a healthy connection, disconnect and choose **Connect with Google** again with the same project.
 - A service-account key connection shows the `gcloud services enable` command to run instead.
 - **Check again** re-tests the connection and asks Google whether the API is usable now. The warning clears as soon as a call succeeds.
 
