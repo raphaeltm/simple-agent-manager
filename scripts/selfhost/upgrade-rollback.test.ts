@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { runRollback } from './backup-lib.js';
+import { finishRollbackCache, refreshRollbackCacheReceipt, runRollback } from './backup-lib.js';
 import { rollbackSteps } from './upgrade-instructions.js';
 import { type BoxContext, UPGRADE_PENDING_FILE } from './upgrade-lib.js';
 import { runManualRollback } from './upgrade-rollback.js';
@@ -12,6 +12,8 @@ import { runManualRollback } from './upgrade-rollback.js';
 vi.mock('./backup-lib.js', async (original) => ({
   ...(await original<typeof import('./backup-lib.js')>()),
   runRollback: vi.fn(),
+  refreshRollbackCacheReceipt: vi.fn(),
+  finishRollbackCache: vi.fn(),
 }));
 vi.mock('./upgrade-preflight.js', async (original) => ({
   ...(await original<typeof import('./upgrade-preflight.js')>()),
@@ -38,6 +40,8 @@ beforeEach(() => {
   steps = [];
   stateEnvs = [];
   dirty = false;
+  vi.mocked(refreshRollbackCacheReceipt).mockReset();
+  vi.mocked(finishRollbackCache).mockReset();
   ctx = {
     box: { COMPOSE_PROJECT_NAME: 'owned-manual' },
     envFile: join(root, 'box.env'),
@@ -73,6 +77,76 @@ const rollback = (checkHealth = async () => true) =>
   });
 
 describe('manual owned rollback', () => {
+  it('retries after dependency failure with the removed cache receipt still retained', async () => {
+    const receipt = join(ctx.stateDir, 'rollback-cache-pending.json');
+    let removed = false;
+    vi.mocked(runRollback).mockImplementation(() => {
+      if (removed && !existsSync(receipt)) throw new Error('cache absent without proof');
+      removed = true;
+      writeFileSync(receipt, 'exact original cache proof');
+    });
+    vi.mocked(finishRollbackCache).mockImplementation(() => rmSync(receipt));
+    const runner = ctx.run;
+    let failInstall = true;
+    ctx.run = (command, args, env) => {
+      if (command === 'pnpm' && args[0] === 'install' && failInstall) {
+        failInstall = false;
+        return { status: 1, stdout: '', stderr: 'withheld' };
+      }
+      return runner(command, args, env);
+    };
+    await expect(rollback()).rejects.toThrow(/Manual rollback did not complete/);
+    expect(existsSync(receipt)).toBe(true);
+    expect(refreshRollbackCacheReceipt).not.toHaveBeenCalled();
+    expect(finishRollbackCache).not.toHaveBeenCalled();
+    await rollback();
+    expect(runRollback).toHaveBeenCalledTimes(2);
+    expect(finishRollbackCache).toHaveBeenCalledOnce();
+    expect(existsSync(receipt)).toBe(false);
+  });
+
+  it('retains the new cache proof through a failed health check and finishes only after healthy retry', async () => {
+    const receipt = join(ctx.stateDir, 'rollback-cache-pending.json');
+    vi.mocked(refreshRollbackCacheReceipt).mockImplementation(() => {
+      expect(steps.at(-1)).toMatch(/ up -d$/);
+      writeFileSync(receipt, 'new container and cache creation proof');
+    });
+    vi.mocked(finishRollbackCache).mockImplementation(() => rmSync(receipt));
+    await expect(rollback(async () => false)).rejects.toThrow(/Manual rollback did not complete/);
+    expect(readFileSync(receipt, 'utf8')).toContain('new container');
+    expect(finishRollbackCache).not.toHaveBeenCalled();
+    await rollback(async () => {
+      expect(existsSync(receipt)).toBe(true);
+      return true;
+    });
+    expect(refreshRollbackCacheReceipt).toHaveBeenCalledTimes(2);
+    expect(existsSync(receipt)).toBe(false);
+  });
+
+  it('refreshes ownership after partial Compose startup but never finishes its failed recovery', async () => {
+    const runner = ctx.run;
+    ctx.run = (command, args, env) => {
+      const result = runner(command, args, env);
+      return args.includes('up') ? { ...result, status: 1 } : result;
+    };
+    await expect(rollback()).rejects.toThrow(/Manual rollback did not complete/);
+    expect(refreshRollbackCacheReceipt).toHaveBeenCalledWith(
+      expect.anything(),
+      join(root, 'snapshot')
+    );
+    expect(finishRollbackCache).not.toHaveBeenCalled();
+  });
+
+  it('does not declare a healthy rollback when the replacement cache identity cannot be proven', async () => {
+    vi.mocked(refreshRollbackCacheReceipt).mockImplementation(() => {
+      throw new Error('foreign cache');
+    });
+    const health = vi.fn(async () => true);
+    await expect(rollback(health)).rejects.toThrow(/Manual rollback did not complete/);
+    expect(health).not.toHaveBeenCalled();
+    expect(finishRollbackCache).not.toHaveBeenCalled();
+  });
+
   it('recovers a populated install before old code starts, builds only active images and verifies health', async () => {
     const health = vi.fn(async () => {
       steps.push('HEALTH');

@@ -11,6 +11,8 @@ vi.mock('./backup-lib', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./backup-lib')>()),
   runBackup: vi.fn(),
   runRollback: vi.fn(),
+  refreshRollbackCacheReceipt: vi.fn(),
+  finishRollbackCache: vi.fn(),
 }));
 
 vi.mock('./upgrade-preflight.js', async (original) => ({

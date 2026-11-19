@@ -239,7 +239,27 @@ function discardCelldCache(ctx: BoxContext, expected: RollbackCacheProof, from: 
       throw new Error('Rollback celld cache identity changed; refusing removal');
     check(ctx.run('docker', ['volume', 'rm', expected.name]), 'remove owned celld cache');
   }
-  rmSync(join(ctx.stateDir, CACHE_PENDING));
+  // recoverUpgrade keeps this receipt until old code and dependencies are healthy.
+}
+
+/** After an authorized Compose recreation, bind retry to its newly observed exact cache. */
+export function refreshRollbackCacheReceipt(ctx: BoxContext, from: string): void {
+  assertOperatorExecution();
+  if (!pendingCache(ctx, from)) throw new Error('Missing rollback cache recovery receipt');
+  const proof = assertRollbackCacheReady(ctx);
+  replacePrivateFile(
+    join(ctx.stateDir, CACHE_PENDING),
+    JSON.stringify({ ...proof, snapshot: resolve(from) })
+  );
+}
+
+/** Clear progress only after the recovered installation has passed its health check. */
+export function finishRollbackCache(ctx: BoxContext): void {
+  assertOperatorExecution();
+  assertRollbackReady(ctx);
+  const path = join(ctx.stateDir, CACHE_PENDING);
+  assertPrivateFile(path);
+  rmSync(path);
 }
 /** Stage the full replacement before swapping directories; failed copying retains live state. */
 function restoreState(

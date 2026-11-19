@@ -13,6 +13,8 @@ import {
   type BoxContext as BackupContext,
   composeArgs,
   composeRunEnv,
+  finishRollbackCache,
+  refreshRollbackCacheReceipt,
   runBackup,
   runRollback,
 } from './backup-lib.js';
@@ -190,8 +192,24 @@ export async function recoverUpgrade(
         'rebuild previous images'
       );
   }
-  check(ctx.run('docker', composeArgs(ctx, ['up', '-d']), env), 'restore previous stack');
+  startRecoveredStack(ctx, backupDir, env);
   if (!(await opts.checkHealth())) throw new Error('previous version health check failed');
+  finishRollbackCache(backupContext(ctx));
+}
+
+/** A partial start may have replaced the cache; retain its exact identity for another retry. */
+function startRecoveredStack(ctx: BoxContext, backupDir: string, env?: NodeJS.ProcessEnv): void {
+  try {
+    check(ctx.run('docker', composeArgs(ctx, ['up', '-d']), env), 'restore previous stack');
+  } catch (error) {
+    try {
+      refreshRollbackCacheReceipt(backupContext(ctx), backupDir);
+    } catch {
+      // Preserve the original start error when no replacement cache can yet be proven.
+    }
+    throw error;
+  }
+  refreshRollbackCacheReceipt(backupContext(ctx), backupDir);
 }
 
 /** The ref an unfinished upgrade started from (`UPGRADE_PENDING_FILE`), or null. */

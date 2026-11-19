@@ -37,6 +37,7 @@ import {
   type RunResult,
   runRollback,
 } from './backup-lib';
+import { finishRollbackCache, refreshRollbackCacheReceipt } from './backup-recovery';
 import { buildCelldConfig } from './celld-config';
 import { prepareCelldProject, writeCelldConfig } from './celld-project';
 import { composeProjectFor, expectedComposeProjectFor, recordInstall } from './install-record';
@@ -643,6 +644,34 @@ describe('runRollback', () => {
     );
   });
 
+  it('keeps completed cache progress until recovered code is healthy and refreshes a recreated cache', () => {
+    const context = ctx('gs://fleet/celld', join(root, 'state'));
+    const snapshot = join(root, 'post-data-retry');
+    runBackup(context, snapshot);
+    runRollback(context, snapshot);
+    const journal = join(context.stateDir, 'rollback-cache-pending.json');
+    expect(existsSync(journal)).toBe(true);
+    const invoke = context.run;
+    context.run = (command, args, env) => {
+      if (
+        command === 'docker' &&
+        args[0] === 'compose' &&
+        args.includes('ps') &&
+        args.includes('-q')
+      )
+        return { status: 0, stdout: '', stderr: '' };
+      if (command === 'docker' && args[0] === 'volume' && args[1] === 'ls')
+        return { status: 0, stdout: '', stderr: '' };
+      return invoke(command, args, env);
+    };
+    expect(() => runRollback(context, snapshot)).not.toThrow();
+    context.run = invoke;
+    expect(() => refreshRollbackCacheReceipt(context, snapshot)).not.toThrow();
+    expect(JSON.parse(readFileSync(journal, 'utf8')).container).toBe('c'.repeat(64));
+    finishRollbackCache(context);
+    expect(existsSync(journal)).toBe(false);
+  });
+
   it('binds a manual rollback to the authenticated source commit before mutation', () => {
     const context = ctx('gs://fleet/celld', join(root, 'state'));
     const snapshot = join(root, 'wrong-code-snapshot');
@@ -717,6 +746,8 @@ describe('runRollback', () => {
       expect(() => runRollback(context, snapshot)).not.toThrow();
       expect(failed).toBe(true);
       expect(readFileSync(join(root, 'store/fleet/celld/current.json'), 'utf8')).toBe('{"v":3}');
+      expect(existsSync(join(context.stateDir, 'rollback-cache-pending.json'))).toBe(true);
+      finishRollbackCache(context);
       expect(existsSync(join(context.stateDir, 'rollback-cache-pending.json'))).toBe(false);
     }
   );
@@ -928,6 +959,8 @@ describe('runRollback', () => {
     };
     const stateReceipt = restoredRecord.resources.find((resource) => resource.kind === 'state-dir');
     expect(stateReceipt?.attributes.inode).toBe(String(statSync(join(root, 'state')).ino));
+    expect(actualState['rollback-cache-pending.json']).toBeDefined();
+    delete actualState['rollback-cache-pending.json'];
     delete actualState['created-resources.json'];
     delete expectedState['created-resources.json'];
     expect(actualState).toEqual(expectedState);

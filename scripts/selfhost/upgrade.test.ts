@@ -28,6 +28,8 @@ vi.mock('./backup-lib.js', async (original) => ({
   runBackup: vi.fn(),
   assertRollbackCacheReady: vi.fn(),
   runRollback: vi.fn(),
+  refreshRollbackCacheReceipt: vi.fn(),
+  finishRollbackCache: vi.fn(),
 }));
 vi.mock('./upgrade-migrations.js', async (original) => ({
   ...(await original<typeof import('./upgrade-migrations.js')>()),

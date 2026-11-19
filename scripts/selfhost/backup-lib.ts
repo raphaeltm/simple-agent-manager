@@ -489,4 +489,9 @@ export function runRestore(ctx: BoxContext, from: string): BackupManifest {
 
 export { readManifest } from './backup-manifest';
 export { assertBackupOutside } from './backup-paths';
-export { assertRollbackCacheReady, runRollback } from './backup-recovery';
+export {
+  assertRollbackCacheReady,
+  finishRollbackCache,
+  refreshRollbackCacheReceipt,
+  runRollback,
+} from './backup-recovery';
