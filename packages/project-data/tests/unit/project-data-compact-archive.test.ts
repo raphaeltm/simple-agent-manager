@@ -758,12 +758,18 @@ describe('compact archive bounded failures', () => {
       for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
     };
 
+    // Each writer hashes its body with real async crypto before touching R2, so wait on the
+    // condition itself rather than a fixed number of ticks (CI coverage runs are slow).
+    const waitFor = async (condition: () => boolean) => {
+      for (let i = 0; i < 1_000 && !condition(); i++) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      expect(condition()).toBe(true);
+    };
     const starter = writeImmutableJson(bucket, 'own-timer.json', { ok: true }, 2_000);
-    await flush();
-    expect(bucket.put).toHaveBeenCalledTimes(1);
+    await waitFor(() => vi.mocked(bucket.put).mock.calls.length === 1);
     // Wait until the joiner is parked on the pending PUT, signalled by the timer it registers
-    // there (its poll timer on celld, its deadline timer otherwise). It hashes its body with
-    // real async crypto first, so a fixed number of ticks is not enough under load.
+    // there (its poll timer on celld, its deadline timer otherwise).
     const timersBefore = vi.getTimerCount();
     const joiner = writeImmutableJson(bucket, 'own-timer.json', { ok: true }, 2_000);
     let joinerSettled = false;
@@ -771,10 +777,7 @@ describe('compact archive bounded failures', () => {
       () => (joinerSettled = true),
       () => (joinerSettled = true)
     );
-    for (let i = 0; i < 1_000 && vi.getTimerCount() <= timersBefore; i++) {
-      await new Promise((resolve) => setImmediate(resolve));
-    }
-    expect(vi.getTimerCount()).toBeGreaterThan(timersBefore);
+    await waitFor(() => vi.getTimerCount() > timersBefore);
     expect(joinerSettled).toBe(false);
 
     finishPut?.({} as R2Object);
