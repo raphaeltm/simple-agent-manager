@@ -112,8 +112,13 @@ Regression coverage here must drive the real writer rather than hand-seed the an
       instead of HTTP 500 (`NodeAllocationAuthorityChangedError`,
       `assertPinnedNodeAllocationPlanCurrent`). Owner control, excluded-source 409, and an
       unavailable database staying a server fault are covered on the migrated-SQLite fixture.
+      The route itself is covered by `tests/unit/routes/workspace-create-pinned-authority.test.ts`
+      (real SQL, real route and guard): an owner control returns 201, an excluded source returns 409,
+      and no row persists. Discrimination: removing the typed error, or pointing the route back at
+      the unwrapped guard, fails exactly the 409 assertions (the route returns the old 500). Both
+      pass with the fix.
       This closes `tasks/backlog/2026-11-18-pinned-workspace-stale-allocation-plan-returns-500.md`.
-- [ ] Verify the same public API/UI flow on staging with an isolated project and remove every
+- [x] Verify the same public API/UI flow on staging with an isolated project and remove every
       created node, workspace, project, and attachment. Record evidence that stable plans pass
       while changed authority is rejected; do not mutate shared pool policy to reproduce it.
 
@@ -179,6 +184,8 @@ archived as fully verified. The canonical idea remains open while the fix is unm
   allocation/reuse and negative HTTP behavior remain explicit staging gaps.
   Tracked as `tasks/backlog/2026-11-18-pinned-workspace-stale-allocation-plan-returns-500.md`
   (deferred: pre-existing, outside this fix's scope; the guard still refuses).
+  **Superseded 2026-11-19:** fixed in this PR (designed 409, `6e7785d12`/`74aa64128`). The task
+  is archived, and the 409 was verified live on `74aa64128` (final verification section below).
 
 No production deployment, readiness action, merge or GitHub issue creation occurred.
 
@@ -241,7 +248,8 @@ placeholder attach (`attachPrecreatedWorkspacePlacement`, 79 binds) failed with
   link/relocation 96–97 → 64–74, reuse 94/95 → 66/69. Query plans identical (24/24).
   Restart was also over the cap before the fix, so it is now covered on Miniflare.
 - Deferred LOW (review): no padding canary enforces the ~17-level margin; any new `node_scope`
-  term lowers it. The Miniflare suite still fails at the cap itself.
+  term lowers it. The Miniflare suite still fails at the cap itself. Tracked in
+  `tasks/backlog/2026-11-19-d1-expression-depth-headroom-canary.md`.
 - No D1 depth errors in this account in the previous 7 days, so this path had not run before.
 
 Cleanup: the kit deleted the node (HTTP 200, row gone, no provider instance recorded on the
@@ -271,7 +279,35 @@ fresh repository, which is deleted with the project.
   HTTP 500 (`Node allocation plan is no longer current` through the global handler). That 500
   is the only error group in the deploy/test window, and it is new in the staging error log
   (none since at least 2026-10-20), so the noise gate does not pass on this head. Fixed by the
-  designed 409 above. The live re-check is pending on the next head.
+  designed 409 above. **Superseded:** the live re-check passed on `74aa64128` (409, 0 rows, 0 noise
+  groups); see the final verification section.
 - Cleanup audit (D1): 0 live nodes on staging; no fixture projects, attachments or nodes. The
   only remaining fixture row is the never-placed `stopping` workspace from 00:47, tracked in
   `tasks/backlog/2026-11-19-unlinked-placeholder-workspace-deletion-stays-stopping.md`.
+
+## Final live verification on `74aa64128` (2026-11-19 03:49–03:54Z)
+
+The deploy runs and the live kit on each head:
+
+- `6e7785d12`: deploy run 44449061059. The first kit attempt at 03:21 stopped before any node
+  existed: Hetzner refused the create with `412: error during placement` (fsn1 capacity). That
+  group is pre-existing, seen on many days since 2026-10-21. The retry at 03:25 passed
+  everything, including the designed 409.
+- Final head `74aa64128`: deploy run 44452026663, CI 44449559519 green. The kit passed every phase.
+  - Node `01M7RYT7KY64A580PWVF1M4GQN` was linked and Hetzner `176741636` ran with a heartbeat.
+  - The anchor was exact: `cap-source-external-credential:cc_attachments%3Acc-att-01M7RYS849AA97WBHJD11R308Y:1783247620644`
+    (`capacity-source-external-ref`, 0 secret and 0 IV bytes).
+  - Pinned reuse returned 201 (load 1.05).
+  - The excluded source got `409 CONFLICT` "Node allocation plan is no longer current. Choose another
+    node or omit nodeId.", with 0 rows persisted.
+  - Every created workspace, node, attachment and project was deleted, and staging has 0 live nodes.
+- Noise (`platform_errors`, level error), pre-existing noise waived per Raphaël 2026-11-18:
+  - Baseline: 24h to 2026-11-18 09:46Z, 23 groups / 329 errors. Previous 24h: 14 groups / 47.
+  - `7c9368f52` window (02:13–02:54): 1 new group, the probe's 500. Fixed by the designed 409.
+  - `6e7785d12` window (03:06–03:30): Hetzner 412 ×1 (pre-existing), and "Session verification is
+    temporarily unavailable" ×16 (pre-existing; 15 arrived in a 2 s burst at the kit's login page loads).
+  - Final-head window (03:34–03:54, the same kit flow): 0 groups, 0 errors. The session burst did
+    not recur, so it is ambient (comparable bursts: 57/h on 2026-11-17, 15/h on 2026-11-18).
+  - This PR introduced no new error group and materially grew no existing one.
+- The primary lease was released early (run 44454708292), and the next queued task
+  `01M7RN3SX99N1J3PBP8H2NBDXN` was messaged.

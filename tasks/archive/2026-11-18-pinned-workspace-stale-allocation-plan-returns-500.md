@@ -45,5 +45,7 @@ error groups and is reported as a server fault (rule 72: categorize by recovery 
 - Security review (PASS, LOW notes addressed): the wrapper logs `node_allocation.pinned_authority_refused`
   with node, user and project IDs plus `action: 'rejected'` (rule 11), and the 409 names the recovery
   action ("Choose another node or omit nodeId."). Deferred LOW: a route-level unit test of the pinned
-  409. The route is exercised live by the staging excluded-source probe, which also asserts no
-  workspace row persists.
+  409, since added as `apps/api/tests/unit/routes/workspace-create-pinned-authority.test.ts`
+  (real route, real SQL; owner control 201, excluded source 409, no row; pointing the route at
+  the unwrapped guard makes it fail with the old 500). Live staging on `74aa64128` also returned
+  409 with 0 rows.
