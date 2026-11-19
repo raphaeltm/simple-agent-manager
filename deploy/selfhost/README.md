@@ -108,6 +108,11 @@ images by digest. Caddy's modules (the DNS provider, `CADDY_DNS_MODULE`, and cad
 pinned by version and verified against the Go checksum database, and the build fails unless the
 binary carries exactly those versions; `sam-mx` modules are pinned by `go.sum`.
 
+Neither image runs as root. Caddy runs as uid 7101 and binds 80/443 through its binary's file
+capability (`NET_BIND_SERVICE`, the one capability compose leaves it). Before each start, the
+one-shot `caddy-volumes` service hands the `caddy-data` and `caddy-config` volumes to that uid,
+so a box whose certificates were written by an older, root Caddy keeps them.
+
 A build still downloads from the network (Docker Hub, the Go module proxy, Alpine packages). The
 content is pinned, so a changed upstream fails the build rather than changing the image.
 

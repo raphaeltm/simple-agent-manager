@@ -36,3 +36,11 @@ RUN set -eu; \
 
 FROM caddy:2.11.9@sha256:ce773ec7a742ce15ee6bf2bb5f65882b9e2a4487b10733e6f1484f86e6b5d8bc
 COPY --from=build /usr/bin/caddy /usr/bin/caddy
+# Never root. The file capability is the only privilege: it lets the unprivileged process bind
+# 80/443, and compose keeps NET_BIND_SERVICE as the one capability (docker-compose.yml, service
+# caddy). Set here rather than trusting COPY to carry the builder's. Caddy's state (XDG_DATA_HOME
+# /data, XDG_CONFIG_HOME /config) belongs to the same uid; an existing box's volumes, written by
+# a root Caddy, are handed over by the caddy-volumes service.
+RUN setcap cap_net_bind_service=+ep /usr/bin/caddy \
+    && chown -R 7101:7101 /data /config
+USER 7101:7101

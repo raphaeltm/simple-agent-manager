@@ -70,6 +70,25 @@ services:
     # "Address already in use"; Docker's restart backoff covers that.
     restart: unless-stopped
 
+  # One-shot, before Caddy: Caddy runs as uid 7101 (caddy/Dockerfile), but a box upgraded from a
+  # release whose Caddy ran as root has root-owned files in its volumes, which Caddy could then no
+  # longer read or renew. Hands both volumes to 7101 and exits; idempotent, so it runs every start.
+  # Root only for this, with just the capabilities chown needs (CHOWN, and DAC_READ_SEARCH to walk
+  # directories 7101 already owns with mode 0700).
+  caddy-volumes:
+    image: sam-selfhost-caddy:local
+    pull_policy: never
+    network_mode: none
+    user: '0:0'
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_READ_SEARCH]
+    security_opt: ['no-new-privileges:true']
+    entrypoint: ['/bin/chown', '-R', '7101:7101', '/data', '/config']
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: 'no'
+
   caddy:
     # Built only by `docker compose build caddy` (or when the image is missing): caddy/Dockerfile
     # pins both base images by digest and both modules by version. caddy/.dockerignore keeps the
@@ -84,7 +103,11 @@ services:
     # Internet-facing and holds the DNS-01 identity: only the capability to bind 80/443.
     cap_drop: [ALL]
     cap_add: [NET_BIND_SERVICE]
-    depends_on: [celld]
+    depends_on:
+      celld:
+        condition: service_started
+      caddy-volumes:
+        condition: service_completed_successfully
     # Validates its settings (start.sh: mail collector password, keep-warm, frp login rate limit,
     # and that no box port lies inside the reverse-tunnel range) before starting Caddy.
     entrypoint: ['/bin/sh', '/etc/caddy/start.sh']
