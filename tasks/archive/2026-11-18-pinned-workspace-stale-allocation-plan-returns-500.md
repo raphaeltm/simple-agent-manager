@@ -21,11 +21,24 @@ error groups and is reported as a server fault (rule 72: categorize by recovery 
 
 ## Acceptance Criteria
 
-- [ ] Authority-drift refusals from the allocation guard surface as a designed 409 (or 400)
+- [x] Authority-drift refusals from the allocation guard surface as a designed 409 (or 400)
       with a stable error code on pinned workspace creation; genuine faults (database
       unavailable) stay 5xx. Prefer a typed error over message matching.
-- [ ] Same mapping reviewed for the other `assertNodeAllocationPlanCurrent` callers in
+- [x] Same mapping reviewed for the other `assertNodeAllocationPlanCurrent` callers in
       `node-provisioning.ts` (task-runner paths may intentionally treat it as a failure).
-- [ ] Route-level test on a real SQL engine: exclude the node's pool source, then a pinned
+- [x] Route-level test on a real SQL engine: exclude the node's pool source, then a pinned
       create returns the designed 4xx and creates no workspace row; owner-path control
       with the source included succeeds.
+
+## Resolution (PR #2853, 2026-11-19)
+
+- `node-allocation-validation.ts` throws `NodeAllocationAuthorityChangedError` (an `Error` subclass,
+  same messages) for record/owner/plan/settings/authority drift. A database outage stays a plain `Error`.
+- The pinned route calls `assertPinnedNodeAllocationPlanCurrent`, which maps that error to
+  `409 CONFLICT`. The `node-provisioning.ts` callers keep calling `assertNodeAllocationPlanCurrent`:
+  for them drift fails the provisioning attempt, so their behavior is unchanged. The node-pool
+  boundary inventory now names the wrapper as the route's evidence.
+- Tests (`node-allocation-plan-guard-composable.test.ts`, migrated SQLite): the owner control
+  passes, an excluded source answers 409 with no workspace created, and an unavailable database is
+  not a 409. With the typed error removed, the 409 test fails. The route itself is exercised live by
+  the staging kit's excluded-source probe.

@@ -11,8 +11,13 @@ import type { Env } from '../../src/env';
 import { D1_MAX_BOUND_PARAMETERS } from '../../src/lib/d1-limits';
 import { externalCapacitySourceCredentialId } from '../../src/services/default-capacity-pool-helpers';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../src/services/default-capacity-pools';
+import { NodeAllocationAuthorityChangedError } from '../../src/services/node-allocation-validation';
 import { resolvePlacementAdmissionPolicy } from '../../src/services/node-lifetime-admission';
-import { assertNodeAllocationPlanCurrent, createNodeRecord } from '../../src/services/nodes';
+import {
+  assertNodeAllocationPlanCurrent,
+  assertPinnedNodeAllocationPlanCurrent,
+  createNodeRecord,
+} from '../../src/services/nodes';
 import {
   capacityPlacementSnapshotForTaskStart,
   resolveTaskStartCapacityPoolSelection,
@@ -397,5 +402,41 @@ describe('composable allocation authority after real pool reconciliation (#2843)
     );
     await expect(validate(f)).rejects.toThrow('Node allocation plan is no longer current');
     expect(await reusable(f)).toEqual(new Set());
+  });
+});
+
+describe('pinned workspace requests refuse authority drift as a designed conflict', () => {
+  const EXCLUDE_SOURCE =
+    'UPDATE capacity_pools SET excluded_source_ids_json = (SELECT json_array(id) FROM capacity_sources LIMIT 1)';
+
+  it('admits the current plan and answers an excluded source with 409, not a server fault', async () => {
+    const f = await fixture();
+    // Owner-path control: the same pinned check passes while the source is current.
+    await expect(
+      assertPinnedNodeAllocationPlanCurrent(f.env, f.nodeId, 'user-1', 'project-1')
+    ).resolves.toBeUndefined();
+    f.sqlite.exec(EXCLUDE_SOURCE);
+    // Background callers keep the same Error subclass and message.
+    await expect(validate(f)).rejects.toBeInstanceOf(NodeAllocationAuthorityChangedError);
+    await expect(
+      assertPinnedNodeAllocationPlanCurrent(f.env, f.nodeId, 'user-1', 'project-1')
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      error: 'CONFLICT',
+      message: 'Node allocation plan is no longer current',
+    });
+  });
+
+  it('keeps an unavailable database a server fault', async () => {
+    const f = await fixture();
+    const error = await assertPinnedNodeAllocationPlanCurrent(
+      { ...f.env, DATABASE: undefined } as unknown as Env,
+      f.nodeId,
+      'user-1',
+      'project-1'
+    ).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(NodeAllocationAuthorityChangedError);
+    expect(error).not.toHaveProperty('statusCode');
   });
 });

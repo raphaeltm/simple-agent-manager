@@ -34,7 +34,7 @@ import {
   LIFETIME_ADMISSION_CUTOFF_REASON,
   resolvePlacementAdmissionPolicy,
 } from '../../services/node-lifetime-admission';
-import { assertNodeAllocationPlanCurrent, createNodeRecord } from '../../services/nodes';
+import { assertPinnedNodeAllocationPlanCurrent, createNodeRecord } from '../../services/nodes';
 import {
   PlacementResolutionError,
   resolveTaskStartPlacement,
@@ -273,7 +273,7 @@ export function registerWorkspaceCreateRoute(crudRoutes: Hono<{ Bindings: Env }>
         }
         authorityNodeClass = node.nodeClass === 'user-owned' ? 'user-owned' : 'managed';
         if (authorityNodeClass === 'managed') {
-          await assertNodeAllocationPlanCurrent(c.env, nodeId, userId, linkedProject.id);
+          await assertPinnedNodeAllocationPlanCurrent(c.env, nodeId, userId, linkedProject.id);
           const nodeSnapshot = toCapacityPlacementSnapshot(node);
           capacityPlacementSnapshot = nodeSnapshot.capacityPoolId ? nodeSnapshot : null;
         } else {

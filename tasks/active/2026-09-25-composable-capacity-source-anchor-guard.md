@@ -108,6 +108,11 @@ Regression coverage here must drive the real writer rather than hand-seed the an
       and platform controls, through plan guard, reuse, `attachPrecreatedWorkspacePlacement`,
       `reserveWorkspacePlacement` and `reserveWorkspaceRestart`
       (`tests/workers/composable-authority-d1-expression-depth.test.ts`).
+- [x] Answer a pinned workspace request whose node lost allocation authority with a designed 409
+      instead of HTTP 500 (`NodeAllocationAuthorityChangedError`,
+      `assertPinnedNodeAllocationPlanCurrent`). Owner control, excluded-source 409, and an
+      unavailable database staying a server fault are covered on the migrated-SQLite fixture.
+      This closes `tasks/backlog/2026-11-18-pinned-workspace-stale-allocation-plan-returns-500.md`.
 - [ ] Verify the same public API/UI flow on staging with an isolated project and remove every
       created node, workspace, project, and attachment. Record evidence that stable plans pass
       while changed authority is rejected; do not mutate shared pool policy to reproduce it.
@@ -243,3 +248,30 @@ Cleanup: the kit deleted the node (HTTP 200, row gone, no provider instance reco
 workspace). The project and attachment were deleted afterwards (200). The never-placed
 workspace row stays `stopping` with `runtime_deletion_unconfirmed`, like four older staging rows;
 it has no node or VM.
+
+## Live verification on `7c9368f52` (2026-11-19 02:46–02:54Z)
+
+Deploy run 44442694482 succeeded; primary staging lease held by this task. Every repository in the
+smoke user's GitHub installation is now linked to an existing project (another agent linked
+VoyajApp at 01:05Z), so the kit creates an Artifacts-backed fixture project. That project owns a
+fresh repository, which is deleted with the project.
+
+- Composable pool reconciled; workspace linked to node `01M7RV7DAC3KNTHV63ZZ1FEW79`; Hetzner
+  `176735855` (cx23/fsn1) running with heartbeat. The node pins the exact project candidate and
+  source, and capacity source `credential_id` is the exact
+  `cap-source-external-credential:cc_attachments%3Acc-att-01M7RV6BG2GDQAKCPFJSA28FX4:1783247620644`
+  anchor (`capacity-source-external-ref`, 0 secret bytes, 0 IV bytes).
+- Workspace reached `running`. The screenshots only captured the app's loading spinner at
+  `domcontentloaded`, so they are not counted as UI evidence; this PR changes no UI.
+- Pinned reuse on the same node: 201 on the first attempt (node load 1.56 on 2 vCPU). An
+  earlier run (02:39) got 409 when it reused the instant the first workspace finished
+  booting. The kit now retries for up to 5 minutes and records live metrics, because final
+  admission vetoes an occupied node while CPU load is over threshold.
+- Excluded source, then the same pinned request: refused with 0 persisted rows. It returned
+  HTTP 500 (`Node allocation plan is no longer current` through the global handler). That 500
+  is the only error group in the deploy/test window, and it is new in the staging error log
+  (none since at least 2026-10-20), so the noise gate does not pass on this head. Fixed by the
+  designed 409 above. The live re-check is pending on the next head.
+- Cleanup audit (D1): 0 live nodes on staging; no fixture projects, attachments or nodes. The
+  only remaining fixture row is the never-placed `stopping` workspace from 00:47, tracked in
+  `tasks/backlog/2026-11-19-unlinked-placeholder-workspace-deletion-stays-stopping.md`.

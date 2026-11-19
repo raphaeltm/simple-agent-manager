@@ -12,6 +12,7 @@ import { capacityPlacementSnapshotDbValues } from './capacity-placement-snapshot
 
 export {
   assertNodeAllocationPlanCurrent,
+  assertPinnedNodeAllocationPlanCurrent,
   type NodeAllocationPlanRole,
 } from './node-allocation-validation';
 export {
