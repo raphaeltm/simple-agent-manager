@@ -163,7 +163,7 @@ async function loadRequestingTask(env: Env, identity: SecretRequesterIdentity) {
     log.error('runtime_secret_request.task_mismatch', {
       taskId: identity.taskId,
       projectId: identity.projectId,
-      cacheUserId: identity.userId,
+      tokenUserId: identity.userId,
       taskUserId: row?.user_id ?? null,
       action: 'rejected',
     });

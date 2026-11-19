@@ -764,6 +764,43 @@ describe('the credential owner reaches the exchange through the real resolver', 
     );
   });
 
+  it('the exact path through a composable project credential uses its owner too', async () => {
+    await storeCcRow('cc-a', 'user-a', JSON.stringify(wif(POOL_A)));
+    sqlite
+      .prepare(
+        `INSERT INTO cc_configurations (id, owner_id, name, consumer_kind, consumer_target, credential_id,
+           settings_json, is_active, created_at, updated_at)
+         VALUES ('cfg-a', 'user-a', 'GCP', 'compute', 'gcp', 'cc-a', NULL, 1, ?, ?)`
+      )
+      .run(NOW, NOW);
+    sqlite
+      .prepare(
+        `INSERT INTO cc_attachments (id, configuration_id, consumer_kind, consumer_target, user_id,
+           project_id, is_active, created_at, updated_at)
+         VALUES ('att-a', 'cfg-a', 'compute', 'gcp', 'user-a', 'proj-a', 1, ?, ?)`
+      )
+      .run(NOW, NOW);
+
+    const resolved = await createProviderForUser(
+      drizzle(env.DATABASE, { schema }),
+      'user-m',
+      KEY,
+      env,
+      'gcp',
+      'proj-a',
+      {
+        credentialSource: 'project',
+        credentialReference: 'cc_credentials:cc-a',
+        credentialVersion: Date.parse(NOW),
+      }
+    );
+    await expect(resolved!.provider.validateToken()).resolves.toBe(true);
+    expect(signIdentityToken).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-a', projectId: 'proj-a' }),
+      env
+    );
+  });
+
   it('a user-level credential signs its owner’s id, which the user-scoped condition requires', async () => {
     await storeLegacyRow('cred-a', 'user-a', wif(POOL_A));
     const resolved = await createProviderForUser(
