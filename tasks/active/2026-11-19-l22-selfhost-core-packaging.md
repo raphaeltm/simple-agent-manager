@@ -69,37 +69,63 @@ and trimmed. Nothing in L22 may change Cloudflare behaviour.
 - [x] task-completion-validator PASS (MEDIUM fixed), CI, CodeRabbit (9 threads fixed), merged #2902
       as fa04695d2, Deploy Production 44478774764 success
 
-### PR 3 (L22c): box runtime (self-host only)
+### PR 3 (L22c): box runtime (self-host only), #2906
 
 - [x] deploy/selfhost compose (no key-agent, fence, docker-proxy, metadata-proxy), Caddy with the
       F21 fixes (L1 double-encoding, L5 ports as compose runs them, L6 narrow 404, L7 frp Login
       limit), frps, objectstore, .env.example, gcp-bootstrap.sh
-- [x] F11 fix: upgrade builds only the local images whose build inputs changed, then `up -d`
-      without `--build` (`image-rebuilds.ts`)
+- [x] F11: builds are explicit and change-gated. Upgrade builds only the local images whose build
+      inputs changed, then `up -d` without `--build` (`image-rebuilds.ts`). Both images pin base
+      images by digest and modules by checksum. Build steps keep the box's unrestricted egress
+      (metadata server included), as the runtime does, because the egress fence (L23) is held;
+      the README says so.
 - [x] Docker live tests + CI job on self-host paths only (D9)
 - [x] Operator README marked experimental, including R2_S3_REGION for s3://
 - [x] Rebased onto main after #2902 (upgrade retry/box-scoped compose kept, F11 merged in)
-- [x] Review fixes: architecture (CI filters, no build in Validate Deploy Scripts, live harness
-      dedup, gcp-bootstrap pinned to GCP_REQUIRED_APIS / SA_PROJECT_ROLES, loadBoxEnv); security
-      MEDIUMs (shared-pool refusal, celld/frps no caps + read-only, 24-char objectstore secret,
-      sam-mx port reserved + deploy-time port check) and LOWs (site-level X-SAM-* strip, child env
-      allowlist, build-arg README note)
+- [x] Review fixes:
+  - Architecture: CI filters, no build in Validate Deploy Scripts, live harness dedup,
+    gcp-bootstrap pinned to GCP_REQUIRED_APIS / SA_PROJECT_ROLES, loadBoxEnv.
+  - Security MEDIUMs: shared-pool refusal, celld/frps with no caps and read-only, 24-char
+    objectstore secret, sam-mx port reserved plus a deploy-time port check.
+  - Security LOWs: site-level X-SAM-* strip, child env allowlist, build-arg README note.
+  - Codex P2s: shell precedence for every compose variable; SAM_MX_LISTEN must be host:port.
+  - SonarCloud: live-suite TLS verification, `--ignore-scripts`, non-root Caddy plus the
+    caddy-volumes ownership hand-off, smells.
+  - Secret Scan: reviewed-baseline entry for the synthetic deploy-harness fixture.
 - [ ] Security HIGH (gcp-bootstrap pool/* binding admits a user credential naming the pool; same
       shape in main's guided setup): Worker fix is SAM task 01M7SB8FRZ08M5NEX9WGM74X61 / PR #2905.
       Coordinator: do not merge PR 3 until #2905 is deployed, then re-run security-auditor.
-- [ ] BOX: fresh teardown + rebuild from this head; prove 0255 lease table on a fresh box;
-      L19 celld teardown OWED (guided login not installed); L13 metered ceiling only if a platform
-      AI key exists
-- [ ] task-completion-validator, CI, CodeRabbit, merge, Deploy Production
+- [x] BOX round R18 (fresh teardown + README rebuild from c4fac57ca, upgrade to 795bf674f):
+  - Passed: install, admin by email, GCP reverse-tunnel node heartbeat through frps, the 0255
+    lease table on fresh D1, and an upgrade that rebuilt only Caddy. Evidence is in the #2906
+    body.
+  - README findings fixed in 754d86cde.
+- [x] Owed, as agreed by the coordinator on 2026-11-19:
+  - Agent session on a box: owed to the first slice that gives a box a repository source
+    (hosted git). Main plus L22 cannot create a project: artifacts is disabled and there is no
+    GitHub/GitLab app.
+  - L19 celld guided-login teardown: no gVisor; guided login is held.
+  - L13 metered ceiling: the box has no platform AI key.
+- [x] task-completion-validator: the agent-session gap is recorded as owed (above) and the HIGH
+      is blocked on #2905. The live suite passed locally at 795bf674f (6 files, 208 tests); CI
+      `Self-host Live (Docker)` runs on every head.
+- [ ] CI green, merge after #2905 deploys plus a security re-review, Deploy Production
 
-Not fixed here (accepted as tracked by the coordinator): F21 L4 `port_range_cooling_down` is
-fail-fast in `apps/api/src/selfhost/reverse-tunnel/leases.ts` and the shared Worker failure path;
-idea 01M7MK0PCF032CT45Z45HRSDEQ. Security LOWs left: access-log redaction matches literal path
-spellings only; frp Login limit is per address (IPv6 rotation).
+Not fixed here (accepted as tracked by the coordinator):
+- F21 L4 `port_range_cooling_down` is fail-fast in `apps/api/src/selfhost/reverse-tunnel/leases.ts`
+  and in the shared Worker failure path; idea 01M7MK0PCF032CT45Z45HRSDEQ.
+- Security LOWs: access-log redaction matches literal path spellings only, and the frp Login limit
+  is per address (IPv6 rotation).
+- Worker defects seen again on the BOX, all outside L22's scope and reported to the coordinator:
+  - `DEFAULT_VM_LOCATION` nbg1 on GCP-only installs.
+  - A 60-minute price backoff after a transient first failure.
+  - JWT kid `key-1970-01`.
+  - A node shows healthy before its first heartbeat.
 
 ## Acceptance criteria
 
 - Cloudflare Worker import graph unchanged by PRs 2-3; Worker behaviour unchanged except the
   bounded joins in PR 1.
 - A box installed from main alone deploys, serves the app, creates an admin by email, runs one
-  agent session and heartbeats a reverse-tunnel node.
+  agent session and heartbeats a reverse-tunnel node. (The agent session is OWED to the hosted-git
+  slice, per the coordinator on 2026-11-19; every other part was proven in BOX round R18.)

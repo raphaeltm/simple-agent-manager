@@ -124,7 +124,10 @@ one-shot `caddy-volumes` service hands the `caddy-data` and `caddy-config` volum
 so a box whose certificates were written by an older, root Caddy keeps them.
 
 A build still downloads from the network (Docker Hub, the Go module proxy, Alpine packages). The
-content is pinned, so a changed upstream fails the build rather than changing the image.
+content is pinned, so a changed upstream fails the build rather than changing the image. A build
+step has the same unrestricted network access as everything else on this box, the cloud metadata
+server included (see [Not included yet](#not-included-yet)): pinning, not a fence, is what keeps an
+upstream from changing what runs.
 
 After changing a build argument in `.env` (`CADDY_DNS_MODULE`), run `docker compose build caddy`
 yourself, then `docker compose up -d`: `selfhost:upgrade` rebuilds only for changes in the
