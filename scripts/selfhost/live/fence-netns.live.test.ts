@@ -233,6 +233,7 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
           SAM_EGRESS_FENCE_ATTESTATION: attestation,
           SAM_EGRESS_FENCE_CHECK_SECONDS: '0.1',
           SAM_EGRESS_FENCE_WAIT_SECONDS: '2',
+          SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS: '2',
         }
       );
       let output = '';
@@ -294,6 +295,34 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
       normal.child.kill('SIGTERM');
       stopFence();
       console.log(`[fence-netns] flush-to-stop ${elapsed}ms`);
+    });
+
+    it('keeps serving past the two-second healthy interval, then stops when attestations expire with rules intact', async () => {
+      const pair = await startPair();
+      const run = startCelld(pair.attestation);
+      await waitFor(() => existsSync(run.pidFile));
+      const pid = Number(readFileSync(run.pidFile, 'utf8'));
+      // Longer than the explicit production max age: healthy re-attestation must keep it alive.
+      await new Promise((done) => setTimeout(done, 2200));
+      expect(run.child.exitCode).toBeNull();
+      expect(existsSync(`/proc/${pid}`)).toBe(true);
+      expect(readFileSync(pair.attestation, 'utf8')).toMatch(/^ok \d+\n$/);
+      stopFence();
+      const stoppedAt = Date.now();
+      // Kill the sidecar plus observer, preserving the table and exercising expiry, not a latch.
+      expect(existsSync(join(pair.state, 'lost'))).toBe(false);
+      expect(probe([{ host: '10.255.255.1', port: 80, protocol: 'udp' }], FENCED_UID).get(0)).toBe(
+        'blocked'
+      );
+      await waitFor(() => run.child.exitCode !== null, 4000);
+      expect(await run.exited).toBe(1);
+      expect(Date.now() - stoppedAt).toBeLessThanOrEqual(4000);
+      expect(run.output()).toContain('egress_fence.celld_killed');
+      expect(existsSync(`/proc/${pid}`)).toBe(false);
+      expect(existsSync(join(pair.state, 'lost'))).toBe(false);
+      expect(probe([{ host: '10.255.255.1', port: 80, protocol: 'udp' }], FENCED_UID).get(0)).toBe(
+        'blocked'
+      );
     });
 
     it('latches a transient flush-and-restore from the kernel event stream', async () => {

@@ -1287,6 +1287,24 @@ jobs:
       - name: Run self-host live tests
         run: pnpm selfhost:live-test
 
+      - name: Check rendered rules with the production nft binary
+        run: |
+          mkdir -p .tmp
+          pnpm exec tsx --eval '
+            import { writeFileSync } from "node:fs";
+            import { buildFencePlan, renderFenceRuleset } from "./scripts/selfhost/egress-fence.ts";
+            const plan = buildFencePlan({
+              box: { GCE_METADATA_PROXY: "off" },
+              leaseRange: { start: 20000, end: 29999 },
+              resolvConf: "nameserver 127.0.0.53\nnameserver 2001:4860:4860::8888\n",
+              objectStore: [{ address: "127.0.0.1", port: 9000 }],
+              localAddresses: ["127.0.0.1", "::1"],
+            });
+            writeFileSync(".tmp/selfhost-production-fence.nft", renderFenceRuleset(plan));
+          '
+          docker build -t sam-fence-production-parser deploy/selfhost/egress-fence
+          docker run --rm --network none --cap-drop ALL --cap-add NET_ADMIN --mount "type=bind,src=$GITHUB_WORKSPACE/.tmp/selfhost-production-fence.nft,dst=/fixture.nft,readonly" --entrypoint nft sam-fence-production-parser -c -f /fixture.nft
+
       - name: Run isolated egress fence kernel tests
         run: |
           docker build -f deploy/selfhost/egress-fence/Dockerfile.lab -t sam-fence-lab deploy/selfhost/egress-fence
