@@ -66,18 +66,36 @@ and trimmed. Nothing in L22 may change Cloudflare behaviour.
 - [x] Review fixes: security H1 (upgrade forwarding + no key minting over a prior deploy), M1 atomic
       platform-keys write, M2 deploy/selfhost/.gitignore, M3 create-account --secrets; architecture
       MEDIUMs (go.mod filter, scripts/ in boundary test, reverse-tunnel limits shared from the Worker)
-- [ ] task-completion-validator, CI, CodeRabbit, merge, Deploy Production
+- [x] task-completion-validator PASS (MEDIUM fixed), CI, CodeRabbit (9 threads fixed), merged #2902
+      as fa04695d2, Deploy Production 44478774764 success
 
 ### PR 3 (L22c): box runtime (self-host only)
 
-- [ ] deploy/selfhost compose (no key-agent, fence, docker-proxy, metadata-proxy), Caddy with the
-      F21 fixes, frps, celld/start.sh, objectstore, .env.example, gcp-bootstrap.sh
-- [ ] F11 fix
-- [ ] Docker live tests + CI job on self-host paths only (D9)
-- [ ] Operator README marked experimental, including R2_S3_REGION for s3://
+- [x] deploy/selfhost compose (no key-agent, fence, docker-proxy, metadata-proxy), Caddy with the
+      F21 fixes (L1 double-encoding, L5 ports as compose runs them, L6 narrow 404, L7 frp Login
+      limit), frps, objectstore, .env.example, gcp-bootstrap.sh
+- [x] F11 fix: upgrade builds only the local images whose build inputs changed, then `up -d`
+      without `--build` (`image-rebuilds.ts`)
+- [x] Docker live tests + CI job on self-host paths only (D9)
+- [x] Operator README marked experimental, including R2_S3_REGION for s3://
+- [x] Rebased onto main after #2902 (upgrade retry/box-scoped compose kept, F11 merged in)
+- [x] Review fixes: architecture (CI filters, no build in Validate Deploy Scripts, live harness
+      dedup, gcp-bootstrap pinned to GCP_REQUIRED_APIS / SA_PROJECT_ROLES, loadBoxEnv); security
+      MEDIUMs (shared-pool refusal, celld/frps no caps + read-only, 24-char objectstore secret,
+      sam-mx port reserved + deploy-time port check) and LOWs (site-level X-SAM-* strip, child env
+      allowlist, build-arg README note)
+- [ ] Security HIGH (gcp-bootstrap pool/* binding admits a user credential naming the pool; same
+      shape in main's guided setup): Worker fix is SAM task 01M7SB8FRZ08M5NEX9WGM74X61 / PR #2905.
+      Coordinator: do not merge PR 3 until #2905 is deployed, then re-run security-auditor.
 - [ ] BOX: fresh teardown + rebuild from this head; prove 0255 lease table on a fresh box;
       L19 celld teardown OWED (guided login not installed); L13 metered ceiling only if a platform
       AI key exists
+- [ ] task-completion-validator, CI, CodeRabbit, merge, Deploy Production
+
+Not fixed here (accepted as tracked by the coordinator): F21 L4 `port_range_cooling_down` is
+fail-fast in `apps/api/src/selfhost/reverse-tunnel/leases.ts` and the shared Worker failure path;
+idea 01M7MK0PCF032CT45Z45HRSDEQ. Security LOWs left: access-log redaction matches literal path
+spellings only; frp Login limit is per address (IPv6 rotation).
 
 ## Acceptance criteria
 
