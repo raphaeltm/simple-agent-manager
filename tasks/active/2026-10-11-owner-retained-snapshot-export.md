@@ -1,10 +1,10 @@
-# Owner retained session snapshot export (draft only)
+# Owner retained session snapshot export
 
 Task: 01M4NYZ5K200GVW23JGBGA4T13. Branch: sam/implement-narrow-owner-authenticated-ga4t13.
 
 ## Problem and scope
 
-The workspace callback artifact download requires the original runtime identity. A human owner needs a supported read-only way to download a retained manifest and exact WIP even when the session is stopped/archived and its workspace is gone. Separate DRAFT PR ONLY: no merge or production rollout. Original A recovery remains unapproved; production WIP contents have not been independently verified.
+The workspace callback artifact download requires the original runtime identity. A human owner needs a supported read-only way to download a retained manifest and exact WIP even when the session is stopped/archived and its workspace is gone. Draft-only hold lifted by Raphaël 2026-11-18 (earlier notes below were written under it). Original A recovery remains unapproved; production WIP contents have not been independently verified.
 
 ## Research
 
@@ -46,3 +46,11 @@ Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/2308 (initial A
 - UI/docs/completion review PASS for implemented scope with CI/staging/PR gates explicitly pending. API references describe authenticated HEAD and native GET; a capture/expiry change after HEAD can make final native GET fail safely outside the component error UI. Physical iOS Safari untested.
 - No staging grant, deployment or shared resources. Bounded zero-VM plan prepared: capture current stage revisions/restore target, one <=1KiB synthetic fixture, normal designated smoke-owner flow, no VM/Container/Instant/pool/credentials/global-auth/config/migrations, clean own fixture, restore priorstage under coordinator sequencing. No production artifacts accessed; original A WIP remains unverified and recovery unapproved.
 - Coordinator/Phase1 queued exact path/interface messages and channel claims before additive index/sessionUI overlap; Phase1 current diff had no overlap. Existing snapshot callback/routes/services and original branches/PRs untouched.
+
+## Integration and release (2026-11-19, task 01M7RN3SX99N1J3PBP8H2NBDXN)
+
+- [x] Merged current `origin/main` (~884 commits). Resolved conflicts in `apps/api/src/index.ts` (route imports) and `SessionMessageView.tsx` (SAM Glass column; control placed after the status banners). `ProjectData` type now comes from `@simple-agent-manager/project-data/durable-object` (service and Worker test).
+- [x] Restyled the control as a SAM Glass slab (`paneClassName('slab')`, raised actions, 44px targets); the audit spec asserts 44px. Playwright 9/9 at 375/320/1280 in the official `mcr.microsoft.com/playwright:v1.65.0-noble` image (local Chromium lacks system libraries); screenshots inspected and refreshed under `tasks/evidence/2026-10-11-owner-retained-export/`.
+- [x] Security-auditor (PASS): added grantee-denial test with owner control (proven by neutralizing the owner predicates), a mount smoke test that session detail still returns 200 through the full Worker, and a field-level ownership recheck instead of a whole-row string compare (an unrelated column write no longer fails a valid download).
+- [x] Task-completion-validator: reverted the `specs/001-mvp` edit (rule 01), moved the API reference section next to the project chat routes with paths first.
+- [x] Worker tests 38/38, web unit 3/3, API and web typecheck pass.

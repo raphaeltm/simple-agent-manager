@@ -3,7 +3,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import type { ProjectData } from '../../src/durable-objects/project-data';
+import type { ProjectData } from '@simple-agent-manager/project-data/durable-object';
 import type { Env } from '../../src/env';
 import { createRequestScopedD1 } from '../../src/lib/d1-session';
 import { AppError } from '../../src/middleware/error';
