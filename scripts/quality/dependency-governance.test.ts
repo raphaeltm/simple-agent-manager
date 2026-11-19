@@ -133,6 +133,7 @@ describe('dependency governance', () => {
       'apps/api/Dockerfile.compose-builder',
       'apps/api/Dockerfile.sandbox',
       'apps/api/Dockerfile.vm-agent-container',
+      'deploy/selfhost/caddy/Dockerfile',
       'deploy/selfhost/sam-mx/Dockerfile',
       'scripts/e2e/workspace-mock/Dockerfile',
     ]);
@@ -140,6 +141,7 @@ describe('dependency governance', () => {
     expect(refs.every((ref) => /@sha256:[a-f0-9]{64}$/.test(ref))).toBe(true);
     expect([...extractDependabotDirectories('docker')].sort()).toEqual([
       '/apps/api',
+      '/deploy/selfhost/caddy',
       '/deploy/selfhost/sam-mx',
       '/scripts/e2e/workspace-mock',
     ]);
