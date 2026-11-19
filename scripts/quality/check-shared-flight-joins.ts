@@ -57,7 +57,16 @@
 import { relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { type Node, Project, type SourceFile, SyntaxKind, ts, type Type } from 'ts-morph';
+import {
+  type CallExpression,
+  type Node,
+  Project,
+  type SourceFile,
+  SyntaxKind,
+  ts,
+  type Type,
+  type VariableDeclaration,
+} from 'ts-morph';
 
 const ROOT = resolve(fileURLToPath(import.meta.url), '../../..');
 
@@ -155,20 +164,27 @@ let moduleHeldClasses = new Set<Node>();
 
 function collectModuleHeldClasses(sourceFiles: SourceFile[]): Set<Node> {
   const held = new Set<Node>();
-  for (const sourceFile of sourceFiles) {
-    for (const statement of sourceFile.getVariableStatements()) {
-      for (const declaration of statement.getDeclarations()) {
-        const type = declaration.getType();
-        const parts = type.isUnion() ? type.getUnionTypes() : [type];
-        for (const part of parts) {
-          for (const node of part.getSymbol()?.getDeclarations() ?? []) {
-            if (node.isKind(SyntaxKind.ClassDeclaration)) held.add(node);
-          }
-        }
-      }
-    }
+  for (const declaration of moduleVariableDeclarations(sourceFiles)) {
+    for (const node of classDeclarationsOf(declaration.getType())) held.add(node);
   }
   return held;
+}
+
+/** Every module-scope variable declaration in these files, in source order. */
+function moduleVariableDeclarations(sourceFiles: SourceFile[]): VariableDeclaration[] {
+  return sourceFiles.flatMap((sourceFile) =>
+    sourceFile.getVariableStatements().flatMap((statement) => statement.getDeclarations())
+  );
+}
+
+/** The class declarations a value of this type (or any member of its union) is an instance of. */
+function classDeclarationsOf(type: Type): Node[] {
+  const parts = type.isUnion() ? type.getUnionTypes() : [type];
+  return parts.flatMap((part) =>
+    (part.getSymbol()?.getDeclarations() ?? []).filter((node) =>
+      node.isKind(SyntaxKind.ClassDeclaration)
+    )
+  );
 }
 
 /** `this.field` of a module-held class: the field's declaration, else undefined. */
@@ -187,13 +203,8 @@ export function rootName(root: Node): string {
   return root.getText();
 }
 
-/**
- * The module-scope variable a value is read from, or undefined when it is local, a parameter,
- * `this` state, or a fresh call result.
- */
-export function moduleRoot(expression: Node, depth = 0): Node | undefined {
-  if (depth > 12) return undefined;
-  const next = (node: Node | undefined) => (node ? moduleRoot(node, depth + 1) : undefined);
+/** Wrappers that do not change the value: parentheses, `as`, `!`, `satisfies`, `<T>x`. */
+function unwrapped(expression: Node): Node | undefined {
   if (
     expression.isKind(SyntaxKind.ParenthesizedExpression) ||
     expression.isKind(SyntaxKind.AsExpression) ||
@@ -201,50 +212,82 @@ export function moduleRoot(expression: Node, depth = 0): Node | undefined {
     expression.isKind(SyntaxKind.SatisfiesExpression) ||
     expression.isKind(SyntaxKind.TypeAssertionExpression)
   ) {
-    return next(expression.getExpression());
+    return expression.getExpression();
   }
+  return undefined;
+}
+
+/** Binary operators whose result may be one of their operands. */
+const TRACED_OPERATORS = new Set<SyntaxKind>([
+  SyntaxKind.QuestionQuestionToken,
+  SyntaxKind.BarBarToken,
+  SyntaxKind.AmpersandAmpersandToken,
+  SyntaxKind.QuestionQuestionEqualsToken,
+  SyntaxKind.BarBarEqualsToken,
+  SyntaxKind.AmpersandAmpersandEqualsToken,
+]);
+
+/** The receiver of a traced method call (`x.get(...)`, `x.then(...)`), else none. */
+function tracedCallReceiver(call: CallExpression): Node[] {
+  const callee = call.getExpression();
+  return callee.isKind(SyntaxKind.PropertyAccessExpression) && TRACED_METHODS.has(callee.getName())
+    ? [callee.getExpression()]
+    : [];
+}
+
+/** The sub-expressions a non-identifier's value may be read from, in the order to try them. */
+function tracedOperands(expression: Node): Node[] {
+  const inner = unwrapped(expression);
+  if (inner) return [inner];
   if (
     expression.isKind(SyntaxKind.PropertyAccessExpression) ||
     expression.isKind(SyntaxKind.ElementAccessExpression)
   ) {
-    return sharedThisField(expression) ?? next(expression.getExpression());
+    return [expression.getExpression()];
   }
-  if (expression.isKind(SyntaxKind.CallExpression)) {
-    const callee = expression.getExpression();
-    if (
-      callee.isKind(SyntaxKind.PropertyAccessExpression) &&
-      TRACED_METHODS.has(callee.getName())
-    ) {
-      return next(callee.getExpression());
-    }
-    return undefined;
-  }
+  if (expression.isKind(SyntaxKind.CallExpression)) return tracedCallReceiver(expression);
   if (expression.isKind(SyntaxKind.ConditionalExpression)) {
-    return next(expression.getWhenTrue()) ?? next(expression.getWhenFalse());
+    return [expression.getWhenTrue(), expression.getWhenFalse()];
   }
-  if (expression.isKind(SyntaxKind.BinaryExpression)) {
-    const operator = expression.getOperatorToken().getKind();
-    if (
-      operator === SyntaxKind.QuestionQuestionToken ||
-      operator === SyntaxKind.BarBarToken ||
-      operator === SyntaxKind.AmpersandAmpersandToken ||
-      operator === SyntaxKind.QuestionQuestionEqualsToken ||
-      operator === SyntaxKind.BarBarEqualsToken ||
-      operator === SyntaxKind.AmpersandAmpersandEqualsToken
-    ) {
-      return next(expression.getLeft()) ?? next(expression.getRight());
-    }
-    return undefined;
+  if (
+    expression.isKind(SyntaxKind.BinaryExpression) &&
+    TRACED_OPERATORS.has(expression.getOperatorToken().getKind())
+  ) {
+    return [expression.getLeft(), expression.getRight()];
   }
-  if (!expression.isKind(SyntaxKind.Identifier)) return undefined;
-  const symbol = expression.getSymbol();
-  const declaration = symbol?.getDeclarations()[0];
+  return [];
+}
+
+/** The initializer a local alias reads from (`const x = ...`, `const { x } = ...`). */
+function aliasInitializer(declaration: Node): Node | undefined {
+  if (declaration.isKind(SyntaxKind.VariableDeclaration)) return declaration.getInitializer();
+  if (declaration.isKind(SyntaxKind.BindingElement)) {
+    return declaration.getFirstAncestorByKind(SyntaxKind.VariableDeclaration)?.getInitializer();
+  }
+  return undefined;
+}
+
+/** An identifier's module-scope root: the variable itself, or what its local alias reads. */
+function identifierRoot(identifier: Node, depth: number): Node | undefined {
+  const declaration = identifier.getSymbol()?.getDeclarations()[0];
   if (!declaration) return undefined;
   if (isModuleScopeVariable(declaration)) return declaration;
-  if (declaration.isKind(SyntaxKind.VariableDeclaration)) return next(declaration.getInitializer());
-  if (declaration.isKind(SyntaxKind.BindingElement)) {
-    const owner = declaration.getFirstAncestorByKind(SyntaxKind.VariableDeclaration);
-    return next(owner?.getInitializer());
+  const initializer = aliasInitializer(declaration);
+  return initializer ? moduleRoot(initializer, depth + 1) : undefined;
+}
+
+/**
+ * The module-scope variable a value is read from, or undefined when it is local, a parameter,
+ * `this` state, or a fresh call result.
+ */
+export function moduleRoot(expression: Node, depth = 0): Node | undefined {
+  if (depth > 12) return undefined;
+  if (expression.isKind(SyntaxKind.Identifier)) return identifierRoot(expression, depth);
+  const field = sharedThisField(expression);
+  if (field) return field;
+  for (const operand of tracedOperands(expression)) {
+    const root = moduleRoot(operand, depth + 1);
+    if (root) return root;
   }
   return undefined;
 }
@@ -265,90 +308,132 @@ function calleeName(call: Node): string | undefined {
   return undefined;
 }
 
-/** Expressions whose settlement the enclosing code resumes on, and how. */
-function resumptions(sourceFile: SourceFile): Array<{ node: Node; kind: SharedFlightJoinKind }> {
-  const out: Array<{ node: Node; kind: SharedFlightJoinKind }> = [];
-  const pushOperand = (operand: Node | undefined) => {
-    if (!operand) return;
-    out.push({ node: operand, kind: 'awaits' });
-    if (!operand.isKind(SyntaxKind.CallExpression)) return;
-    const callee = operand.getExpression();
-    if (
-      callee.isKind(SyntaxKind.PropertyAccessExpression) &&
-      callee.getExpression().getText() === 'Promise' &&
-      COMBINATORS.has(callee.getName())
-    ) {
-      const list = operand.getArguments()[0];
-      if (list?.isKind(SyntaxKind.ArrayLiteralExpression)) {
-        for (const element of list.getElements()) out.push({ node: element, kind: 'awaits' });
-      }
-    }
-  };
-  for (const node of sourceFile.getDescendantsOfKind(SyntaxKind.AwaitExpression)) {
-    pushOperand(node.getExpression());
+type Resumption = { node: Node; kind: SharedFlightJoinKind };
+
+/** The elements of `Promise.all/race/allSettled/any([...])`, else none. */
+function combinatorElements(operand: Node): Node[] {
+  if (!operand.isKind(SyntaxKind.CallExpression)) return [];
+  const callee = operand.getExpression();
+  const isCombinator =
+    callee.isKind(SyntaxKind.PropertyAccessExpression) &&
+    callee.getExpression().getText() === 'Promise' &&
+    COMBINATORS.has(callee.getName());
+  const list = isCombinator ? operand.getArguments()[0] : undefined;
+  return list?.isKind(SyntaxKind.ArrayLiteralExpression) ? list.getElements() : [];
+}
+
+/** Operands the code awaits: `await X`, `return X`, and an async-arrow body `X`, in that order. */
+function awaitedOperands(sourceFile: SourceFile): Node[] {
+  const operands: Array<Node | undefined> = [
+    ...sourceFile
+      .getDescendantsOfKind(SyntaxKind.AwaitExpression)
+      .map((node) => node.getExpression()),
+    ...sourceFile
+      .getDescendantsOfKind(SyntaxKind.ReturnStatement)
+      .map((node) => node.getExpression()),
+    ...sourceFile
+      .getDescendantsOfKind(SyntaxKind.ArrowFunction)
+      .map((arrow) => arrow.getBody())
+      .filter((body) => !body.isKind(SyntaxKind.Block)),
+  ];
+  return operands.filter((operand): operand is Node => operand !== undefined);
+}
+
+/** What a call resumes on: `X.then/catch/finally(...)`, and every argument it is handed. */
+function callResumptions(call: CallExpression): Resumption[] {
+  const out: Resumption[] = [];
+  const callee = call.getExpression();
+  if (callee.isKind(SyntaxKind.PropertyAccessExpression) && CONTINUATIONS.has(callee.getName())) {
+    out.push({ node: callee.getExpression(), kind: 'continues' });
   }
-  for (const node of sourceFile.getDescendantsOfKind(SyntaxKind.ReturnStatement)) {
-    pushOperand(node.getExpression());
-  }
-  for (const arrow of sourceFile.getDescendantsOfKind(SyntaxKind.ArrowFunction)) {
-    const body = arrow.getBody();
-    if (!body.isKind(SyntaxKind.Block)) pushOperand(body);
-  }
-  for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    const callee = call.getExpression();
-    if (callee.isKind(SyntaxKind.PropertyAccessExpression) && CONTINUATIONS.has(callee.getName())) {
-      out.push({ node: callee.getExpression(), kind: 'continues' });
-    }
-    // `Promise.race([X, ...])` that is not awaited directly still resumes on X.
-    const name = calleeName(call);
-    if (name && SANCTIONED_JOINS.has(name)) continue;
-    for (const argument of call.getArguments()) {
-      if (argument.isKind(SyntaxKind.ArrayLiteralExpression)) {
-        for (const element of argument.getElements())
-          out.push({ node: element, kind: 'hands-off' });
-      } else {
-        out.push({ node: argument, kind: 'hands-off' });
-      }
-    }
+  // `Promise.race([X, ...])` that is not awaited directly still resumes on X.
+  const name = calleeName(call);
+  if (name && SANCTIONED_JOINS.has(name)) return out;
+  for (const argument of call.getArguments()) {
+    const handed = argument.isKind(SyntaxKind.ArrayLiteralExpression)
+      ? argument.getElements()
+      : [argument];
+    for (const node of handed) out.push({ node, kind: 'hands-off' });
   }
   return out;
+}
+
+/** Expressions whose settlement the enclosing code resumes on, and how. */
+function resumptions(sourceFile: SourceFile): Resumption[] {
+  const awaited = awaitedOperands(sourceFile)
+    .flatMap((operand) => [operand, ...combinatorElements(operand)])
+    .map((node): Resumption => ({ node, kind: 'awaits' }));
+  const handed = sourceFile
+    .getDescendantsOfKind(SyntaxKind.CallExpression)
+    .flatMap((call) => callResumptions(call));
+  return [...awaited, ...handed];
+}
+
+/** Whether the root holds a promise, computed once per root across the scan. */
+function rootHoldsPromise(cache: Map<Node, boolean>, rootDeclaration: Node): boolean {
+  let holds = cache.get(rootDeclaration);
+  if (holds === undefined) {
+    holds = holdsPromise(rootDeclaration.getType());
+    cache.set(rootDeclaration, holds);
+  }
+  return holds;
+}
+
+/** Whether the expression's own type may be a promise (thenable, `any` or `unknown`). */
+function mayBePromise(expression: Node): boolean {
+  const type = expression.getType();
+  return isThenable(type) || type.isAny() || type.isUnknown();
+}
+
+function fileFindings(
+  sourceFile: SourceFile,
+  holderCache: Map<Node, boolean>,
+  root: string
+): SharedFlightFinding[] {
+  const findings: SharedFlightFinding[] = [];
+  // One finding per line and root: `await X.then(...)` both awaits and continues.
+  const seen = new Set<string>();
+  for (const { node: expression, kind } of resumptions(sourceFile)) {
+    const rootDeclaration = moduleRoot(expression);
+    if (!rootDeclaration || !rootHoldsPromise(holderCache, rootDeclaration)) continue;
+    if (!mayBePromise(expression)) continue;
+    const key = `${expression.getStartLineNumber()}:${rootName(rootDeclaration)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (isAllowed(expression)) continue;
+    findings.push({
+      file: relative(root, sourceFile.getFilePath()),
+      line: expression.getStartLineNumber(),
+      root: rootName(rootDeclaration),
+      code: expression.getText().split('\n')[0] ?? '',
+      kind,
+    });
+  }
+  return findings;
 }
 
 export function findSharedFlightJoins(
   sourceFiles: SourceFile[],
   root = ROOT
 ): SharedFlightFinding[] {
-  const findings: SharedFlightFinding[] = [];
   const holderCache = new Map<Node, boolean>();
   moduleHeldClasses = collectModuleHeldClasses(sourceFiles);
-  for (const sourceFile of sourceFiles) {
-    // One finding per line and root: `await X.then(...)` both awaits and continues.
-    const seen = new Set<string>();
-    for (const { node: expression, kind } of resumptions(sourceFile)) {
-      const rootDeclaration = moduleRoot(expression);
-      if (!rootDeclaration) continue;
-      let holds = holderCache.get(rootDeclaration);
-      if (holds === undefined) {
-        holds = holdsPromise(rootDeclaration.getType());
-        holderCache.set(rootDeclaration, holds);
-      }
-      if (!holds) continue;
-      const type = expression.getType();
-      if (!isThenable(type) && !type.isAny() && !type.isUnknown()) continue;
-      const key = `${expression.getStartLineNumber()}:${rootName(rootDeclaration)}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      if (isAllowed(expression)) continue;
-      findings.push({
-        file: relative(root, sourceFile.getFilePath()),
-        line: expression.getStartLineNumber(),
-        root: rootName(rootDeclaration),
-        code: expression.getText().split('\n')[0] ?? '',
-        kind,
-      });
-    }
-  }
-  return findings;
+  return sourceFiles.flatMap((sourceFile) => fileFindings(sourceFile, holderCache, root));
+}
+
+/** A module-scope function or class is not state, whatever it returns. */
+function isCallable(type: Type): boolean {
+  return type.getCallSignatures().length > 0 || type.getConstructSignatures().length > 0;
+}
+
+/** Library objects (a Hono app, a logger) are not request-shared flights SAM wrote. */
+function isLibraryObject(type: Type): boolean {
+  const symbol = type.getSymbol() ?? type.getAliasSymbol();
+  const declaredIn = symbol?.getDeclarations()[0];
+  return (
+    Boolean(declaredIn?.getSourceFile().isInNodeModules()) &&
+    !COLLECTIONS.has(symbol?.getName() ?? '')
+  );
 }
 
 export function listModulePromiseHolders(
@@ -356,30 +441,15 @@ export function listModulePromiseHolders(
   root = ROOT
 ): ModulePromiseHolder[] {
   const out: ModulePromiseHolder[] = [];
-  for (const sourceFile of sourceFiles) {
-    for (const statement of sourceFile.getVariableStatements()) {
-      for (const declaration of statement.getDeclarations()) {
-        const type = declaration.getType();
-        // A module-scope function or class is not state, whatever it returns.
-        if (type.getCallSignatures().length > 0 || type.getConstructSignatures().length > 0)
-          continue;
-        // Library objects (a Hono app, a logger) are not request-shared flights SAM wrote.
-        const symbol = type.getSymbol() ?? type.getAliasSymbol();
-        const declaredIn = symbol?.getDeclarations()[0];
-        if (
-          declaredIn?.getSourceFile().isInNodeModules() &&
-          !COLLECTIONS.has(symbol?.getName() ?? '')
-        )
-          continue;
-        if (!holdsPromise(type)) continue;
-        out.push({
-          file: relative(root, sourceFile.getFilePath()),
-          line: declaration.getStartLineNumber(),
-          name: declaration.getName(),
-          type: type.getText(declaration, ts.TypeFormatFlags.NoTruncation).slice(0, 160),
-        });
-      }
-    }
+  for (const declaration of moduleVariableDeclarations(sourceFiles)) {
+    const type = declaration.getType();
+    if (isCallable(type) || isLibraryObject(type) || !holdsPromise(type)) continue;
+    out.push({
+      file: relative(root, declaration.getSourceFile().getFilePath()),
+      line: declaration.getStartLineNumber(),
+      name: declaration.getName(),
+      type: type.getText(declaration, ts.TypeFormatFlags.NoTruncation).slice(0, 160),
+    });
   }
   return out;
 }
@@ -407,51 +477,65 @@ function explicitFiles(argv: string[]): string[] {
   return argv.flatMap((arg, index) => (argv[index - 1] === '--file' ? [resolve(arg)] : []));
 }
 
+interface ScanResult {
+  scanned: number;
+  findings: SharedFlightFinding[];
+  holders: ModulePromiseHolder[];
+}
+
+/** `--file`: only these files, type-checked with the API's tsconfig (no inventory). */
+function scanExplicitFiles(paths: string[]): ScanResult {
+  const project = new Project({
+    tsConfigFilePath: resolve(ROOT, SCANNED_PROJECTS[0].tsconfig),
+    skipAddingFilesFromTsConfig: true,
+  });
+  const files = paths.map((path) => project.addSourceFileAtPath(path));
+  return { scanned: files.length, findings: findSharedFlightJoins(files), holders: [] };
+}
+
+function scanAllProjects(inventory: boolean): ScanResult {
+  const result: ScanResult = { scanned: 0, findings: [], holders: [] };
+  for (const { tsconfig, glob } of SCANNED_PROJECTS) {
+    const files = loadProject(tsconfig, glob);
+    result.scanned += files.length;
+    result.findings.push(...findSharedFlightJoins(files));
+    if (inventory) result.holders.push(...listModulePromiseHolders(files));
+  }
+  return result;
+}
+
+function printReport({ scanned, findings, holders }: ScanResult, args: Set<string>): void {
+  if (args.has('--json')) {
+    console.log(JSON.stringify({ scanned, findings, holders }, null, 2));
+    return;
+  }
+  if (args.has('--inventory')) {
+    console.log('Module-scope state that holds a promise:');
+    for (const h of holders) console.log(`  ${h.file}:${h.line} ${h.name}: ${h.type}`);
+  }
+  for (const f of findings) {
+    console.error(
+      `✗ ${f.file}:${f.line} ${describeFinding(f)}: ${f.code}\n` +
+        '  Join another request’s flight with joinSharedFlight/settleSharedFlight ' +
+        '(packages/worker-core/src/shared-flight.ts).'
+    );
+  }
+  console.log(`shared-flight-joins: ${scanned} files, ${findings.length} finding(s)`);
+}
+
 function main(): void {
   const argv = process.argv.slice(2);
   const args = new Set(argv);
   const only = explicitFiles(argv);
-  const findings: SharedFlightFinding[] = [];
-  const holders: ModulePromiseHolder[] = [];
-  let scanned = 0;
-  const projects = only.length > 0 ? [] : SCANNED_PROJECTS;
-  if (only.length > 0) {
-    const project = new Project({
-      tsConfigFilePath: resolve(ROOT, SCANNED_PROJECTS[0].tsconfig),
-      skipAddingFilesFromTsConfig: true,
-    });
-    const files = only.map((path) => project.addSourceFileAtPath(path));
-    scanned = files.length;
-    findings.push(...findSharedFlightJoins(files));
-  }
-  for (const { tsconfig, glob } of projects) {
-    const files = loadProject(tsconfig, glob);
-    scanned += files.length;
-    findings.push(...findSharedFlightJoins(files));
-    if (args.has('--inventory')) holders.push(...listModulePromiseHolders(files));
-  }
+  const result =
+    only.length > 0 ? scanExplicitFiles(only) : scanAllProjects(args.has('--inventory'));
   // A full scan that read almost nothing would report "all clear"; refuse that (rule 02).
-  if (only.length === 0 && scanned < 500) {
-    console.error(`shared-flight-joins: scanned only ${scanned} files; the glob is broken`);
+  if (only.length === 0 && result.scanned < 500) {
+    console.error(`shared-flight-joins: scanned only ${result.scanned} files; the glob is broken`);
     process.exit(1);
   }
-  if (args.has('--json')) {
-    console.log(JSON.stringify({ scanned, findings, holders }, null, 2));
-  } else {
-    if (args.has('--inventory')) {
-      console.log('Module-scope state that holds a promise:');
-      for (const h of holders) console.log(`  ${h.file}:${h.line} ${h.name}: ${h.type}`);
-    }
-    for (const f of findings) {
-      console.error(
-        `✗ ${f.file}:${f.line} ${describeFinding(f)}: ${f.code}\n` +
-          '  Join another request’s flight with joinSharedFlight/settleSharedFlight ' +
-          '(packages/worker-core/src/shared-flight.ts).'
-      );
-    }
-    console.log(`shared-flight-joins: ${scanned} files, ${findings.length} finding(s)`);
-  }
-  process.exit(findings.length > 0 ? 1 : 0);
+  printReport(result, args);
+  process.exit(result.findings.length > 0 ? 1 : 0);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

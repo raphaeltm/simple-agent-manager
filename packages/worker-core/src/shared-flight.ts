@@ -80,8 +80,10 @@ export async function joinSharedFlight<T>(
     (value) => (state.outcome = { ok: true, value }),
     (error: unknown) => (state.outcome = { ok: false, error })
   );
-  // An already-settled flight is recorded by now, still in this request's own turn: no timer.
-  await null;
+  // Yield exactly one microtask, still in this request's own turn: an already-settled flight's
+  // reaction above was queued first, so it has recorded the outcome before the loop and no timer
+  // is needed. (An already-resolved native promise, like `await null`, resumes after one tick.)
+  await Promise.resolve();
   while (!state.outcome) {
     const remaining = giveUpAt - Date.now();
     if (remaining <= 0) throw new SharedFlightAbandonedError();
