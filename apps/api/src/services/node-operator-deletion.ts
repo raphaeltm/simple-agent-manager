@@ -31,15 +31,16 @@ import {
   isOperatorRemovableBlockReason,
   isUserOwnedNodeClass,
   OPERATOR_NODE_DELETION_NOTE_MAX_CHARS,
+  OPERATOR_REMOVABLE_BLOCK_REASONS,
   primaryCleanupBlockReason,
   TASK_TERMINAL_STATUSES,
 } from '@simple-agent-manager/shared';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
-import { errors } from '../middleware/error';
+import { AppError, errors } from '../middleware/error';
 import { isOnSamCapacity } from './node-manual-deletion';
 import {
   buildNodeProviderLabels,
@@ -78,6 +79,8 @@ export interface OperatorNodeDeletionInput {
   /** Must equal `nodeId`: the operator typed the exact node they checked at the provider. */
   confirmation: string;
   note: string;
+  /** The refusal the operator was shown (`cleanupBlockedReason` from the list). Must still match. */
+  expectedBlockedReason: string | null;
   /** The request came from an agent sign-in session; recorded in the audit, not refused. */
   agentSignIn: boolean;
 }
@@ -95,6 +98,8 @@ export interface OperatorNodeDeletionProof {
  *   refusal diagnosis; `pending` is added because it is about to start);
  * - no non-terminal task holds a warm placement claim on the node, whatever the claim's age
  *   (the same terminal set as the live-claim index on `tasks`);
+ * - no Cloudflare build is reserved on the node (the same predicate as
+ *   `assertNoReservedCloudflareBuilds`, which the removal tail checks too late to protect the proof);
  * - the heartbeat is older than the node's own `heartbeat_stale_after_seconds`, as in the
  *   stale-heartbeat anomaly. A heartbeat is a liveness signal: it backs up, never replaces, the
  *   provider lookup.
@@ -113,8 +118,28 @@ export function operatorAttestationAdmissionSql(cleanupBlockedReason: string | n
       WHERE t.claimed_warm_node_id = nodes.id
         AND t.status NOT IN ${sql.raw(TERMINAL_TASK_STATUSES_SQL)}
     )
+    AND NOT EXISTS (
+      SELECT 1 FROM deployment_publish_jobs j
+      WHERE j.node_id = nodes.id AND j.executor = 'cloudflare' AND j.context_shadow = 0
+        AND j.executor_instance_id IS NOT NULL
+    )
     AND (nodes.last_heartbeat_at IS NULL OR julianday(nodes.last_heartbeat_at) <
       julianday('now') - MAX(1, nodes.heartbeat_stale_after_seconds) / 86400.0)`;
+}
+
+async function hasEnabledPlatformCredential(db: NodeDb, provider: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: schema.platformCredentials.id })
+    .from(schema.platformCredentials)
+    .where(
+      and(
+        eq(schema.platformCredentials.credentialType, 'cloud-provider'),
+        eq(schema.platformCredentials.provider, provider),
+        eq(schema.platformCredentials.isEnabled, true)
+      )
+    )
+    .limit(1);
+  return row !== undefined;
 }
 
 type ProviderLookup =
@@ -152,8 +177,18 @@ async function findNodeServerAtProvider(
       pinnedCredentialResolved = true;
     } else {
       providers = authority.candidates.filter((c) => c.credentialSource === 'platform');
+      // The resolver isolates a failed credential and keeps going, so an empty platform list can
+      // mean "a platform credential exists but could not be read" (an owner credential may have
+      // resolved instead). That is inconclusive, not "nothing can look".
+      if (providers.length === 0 && (await hasEnabledPlatformCredential(db, node.cloudProvider))) {
+        log.warn('node_operator_deletion.platform_credential_unresolved', { nodeId: node.id });
+        throw errors.serviceUnavailable(
+          `Could not read SAM's ${node.cloudProvider} credential to check this node. Try again in a minute.`
+        );
+      }
     }
   } catch (error) {
+    if (error instanceof AppError) throw error;
     if (error instanceof NodeTeardownBlockedError) return none;
     log.warn('node_operator_deletion.credential_resolution_failed', {
       nodeId: node.id,
@@ -257,6 +292,11 @@ export async function recordOperatorNodeDeletion(
       'Only a node SAM has failed to tear down can be removed this way. Wait for cleanup to try first.'
     );
   }
+  if ((node.cleanupBlockedReason ?? null) !== input.expectedBlockedReason) {
+    throw errors.conflict(
+      "SAM's teardown refusal for this node changed since you looked. Reload and check again."
+    );
+  }
   if (!isOperatorRemovableBlockReason(node.cleanupBlockedReason)) {
     throw errors.conflict(
       `SAM's last teardown refusal (${primaryCleanupBlockReason(node.cleanupBlockedReason) ?? 'unknown'}) ` +
@@ -343,6 +383,14 @@ export async function recordOperatorNodeDeletion(
   return { node, runtimeTerminationConfirmedAt };
 }
 
+/** First token of `n.cleanup_blocked_reason`, the twin of `primaryCleanupBlockReason`. */
+const PRIMARY_REASON_SQL = `TRIM(CASE WHEN instr(n.cleanup_blocked_reason, ',') > 0
+  THEN substr(n.cleanup_blocked_reason, 1, instr(n.cleanup_blocked_reason, ',') - 1)
+  ELSE n.cleanup_blocked_reason END)`;
+const OPERATOR_REMOVABLE_REASONS_SQL = OPERATOR_REMOVABLE_BLOCK_REASONS.map(
+  (reason) => `'${reason}'`
+).join(', ');
+
 /** Teardown error text is shown to the operator only as a hint; keep the page small. */
 const STRANDED_NODE_ERROR_MESSAGE_MAX_CHARS = 500;
 
@@ -353,9 +401,11 @@ function textOrNull(value: unknown): string | null {
 }
 
 /**
- * SAM-capacity managed VM nodes in `destroying` with a recorded teardown refusal, oldest first, for Admin →
+ * SAM-capacity managed VM nodes in `destroying` with a recorded teardown refusal for Admin →
  * Infrastructure. The capacity predicate mirrors `isOnSamCapacity` (any of the three source
- * columns). `total` counts every match, so a capped page discloses what it left out (rule 65).
+ * columns). Ranked by purpose (rule 65): nodes an operator can act on come first, so a page full
+ * of refusals that need the provider resolved first can never hide an actionable node; then the
+ * oldest refusal first. `total` counts every match, so a capped page discloses what it left out.
  * Mapping cannot throw: every column is read through a type guard (rule 50).
  */
 export async function listStrandedPlatformNodes(
@@ -372,7 +422,8 @@ export async function listStrandedPlatformNodes(
         AND n.cleanup_blocked_since IS NOT NULL
         AND (n.credential_source = 'platform' OR n.placement_credential_source = 'platform'
           OR n.credential_attribution_source = 'platform')
-      ORDER BY n.cleanup_blocked_since ASC, n.id ASC
+      ORDER BY CASE WHEN ${PRIMARY_REASON_SQL} IN (${OPERATOR_REMOVABLE_REASONS_SQL}) THEN 0 ELSE 1 END,
+        n.cleanup_blocked_since ASC, n.id ASC
       LIMIT ?`
   )
     .bind(limit)

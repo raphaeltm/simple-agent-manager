@@ -3,7 +3,10 @@ import type {
   CredentialProvider,
   ListAdminStrandedNodesResponse,
 } from '@simple-agent-manager/shared';
-import { OPERATOR_NODE_DELETION_NOTE_MAX_CHARS, PROVIDER_LABELS } from '@simple-agent-manager/shared';
+import {
+  OPERATOR_NODE_DELETION_NOTE_MAX_CHARS,
+  PROVIDER_LABELS,
+} from '@simple-agent-manager/shared';
 import { Alert, Button, Dialog, Input, Spinner, Textarea } from '@simple-agent-manager/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { RefreshCw } from 'lucide-react';
@@ -72,7 +75,11 @@ function RemoveNodeDialog({
   const errorRef = useRef<HTMLParagraphElement>(null);
   const mutation = useMutation({
     mutationFn: () =>
-      attestOperatorNodeDeletion(node.id, { confirmation: confirmation.trim(), note: note.trim() }),
+      attestOperatorNodeDeletion(node.id, {
+        confirmation: confirmation.trim(),
+        expectedBlockedReason: node.cleanupBlockedReason,
+        note: note.trim(),
+      }),
     onSuccess: () => {
       toast.success(`Node ${node.id} removed`);
       onRemoved(node.id);
@@ -176,7 +183,12 @@ function RemoveNodeDialog({
             </p>
           )}
           <div className="flex flex-wrap justify-end gap-2">
-            <Button type="button" variant="secondary" onClick={onClose} disabled={mutation.isPending}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={onClose}
+              disabled={mutation.isPending}
+            >
               Cancel
             </Button>
             <Button type="submit" variant="danger" disabled={!ready} loading={mutation.isPending}>
@@ -206,7 +218,9 @@ function StrandedNodeRow({
           {node.providerInstanceId ? `server ${node.providerInstanceId}` : 'no server ID recorded'}{' '}
           · owner {node.ownerEmail ?? node.ownerUserId}
         </span>
-        <span className="text-sm text-fg-secondary">{describeBlock(node.cleanupBlockedReason)}</span>
+        <span className="text-sm text-fg-secondary">
+          {describeBlock(node.cleanupBlockedReason)}
+        </span>
         <span className="text-xs text-fg-muted">
           Failing since {formatTime(node.cleanupBlockedSince)} · last heartbeat{' '}
           {formatTime(node.lastHeartbeatAt)}

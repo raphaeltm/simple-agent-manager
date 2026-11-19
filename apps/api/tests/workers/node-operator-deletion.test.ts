@@ -11,16 +11,19 @@
  * superadmin middleware, valibot body), against D1 with every migration applied. Only the
  * Hetzner API is faked, at `fetch`.
  */
-import { env } from 'cloudflare:test';
+import { env, SELF } from 'cloudflare:test';
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { getCredentialEncryptionKey } from '../../src/lib/secrets';
 import { AppError } from '../../src/middleware/error';
 import { adminStrandedNodeRoutes } from '../../src/routes/admin-stranded-nodes';
 import { handleCleanupFailure } from '../../src/scheduled/node-cleanup/cleanup-outcome';
 import { encrypt } from '../../src/services/encryption';
+import { recordOperatorNodeDeletion } from '../../src/services/node-operator-deletion';
 import { buildNodeProviderLabels } from '../../src/services/node-provider-labels';
 import { NodeTeardownBlockedError } from '../../src/services/node-teardown-authority';
 import { deleteNodeResourcesStrict } from '../../src/services/strict-node-deletion';
@@ -57,17 +60,26 @@ async function signIn(userId: string, role: 'superadmin' | 'user') {
   return seedSignedInUser(userId);
 }
 
-async function operatorDeletion(
-  cookie: string,
-  nodeId: string,
-  body: unknown = { confirmation: nodeId, note: 'Checked the Hetzner console: no server.' }
-) {
+async function currentBlockedReason(nodeId: string): Promise<string | null> {
+  const row = await env.DATABASE.prepare('SELECT cleanup_blocked_reason FROM nodes WHERE id = ?')
+    .bind(nodeId)
+    .first<{ cleanup_blocked_reason: string | null }>();
+  return row?.cleanup_blocked_reason ?? null;
+}
+
+async function operatorDeletion(cookie: string, nodeId: string, body?: unknown) {
+  const payload = body ?? {
+    confirmation: nodeId,
+    // The refusal the operator was shown in the list.
+    expectedBlockedReason: await currentBlockedReason(nodeId),
+    note: 'Checked the Hetzner console: no server.',
+  };
   return app.request(
     `/api/admin/nodes/${nodeId}/operator-deletion`,
     {
       method: 'POST',
       headers: { Cookie: cookie, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(payload),
     },
     TEST_ENV
   );
@@ -609,6 +621,129 @@ describe('superadmin attestation removes a stranded SAM-capacity node', () => {
     expect((await readNode(seeded.nodeId))?.runtime_termination_confirmed_at).toBeNull();
   });
 
+  it('refuses when the refusal changed since the operator looked, and changes nothing', async () => {
+    const cookie = await signIn(`op-del-admin-stale-${Date.now()}`, 'superadmin');
+    const seeded = await seedStrandedPlatformNode('stale-reason');
+    await resavePlatformCredential(seeded.nodeId);
+    await recordBlock(seeded.nodeId, 'teardown_credential_unavailable');
+    const calls = stubHetzner();
+    const before = await readNode(seeded.nodeId);
+
+    const response = await operatorDeletion(cookie, seeded.nodeId, {
+      confirmation: seeded.nodeId,
+      // Shown in the dialog before cleanup re-recorded a different (also removable) refusal.
+      expectedBlockedReason: 'teardown_credential_generation_changed',
+      note: 'checked',
+    });
+    expect(response.status).toBe(409);
+    expect(calls).toEqual([]);
+    expect(await readNode(seeded.nodeId)).toEqual(before);
+  });
+
+  it('refuses in the final write when a Cloudflare build reserved the node after the route check', async () => {
+    const seeded = await seedStrandedPlatformNode('build-reserved');
+    await resavePlatformCredential(seeded.nodeId);
+    await recordBlock(seeded.nodeId);
+    const suffix = seeded.nodeId;
+    await seedInstallation(`inst-${suffix}`, seeded.ownerId);
+    await seedProject(`proj-${suffix}`, seeded.ownerId, `inst-${suffix}`);
+    await env.DATABASE.prepare(
+      `INSERT INTO deployment_environments (id, project_id, name, status, node_id, created_by_user_id)
+       VALUES (?, ?, 'production', 'active', ?, ?)`
+    )
+      .bind(`env-${suffix}`, `proj-${suffix}`, seeded.nodeId, seeded.ownerId)
+      .run();
+    // Reserved between the route's precheck and the proof: drive the service directly.
+    await env.DATABASE.prepare(
+      `INSERT INTO deployment_publish_jobs
+         (id, project_id, environment_id, workspace_id, node_id, requested_by,
+          environment_name, executor, executor_instance_id, status, created_at, updated_at)
+       VALUES (?, ?, ?, 'ws-none', ?, ?, 'production', 'cloudflare', 'cf-instance', 'building', ?, ?)`
+    )
+      .bind(
+        `job-${suffix}`,
+        `proj-${suffix}`,
+        `env-${suffix}`,
+        seeded.nodeId,
+        seeded.ownerId,
+        new Date().toISOString(),
+        new Date().toISOString()
+      )
+      .run();
+    stubHetzner();
+    const before = await readNode(seeded.nodeId);
+
+    await expect(
+      recordOperatorNodeDeletion(drizzle(env.DATABASE, { schema }), TEST_ENV, {
+        nodeId: seeded.nodeId,
+        operatorUserId: seeded.ownerId,
+        confirmation: seeded.nodeId,
+        expectedBlockedReason: await currentBlockedReason(seeded.nodeId),
+        note: 'checked',
+        agentSignIn: false,
+      })
+    ).rejects.toMatchObject({ statusCode: 409 });
+    expect(await readNode(seeded.nodeId)).toEqual(before);
+    expect(await auditOutcomes(seeded.nodeId)).toEqual(['attested', 'refused']);
+  });
+
+  it('asks to retry when a SAM credential exists but cannot be read', async () => {
+    const cookie = await signIn(`op-del-admin-unreadable-${Date.now()}`, 'superadmin');
+    const seeded = await seedStrandedPlatformNode('unreadable-platform');
+    await recordBlock(seeded.nodeId, 'teardown_credential_generation_changed');
+    // The node's own platform credential was re-saved into something that no longer decrypts.
+    await env.DATABASE.prepare(
+      `UPDATE platform_credentials SET encrypted_token = 'garbled', iv = 'garbled', updated_at = ?
+        WHERE id = ?`
+    )
+      .bind(new Date(Date.now() + 1000).toISOString(), `${seeded.nodeId}-proof-credential`)
+      .run();
+    // The owner has a readable credential of their own, which must not stand in for SAM's.
+    await env.DATABASE.prepare(
+      `INSERT INTO credentials
+         (id, user_id, project_id, credential_type, credential_kind, agent_type, provider,
+          encrypted_token, iv, is_active, created_at, updated_at)
+       VALUES (?, ?, NULL, 'cloud-provider', 'api-key', NULL, 'hetzner', ?, ?, 1,
+               datetime('now'), datetime('now'))`
+    )
+      .bind(
+        `owner-cred-${seeded.nodeId}`,
+        seeded.ownerId,
+        ...(await (async () => {
+          const t = await encrypt('hetzner-owner-token', getCredentialEncryptionKey(TEST_ENV));
+          return [t.ciphertext, t.iv];
+        })())
+      )
+      .run();
+    // Only this node's platform credential may exist for the duration of this case.
+    const others = (
+      await env.DATABASE.prepare(
+        `SELECT id FROM platform_credentials WHERE is_enabled = 1 AND id != ?`
+      )
+        .bind(`${seeded.nodeId}-proof-credential`)
+        .all<{ id: string }>()
+    ).results.map((row) => row.id);
+    for (const id of others) {
+      await env.DATABASE.prepare('UPDATE platform_credentials SET is_enabled = 0 WHERE id = ?')
+        .bind(id)
+        .run();
+    }
+    try {
+      const calls = stubHetzner();
+      const before = await readNode(seeded.nodeId);
+      const response = await operatorDeletion(cookie, seeded.nodeId);
+      expect(response.status).toBe(503);
+      expect(calls).toEqual([]);
+      expect(await readNode(seeded.nodeId)).toEqual(before);
+    } finally {
+      for (const id of others) {
+        await env.DATABASE.prepare('UPDATE platform_credentials SET is_enabled = 1 WHERE id = ?')
+          .bind(id)
+          .run();
+      }
+    }
+  });
+
   it('changes nothing when the audit entry cannot be written', async () => {
     const cookie = await signIn(`op-del-admin-noaudit-${Date.now()}`, 'superadmin');
     const seeded = await seedStrandedPlatformNode('audit-down');
@@ -678,11 +813,13 @@ describe('superadmin attestation removes a stranded SAM-capacity node', () => {
 
     const wrongId = await operatorDeletion(cookie, seeded.nodeId, {
       confirmation: 'some-other-node',
+      expectedBlockedReason: await currentBlockedReason(seeded.nodeId),
       note: 'checked',
     });
     expect(wrongId.status).toBe(400);
     const noNote = await operatorDeletion(cookie, seeded.nodeId, {
       confirmation: seeded.nodeId,
+      expectedBlockedReason: await currentBlockedReason(seeded.nodeId),
       note: '   ',
     });
     expect(noNote.status).toBe(400);
@@ -783,5 +920,28 @@ describe('only an active superadmin reaches the stranded-node routes', () => {
       cleanupBlockedReason: 'teardown_credential_generation_changed',
       ownerEmail: `${platform.ownerId}@test.com`,
     });
+  });
+});
+
+describe('stranded-node routes through the real worker mount', () => {
+  it('refuses a non-superadmin and serves a superadmin through the combined app', async () => {
+    const api = `https://api.${(env as unknown as Env).BASE_DOMAIN}`;
+    const stranger = await signIn(`op-del-self-user-${Date.now()}`, 'user');
+    const admin = await signIn(`op-del-self-admin-${Date.now()}`, 'superadmin');
+    const refused = await SELF.fetch(`${api}/api/admin/nodes/stranded`, {
+      headers: { Cookie: stranger },
+    });
+    expect(refused.status).toBe(403);
+    const refusedAction = await SELF.fetch(`${api}/api/admin/nodes/any-node/operator-deletion`, {
+      method: 'POST',
+      headers: { Cookie: stranger, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmation: 'any-node', expectedBlockedReason: null, note: 'x' }),
+    });
+    expect(refusedAction.status).toBe(403);
+    const served = await SELF.fetch(`${api}/api/admin/nodes/stranded`, {
+      headers: { Cookie: admin },
+    });
+    expect(served.status).toBe(200);
+    await expect(served.json()).resolves.toMatchObject({ total: expect.any(Number) });
   });
 });

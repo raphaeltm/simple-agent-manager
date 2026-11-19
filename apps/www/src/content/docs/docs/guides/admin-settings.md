@@ -511,7 +511,8 @@ Active workspaces and provider ownership checks remain protected. When SAM can't
 
 **Admin → Infrastructure → Stuck nodes** lists managed VM nodes on the installation's own cloud
 credential that are `destroying` with a recorded teardown refusal (`listStrandedPlatformNodes()`
-in `apps/api/src/services/node-operator-deletion.ts`), oldest first, with the reason SAM recorded.
+in `apps/api/src/services/node-operator-deletion.ts`), the ones you can act on first, then oldest
+first, with the reason SAM recorded.
 Two reasons mean SAM can never finish by itself, because the node has no server ID and only the
 exact credential it was created with could prove no server exists:
 
@@ -533,14 +534,15 @@ you checked (`recordOperatorNodeDeletion()`):
 
 1. SAM asks the provider with the node's own credential, or every enabled platform credential if
    that one no longer resolves (never the owner's own credentials), and refuses if any returns a
-   server for the node. A node with no server ID whose ownership labels cannot be built is
+   server for the node. If a SAM credential exists but cannot be read, it asks you to retry. A node with no server ID whose ownership labels cannot be built is
    refused while a credential could look.
 2. It writes the audit entry (your note, name, time, and what the lookup could check) to the
    Operations audit log (`admin_operator_node_deletion`) **before** anything changes, and changes
    nothing if that write fails.
 3. It records the attested termination proof in one database write that re-checks the exact
    refusal you were shown, that no workspace is active or pending, that no live task holds a
-   placement claim on the node, and that its heartbeat is stale. It also refuses a node with no
+   placement claim on the node, that no Cloudflare build is reserved on it, and that its heartbeat
+   is stale. It also refuses a node with no
    server ID created inside the provisioning window.
 
 It deletes nothing at the provider. The removal is recorded as `operator_attested_manual_deletion`

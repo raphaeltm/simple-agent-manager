@@ -4,7 +4,7 @@
  * refuses SAM capacity, because only an operator can look inside SAM's cloud account.
  *
  *   GET  /api/admin/nodes/stranded                 SAM-capacity VM nodes in `destroying`
- *   POST /api/admin/nodes/:id/operator-deletion    { confirmation: <node ID>, note }
+ *   POST /api/admin/nodes/:id/operator-deletion    { confirmation: <node ID>, expectedBlockedReason, note }
  */
 import { assertNoReservedCloudflareBuilds } from '@simple-agent-manager/app-deployment';
 import {
@@ -33,6 +33,9 @@ import { completeAttestedNodeRemoval } from './nodes/manual-deletion';
 
 const OperatorNodeDeletionSchema = v.object({
   confirmation: v.pipe(v.string(), v.maxLength(200)),
+  // The refusal the operator was shown; null when none was shown. Echoed server state, so its
+  // bound is the body cap rather than an identifier-sized guess (rule 51).
+  expectedBlockedReason: v.nullable(v.pipe(v.string(), v.maxLength(2_000))),
   note: v.pipe(
     v.string(),
     v.trim(),
@@ -82,6 +85,7 @@ adminStrandedNodeRoutes.post(
       operatorUserId,
       confirmation: body.confirmation,
       note: body.note,
+      expectedBlockedReason: body.expectedBlockedReason,
       // Not refused (an agent may relay a person's check of the provider console), but recorded.
       agentSignIn: c.get('auth')?.session.agentSignIn === true,
     });

@@ -73,6 +73,8 @@ export interface ListAdminStrandedNodesResponse {
 export interface OperatorNodeDeletionRequest {
   /** The node ID, typed by the operator. */
   confirmation: string;
+  /** The `cleanupBlockedReason` the operator was shown; the server refuses if it has changed. */
+  expectedBlockedReason: string | null;
   /** What the operator checked at the provider. Stored in the audit log with who and when. */
   note: string;
 }
