@@ -44,7 +44,7 @@ function npmGlobalInstallSpecs(files: string[], packageName: string): string[] {
   const specs: string[] = [];
   const escapedPackageName = packageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const installPattern = new RegExp(
-    `npm\\s+install(?:\\s+-{1,2}[^\\s"\']+)*\\s+["\']?(${escapedPackageName}(?:@[^\\s"\']+)?)`,
+    `npm\\s+install(?:\\s+-{1,2}[^\\s"']+)*\\s+["']?(${escapedPackageName}(?:@[^\\s"']+)?)`,
     'g'
   );
 
