@@ -131,7 +131,7 @@ function reconcileServices(
     if (!states.has('egress-fence')) throw new Error('missing fence service');
     recreate('egress-fence');
   }
-  if (pending.env && pending.proxy) {
+  if ((pending.env || pending.rules) && pending.proxy) {
     if (metadataProxyEnabled(box)) recreate('gce-metadata-proxy');
     else compose(['stop', 'gce-metadata-proxy']);
   }

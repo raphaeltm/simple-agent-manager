@@ -90,6 +90,7 @@ describe(
         ['ps', '--all', '--format', 'json'],
         ['stop', 'celld'],
         ['up', '-d', '--no-deps', '--force-recreate', '--wait', 'egress-fence'],
+        ['up', '-d', '--no-deps', '--force-recreate', '--wait', 'gce-metadata-proxy'],
         ['run', '--rm', '--no-deps', 'celld-data-owner'],
         ['up', '-d', '--no-deps', '--force-recreate', '--wait', 'celld'],
       ]);
@@ -368,15 +369,35 @@ syncBuiltinESMExports();
       }
     );
 
-    it('runs the volume owner one-shot before recreating celld on a UID change', async () => {
-      expect((await init()).status).toBe(0);
-      expect((await init(['CELLD_UID=7203'])).status).toBe(0);
-      const ops = operations();
-      const owner = ops.findIndex((args) => args.includes('celld-data-owner'));
-      const celld = ops.findIndex((args) => args.includes('up') && args.includes('celld'));
-      expect(owner).toBeGreaterThan(0);
-      expect(celld).toBeGreaterThan(owner);
-      expect(readFileSync(join(dir, '.state/egress-fence.nft'), 'utf8')).toContain('7203');
-    });
+    it.each(['running', 'exited'])(
+      'updates UID ownership while preserving a %s metadata proxy intent',
+      async (proxyState) => {
+        expect((await init()).status).toBe(0);
+        serviceState(
+          active.map((row) =>
+            row.Service === 'gce-metadata-proxy' ? { ...row, State: proxyState } : row
+          )
+        );
+        const oldEnv = readFileSync(join(dir, '.state/celld.env'), 'utf8');
+        expect((await init(['CELLD_UID=7203'])).status).toBe(0);
+        // This must exercise the UID-only path, not an incidental env change.
+        expect(readFileSync(join(dir, '.state/celld.env'), 'utf8')).toBe(oldEnv);
+        const ops = operations();
+        const owner = ops.findIndex((args) => args.includes('celld-data-owner'));
+        const celld = ops.findIndex((args) => args.includes('up') && args.includes('celld'));
+        const proxy = ops.findIndex(
+          (args) => args.includes('up') && args.includes('gce-metadata-proxy')
+        );
+        expect(owner).toBeGreaterThan(0);
+        expect(celld).toBeGreaterThan(owner);
+        if (proxyState === 'running') {
+          expect(proxy).toBeGreaterThan(0);
+          expect(proxy).toBeLessThan(celld);
+        } else {
+          expect(proxy).toBe(-1);
+        }
+        expect(readFileSync(join(dir, '.state/egress-fence.nft'), 'utf8')).toContain('7203');
+      }
+    );
   }
 );
