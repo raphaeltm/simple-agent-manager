@@ -199,6 +199,7 @@ These topics have strong source material and broad developer appeal:
 - **Always verify claims against the codebase.** Read the relevant source files before writing about how something works.
 - **Reference specific files.** Instead of "our encryption module," say "the `encryptCredential()` function in `apps/api/src/lib/credentials.ts`."
 - **Include real code, not pseudocode.** If showing how something works, extract from the actual implementation. Simplify if needed, but note what was simplified.
+- **Frame SAM as self-hosted.** SAM is open source and self-hosted; there is no SaaS. Each installation belongs to one person or organization, usually a team. When a post covers security, the exposure is between people with accounts on the same installation, not the public. Do not compare SAM to public SaaS platforms such as GitHub Actions. See "Self-Hosted, Not SaaS" in the root `CLAUDE.md`.
 - **Check the constitution.** The project constitution is at `.specify/memory/constitution.md`. Ensure blog content doesn't contradict project principles.
 
 ## SEO Considerations
