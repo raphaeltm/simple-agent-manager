@@ -54,7 +54,7 @@ const AGENT_PROFILE_ID = 'profile-apex-deployer';
 const RELEASE_V14 = '01M2PKNZXH32QM324BD7KTR0KS';
 const RELEASE_V15 = '01M32DYXWVG1Y5W57X5EB9Z2SM';
 const PLACEMENT_FAILURE_MESSAGE =
-  'Deployment node placement failed: Existing exclusive deployment node cannot admit the declared resource reservation';
+  'Deployment node placement failed: Existing exclusive deployment node is no longer eligible under the effective compute pool or cannot admit the declared resource reservation';
 
 const RESERVATION = {
   version: 3 as const,

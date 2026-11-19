@@ -19,6 +19,7 @@ import { errors } from '../middleware/error';
 import { collectSecretNames } from '../services/compose-renderer';
 import { NO_DEPLOYMENT_RELOCATION_CLAIM_SQL } from '../services/deployment-environment-state';
 import { resolveDeploymentPlacement } from '../services/deployment-provisioning';
+import { resolveVolumePlacementConstraint } from '../services/deployment-volume-placement';
 import {
   createMissingManifestVolumes,
   listEnvironmentVolumes,
@@ -229,22 +230,7 @@ async function prepareManifestVolumes(params: {
   const volumes = params.requiresVolumes
     ? await listEnvironmentVolumes(params.db, params.envId)
     : [];
-  const volume = volumes[0];
-  if (
-    volume &&
-    volumes.some((item) => item.provider !== volume.provider || item.location !== volume.location)
-  ) {
-    return {
-      success: false,
-      response: {
-        status: 400,
-        body: {
-          error: 'VOLUME_PLACEMENT_CONFLICT',
-          message: 'Existing environment volumes must share the same provider and location.',
-        },
-      },
-    };
-  }
+  const volume = resolveVolumePlacementConstraint(volumes);
   const placement = await resolveDeploymentPlacement(params.userId, params.env, params.projectId, {
     reservation: params.reservation,
     ...(volume ? { providerOverride: volume.provider, vmLocationOverride: volume.location } : {}),

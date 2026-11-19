@@ -1,10 +1,10 @@
-import {
-  capacityPlacementSnapshotForCandidate,
-  DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS,
-} from '@simple-agent-manager/scheduler-core';
 import type {
   TaskStartCapacityCandidate,
   TaskStartCapacityPoolSelection,
+} from '@simple-agent-manager/scheduler-core';
+import {
+  capacityPlacementSnapshotForCandidate,
+  DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS,
 } from '@simple-agent-manager/scheduler-core';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
@@ -14,8 +14,8 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { placeReleaseOnDeploymentNode } from '../../../src/routes/deployment-release-placement';
 import {
-  findDeploymentNodeWithCapacity,
   type DeploymentPlacement,
+  findDeploymentNodeWithCapacity,
 } from '../../../src/services/deployment-provisioning';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -80,7 +80,12 @@ function fixture(exclusive = false) {
   const env = { DATABASE: createSqliteD1(sqlite) } as Env;
   const db = drizzle(env.DATABASE, { schema });
   const old = candidate('hetzner');
-  const top = candidate('gcp');
+  const top = {
+    ...candidate('gcp'),
+    credentialAttributionSource: 'platform' as const,
+    placementCredentialSource: 'platform' as const,
+    placementCredentialReference: 'platform_credentials:gcp',
+  };
   const selection: TaskStartCapacityPoolSelection = {
     poolId: 'pool',
     scope: 'user',
@@ -108,10 +113,10 @@ function fixture(exclusive = false) {
     provider: top.provider,
     location: top.location,
     vmSize: 'small',
-    credentialSource: 'user',
+    credentialSource: 'platform',
     credentialAttributionUserId: 'user',
     credentialAttributionProjectId: null,
-    placementCredentialSource: 'user',
+    placementCredentialSource: 'platform',
     placementCredentialReference: top.placementCredentialReference,
     placementCredentialVersion: version,
     providerInstanceType: top.providerInstanceType,
@@ -144,24 +149,37 @@ function fixture(exclusive = false) {
     configuration_state: 'configured-ready',
   });
   for (const c of [old, top]) {
-    insert('credentials', {
-      id: c.id,
-      user_id: 'user',
-      provider: c.provider,
-      credential_type: 'cloud-provider',
-      is_active: 1,
-      encrypted_token: 'fixture',
-      iv: 'fixture',
-      updated_at: new Date(version).toISOString(),
-    });
+    if (c.placementCredentialSource === 'platform') {
+      insert('platform_credentials', {
+        id: c.id,
+        provider: c.provider,
+        credential_type: 'cloud-provider',
+        is_enabled: 1,
+        encrypted_token: 'fixture',
+        iv: 'fixture',
+        updated_at: new Date(version).toISOString(),
+      });
+    } else {
+      insert('credentials', {
+        id: c.id,
+        user_id: 'user',
+        provider: c.provider,
+        credential_type: 'cloud-provider',
+        is_active: 1,
+        encrypted_token: 'fixture',
+        iv: 'fixture',
+        updated_at: new Date(version).toISOString(),
+      });
+    }
     insert('capacity_sources', {
       id: c.id,
       scope: 'user',
       owner_user_id: 'user',
       source_kind: 'cloud-provider-credential',
       provider: c.provider,
-      credential_source: 'user',
-      credential_id: c.id,
+      credential_source: c.placementCredentialSource,
+      credential_id: c.placementCredentialSource === 'user' ? c.id : null,
+      platform_credential_id: c.placementCredentialSource === 'platform' ? c.id : null,
       credential_reference: c.placementCredentialReference,
       credential_version: version,
       status: 'active',
@@ -270,6 +288,8 @@ describe('linked deployment node pool eligibility through release placement', ()
       });
       expect(match?.placement).toMatchObject({
         provider: 'hetzner',
+        credentialSource: 'user',
+        placementCredentialSource: 'user',
         placementCredentialReference: 'credentials:hetzner',
         capacityPlacementSnapshot: {
           capacityPoolCandidateId: 'hetzner',

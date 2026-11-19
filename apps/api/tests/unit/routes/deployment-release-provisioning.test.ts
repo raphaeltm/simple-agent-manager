@@ -644,7 +644,7 @@ describe('POST /:projectId/environments/:envId/releases — provisioning trigger
       dbCalls.some(
         ({ values }) =>
           values?.observedErrorMessage ===
-          'Deployment node placement failed: Existing exclusive deployment node cannot admit the declared resource reservation'
+          'Deployment node placement failed: Existing exclusive deployment node is no longer eligible under the effective compute pool or cannot admit the declared resource reservation'
       )
     ).toBe(true);
   });
