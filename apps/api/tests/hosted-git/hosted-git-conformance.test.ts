@@ -26,6 +26,7 @@ import {
   DEFAULT_HOSTED_GIT_MAX_PUSH_BYTES,
   DEFAULT_HOSTED_GIT_MAX_REPO_OBJECTS,
 } from '../../src/selfhost/hosted-git/limits';
+import { buildReceivePackRequest,buildSeedPack } from '../../src/services/artifacts/seed-readme';
 import {
   HOSTED_GIT_TEST_BASE_DOMAIN,
   type HostedGitRuntime,
@@ -770,5 +771,41 @@ describe('ref-only push admission', () => {
       ).run();
       await runtime.fetch('/__test/invalidate-settings', { method: 'POST' });
     }
+  });
+});
+
+
+describe('repository cleanup through real SQLite', () => {
+  it('schedules and reclaims an ingested pack whose only ref update is rejected', async () => {
+    const owner = await createEmailOnlyUser();
+    const project = await createHostedProject(owner, 'Rejected pack');
+    const token = await mintToken(project, 'write');
+    const info = async () => (await (await runtime.fetch(`/__test/info/${project.artifactsRepoId}`)).json()) as { objects: number };
+    await runtime.fetch(`/__test/gc/${project.artifactsRepoId}`, { method: 'POST' });
+    const idle = await (await runtime.fetch(`/__test/gc-state/${project.artifactsRepoId}`)).json();
+    expect(idle).toMatchObject({ pending: '0', alarm: null });
+    const before = await info();
+    const { pack, commitOid } = await buildSeedPack({ projectName: 'Unreachable rejected pack' });
+    const rejected = await runtime.fetch(`/git/${project.artifactsRepoId}.git/git-receive-pack`, {
+      method: 'POST', headers: { authorization: `Basic ${Buffer.from(`x:${token}`).toString('base64')}`, 'content-type': 'application/x-git-receive-pack-request' },
+      body: buildReceivePackRequest(commitOid, 'main', pack) as BodyInit,
+    });
+    expect(await rejected.text()).toContain('ng refs/heads/main');
+    expect((await info()).objects).toBeGreaterThan(before.objects);
+    const queued = await (await runtime.fetch(`/__test/gc-state/${project.artifactsRepoId}`)).json() as { pending: string; alarm: number | null };
+    expect(queued.pending).toBe('1'); expect(queued.alarm).not.toBeNull();
+    await runtime.fetch(`/__test/gc/${project.artifactsRepoId}`, { method: 'POST' });
+    expect((await info()).objects).toBe(before.objects);
+  });
+  it('transactionally deletes a populated repository and refuses later Git requests', async () => {
+    const owner = await createEmailOnlyUser();
+    const project = await createHostedProject(owner, 'Delete me');
+    const token = await mintToken(project, 'write');
+    const remote = localRemote(project.repository, token);
+    expect((await git(['ls-remote', remote])).code).toBe(0);
+    expect((await runtime.fetch(`/__test/repository/${project.artifactsRepoId}`, { method: 'DELETE' })).status).toBe(200);
+    const after = await git(['ls-remote', remote]);
+    expect(after.code).not.toBe(0); expect(after.stderr).toContain('410');
+    expect((await runtime.fetch(`/__test/repository/${project.artifactsRepoId}`, { method: 'DELETE' })).status).toBe(200);
   });
 });

@@ -31,7 +31,11 @@ export class HostedGitRepoTest extends HostedGitRepo {
         "INSERT INTO meta (key, value) VALUES ('gc-pending', '1') ON CONFLICT(key) DO UPDATE SET value = '1'"
       );
       await this.alarm();
+      await this.ctx.storage.deleteAlarm();
       return new Response('ok');
+    }
+    if (new URL(req.url).pathname === '/__test/gc-state') {
+      return Response.json({ pending: this.ctx.storage.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key='gc-pending'").toArray()[0]?.value, alarm: await this.ctx.storage.getAlarm() });
     }
     return super.fetch(req);
   }
@@ -91,4 +95,13 @@ export default app;
 app.post('/__test/invalidate-settings', (c) => {
   invalidateAdminSettings(c.env);
   return new Response('ok');
+});
+
+app.get('/__test/gc-state/:repo', async (c) => {
+  const ns = c.env.HOSTED_GIT!;
+  return ns.get(ns.idFromName(c.req.param('repo'))).fetch('https://hosted-git/__test/gc-state');
+});
+app.delete('/__test/repository/:repo', async (c) => {
+  const ns = c.env.HOSTED_GIT!;
+  return ns.get(ns.idFromName(c.req.param('repo'))).fetch('https://hosted-git/', { method: 'DELETE' });
 });
