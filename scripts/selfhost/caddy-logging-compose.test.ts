@@ -62,6 +62,15 @@ describe('Caddy logging and keep-warm wiring', () => {
     expect(redaction).toContain('\t\tregexp "^/p/[^?]*" "/p/<redacted>"');
   });
 
+  // Proven on the real image in live/caddy-fragments.live.test.ts; pinned here so a compose-only
+  // CI run notices it moving into a handle block or after the fragments.
+  it('strips client X-SAM-* headers at site level, before the sam.d routes', () => {
+    const site = caddyfile.slice(caddyfile.indexOf('*.{$SAM_DOMAIN} {'));
+    const strip = site.indexOf('\n\trequest_header -X-SAM-*\n');
+    expect(strip).toBeGreaterThan(0);
+    expect(strip).toBeLessThan(site.indexOf('import sam.d/*.caddy'));
+  });
+
   it('keeps the keep-warm check on a route that never serves a request', () => {
     expect(caddyfile).toContain('import keep-warm/{$SAM_KEEP_WARM:on}.caddy');
     expect(keepWarm).toMatch(/^@sam_keep_warm expression false$/m);

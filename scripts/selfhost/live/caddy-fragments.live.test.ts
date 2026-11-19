@@ -379,6 +379,22 @@ const FORGED = {
 const forwardAuth = () =>
   celldSeen.filter((seen) => seen.url.startsWith('/api/self-host/gateway/node-websocket'));
 
+describe('client X-SAM-* headers on ordinary routes', () => {
+  it.each(['api', 'app', `ws-${WORKSPACE}--3000`])(
+    'never reach celld through the catch-all route (%s)',
+    async (host) => {
+      const reply = await send(host, '/api/projects', { ...FORGED, 'X-Other': 'kept' });
+      expect(reply.status).toBe(200);
+      // Liveness: the request reached celld, with an ordinary header intact.
+      expect(celldSeen).toHaveLength(1);
+      expect(celldSeen[0]?.headers['x-other']).toBe('kept');
+      expect(
+        Object.keys(celldSeen[0]?.headers ?? {}).filter((h) => h.startsWith('x-sam-'))
+      ).toEqual([]);
+    }
+  );
+});
+
 describe('forward_auth for node WebSockets', () => {
   it.each([WS_HOST, PORT_HOST])(
     'strips client X-SAM-* headers before forward_auth and passes a refusal through (%s)',
