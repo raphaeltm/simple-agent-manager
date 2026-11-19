@@ -30,7 +30,7 @@ export function composeOverlays(
   fileAt: (ref: string, path: string) => string | null
 ): ComposeOverlay[] {
   return composeFiles
-    .map((file) => ({ file, rel: relative(REPO_ROOT, resolve(file)).split(/[\\/]/).join('/') }))
+    .map((file) => ({ file, rel: relative(REPO_ROOT, resolve(file)).replaceAll('\\', '/') }))
     .filter(({ rel }) => rel !== COMPOSE_PATH)
     .map(({ file, rel }) => {
       const inRepo = !rel.startsWith('../') && !isAbsolute(rel);

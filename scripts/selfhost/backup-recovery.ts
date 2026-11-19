@@ -33,7 +33,8 @@ function compose(ctx: BoxContext, args: string[]): void {
 function readIdentity(path: string): Record<string, unknown> {
   try {
     const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error();
+    if (typeof value !== 'object' || value === null || Array.isArray(value))
+      throw new Error('Invalid rollback identity object');
     return value as Record<string, unknown>;
   } catch {
     throw new Error('Cannot verify rollback installation identity');

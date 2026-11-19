@@ -75,37 +75,39 @@ export function stateItems(ctx: TeardownContext): Item[] {
     });
   }
   const state = ctx.record.find((r) => r.cloud === 'box' && r.kind === 'state-dir');
-  items.push({
-    id: 'box:state',
-    place: 'on the box',
-    what: `${ctx.stateDir} (sealed bundles, generated config, deploy project, celld binary, caches, secrets.env)`,
-    provenance: state ? 'recorded' : 'discovered, not recorded',
-    how: `rm -r everything in ${ctx.stateDir} except ${RECORD_FILE} and a key that is kept`,
-    step: STEPS.state,
-    plan: {
-      'keep-data': { act: 'keep', why: 'keep my data keeps the bundles and state' },
-      'remove-everything': { act: 'remove' },
+  items.push(
+    {
+      id: 'box:state',
+      place: 'on the box',
+      what: `${ctx.stateDir} (sealed bundles, generated config, deploy project, celld binary, caches, secrets.env)`,
+      provenance: state ? 'recorded' : 'discovered, not recorded',
+      how: `rm -r everything in ${ctx.stateDir} except ${RECORD_FILE} and a key that is kept`,
+      step: STEPS.state,
+      plan: {
+        'keep-data': { act: 'keep', why: 'keep my data keeps the bundles and state' },
+        'remove-everything': { act: 'remove' },
+      },
+      removedAt: state?.removedAt,
+      runKey: 'state',
+      run: () => clearState(ctx, keepKey),
+      record: [
+        { cloud: 'box', kind: 'state-dir', name: ctx.stateDir, createdBy: 'deploy' },
+        // The install itself is gone with its state; the id stays readable for a resumed run.
+        ...ctx.record
+          .filter((r) => r.cloud === 'box' && r.kind === 'installation')
+          .map((r) => ({ cloud: 'box', kind: 'installation', name: r.name })),
+      ],
     },
-    removedAt: state?.removedAt,
-    runKey: 'state',
-    run: () => clearState(ctx, keepKey),
-    record: [
-      { cloud: 'box', kind: 'state-dir', name: ctx.stateDir, createdBy: 'deploy' },
-      // The install itself is gone with its state; the id stays readable for a resumed run.
-      ...ctx.record
-        .filter((r) => r.cloud === 'box' && r.kind === 'installation')
-        .map((r) => ({ cloud: 'box', kind: 'installation', name: r.name })),
-    ],
-  });
-  items.push({
-    id: 'box:record',
-    place: 'on the box',
-    what: `${ctx.recordFile} (this record: teardown's receipt)`,
-    provenance: 'recorded',
-    how: `rm ${ctx.recordFile} by hand once you no longer need it`,
-    step: STEPS.state,
-    plan: both({ act: 'keep', why: 'the receipt a second run resumes from' }),
-  });
+    {
+      id: 'box:record',
+      place: 'on the box',
+      what: `${ctx.recordFile} (this record: teardown's receipt)`,
+      provenance: 'recorded',
+      how: `rm ${ctx.recordFile} by hand once you no longer need it`,
+      step: STEPS.state,
+      plan: both({ act: 'keep', why: 'the receipt a second run resumes from' }),
+    }
+  );
   return items;
 }
 
@@ -268,7 +270,8 @@ function assertStateDir(ctx: TeardownContext): void {
     let identity: unknown;
     try {
       const parsed: unknown = JSON.parse(readFileSync(keys, 'utf8'));
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+        throw new Error('Invalid ownership metadata shape');
       identity = (parsed as { SAM_INSTALLATION_ID?: unknown }).SAM_INSTALLATION_ID;
     } catch {
       throw new Error('Refused: unreadable installation identity');

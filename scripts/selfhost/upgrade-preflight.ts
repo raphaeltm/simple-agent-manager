@@ -1,3 +1,5 @@
+import { isAbsolute } from 'node:path';
+
 /** Refuse upgrades whose installation cannot safely remove its cache during rollback. */
 import type { BoxContext } from './backup-lib.js';
 import {
@@ -32,4 +34,20 @@ export function assertRollbackReady(ctx: Pick<BoxContext, 'box' | 'stateDir'>): 
       'Upgrade refused: missing installation compose creation receipt; deploy the installation-specific project before upgrading'
     );
   }
+}
+
+/** A pending record without its original snapshot cannot safely authorize another deployment. */
+export function pendingBackupDirectory(pending: unknown): string {
+  if (
+    typeof pending !== 'object' ||
+    pending === null ||
+    !('backupDir' in pending) ||
+    typeof pending.backupDir !== 'string' ||
+    !isAbsolute(pending.backupDir)
+  ) {
+    throw new Error(
+      'unfinished upgrade has no recorded encrypted snapshot; recover the original installation before retrying'
+    );
+  }
+  return pending.backupDir;
 }

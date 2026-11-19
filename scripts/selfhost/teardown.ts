@@ -6,7 +6,7 @@
  *       stop and delete owned node VMs; keep workload identity, bucket, backups, key file,
  *       bundles, .env and state, so `docker compose up -d` and the bootstrap bring it back
  *   pnpm selfhost:teardown --remove-everything [--dry-run] --confirm <domain>
- *       also the bucket contents, compose volumes and images, .state and .env
+ *       also proven-owned compose volumes, .state and .env; external stores/images stay manual
  *     --delete-backups   also delete local backups (never without this flag)
  *     --destroy-key      also delete the key file / schedule the cloud KMS key's destruction
  *   --gcp-project <id>   a Google Cloud project nodes ran in (default: GCP_PROJECT in .env, plus
@@ -60,11 +60,9 @@ function parse() {
   if (values['keep-data'] && values['remove-everything']) {
     throw new Error('choose one of --keep-data and --remove-everything');
   }
-  const mode: Mode | undefined = values['keep-data']
-    ? 'keep-data'
-    : values['remove-everything']
-      ? 'remove-everything'
-      : undefined;
+  let mode: Mode | undefined;
+  if (values['keep-data']) mode = 'keep-data';
+  else if (values['remove-everything']) mode = 'remove-everything';
   if ((values['delete-backups'] || values['destroy-key']) && mode !== 'remove-everything') {
     throw new Error('--delete-backups and --destroy-key go with --remove-everything only');
   }
@@ -151,6 +149,12 @@ async function confirm(expected: string, given: string | undefined): Promise<boo
   }
 }
 
+function installationSource(recordedId: string | null, installationId: string | null): string {
+  if (recordedId) return 'recorded';
+  if (installationId) return 'discovered, not recorded: platform-keys.json';
+  return 'unknown';
+}
+
 async function main(): Promise<number> {
   assertOperatorExecution();
   const { values, mode } = parse();
@@ -207,11 +211,7 @@ async function main(): Promise<number> {
     installationId,
     selfhostDir: SELFHOST_DIR,
   };
-  const idSource = recordedId
-    ? 'recorded'
-    : installationId
-      ? 'discovered, not recorded: platform-keys.json'
-      : 'unknown';
+  const idSource = installationSource(recordedId, installationId);
   log(
     `install ${domain || '(domain unknown)'}, installation ${installationId ?? '?'} (${idSource})`
   );
@@ -257,10 +257,9 @@ async function main(): Promise<number> {
   return outcomes.some((o) => ['failed', 'refused', 'not attempted'].includes(o.status)) ? 1 : 0;
 }
 
-main().then(
-  (code) => process.exit(code),
-  (error: unknown) => {
-    console.error(`[selfhost] ${error instanceof Error ? error.message : String(error)}`);
-    process.exit(1);
-  }
-);
+try {
+  process.exit(await main());
+} catch (error: unknown) {
+  console.error(`[selfhost] ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}

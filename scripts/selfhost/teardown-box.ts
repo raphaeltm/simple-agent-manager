@@ -9,7 +9,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import type { CreatedResource } from '../../deploy/selfhost/created-resources.mjs';
 import { type BoxContext, composeArgs, MANIFEST_NAME, parseBucketUrl } from './backup-lib';
 import { composeProjectFor, expectedComposeProjectFor, usesBundledStore } from './install-record';
-import { readComposeInventory, removeContainers,stopContainers } from './teardown-compose';
+import { readComposeInventory, removeContainers, stopContainers } from './teardown-compose';
 import { both, type Item, type Mode, STEPS } from './teardown-model';
 import { isProtectedDir, stateItems } from './teardown-state-dir';
 
@@ -40,7 +40,7 @@ export function recorded(ctx: TeardownContext, kind: string, name?: string) {
   );
 }
 
-export function boxItems(ctx: TeardownContext): Item[] {
+function composeItems(ctx: TeardownContext): { items: Item[]; owned: boolean } {
   const items: Item[] = [];
   const projectName = composeProjectFor(ctx.box, ctx.stateDir);
   const project = recorded(ctx, 'compose-project', projectName);
@@ -50,53 +50,42 @@ export function boxItems(ctx: TeardownContext): Item[] {
   const composeGone = project?.removedAt ?? (existsSync(ctx.envFile) ? undefined : 'no .env left');
   const composeCmd = `docker ${composeArgs(ctx, []).join(' ')}`;
   const everything = ctx.mode === 'remove-everything';
-  let inventory: ReturnType<typeof readComposeInventory> | undefined;
-  let inventoryError: Error | undefined;
-  if (owned) {
-    try {
-      inventory = readComposeInventory(ctx);
-    } catch (error) {
-      inventoryError = error instanceof Error ? error : new Error('Cannot verify Docker inventory');
-    }
-  }
-  const proof = () => {
-    if (inventoryError) throw inventoryError;
-    if (!inventory) throw new Error('Missing Docker ownership inventory');
-    return inventory;
-  };
+  const { inventory, proof } = composeProof(ctx, owned);
 
-  items.push({
-    id: 'box:stop',
-    place: 'on the box',
-    what: `services of compose project ${projectName} stopped (no new VMs or work start)`,
-    provenance: project ? 'recorded' : 'discovered, not recorded',
-    how: `${composeCmd} stop`,
-    step: STEPS.stop,
-    plan: both(
-      owned
-        ? { act: 'remove' }
-        : { act: 'refused', why: 'no creation record for this installation compose project' }
-    ),
-    removedAt: composeGone,
-    run: () => stopContainers(ctx, proof()),
-  });
-  items.push({
-    id: 'box:containers',
-    place: 'on the box',
-    what: `containers and network of compose project ${projectName}`,
-    provenance: project ? 'recorded' : 'discovered, not recorded',
-    how: 'revalidate exact container ids and configuration scope, remove those ids; remove everything also removes individually proven volume identities',
-    step: STEPS.box,
-    plan: both(
-      owned
-        ? { act: 'remove' }
-        : { act: 'refused', why: 'no creation record for this installation compose project' }
-    ),
-    removedAt: composeGone,
-    runKey: 'compose-down',
-    run: () => removeContainers(ctx, proof(), everything),
-    record: everything ? { cloud: 'box', kind: 'compose-project', name: projectName } : undefined,
-  });
+  items.push(
+    {
+      id: 'box:stop',
+      place: 'on the box',
+      what: `services of compose project ${projectName} stopped (no new VMs or work start)`,
+      provenance: project ? 'recorded' : 'discovered, not recorded',
+      how: `${composeCmd} stop`,
+      step: STEPS.stop,
+      plan: both(
+        owned
+          ? { act: 'remove' }
+          : { act: 'refused', why: 'no creation record for this installation compose project' }
+      ),
+      removedAt: composeGone,
+      run: () => stopContainers(ctx, proof()),
+    },
+    {
+      id: 'box:containers',
+      place: 'on the box',
+      what: `containers of compose project ${projectName}`,
+      provenance: project ? 'recorded' : 'discovered, not recorded',
+      how: 'revalidate exact container ids and configuration scope, remove those ids; remove everything also removes individually proven volume identities',
+      step: STEPS.box,
+      plan: both(
+        owned
+          ? { act: 'remove' }
+          : { act: 'refused', why: 'no creation record for this installation compose project' }
+      ),
+      removedAt: composeGone,
+      runKey: 'compose-down',
+      run: () => removeContainers(ctx, proof(), everything),
+      record: everything ? { cloud: 'box', kind: 'compose-project', name: projectName } : undefined,
+    }
+  );
   const keepVolumes = { act: 'keep' as const, why: 'keep my data keeps volumes' };
   for (const volume of inventory?.volumes.map((v) => v.name) ?? []) {
     const store = volume.endsWith('objectstore-data');
@@ -105,7 +94,7 @@ export function boxItems(ctx: TeardownContext): Item[] {
       place: 'on the box',
       what: `volume ${volume}${store ? ' (the bundled object store: the fleet bucket)' : ''}`,
       provenance: 'discovered, not recorded',
-      how: 'docker compose down -v',
+      how: `revalidate ownership and creation identity, then docker volume rm ${volume}`,
       step: STEPS.box,
       plan: {
         'keep-data': keepVolumes,
@@ -126,7 +115,7 @@ export function boxItems(ctx: TeardownContext): Item[] {
     place: 'on the box',
     what: `images compose built for ${projectName} (key agent, egress fence, celld, ...)`,
     provenance: 'discovered, not recorded',
-    how: 'docker compose down --rmi local',
+    how: 'inspect image users and remove only unused image ids manually',
     step: STEPS.box,
     plan: {
       'keep-data': { act: 'keep', why: 'rebuilt or reused on start' },
@@ -137,6 +126,29 @@ export function boxItems(ctx: TeardownContext): Item[] {
     },
     removedAt: composeGone,
   });
+  return { items, owned };
+}
+
+function composeProof(ctx: TeardownContext, owned: boolean) {
+  let inventory: ReturnType<typeof readComposeInventory> | undefined;
+  let inventoryError: Error | undefined;
+  if (owned) {
+    try {
+      inventory = readComposeInventory(ctx);
+    } catch (error) {
+      inventoryError = error instanceof Error ? error : new Error('Cannot verify Docker inventory');
+    }
+  }
+  const proof = () => {
+    if (inventoryError) throw inventoryError;
+    if (!inventory) throw new Error('Missing Docker ownership inventory');
+    return inventory;
+  };
+  return { inventory, proof };
+}
+
+export function boxItems(ctx: TeardownContext): Item[] {
+  const { items, owned } = composeItems(ctx);
   if (owned) items.push(...stateItems(ctx), ...backupItems(ctx));
   const env = recorded(ctx, 'env-file');
   items.push({
@@ -180,7 +192,7 @@ function endpointHost(endpoint: string | undefined): string {
   }
 }
 
-function backupItems(ctx: TeardownContext): Item[] {
+function backupPaths(ctx: TeardownContext): Map<string, CreatedResource | undefined> {
   const paths = new Map<string, CreatedResource | undefined>();
   for (const r of ctx.record) if (r.cloud === 'box' && r.kind === 'backup') paths.set(r.name, r);
   const defaultDir = join(ctx.selfhostDir, 'backups');
@@ -190,12 +202,29 @@ function backupItems(ctx: TeardownContext): Item[] {
       if (!paths.has(path) && existsSync(join(path, MANIFEST_NAME))) paths.set(path, undefined);
     }
   }
+  return paths;
+}
+
+function backupPlan(ctx: TeardownContext, path: string, entry?: CreatedResource): Item['plan'] {
+  if (!existsSync(path)) return both({ act: 'keep', why: 'no longer on disk' });
+  if (entry?.action !== 'created' || !isBackupDir(path, ctx)) {
+    return both({
+      act: 'refused',
+      why: `not proven a backup (needs an absolute path, a version-1 ${MANIFEST_NAME}, and not /, home or the checkout)`,
+    });
+  }
+  return {
+    'keep-data': { act: 'keep', why: 'keep my data keeps backups' },
+    'remove-everything': ctx.options.deleteBackups
+      ? { act: 'remove' }
+      : { act: 'keep', why: 'pass --delete-backups to delete backups' },
+  };
+}
+
+function backupItems(ctx: TeardownContext): Item[] {
   const items: Item[] = [];
-  for (const [path, entry] of paths) {
+  for (const [path, entry] of backupPaths(ctx)) {
     if (entry?.removedAt && !existsSync(path)) continue;
-    // Proof it is a backup: the manifest runBackup writes. A recorded path without one is refused.
-    const isBackup = entry?.action === 'created' && isBackupDir(path, ctx);
-    const gone = !existsSync(path);
     items.push({
       id: `box:backup:${path}`,
       place: 'on the box',
@@ -203,19 +232,7 @@ function backupItems(ctx: TeardownContext): Item[] {
       provenance: entry ? 'recorded' : 'discovered, not recorded',
       how: `rm -r ${path}`,
       step: STEPS.cleanup,
-      plan: gone
-        ? both({ act: 'keep', why: 'no longer on disk' })
-        : !isBackup
-          ? both({
-              act: 'refused',
-              why: `not proven a backup (needs an absolute path, a version-1 ${MANIFEST_NAME}, and not /, home or the checkout)`,
-            })
-          : {
-              'keep-data': { act: 'keep', why: 'keep my data keeps backups' },
-              'remove-everything': ctx.options.deleteBackups
-                ? { act: 'remove' }
-                : { act: 'keep', why: 'pass --delete-backups to delete backups' },
-            },
+      plan: backupPlan(ctx, path, entry),
       forGood: 'this backup can never be restored',
       run: () => rmSync(path, { recursive: true, force: true }),
       record: { cloud: 'box', kind: 'backup', name: path, createdBy: 'backup' },

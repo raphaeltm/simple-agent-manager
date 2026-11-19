@@ -13,7 +13,10 @@ vi.mock('./backup-lib', async (importOriginal) => ({
   runRollback: vi.fn(),
 }));
 
-vi.mock('./upgrade-preflight.js', () => ({ assertRollbackReady: vi.fn() }));
+vi.mock('./upgrade-preflight.js', async (original) => ({
+  ...(await original<typeof import('./upgrade-preflight.js')>()),
+  assertRollbackReady: vi.fn(),
+}));
 
 const FROM = 'a'.repeat(40);
 const TO = 'b'.repeat(40);
@@ -32,8 +35,11 @@ let failCommand: string | undefined;
 let generatedChange: boolean;
 let cacheProject: string;
 let invalidCacheMount: boolean;
+let failureStopStateDirs: (string | undefined)[];
 
-function run(command: string, args: string[]): RunResult {
+function run(command: string, args: string[], env?: NodeJS.ProcessEnv): RunResult {
+  if (command === 'docker' && args.slice(-2).join(' ') === 'stop celld')
+    failureStopStateDirs.push(env?.SAM_SELFHOST_STATE_DIR);
   const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
   const commandArgs =
     command === 'pnpm' && args[0] === 'selfhost:deploy'
@@ -138,6 +144,7 @@ beforeEach(() => {
   generatedChange = false;
   cacheProject = '';
   invalidCacheMount = false;
+  failureStopStateDirs = [];
   vi.mocked(runBackup)
     .mockReset()
     .mockImplementation(() => {
@@ -273,6 +280,8 @@ describe('runUpgrade', () => {
     await expect(upgrade()).rejects.toThrow(/automatic rollback did not complete/);
     expect(steps).not.toContain(`git checkout --detach ${FROM}`);
     expect(logs.join('\n')).not.toContain('secret-value');
+    // --state-dir differs from Compose's default; failed recovery must still stop this box.
+    expect(failureStopStateDirs).toEqual([join(root, 'state')]);
   });
 
   it('fails recovery if the restored installation is unhealthy', async () => {

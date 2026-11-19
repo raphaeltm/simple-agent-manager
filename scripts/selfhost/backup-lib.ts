@@ -77,13 +77,21 @@ export interface BucketUrl {
 }
 
 export function parseBucketUrl(url: string): BucketUrl {
-  const match = /^(gs|s3):\/\/([^/]+)\/?(.*)$/.exec(url.trim());
-  if (!match) throw new Error(`CELLD_BUCKET must be gs://bucket[/prefix] or s3://bucket[/prefix]`);
-  return {
-    scheme: match[1] as 'gs' | 's3',
-    bucket: match[2] as string,
-    prefix: (match[3] ?? '').replace(/\/+$/, ''),
-  };
+  const value = url.trim();
+  let scheme: 'gs' | 's3';
+  if (value.startsWith('gs://')) scheme = 'gs';
+  else if (value.startsWith('s3://')) scheme = 's3';
+  else throw new Error('CELLD_BUCKET must be gs://bucket[/prefix] or s3://bucket[/prefix]');
+  if (/[\r\n\u2028\u2029]/.test(value))
+    throw new Error('CELLD_BUCKET must be gs://bucket[/prefix] or s3://bucket[/prefix]');
+  const rest = value.slice(5);
+  const slash = rest.indexOf('/');
+  const bucket = slash === -1 ? rest : rest.slice(0, slash);
+  if (!bucket) throw new Error('CELLD_BUCKET must be gs://bucket[/prefix] or s3://bucket[/prefix]');
+  const prefix = slash === -1 ? '' : rest.slice(slash + 1);
+  let end = prefix.length;
+  while (end > 0 && prefix[end - 1] === '/') end--;
+  return { scheme, bucket, prefix: prefix.slice(0, end) };
 }
 
 export function check(result: RunResult, what: string): RunResult {

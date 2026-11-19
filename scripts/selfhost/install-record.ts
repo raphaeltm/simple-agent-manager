@@ -37,13 +37,14 @@ export function expectedComposeProjectFor(
     assertOperatorExecution();
     try {
       const raw: unknown = JSON.parse(readFileSync(keys, 'utf8'));
-      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error();
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+        throw new Error('Invalid ownership metadata shape');
       const value = raw as { SAM_INSTALLATION_ID?: unknown };
       if (
         typeof value.SAM_INSTALLATION_ID !== 'string' ||
         !/^[a-f0-9]{32}$/.test(value.SAM_INSTALLATION_ID)
       )
-        throw new Error();
+        throw new Error('Invalid ownership metadata shape');
       installation = value.SAM_INSTALLATION_ID;
     } catch {
       throw new Error('Cannot resolve installation Compose identity');

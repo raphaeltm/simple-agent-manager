@@ -35,7 +35,8 @@ function result(ctx: TeardownContext, args: string[]): string {
 function parse(text: string): Record<string, unknown> {
   try {
     const value: unknown = JSON.parse(text);
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error();
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      throw new Error('Invalid ownership metadata shape');
     return value as Record<string, unknown>;
   } catch {
     throw new Error('Unreadable Docker ownership metadata');
@@ -143,10 +144,9 @@ export function readComposeInventory(ctx: TeardownContext): ComposeInventory {
   });
   if (new Set(volumes.map((v) => v.name)).size !== volumes.length)
     throw new Error('Refused: duplicate Docker volume inventory');
-  return {
-    containers: containers.sort((a, b) => a.id.localeCompare(b.id)),
-    volumes: volumes.sort((a, b) => a.name.localeCompare(b.name)),
-  };
+  containers.sort((a, b) => a.id.localeCompare(b.id));
+  volumes.sort((a, b) => a.name.localeCompare(b.name));
+  return { containers, volumes };
 }
 export function assertComposeInventory(ctx: TeardownContext, expected: ComposeInventory): void {
   if (JSON.stringify(readComposeInventory(ctx)) !== JSON.stringify(expected))

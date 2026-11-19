@@ -156,9 +156,11 @@ command -v gcloud >/dev/null 2>&1 || die "gcloud is not installed or not on PATH
 # Receipts contain public resource identifiers only, never credentials. Reuse never becomes
 # creation proof; teardown will preserve resources that existed before this install.
 record_resource() {
+  local resource_kind="$1" resource_name="$2" resource_action="$3" resource_identity="$4"
+  local resource_member="${5:-}" resource_role="${6:-}"
   [[ "$DRY_RUN" -eq 0 && -n "$INSTALLATION_ID" ]] || return 0
-  node "$SCRIPT_DIR/created-resources.mjs" add "$STATE_DIR/created-resources.json" gcp "$1" "$2" "$3" gcp-bootstrap \
-    "project=$PROJECT" "install=$ISSUER" "identity=$4" "pool=$POOL_ID" "environment=selfhost" "installation=$INSTALLATION_ID" "account=$SA_EMAIL" "member=${5:-}" "role=${6:-}"
+  node "$SCRIPT_DIR/created-resources.mjs" add "$STATE_DIR/created-resources.json" gcp "$resource_kind" "$resource_name" "$resource_action" gcp-bootstrap \
+    "project=$PROJECT" "install=$ISSUER" "identity=$resource_identity" "pool=$POOL_ID" "environment=selfhost" "installation=$INSTALLATION_ID" "account=$SA_EMAIL" "member=$resource_member" "role=$resource_role"
 }
 
 # The OIDC provider trusts the issuer the install advertises: check it before trusting it.

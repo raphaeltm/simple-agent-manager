@@ -35,7 +35,10 @@ vi.mock('./upgrade-migrations.js', async (original) => ({
   installedMigrations: vi.fn(() => [{ tag: 'v1', new_sqlite_classes: ['ProjectData'] }]),
 }));
 
-vi.mock('./upgrade-preflight.js', () => ({ assertRollbackReady: vi.fn() }));
+vi.mock('./upgrade-preflight.js', async (original) => ({
+  ...(await original<typeof import('./upgrade-preflight.js')>()),
+  assertRollbackReady: vi.fn(),
+}));
 
 const FROM = 'a'.repeat(40);
 const TO = 'b'.repeat(40);

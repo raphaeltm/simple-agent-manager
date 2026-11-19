@@ -80,9 +80,11 @@ export function gcpItems(ctx: TeardownContext): Item[] {
       throw new Error(`invalid Google Cloud project id: ${project}`);
     }
     const listed = listInstances(ctx, project);
-    items.push(...instanceItems(ctx, project, listed));
-    items.push(...firewallItems(ctx, project, listed));
-    items.push(...bootstrapItems(ctx, project));
+    items.push(
+      ...instanceItems(ctx, project, listed),
+      ...firewallItems(ctx, project, listed),
+      ...bootstrapItems(ctx, project)
+    );
   }
   return items;
 }
@@ -130,7 +132,7 @@ function parseInstance(value: unknown): GcpInstance {
     typeof v?.name !== 'string' ||
     typeof v.zone !== 'string' ||
     typeof v.id !== 'string' ||
-    !/^[0-9]+$/.test(v.id)
+    !/^\d+$/.test(v.id)
   ) {
     throw new Error('instance without name, zone or id');
   }
@@ -232,10 +234,13 @@ function instanceItems(
     const refusal = ownershipRefusal(instance, ctx.installationId);
     const path = `projects/${project}/zones/${instance.zone}/instances/${instance.name}`;
     const keptDisks = instance.disks.filter((d) => !d.autoDelete);
+    const diskDescription = keptDisks.length
+      ? ` (${keptDisks.length} disk(s) without auto-delete are retained)`
+      : ', boot disk with it';
     return {
       id: `gcp:${path}`,
       place: 'in your cloud, made by SAM at runtime',
-      what: `node VM ${instance.name} (${project}, ${instance.zone}, node ${instance.labels[SAM_NODE_LABEL_KEY] ?? '?'})${keptDisks.length ? ` (${keptDisks.length} disk(s) without auto-delete are retained)` : ', boot disk with it'}`,
+      what: `node VM ${instance.name} (${project}, ${instance.zone}, node ${instance.labels[SAM_NODE_LABEL_KEY] ?? '?'})${diskDescription}`,
       provenance: 'discovered, not recorded',
       how: `gcloud compute instances delete ${instance.name} --zone=${instance.zone} --project=${project}, after checking its id and labels again`,
       step: STEPS.compute,
@@ -386,7 +391,8 @@ function firewallItems(
         let raw: Record<string, unknown>;
         try {
           const parsed: unknown = JSON.parse(current.stdout);
-          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+            throw new Error('Invalid ownership metadata shape');
           raw = parsed as Record<string, unknown>;
         } catch {
           throw new Error('Refused: unreadable firewall identity');

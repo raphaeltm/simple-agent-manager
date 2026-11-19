@@ -6,12 +6,13 @@
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 import {
   assertRollbackCacheReady,
   type BoxContext as BackupContext,
   composeArgs,
+  composeRunEnv,
   runBackup,
   runRollback,
 } from './backup-lib.js';
@@ -30,7 +31,7 @@ import {
 } from './upgrade-migrations.js';
 
 export { composeInputsChanged, composeOverlays } from './upgrade-compose.js';
-import { assertRollbackReady } from './upgrade-preflight.js';
+import { assertRollbackReady, pendingBackupDirectory } from './upgrade-preflight.js';
 
 const MIGRATIONS_DIR = 'apps/api/src/db/migrations/';
 /** In the state dir while an upgrade has not finished: `{ "from": "<sha>" }`. */
@@ -332,6 +333,62 @@ async function applyUpgrade(
   return composeRestarted;
 }
 
+/** Resume from the original snapshot, never from a new snapshot of partially migrated data. */
+async function recoverPendingUpgrade(
+  ctx: BoxContext,
+  opts: UpgradeOptions,
+  from: string,
+  rebuilds: string[]
+): Promise<void> {
+  const pendingPath = join(ctx.stateDir, UPGRADE_PENDING_FILE);
+  const pending: unknown = JSON.parse(readFileSync(pendingPath, 'utf8'));
+  const backupDir = pendingBackupDirectory(pending);
+  try {
+    await recoverUpgrade(ctx, from, backupDir, rebuilds, opts);
+  } catch {
+    stopCelldAfterFailure(ctx);
+    throw new Error(
+      'unfinished upgrade recovery failed; keep celld stopped and retry using the recorded encrypted snapshot'
+    );
+  }
+  rmSync(pendingPath, { force: true });
+}
+
+function stopCelldAfterFailure(ctx: BoxContext): void {
+  const env = composeRunEnv(ctx);
+  try {
+    ctx.run('docker', composeArgs(ctx, ['stop', 'celld']), env);
+  } catch {
+    /* best effort */
+  }
+}
+
+async function rollbackFailedUpgrade(
+  ctx: BoxContext,
+  opts: UpgradeOptions,
+  git: Git,
+  from: string,
+  backupDir: string,
+  progress: UpgradeProgress
+): Promise<void> {
+  ctx.log('upgrade failed; automatically restoring the previous version');
+  try {
+    if (progress.deploymentStarted) {
+      await recoverUpgrade(ctx, from, backupDir, progress.imagesRebuilt, opts);
+    } else {
+      git(['checkout', '--detach', from]);
+      check(ctx.run('pnpm', ['install', '--frozen-lockfile']), 'restore previous dependencies');
+    }
+    rmSync(join(ctx.stateDir, UPGRADE_PENDING_FILE), { force: true });
+    ctx.log('automatic rollback completed');
+  } catch {
+    if (progress.deploymentStarted) stopCelldAfterFailure(ctx);
+    throw new Error(
+      'upgrade failed and automatic rollback did not complete; keep celld stopped and retry using the recorded encrypted snapshot'
+    );
+  }
+}
+
 export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise<UpgradeResult> {
   assertOperatorExecution();
   assertRollbackReady(ctx);
@@ -399,33 +456,7 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
       'automatic rollback requires a fresh backup; --skip-backup is no longer supported'
     );
   if (pendingFrom !== null) {
-    const pending: unknown = JSON.parse(
-      readFileSync(join(ctx.stateDir, UPGRADE_PENDING_FILE), 'utf8')
-    );
-    if (
-      typeof pending !== 'object' ||
-      pending === null ||
-      !('backupDir' in pending) ||
-      typeof pending.backupDir !== 'string' ||
-      !isAbsolute(pending.backupDir)
-    ) {
-      throw new Error(
-        'unfinished upgrade has no recorded encrypted snapshot; recover the original installation before retrying'
-      );
-    }
-    try {
-      await recoverUpgrade(ctx, pendingFrom, pending.backupDir, rebuilds, opts);
-    } catch {
-      try {
-        ctx.run('docker', composeArgs(ctx, ['stop', 'celld']));
-      } catch {
-        /* best effort */
-      }
-      throw new Error(
-        'unfinished upgrade recovery failed; keep celld stopped and retry using the recorded encrypted snapshot'
-      );
-    }
-    rmSync(join(ctx.stateDir, UPGRADE_PENDING_FILE), { force: true });
+    await recoverPendingUpgrade(ctx, opts, pendingFrom, rebuilds);
     return runUpgrade(ctx, opts);
   }
   assertRollbackCacheReady(backupContext(ctx));
@@ -453,30 +484,10 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
       progress
     );
   } catch (error) {
-    ctx.log('upgrade failed; automatically restoring the previous version');
-    try {
-      if (progress.deploymentStarted) {
-        await recoverUpgrade(ctx, from, backupDir, progress.imagesRebuilt, opts);
-      } else {
-        git(['checkout', '--detach', from]);
-        check(ctx.run('pnpm', ['install', '--frozen-lockfile']), 'restore previous dependencies');
-      }
-      rmSync(pendingPath, { force: true });
-      ctx.log('automatic rollback completed');
-    } catch {
-      if (progress.deploymentStarted) {
-        try {
-          ctx.run('docker', composeArgs(ctx, ['stop', 'celld']));
-        } catch {
-          /* best effort */
-        }
-      }
-      throw new Error(
-        'upgrade failed and automatic rollback did not complete; keep celld stopped and retry using the recorded encrypted snapshot'
-      );
-    }
+    await rollbackFailedUpgrade(ctx, opts, git, from, backupDir, progress);
     throw error;
   }
+
   rmSync(pendingPath, { force: true });
 
   const { imagesRebuilt } = progress;
