@@ -18,6 +18,8 @@ import {
   renderFenceRuleset,
   resolveObjectStoreEndpoints,
 } from './egress-fence.js';
+import { resolverNeedsDenialProbe } from './fence-addresses.js';
+import { startCheckProbes } from './fence-probes.js';
 import { assertComposeProfiles, writeFenceFiles } from './fence-state.js';
 import { parseDotenv } from './secret-files.js';
 
@@ -372,7 +374,9 @@ describe('celld.env and the metadata token proxy', () => {
   it('on for gs:// by default, off for s3://, overridable', () => {
     expect(metadataProxyEnabled({ CELLD_BUCKET: 'gs://fleet-bucket' })).toBe(true);
     expect(metadataProxyEnabled({ CELLD_BUCKET: 's3://b' })).toBe(false);
-    expect(metadataProxyEnabled({ CELLD_BUCKET: 'gs://fleet-bucket', GCE_METADATA_PROXY: 'off' })).toBe(false);
+    expect(
+      metadataProxyEnabled({ CELLD_BUCKET: 'gs://fleet-bucket', GCE_METADATA_PROXY: 'off' })
+    ).toBe(false);
   });
 
   it('requires the gce compose profile exactly when the proxy is on', () => {
@@ -428,10 +432,47 @@ describe('presign credential', () => {
 });
 
 describe('reserved caller identities and Caddy admin port', () => {
-  it.each(['7101', '7102', '65532', '65534'])('refuses celld uid %s', uid => {
+  it.each(['7101', '7102', '65532', '65534'])('refuses celld uid %s', (uid) => {
     expect(() => plan({ CELLD_UID: uid })).toThrow(/identity/);
   });
-  it.each(['127.0.0.1:2019', '127.0.0.2:2019', '[::1]:2019', '[::ffff:127.0.0.1]:2019', '10.1.2.3:2019'])('refuses admin via %s', endpoint => {
+  it.each([
+    '127.0.0.1:2019',
+    '127.0.0.2:2019',
+    '[::1]:2019',
+    '[::ffff:127.0.0.1]:2019',
+    '10.1.2.3:2019',
+  ])('refuses admin via %s', (endpoint) => {
     expect(() => plan({ SAM_EGRESS_ALLOW: endpoint })).toThrow(/Caddy admin/);
+  });
+});
+
+describe('public resolver startup safety', () => {
+  it('does not demand non-DNS rejection for a public resolver', () => {
+    const p = buildFencePlan({
+      box: {},
+      leaseRange: RANGE,
+      resolvConf: 'nameserver 1.1.1.1\n',
+      objectStore: [],
+    });
+    expect(startCheckProbes(p).filter((probe) => probe.host === '1.1.1.1')).toEqual([]);
+    expect(startCheckProbes(p).some((probe) => probe.name === 'private-v4')).toBe(true);
+  });
+});
+
+describe('resolver address-family policy', () => {
+  it.each([
+    ['1.1.1.1', false],
+    ['::ffff:1.1.1.1', false],
+    ['::ffff:101:101', false],
+    ['2606:4700:4700::1111', false],
+    ['::ffff:10.0.0.1', true],
+    ['::ffff:a00:1', true],
+    ['127.0.0.2', true],
+    ['fd00::1', true],
+  ])('classifies %s by its effective destination policy', (host, denied) => {
+    expect(resolverNeedsDenialProbe(host, [])).toBe(denied);
+  });
+  it('recognizes a mapped spelling of this host', () => {
+    expect(resolverNeedsDenialProbe('::ffff:1.1.1.1', ['1.1.1.1'])).toBe(true);
   });
 });

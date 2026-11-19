@@ -19,6 +19,7 @@ import {
   parseNameservers,
   resolveObjectStoreEndpoints,
 } from './egress-fence.js';
+import { resolverNeedsDenialProbe } from './fence-addresses.js';
 import { hostAddresses, type ProbeOutcome, type ProbeSpec, REMOTE_PROBES } from './fence-probes.js';
 import { mailEgressEndpoints } from './mail-settings.js';
 
@@ -213,7 +214,9 @@ export async function verifyTargets(input: TargetInput): Promise<VerifyTarget[]>
         protocol: 'udp' as const,
         expect: 'reachable' as const,
       },
-      { label: 'resolver non-DNS service', host, port: 2019, expect: 'blocked' as const },
+      ...(resolverNeedsDenialProbe(host, input.localAddresses)
+        ? [{ label: 'resolver non-DNS service', host, port: 2019, expect: 'blocked' as const }]
+        : []),
     ]),
     allow('node tunnel lease port', '127.0.0.1', range.start),
     allow('public internet', publicHost, Number(publicPort)),

@@ -38,7 +38,8 @@ import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 
 import type { PortRange } from './box-settings.js';
-import { assertOpenable } from './fence-addresses.js';
+import { assertOpenable, FORBIDDEN_IPV4, FORBIDDEN_IPV6 } from './fence-addresses.js';
+export { FORBIDDEN_IPV4, FORBIDDEN_IPV6 } from './fence-addresses.js';
 import { formatProbes, startCheckProbes } from './fence-probes.js';
 /** nftables table name; the start check and the verify command look for it. */
 export const EGRESS_FENCE_TABLE = 'sam_celld_egress';
@@ -86,46 +87,6 @@ const COMPOSE_PORT_DEFAULTS = {
 } as const;
 
 type ComposePort = keyof typeof COMPOSE_PORT_DEFAULTS;
-
-/** IPv4 destinations celld may never open a connection to (besides this host's own addresses). */
-export const FORBIDDEN_IPV4 = [
-  '0.0.0.0/8',
-  '10.0.0.0/8',
-  '100.64.0.0/10', // carrier-grade NAT, incl. Alibaba metadata 100.100.100.200
-  '168.63.129.16/32', // Azure WireServer (a public address; DNS to it is allowed above)
-  '127.0.0.0/8',
-  '169.254.0.0/16', // link-local, cloud metadata
-  '172.16.0.0/12',
-  '192.0.0.0/24',
-  '192.0.2.0/24', // documentation
-  '192.88.99.0/24', // 6to4 relay anycast
-  '192.168.0.0/16',
-  '198.18.0.0/15',
-  '198.51.100.0/24', // documentation
-  '203.0.113.0/24', // documentation
-  '224.0.0.0/3', // multicast and reserved
-];
-
-/**
- * The same ranges packages/worker-core/src/network-hosts refuses, plus every IPv6 form that embeds an
- * IPv4 address or tunnels to one (6to4, Teredo), refused wholesale: the kernel would route them
- * to a relay, where the embedded address is out of the fence's sight.
- */
-export const FORBIDDEN_IPV6 = [
-  '::/96', // unspecified, loopback and IPv4-compatible
-  '::ffff:0:0/96', // IPv4-mapped
-  '::ffff:0:0:0/96', // IPv4-translated
-  '64:ff9b::/96', // NAT64
-  '64:ff9b:1::/48',
-  '100::/64',
-  '2001::/32', // Teredo
-  '2001:db8::/32', // documentation
-  '2002::/16', // 6to4
-  'fc00::/7', // unique-local (incl. AWS IMDS fd00:ec2::254, GCE fd20:ce::254)
-  'fe80::/10', // link-local
-  'fec0::/10',
-  'ff00::/8',
-];
 
 export interface FenceEndpoint {
   address: string;

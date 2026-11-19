@@ -1,4 +1,5 @@
 /** F3: the pinned native celld environment and filesystem are inaccessible to its Worker. */
+import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -20,6 +21,7 @@ describe.skipIf(skipWithoutDocker)('metadata proxy credential isolation in pinne
     const store = await startObjectStore('isolation-test', randomBytes(24).toString('hex'));
     let running: Awaited<ReturnType<Awaited<ReturnType<typeof celldNode>>['serve']>> | undefined;
     try {
+      expect(spawnSync('/bin/true').status).toBe(0);
       const node = await celldNode(binary, store, 's3://fleet', { L23_ISOLATION_CANARY: canary });
       const project = writeProject(join(dir, 'project'), {
         name: 'l23-isolation',
@@ -33,7 +35,7 @@ export default { async fetch(_request, env) {
   for (const path of ['/proc/self/environ','/proc/1/environ',${JSON.stringify(nativeFile)},'/etc/sam/celld.env','/run/sam-egress-fence/attestation']) {
     try { const value = readFileSync(path, 'utf8'); if (value.length > 0) out.filesHidden = false; } catch {}
   }
-  try { const cp = await import('node:child_process'); cp.execFileSync('/usr/sbin/nft',['flush','ruleset']); out.spawnDenied = false; } catch {}
+  try { const cp = await import('node:child_process'); cp.execFileSync('/bin/true',[]); out.spawnDenied = false; } catch {}
   return Response.json(out);
 }};`,
       });

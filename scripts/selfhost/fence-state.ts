@@ -41,15 +41,17 @@ function ensureMetadataProxySecret(stateDir: string): string {
  * pointed at a proxy that is not running; with it and no gs:// bucket the proxy has no config.
  */
 export function assertComposeProfiles(box: Readonly<Record<string, string>>): void {
-  const profiles = (box.COMPOSE_PROFILES ?? '').split(',').map((profile) => profile.trim());
+  const profiles = new Set(
+    (box.COMPOSE_PROFILES ?? '').split(',').map((profile) => profile.trim())
+  );
   const wanted = metadataProxyEnabled(box);
-  if (wanted && !profiles.includes(GCE_PROFILE)) {
+  if (wanted && !profiles.has(GCE_PROFILE)) {
     throw new Error(
       'a gs:// bucket uses the GCE metadata token proxy: add `gce` to COMPOSE_PROFILES ' +
         '(or set GCE_METADATA_PROXY=off when celld gets Google credentials another way)'
     );
   }
-  if (!wanted && profiles.includes(GCE_PROFILE)) {
+  if (!wanted && profiles.has(GCE_PROFILE)) {
     throw new Error('COMPOSE_PROFILES has `gce` but the metadata token proxy is off; remove it');
   }
 }

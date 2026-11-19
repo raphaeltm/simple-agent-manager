@@ -36,20 +36,21 @@ celld="${SAM_CELLD_BIN:-/usr/local/bin/celld}"
 
 log() { echo "[celld-start] $*" >&2; }
 
-if [ "$(id -u)" = "0" ]; then
+if [[ "$(id -u)" = "0" ]]; then
   log "refusing to run celld as root: the egress fence matches its uid"
   exit 1
 fi
 
 # Prints the error from sending a UDP datagram to host $1 port $2 (empty when it was sent).
 send_error() {
-  (exec 3<>"/dev/udp/$1/$2" && printf x >&3) 2>&1 || true
+  local host="$1" port="$2"
+  (exec 3<>"/dev/udp/$host/$port" && printf x >&3) 2>&1 || true
 }
 
 # Sets $result to why the fence is not in effect, or empty when it is.
 fence_problem() {
   result=""
-  [ ! -f "$(dirname "$attestation")/lost" ] || { result="fence loss latched"; return; }
+  [[ ! -f "$(dirname "$attestation")/lost" ]] || { result="fence loss latched"; return; }
   local entry name host port out now stamp state
   for entry in $probes; do
     IFS=, read -r name host port <<<"$entry"
@@ -64,7 +65,7 @@ fence_problem() {
   done
   read -r state stamp <"$attestation" 2>/dev/null || { result="no attestation at $attestation"; return; }
   now="$(date +%s)"
-  if [ "$state" != "ok" ] || ! [[ "$stamp" =~ ^[0-9]+$ ]] || ((stamp > now || now - stamp > max_age)); then
+  if [[ "$state" != "ok" ]] || ! [[ "$stamp" =~ ^[0-9]+$ ]] || ((stamp > now || now - stamp > max_age)); then
     result="attestation '${state:-} ${stamp:-}' is not a recent ok (max age ${max_age}s)"
   fi
 }
@@ -74,7 +75,7 @@ trap 'exit 143' TERM INT
 
 deadline=$((SECONDS + wait_seconds))
 fence_problem
-until [ -z "$result" ]; do
+until [[ -z "$result" ]]; do
   if ((SECONDS >= deadline)); then
     log "egress fence is not in effect ($result); not starting"
     exit 1
@@ -92,7 +93,7 @@ while kill -0 "$pid" 2>/dev/null; do
   wait $! || true
   kill -0 "$pid" 2>/dev/null || break
   fence_problem
-  [ -z "$result" ] && continue
+  [[ -z "$result" ]] && continue
   kill -KILL "$pid" 2>/dev/null || true
   echo '{"level":"error","event":"egress_fence.celld_killed"}' >&2
   wait "$pid" || true

@@ -129,6 +129,8 @@ describe('fixed-bucket metadata CAB broker', () => {
     ).toEqual(['inRole:roles/storage.objectViewer']);
     for (const scope of [
       `${STORAGE_SCOPE_PREFIX}full_control`,
+      'constructor',
+      '__proto__',
       'https://www.googleapis.com/auth/cloud-platform',
       `${config.scope},${config.scope}`,
     ]) {

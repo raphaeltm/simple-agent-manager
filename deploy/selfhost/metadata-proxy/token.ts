@@ -6,6 +6,7 @@ export const STORAGE_SCOPE_PREFIX = 'https://www.googleapis.com/auth/devstorage.
 export const METADATA_TOKEN_PATH = '/computeMetadata/v1/instance/service-accounts/default/token';
 const METADATA_URL = `http://169.254.169.254${METADATA_TOKEN_PATH}`;
 const STS_URL = 'https://sts.googleapis.com/v1/token';
+const DEFAULT_ENDPOINTS = { metadata: METADATA_URL, sts: STS_URL };
 
 export interface TokenConfig {
   bucket: string;
@@ -22,7 +23,7 @@ export function accessBoundary(config: TokenConfig) {
     [`${STORAGE_SCOPE_PREFIX}read_only`]: 'inRole:roles/storage.objectViewer',
     [`${STORAGE_SCOPE_PREFIX}read_write`]: 'inRole:roles/storage.objectAdmin',
   };
-  const role = roles[config.scope];
+  const role = Object.hasOwn(roles, config.scope) ? roles[config.scope] : undefined;
   if (!role) throw new Error('metadata proxy requires one supported storage scope');
   return {
     accessBoundary: {
@@ -59,10 +60,7 @@ function token(value: unknown): Token {
 }
 
 /** URL injection is a test seam only; production main supplies neither endpoint. */
-export function tokenSource(
-  config: TokenConfig,
-  endpoints = { metadata: METADATA_URL, sts: STS_URL }
-) {
+export function tokenSource(config: TokenConfig, endpoints = DEFAULT_ENDPOINTS) {
   const boundary = accessBoundary(config);
   const transporter = new Gaxios({
     timeout: config.timeoutMs,

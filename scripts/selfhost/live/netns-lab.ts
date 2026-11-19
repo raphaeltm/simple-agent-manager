@@ -39,7 +39,7 @@ export const PEER_TARGETS = [
 export function labUnavailableReason(): string | null {
   if (process.platform !== 'linux') return 'not Linux';
   if (!ROOT) return 'requires root in the isolated test runner';
-  const missing = TOOLS.filter((tool) => spawnSync('test', ['-x', tool]).status !== 0);
+  const missing = TOOLS.filter((tool) => spawnSync('/usr/bin/test', ['-x', tool]).status !== 0);
   return missing.length > 0 ? `missing ${missing.join(', ')}` : null;
 }
 
@@ -53,7 +53,7 @@ function run(args: string[], input?: string): string {
 
 /** Node one-liner: TCP listeners on every address (dual stack) that answer and close. */
 function listenerScript(ports: number[]): string {
-  return `const net=require('net'),dgram=require('dgram');for(const p of ${JSON.stringify(ports)}){net.createServer(s=>{s.on('error',()=>{});s.end('ok\\n')}).listen(p,'::');if(p===53){const u=dgram.createSocket('udp4');u.on('message',(b,r)=>u.send(b,r.port,r.address));u.bind(p,'0.0.0.0')}}`;
+  return String.raw`const net=require('net'),dgram=require('dgram');for(const p of ${JSON.stringify(ports)}){net.createServer(s=>{s.on('error',()=>{});s.end('ok\n')}).listen(p,'::');if(p===53){const u=dgram.createSocket('udp4');u.on('message',(b,r)=>u.send(b,r.port,r.address));u.bind(p,'0.0.0.0')}}`;
 }
 
 export class NetnsLab {
@@ -152,7 +152,7 @@ export class NetnsLab {
       } catch {
         continue; // already gone
       }
-      if (cmdline.includes(fragment)) spawnSync('kill', ['-KILL', pid]);
+      if (cmdline.includes(fragment)) spawnSync('/bin/kill', ['-KILL', pid]);
     }
   }
 
@@ -167,11 +167,11 @@ export class NetnsLab {
 
   teardown(): void {
     for (const child of this.children) {
-      if (child.pid !== undefined) spawnSync('pkill', ['-KILL', '-P', String(child.pid)]);
+      if (child.pid !== undefined) spawnSync('/usr/bin/pkill', ['-KILL', '-P', String(child.pid)]);
       child.kill('SIGKILL');
     }
     for (const ns of [this.fenced, this.peer]) {
-      for (const pid of this.pids(ns)) spawnSync('kill', ['-KILL', pid]);
+      for (const pid of this.pids(ns)) spawnSync('/bin/kill', ['-KILL', pid]);
       spawnSync(IP, ['netns', 'del', ns]);
     }
   }

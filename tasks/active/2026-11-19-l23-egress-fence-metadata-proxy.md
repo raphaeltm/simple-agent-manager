@@ -12,16 +12,16 @@ Trace: deploy -> fence-state rules/celld.env -> compose dedicated UID/NET_ADMIN 
 Docs stay experimental operator guide in deploy/selfhost/README.md per landing plan, not publicized on docs site (same exception as L22).
 
 ## Checklist
-- [ ] Fresh main branch; checkout exact integration paths then trim held features.
-- [ ] F3/F4 fixed-bucket scoped metadata proxy, scope mapping and malicious request tests.
-- [ ] Pinned real Worker runtime environment/filesystem isolation proof.
-- [ ] Dedicated UID distinct from Caddy/mx/proxy; no capabilities.
-- [ ] Caddy admin refusal across allowlist/endpoints/lease range/local addresses.
-- [ ] Reply-direction established rule and spanning-flush regression.
-- [ ] Complete start/verify probes: DNS TCP/UDP, IPv6, UDP,127.0.0.2 and every blocked class.
+- [x] Fresh main branch; checkout exact integration paths then trim held features.
+- [x] F3/F4 fixed-bucket scoped metadata proxy, scope mapping and malicious request tests.
+- [x] Pinned real Worker runtime environment/filesystem isolation proof.
+- [x] Dedicated UID distinct from Caddy/mx/proxy; no capabilities.
+- [x] Caddy admin refusal across allowlist/endpoints/lease range/local addresses.
+- [x] Reply-direction established rule and spanning-flush regression.
+- [x] Complete start/verify probes: DNS TCP/UDP, IPv6, UDP,127.0.0.2 and every blocked class.
 - [ ] Measured <=1s shutdown on fence loss; no serving until verified restoration; structured error and unhealthy/recovery evidence.
-- [ ] Prove workload/Worker cannot change control-plane firewall.
-- [ ] Wire deploy/upgrade/compose minimally; preserve s3 R2_S3_REGION requirement.
+- [x] Prove workload/Worker cannot change control-plane firewall.
+- [x] Wire deploy/upgrade/compose minimally; preserve s3 R2_S3_REGION requirement.
 - [ ] Unit/live tests plus self-host-only import graph; lint/typecheck/build/full relevant checks.
 - [ ] Security design follow-up acceptance, final-head security, task-completion and supporting specialist reviews.
 - [ ] Coordinate BOX after H2 BOX FREE; prove all denials/recovery/flush stop/scoped token/normal workload; clean resources/access.
@@ -29,3 +29,12 @@ Docs stay experimental operator guide in deploy/selfhost/README.md per landing p
 
 ## Acceptance
 Every checklist item above is required. Report numerical test totals and exact box head. No token/secret output. No new accounts. Clean every created VM. No merge while any gate is outstanding.
+
+## Validation evidence (candidate before BOX)
+- Self-host unit: 23 files, 487 passed / 3 skipped (host lacks nft capabilities; isolated kernel lab runs those paths).
+- Privileged isolated netns lab: 66/66 passed; latest flush-to-stop27ms; partial-rule startup, transient loss, observer death, DNS TCP/UDP, routed IPv6, reply-only conntrack, UID denial and operator recovery covered.
+- Pinned celld0.6.3 bucket runtime: native canary exists in parent /proc environ but exact Worker comparison false; envOwn false/envNames empty, native files inaccessible, /bin/true child exec refused with native success control. 1/1 passed.
+- Worker import graph4/4; dependency governance5/5. Public resolver startup regression red when filter removed, green restored.
+- Root lint23/23, typecheck38/38, build19/19 passed. Full root tests:39/41 tasks succeeded; web433files5459tests passed but3unhandled window teardown errors in unchanged ErrorBoundary test caused failure/cancel; focused rerun pending.
+- BOX FREE417, yielded toL24. Shared H2 head/data unchanged; ownSSHmetadata keys absent + firewall404 verified, noVM/accountcreated. Future BOX uses disposable isolated install from main-based candidate, preserving H2DO/data (coordinator eventc3b97be7).
+- Pending: final-head security/completion, current-headCI/CodeRabbit, isolated BOX scoped token+normal workload proof/cleanup, merge/deploy.

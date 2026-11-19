@@ -12,6 +12,7 @@
 import { isIP } from 'node:net';
 
 import type { EgressFencePlan } from './egress-fence.js';
+import { resolverNeedsDenialProbe } from './fence-addresses.js';
 
 export interface FenceProbe {
   /** Rule class the probe exercises; stable, used in messages and tests. */
@@ -65,7 +66,9 @@ export function startCheckProbes(plan: EgressFencePlan): FenceProbe[] {
     ...local,
     ...REMOTE_PROBES,
     { name: 'non-resolver-dns', host: '10.255.255.1', port: 53 },
-    ...plan.dnsServers.map((host) => ({ name: 'resolver-non-dns', host, port: 2019 })),
+    ...plan.dnsServers
+      .filter((host) => resolverNeedsDenialProbe(host, plan.localAddresses))
+      .map((host) => ({ name: 'resolver-non-dns', host, port: 2019 })),
     { name: 'caddy-admin', host: '127.0.0.1', port: 2019 },
   ];
 }

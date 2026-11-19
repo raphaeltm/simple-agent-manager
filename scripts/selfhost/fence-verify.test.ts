@@ -349,3 +349,19 @@ describe('probe script classification (real bash, canned kernel errors)', () => 
     ]);
   });
 });
+
+describe('public resolver verification', () => {
+  it('permits public resolver TCP and UDP without a false non-DNS denial expectation', async () => {
+    const targets = await verifyTargets({
+      box: {},
+      range: RANGE,
+      publicProbe: '1.1.1.1:443',
+      localAddresses: [],
+      resolvConf: 'nameserver 1.1.1.1\n',
+    });
+    const dns = targets.filter((t) => t.host === '1.1.1.1' && t.port === 53);
+    expect(dns).toHaveLength(2);
+    expect(dns.every((t) => t.expect === 'reachable')).toBe(true);
+    expect(targets.some((t) => t.host === '1.1.1.1' && t.port === 2019)).toBe(false);
+  });
+});

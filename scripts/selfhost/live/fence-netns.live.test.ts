@@ -286,6 +286,7 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
       const pair = await startPair();
       lab.killInNamespace(lab.fenced, 'nft monitor');
       await waitFor(() => existsSync(join(pair.state, 'lost')));
+      expect(readFileSync(pair.attestation, 'utf8')).toBe('lost\n');
       stopFence();
     });
 
