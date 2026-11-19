@@ -22,6 +22,10 @@ import { getCredentialEncryptionKey } from '../../src/lib/secrets';
 import { AppError } from '../../src/middleware/error';
 import { adminStrandedNodeRoutes } from '../../src/routes/admin-stranded-nodes';
 import { handleCleanupFailure } from '../../src/scheduled/node-cleanup/cleanup-outcome';
+import {
+  __resetAdminSettingsCacheForTest,
+  updateAdminSettings,
+} from '../../src/services/admin-settings';
 import { encrypt } from '../../src/services/encryption';
 import { recordOperatorNodeDeletion } from '../../src/services/node-operator-deletion';
 import { buildNodeProviderLabels } from '../../src/services/node-provider-labels';
@@ -741,6 +745,54 @@ describe('superadmin attestation removes a stranded SAM-capacity node', () => {
           .bind(id)
           .run();
       }
+    }
+  });
+
+  it('refuses an agent sign-in session by default, and accepts it once the installation opts in', async () => {
+    const operatorId = `op-del-admin-agent-${Date.now()}`;
+    await signIn(operatorId, 'superadmin');
+    const seeded = await seedStrandedPlatformNode('agent-session');
+    await resavePlatformCredential(seeded.nodeId);
+    await recordBlock(seeded.nodeId);
+    const calls = stubHetzner();
+    const before = await readNode(seeded.nodeId);
+    const attest = async () =>
+      recordOperatorNodeDeletion(drizzle(env.DATABASE, { schema }), TEST_ENV, {
+        nodeId: seeded.nodeId,
+        operatorUserId: operatorId,
+        confirmation: seeded.nodeId,
+        expectedBlockedReason: await currentBlockedReason(seeded.nodeId),
+        note: 'relayed the owner console check',
+        agentSignIn: true,
+      });
+
+    __resetAdminSettingsCacheForTest();
+    await expect(attest()).rejects.toMatchObject({ statusCode: 403 });
+    // Refused before anything else: no provider call, no audit row, nothing changed.
+    expect(calls).toEqual([]);
+    expect(await auditOutcomes(seeded.nodeId)).toEqual([]);
+    expect(await readNode(seeded.nodeId)).toEqual(before);
+
+    await updateAdminSettings(TEST_ENV, {
+      actorUserId: operatorId,
+      changes: [{ name: 'operations.operatorNodeDeletionAllowAgentSessions', value: true }],
+    });
+    try {
+      const proof = await attest();
+      expect(proof.runtimeTerminationConfirmedAt).toEqual(expect.any(String));
+      const audit = await env.DATABASE.prepare(
+        `SELECT json_extract(detail, '$.agentSignIn') AS agent FROM operations_audit_log
+          WHERE target_id = ?`
+      )
+        .bind(seeded.nodeId)
+        .first<{ agent: number }>();
+      expect(audit?.agent).toBe(1);
+    } finally {
+      await updateAdminSettings(TEST_ENV, {
+        actorUserId: operatorId,
+        changes: [{ name: 'operations.operatorNodeDeletionAllowAgentSessions', value: false }],
+      });
+      __resetAdminSettingsCacheForTest();
     }
   });
 

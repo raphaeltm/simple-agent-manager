@@ -1493,7 +1493,8 @@ Superadmin only. Remove a stuck node on the installation's own capacity after ch
 provider. Body: `{ "confirmation": "<node ID>", "expectedBlockedReason": "<the cleanupBlockedReason
 you were shown, or null>", "note": "<what you checked>" }`. Returns `400`
 when the confirmation is not the node ID or the note is empty, `403` for a node on its owner's
-cloud account, `409` when the node is not `destroying`, its refusal is not operator-removable, it
+cloud account or for an agent sign-in session while `operations.operatorNodeDeletionAllowAgentSessions`
+is off, `409` when the node is not `destroying`, its refusal is not operator-removable, it
 is providerless and still inside the provisioning window or has no buildable ownership labels, it
 has an active or pending workspace, a live task placement claim or a recent heartbeat, its
 refusal changed, or any usable credential still finds its server, and `503` when a provider

@@ -210,6 +210,8 @@ export function adminSettingCacheMs(env: Env, name: AdminSettingName): number {
   if (name === 'operations.samOperatorDisabled') return 0;
   // The debugger-tools dial is a trust boundary: turning it down must apply to the next call.
   if (name === 'operations.debuggerTools') return 0;
+  // Who may attest a stuck node's server is gone is a trust boundary too.
+  if (name === 'operations.operatorNodeDeletionAllowAgentSessions') return 0;
   const ceiling =
     name === 'operations.cronSweepsEnabled' || name === 'operations.doAlarmsEnabled'
       ? LEGACY_KV_CACHE_MAX_MS

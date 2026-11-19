@@ -40,10 +40,11 @@ Sources: `apps/api/src/services/operator-settings.ts`, `admin-settings-registry.
 
 ## Operations debugger tools
 
-| Admin setting key               | Default | Permitted range and meaning                                                                                                                                              |
-| ------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `operations.debuggerTools`      | `off`   | `off`, `read`, `read_ask` or `read_auto_safe`; which debugger tools Operations-project agents may use. Read with no cache.                                               |
-| `operations.auditRetentionDays` | `90`    | Integer `1`–`3650`; days an `operations_audit_log` row is kept before the daily `0 3 * * *` cron deletes it. If the setting cannot be read, that day's purge is skipped. |
+| Admin setting key                                   | Default | Permitted range and meaning                                                                                                                                              |
+| --------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `operations.debuggerTools`                          | `off`   | `off`, `read`, `read_ask` or `read_auto_safe`; which debugger tools Operations-project agents may use. Read with no cache.                                               |
+| `operations.auditRetentionDays`                     | `90`    | Integer `1`–`3650`; days an `operations_audit_log` row is kept before the daily `0 3 * * *` cron deletes it. If the setting cannot be read, that day's purge is skipped. |
+| `operations.operatorNodeDeletionAllowAgentSessions` | `false` | Boolean; whether an agent sign-in session may use `POST /api/admin/nodes/:id/operator-deletion` (Admin → Infrastructure → Stuck nodes). Read with no cache.              |
 
 Read-tool limits (thresholds, caps and debug-package retention) are the `operations.debugPackage*` and `operations.ops*` admin settings defined in `apps/api/src/services/fleet-ops/settings-definitions.ts`; the daily `0 3 * * *` cron deletes debug packages older than `operations.debugPackageRetentionDays` (default `7`) from the Operations project library (`purgeExpiredDebugPackages` in `apps/api/src/services/fleet-ops/debug-packages.ts`). See [Admin Settings](/docs/guides/admin-settings/#read-tool-limits).
 
@@ -737,18 +738,17 @@ retain the KV procedure in `.claude/rules/55-runaway-cost-emergency-ops.md`.
 
 The five `orchestrator.cancellation*` controls are typed runtime settings editable in Admin Settings under Operations, rather than environment variables. The residence limit is captured as a durable deadline when cancellation starts or is explicitly retried; changing the setting does not extend an existing episode. Expired episodes block locally before any settings or D1 lookup.
 
-| Runtime setting | Default | Description |
-| --- | --- | --- |
-| `orchestrator.cancellationPageSize` | `25` | Maximum tasks visited in one mission cancellation turn. |
-| `orchestrator.cancellationTurnMs` | `5000` | Elapsed turn budget checked between task operations. |
-| `orchestrator.cancellationRetryPasses` | `3` | Maximum passes before failed cancellation is blocked for explicit retry. |
-| `orchestrator.cancellationResidenceMs` | `900000` | Maximum cancellation episode residence before blocking. |
-| `orchestrator.cancellationIntervalMs` | `1000` | Alarm delay between pending cancellation turns. |
+| Runtime setting                        | Default  | Description                                                              |
+| -------------------------------------- | -------- | ------------------------------------------------------------------------ |
+| `orchestrator.cancellationPageSize`    | `25`     | Maximum tasks visited in one mission cancellation turn.                  |
+| `orchestrator.cancellationTurnMs`      | `5000`   | Elapsed turn budget checked between task operations.                     |
+| `orchestrator.cancellationRetryPasses` | `3`      | Maximum passes before failed cancellation is blocked for explicit retry. |
+| `orchestrator.cancellationResidenceMs` | `900000` | Maximum cancellation episode residence before blocking.                  |
+| `orchestrator.cancellationIntervalMs`  | `1000`   | Alarm delay between pending cancellation turns.                          |
 
 Mission cancellation uses the existing orchestrator tracking and alarm (`project-orchestrator/cancel-mission.ts`, `cancellation-config.ts`). The mission stays paused while its tasks are being cancelled; completion is recorded only after no nonterminal task remains. A blocked cancellation stops rearming and requires an explicit cancellation retry. Completed task cancellations remain complete across retries.
 
 These bounds limit work rather than guarantee completion within one episode. At the defaults, 10,000 tasks require at least 400 turns. If every turn uses its full five-second work budget plus the one-second alarm delay, that is approximately 40 minutes before scheduler and RPC overhead, exceeding the fifteen-minute residence limit. Such a mission will require explicit retries; raise the bounds deliberately for larger workloads. The turn budget is checked between operations and does not interrupt an RPC already in progress.
-
 
 The scheduled Durable Object billing monitor reads these non-secret variables
 from the selected GitHub Environment, not from the API Worker runtime:

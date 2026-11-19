@@ -41,6 +41,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { AppError, errors } from '../middleware/error';
+import { resolveAdminSetting } from './admin-settings-resolution';
 import { isOnSamCapacity } from './node-manual-deletion';
 import {
   buildNodeProviderLabels,
@@ -81,7 +82,10 @@ export interface OperatorNodeDeletionInput {
   note: string;
   /** The refusal the operator was shown (`cleanupBlockedReason` from the list). Must still match. */
   expectedBlockedReason: string | null;
-  /** The request came from an agent sign-in session; recorded in the audit, not refused. */
+  /**
+   * The request came from an agent sign-in session. Refused unless the superadmin setting
+   * `operations.operatorNodeDeletionAllowAgentSessions` allows it; always recorded in the audit.
+   */
   agentSignIn: boolean;
 }
 
@@ -263,6 +267,22 @@ export async function recordOperatorNodeDeletion(
   env: Env,
   input: OperatorNodeDeletionInput
 ): Promise<OperatorNodeDeletionProof> {
+  // The attestation asserts that someone checked the provider console. By default only a
+  // person's own session may make it; an installation can opt in to agents relaying a person's
+  // check. Read on every call (cache 0 ms): turning it off applies to the next request.
+  if (
+    input.agentSignIn &&
+    (await resolveAdminSetting(env, 'operations.operatorNodeDeletionAllowAgentSessions')) !== true
+  ) {
+    log.warn('node_operator_deletion.agent_session_refused', {
+      nodeId: input.nodeId,
+      operatorUserId: input.operatorUserId,
+      action: 'rejected',
+    });
+    throw errors.forbidden(
+      'Agent sign-in sessions cannot remove nodes here. Sign in yourself, or allow it in Admin → Settings (operations.operatorNodeDeletionAllowAgentSessions).'
+    );
+  }
   const note = input.note.trim().slice(0, OPERATOR_NODE_DELETION_NOTE_MAX_CHARS);
   if (!note) throw errors.badRequest('Describe what you checked at the provider');
   if (input.confirmation.trim() !== input.nodeId) {

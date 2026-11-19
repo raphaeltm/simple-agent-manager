@@ -530,7 +530,9 @@ that means the server may be live (a delete the provider refused or never confir
 ownership mismatch) shows a note to resolve it at the provider instead.
 
 After checking the provider's console yourself, select **Remove…**, type the node ID and say what
-you checked (`recordOperatorNodeDeletion()`):
+you checked (`recordOperatorNodeDeletion()`). An agent sign-in session is refused unless
+`operations.operatorNodeDeletionAllowAgentSessions` is on; the audit entry records whether an agent
+made the request either way.
 
 1. SAM asks the provider with the node's own credential, or every enabled platform credential if
    that one no longer resolves (never the owner's own credentials), and refuses if any returns a
@@ -869,10 +871,11 @@ The **Operations project** is the private project you select in **Admin → Inte
 debugger tools that let its agents look across every user's nodes, workspaces and sessions. Two
 **Operations** settings control them:
 
-| Setting                         | Default | Values                                      | What it controls                                                                           |
-| ------------------------------- | ------- | ------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `operations.debuggerTools`      | `off`   | `off`, `read`, `read_ask`, `read_auto_safe` | Which debugger tools Operations agents may use. `off` hides and refuses all of them        |
-| `operations.auditRetentionDays` | 90      | 1–3,650                                     | Days each debugger tool audit record is kept before the daily 03:00 UTC cleanup deletes it |
+| Setting                                             | Default | Values                                      | What it controls                                                                                                                                           |
+| --------------------------------------------------- | ------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `operations.debuggerTools`                          | `off`   | `off`, `read`, `read_ask`, `read_auto_safe` | Which debugger tools Operations agents may use. `off` hides and refuses all of them                                                                        |
+| `operations.auditRetentionDays`                     | 90      | 1–3,650                                     | Days each debugger tool audit record is kept before the daily 03:00 UTC cleanup deletes it                                                                 |
+| `operations.operatorNodeDeletionAllowAgentSessions` | off     | on/off                                      | Let an agent sign-in session remove a stuck SAM-capacity node on a person's behalf (Stuck nodes). Off: only a person's own session can. Read with no cache |
 
 `ops_get_access_status` reports this setting, the capabilities a task has, and why any are
 refused. The read tools and the [approved actions](#approved-actions) below all use the gate

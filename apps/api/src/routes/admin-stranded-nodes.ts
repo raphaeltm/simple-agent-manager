@@ -86,7 +86,7 @@ adminStrandedNodeRoutes.post(
       confirmation: body.confirmation,
       note: body.note,
       expectedBlockedReason: body.expectedBlockedReason,
-      // Not refused (an agent may relay a person's check of the provider console), but recorded.
+      // Refused unless the installation opted in; recorded in the audit either way.
       agentSignIn: c.get('auth')?.session.agentSignIn === true,
     });
     await completeAttestedNodeRemoval({
