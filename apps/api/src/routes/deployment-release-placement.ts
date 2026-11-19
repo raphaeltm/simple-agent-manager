@@ -549,8 +549,8 @@ async function reserveExistingNodeForRelease(params: {
   nodeId: string;
   expectedReservationJson: string | null;
   beforeExternalMutation: BeforeExternalMutation;
-}): Promise<ReleasePlacement | boolean> {
-  if (!params.release.placement) return true;
+}): Promise<{ admitted: boolean; placement: ReleasePlacement | null }> {
+  if (!params.release.placement) return { admitted: true, placement: null };
   await params.beforeExternalMutation();
   const nodeMode = params.release.requiresVolumes ? 'exclusive' : 'shared';
   const currentNode = await findDeploymentNodeWithCapacity(
@@ -564,7 +564,7 @@ async function reserveExistingNodeForRelease(params: {
       nodeMode,
     }
   );
-  if (currentNode?.nodeId !== params.nodeId) return false;
+  if (currentNode?.nodeId !== params.nodeId) return { admitted: false, placement: null };
   const linked = await linkEnvironmentToNode({
     env: params.release.env,
     db: params.release.db,
@@ -577,7 +577,7 @@ async function reserveExistingNodeForRelease(params: {
     expectedReservationJson: params.expectedReservationJson,
     releaseId: params.release.releaseId,
   });
-  return linked ? currentNode.placement : false;
+  return { admitted: linked, placement: linked ? currentNode.placement : null };
 }
 
 async function relocateSharedNodeForRelease(params: {
@@ -752,7 +752,7 @@ export async function placeReleaseOnDeploymentNode(
     beforeExternalMutation: assertPlacementCurrent,
   });
   let adoptedLegacyNode = false;
-  if (!reserved) {
+  if (!reserved.admitted) {
     // Pre-node-pool deployment nodes carry no pooled placement identity and no
     // trusted observed hardware, so capacity-aware admission can never readmit
     // them. An environment already running on one keeps deploying there.
@@ -791,7 +791,7 @@ export async function placeReleaseOnDeploymentNode(
   } else if (params.requiresVolumes) {
     await attachVolumesToExistingNode({
       ...params,
-      placement: typeof reserved === 'object' ? reserved : params.placement,
+      placement: reserved.placement,
       beforeExternalMutation: assertPlacementCurrent,
     });
   }
