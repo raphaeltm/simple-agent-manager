@@ -5,7 +5,7 @@ go 1.26.11
 require (
 	blitiri.com.ar/go/spf v1.6.0
 	github.com/emersion/go-msgauth v0.7.0
-	github.com/emersion/go-smtp v0.25.1
+	github.com/emersion/go-smtp v0.26.0
 	golang.org/x/net v0.62.0
 )
 
