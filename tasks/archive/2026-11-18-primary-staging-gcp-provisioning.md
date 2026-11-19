@@ -26,9 +26,9 @@ References: rules19/28/56/62/71, PR2715; official Google WIF configuration and b
 - [x] Safe absence proof for unsent terminal allocations; preserve uncertain/durable cases.
 - [x] Separate binding-state tests for owner escape against real D1.
 - [x] Public setup/troubleshooting docs.
-- [ ] Local lint/typecheck/test/build and specialist reviews.
-- [ ] Primary staging deploy/live verification, maximum two test VMs cleaned promptly.
-- [ ] Canonical 24h noise gate passes; preserve historical evidence while it ages naturally.
+- [x] Local lint/typecheck/test/build and specialist reviews.
+- [x] Primary staging deploy/live verification, maximum two test VMs cleaned promptly.
+- [x] Canonical 24h noise gate passes; preserve historical evidence while it ages naturally.
 - [ ] CI, CodeRabbit, merge and read-only production deploy monitoring.
 
 ## Acceptance
@@ -52,3 +52,12 @@ Review follow-up: automated reviews identified a real direct-placement binding u
 ## Per-installation provider IDs (added 2026-11-18 at Raphaël's request)
 
 The issuer guard alone makes the second installation in a shared Google Cloud project fail instead of coexisting, and leaves primary staging unable to reconnect (the legacy `sam-pool/sam-oidc` now trusts staging2). Setup now derives the provider ID per installation from `BASE_DOMAIN` (`installationWifProviderId()` in `apps/api/src/services/gcp-wif-setup.ts`, used by `runGcpSetup()` and `runGcpDeploySetup()`); explicit `GCP_WIF_PROVIDER_ID` / `GCP_DEPLOY_WIF_PROVIDER_ID` overrides still win, and saved credentials keep their recorded IDs. Primary staging's repair is therefore a normal Connect GCP reconnect, which creates `sam-sammy-party-<hash>` beside staging2's provider; no hand-built IAM pool is needed. Covered by `apps/api/tests/unit/services/gcp-wif-shared-project.test.ts` (incident shape, two-installation re-run, deploy setup, override, foreign-name refusal); the incident and coexistence tests fail when the provider ID is fixed to `sam-oidc`.
+
+## Final verification (takeover task 01M7RHQ9Q0RCA8J8EF8RYF3AX5, 2026-11-19)
+
+- Primary canonical `pnpm quality:observability-noise` (unchanged script, 24h, threshold 10) at 03:14:54Z: exit 0, no findings. The last group (session verification 23x, all 01:00-02:37Z Nov 18) aged out naturally.
+- Live isolation across both installations: staging2 ran 12a53 when the owner re-ran Connect GCP at 17:05Z Nov 18 (new credential `01M7QSX782RCKCFK359R9R9BKQ`). That credential strictly deleted real VM `01M7PXK8QYGWKBANPSN6JCT9R1` at 17:10:48Z and refreshed staging2's GCP price table at 17:40:58Z. Afterwards, primary `POST /api/gcp/verify` at 03:16:45Z Nov 19 returned verified=true, billingCheck ok, apiIssues []. Primary trust survived the second installation's setup.
+- A staging2 VM create was not run. Provisioning, heartbeat and strict teardown of the same code were already proven on primary (09:11-09:19Z Nov 18), and staging2 token minting was proven by the strict delete above. Test VMs used by the takeover: 0.
+- staging2 stuck uncertain-allocation fixtures `01M7QDJNF4AZ44BBH2B2411502` and `01M7QKWQDZK50ZX0YTXZG0S8VW` (staging2-test-user, user credential, provider_instance_id NULL, created during the shared-issuer breakage): removed at 00:42Z via the existing owner-attested `POST /api/nodes/:id/manual-deletion` (200, then GET 404). This was coordinator-authorized, after a read-only inventory of sam-staging-infra found 0 instances across 132 zones. Attested provenance, not strict proof.
+- staging2 gate: remaining groups are pre-existing (the owner-exempted node `01M7MTMV89F5ZV23VSF0ZVPJPS`, STS 400 groups that ended at 17:00:59Z, the two removed fixtures aging out, and a periodic KV 429 burst across many builds). There were no new groups and no GCP errors during this PR's staging2 window (00:40-01:45Z Nov 19). Pre-existing noise waived per Raphaël 2026-11-18.
+- Branch refreshed with main (da4aea30): API typecheck, 101 focused tests and changed-file lint pass; all runtime CI passes; staging2 deploy 44430979075 of da4aea30 succeeded, including smoke.
