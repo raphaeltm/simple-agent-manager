@@ -246,8 +246,18 @@ adminPlatformCredentialRoutes.patch(
 adminPlatformCredentialRoutes.delete('/:id', async (c) => {
   const credentialId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
-  // Record the pool a GCP platform credential names before it goes: Google may still trust it.
-  await reconcileGcpWifPoolIndex(c.env, 'delete_platform_credential');
+  const [target] = await db
+    .select({
+      credentialType: schema.platformCredentials.credentialType,
+      provider: schema.platformCredentials.provider,
+    })
+    .from(schema.platformCredentials)
+    .where(eq(schema.platformCredentials.id, credentialId))
+    .limit(1);
+  if (target?.credentialType === 'cloud-provider' && target.provider === 'gcp') {
+    // Record the pool a GCP platform credential names before it goes: Google may still trust it.
+    await reconcileGcpWifPoolIndex(c.env, 'delete_platform_credential');
+  }
 
   const result = await db
     .delete(schema.platformCredentials)

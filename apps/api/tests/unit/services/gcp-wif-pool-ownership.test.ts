@@ -1165,3 +1165,34 @@ describe('an unreadable row does not refuse stored credentials (rule 41)', () =>
     ).rejects.toBeInstanceOf(GcpWifPoolOwnedByAnotherOwnerError);
   });
 });
+
+describe('deletes reconcile only for credentials that can name a GCP pool', () => {
+  it('an agent-key delete never waits on pool reconciliation', async () => {
+    sqlite
+      .prepare(
+        `INSERT INTO cc_credentials (id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at)
+         VALUES ('cc-agent', 'user-a', 'claude', 'api-key', 'x', 'y', 1, ?, ?)`
+      )
+      .run(NOW, NOW);
+    // Pool reconciliation would fail closed (503) if it ran.
+    vi.spyOn(env.DATABASE, 'batch').mockRejectedValue(new Error('D1 unavailable'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    auth.userId = 'user-a';
+
+    const res = await testApp().request('/api/cc/credentials/cc-agent', { method: 'DELETE' }, env);
+    expect(res.status).toBe(200);
+  });
+
+  it('control: a cloud-provider composable delete still reconciles first (and refuses while it cannot)', async () => {
+    await storeCcRow('cc-cloud', 'user-a', JSON.stringify(wif(POOL_A)));
+    vi.spyOn(env.DATABASE, 'batch').mockRejectedValue(new Error('D1 unavailable'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    auth.userId = 'user-a';
+
+    const res = await testApp().request('/api/cc/credentials/cc-cloud', { method: 'DELETE' }, env);
+    expect(res.status).toBe(503);
+    expect(
+      sqlite.prepare("SELECT count(*) AS n FROM cc_credentials WHERE id = 'cc-cloud'").get()
+    ).toEqual({ n: 1 });
+  });
+});

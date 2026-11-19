@@ -246,9 +246,16 @@ ccRoutes.delete('/credentials/:id', async (c) => {
   const { id } = c.req.param();
 
   const affectedProjectIds = await listAffectedCredentialProjectIds(db, userId, id);
-  // A cloud credential may name a GCP pool; record it before the row goes (Google may still
-  // trust it). One D1 batch when nothing is unindexed.
-  await reconcileGcpWifPoolIndex(c.env, 'delete_composable_credential');
+  const [target] = await db
+    .select({ kind: schema.ccCredentials.kind })
+    .from(schema.ccCredentials)
+    .where(and(eq(schema.ccCredentials.id, id), eq(schema.ccCredentials.ownerId, userId)))
+    .limit(1);
+  if (target?.kind === 'cloud-provider') {
+    // A cloud credential may name a GCP pool; record it before the row goes (Google may still
+    // trust it). Agent keys and other kinds skip this.
+    await reconcileGcpWifPoolIndex(c.env, 'delete_composable_credential');
+  }
 
   const result = await db
     .delete(schema.ccCredentials)
