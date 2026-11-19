@@ -10,8 +10,8 @@
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
-import { celldPort } from './deploy-steps.js';
-import { loadBox, runUpgrade, SELFHOST_DIR } from './upgrade-lib.js';
+import { celldPort, SELFHOST_DIR } from './deploy-steps.js';
+import { loadBox, runUpgrade } from './upgrade-lib.js';
 
 const { values } = parseArgs({
   options: {

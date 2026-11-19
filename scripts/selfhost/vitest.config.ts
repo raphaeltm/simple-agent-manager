@@ -4,6 +4,8 @@ export default defineConfig({
   test: {
     root: import.meta.dirname,
     include: ['**/*.test.ts'],
-    exclude: ['**/node_modules/**'],
+    // The live suite (real Caddy, frp and celld in Docker) has its own config:
+    // pnpm selfhost:live-test.
+    exclude: ['live/**', '**/node_modules/**'],
   },
 });

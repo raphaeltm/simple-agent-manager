@@ -139,6 +139,46 @@ describe('DELETE /api/projects/:id library cleanup — real SQL vertical slice',
     expect(deletedObjects).toEqual([]);
   });
 
+  it('records the GCP pool a deleted project credential names before the cascade', async () => {
+    addProject(PROJECT_A, OWNER_A);
+    const key = Buffer.from('0123456789abcdef0123456789abcdef').toString('base64');
+    (env as { ENCRYPTION_KEY?: string }).ENCRYPTION_KEY = key;
+    const { encrypt } = await import('../../../src/services/encryption');
+    const sealed = await encrypt(
+      JSON.stringify({
+        version: 1,
+        provider: 'gcp',
+        authType: 'workload-identity',
+        gcpProjectId: 'gcp-a',
+        gcpProjectNumber: '111111111111',
+        serviceAccountEmail: 'sam@gcp-a.iam.gserviceaccount.com',
+        wifPoolId: 'sam-pool',
+        wifProviderId: 'sam-provider',
+        defaultZone: 'us-central1-a',
+      }),
+      key
+    );
+    sqlite
+      .prepare(
+        `INSERT INTO credentials (id, user_id, project_id, provider, credential_type, credential_kind,
+           is_active, encrypted_token, iv, created_at, updated_at)
+         VALUES ('cred-project-a', ?, ?, 'gcp', 'cloud-provider', 'api-key', 1, ?, ?, 'now', 'now')`
+      )
+      .run(OWNER_A, PROJECT_A, sealed.ciphertext, sealed.iv);
+
+    const response = await app.fetch(
+      new Request(`https://api.test/api/projects/${PROJECT_A}`, { method: 'DELETE' }),
+      env,
+      { waitUntil: () => undefined, passThroughOnException: vi.fn() } as unknown as ExecutionContext
+    );
+
+    expect(response.status).toBe(200);
+    // Google may still trust this pool after the row is gone, so it stays claimed by its owner.
+    expect(sqlite.prepare('SELECT pool_key, owner_user_id FROM gcp_wif_pool_claims').all()).toEqual(
+      [{ pool_key: '111111111111/sam-pool', owner_user_id: OWNER_A }]
+    );
+  });
+
   it('deletes project A rows and R2 keys through the route while project B is untouched', async () => {
     addProject(PROJECT_A, OWNER_A);
     addProject(PROJECT_B, 'user-b');

@@ -354,18 +354,30 @@ export async function grantProjectRoles(
   }
 }
 
+/** The SAM user a user-level guided setup is for. */
+export interface GcpUserSetupScope {
+  userId: string;
+  /**
+   * Called with the pool once the project number is known, before SAM creates or changes any
+   * Google resource. Throws to stop a setup that would take over another owner's pool.
+   */
+  assertPoolAvailable?: (pool: { gcpProjectNumber: string; wifPoolId: string }) => Promise<void>;
+}
+
 /**
  * Full GCP OIDC setup orchestrator.
  * Takes a Google OAuth access token and project ID, then configures all GCP resources.
+ * The provider and service-account binding admit only tokens SAM signs for `scope.userId`.
  */
 export async function runGcpSetup(
   oauthToken: string,
   gcpProjectId: string,
   defaultZone: string,
   env: Env,
-  onProgress?: SetupProgressCallback,
-  samProjectId?: string
+  scope: GcpUserSetupScope,
+  onProgress?: SetupProgressCallback
 ): Promise<GcpOidcCredential> {
+  const trustScope = { kind: 'user', userId: scope.userId } as const;
   const timeoutMs = env.GCP_API_TIMEOUT_MS
     ? parseInt(env.GCP_API_TIMEOUT_MS, 10)
     : DEFAULT_GCP_API_TIMEOUT_MS;
@@ -379,6 +391,7 @@ export async function runGcpSetup(
   onProgress?.('get_project_number', 'in_progress');
   const projectNumber = await getProjectNumber(oauthToken, gcpProjectId, timeoutMs);
   onProgress?.('get_project_number', 'done');
+  await scope.assertPoolAvailable?.({ gcpProjectNumber: projectNumber, wifPoolId: poolId });
 
   // Step 2: Enable APIs
   onProgress?.('enable_apis', 'in_progress');
@@ -399,7 +412,7 @@ export async function runGcpSetup(
     providerId,
     issuerUri,
     timeoutMs,
-    samProjectId
+    trustScope
   );
   onProgress?.('create_oidc_provider', 'done');
 
@@ -417,7 +430,7 @@ export async function runGcpSetup(
     saEmail,
     poolId,
     timeoutMs,
-    samProjectId
+    trustScope
   );
   onProgress?.('grant_wif_user', 'done');
 

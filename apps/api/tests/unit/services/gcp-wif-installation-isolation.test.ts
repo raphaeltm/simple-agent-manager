@@ -15,7 +15,10 @@ function existingProvider(body: unknown) {
 }
 
 async function create() {
-  return createOidcProvider('oauth-token', '123456', 'shared', 'sam-oidc', issuer, 5000);
+  return createOidcProvider('oauth-token', '123456', 'shared', 'sam-oidc', issuer, 5000, {
+    kind: 'user',
+    userId: 'user-1',
+  });
 }
 
 beforeEach(() => {
@@ -37,7 +40,10 @@ describe('OIDC provider conflicts preserve the other installation', () => {
   it('also protects a direct update caller from changing another issuer', async () => {
     existingProvider({ name, oidc: { issuerUri: 'https://api.secondary.example' } });
     await expect(
-      updateOidcProvider('oauth-token', '123456', 'shared', 'sam-oidc', issuer, 5000)
+      updateOidcProvider('oauth-token', '123456', 'shared', 'sam-oidc', issuer, 5000, {
+        kind: 'user',
+        userId: 'user-1',
+      })
     ).rejects.toMatchObject({ step: 'oidc_provider_issuer_mismatch' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

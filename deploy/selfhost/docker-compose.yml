@@ -1,0 +1,362 @@
+# One-box self-hosted SAM control plane on celld (https://celld.dev). EXPERIMENTAL: see README.md.
+#
+#   browser / nodes --443--> caddy --127.0.0.1:CELLD_PORT--> celld (API Worker + web UI assets)
+#                              |                               |  \--127.0.0.1:<lease port>--> frps --> node
+#                              \--frp over wss, node WS------> frps (127.0.0.1:FRPS_BIND_PORT)
+#                                                              celld --> fleet bucket (GCS, S3, or the bundled store)
+#
+# caddy, celld and frps share the host network on purpose: the Worker's fetch to a node's
+# loopback lease port runs in celld's network namespace, and Caddy forward_auth proxies node
+# WebSockets to the same port. Everything except Caddy (and sam-mx on port 25) listens on
+# 127.0.0.1 only.
+#
+# Plaintext mode: celld keeps every Worker secret in plaintext in the fleet bucket's deploy
+# manifests, and nothing restricts the Worker's outbound connections on the box yet (README.md,
+# "Not included yet"). Treat the bucket credential and the box as one secret.
+#
+# Usage (README.md): cp .env.example .env && chmod 600 .env && edit it;
+# `pnpm selfhost:deploy --init` (platform keys + .state/gateway.env); `docker compose build`;
+# `docker compose up -d`; then `pnpm selfhost:deploy`.
+#
+# Images: pulled images are pinned by digest. The two built here (caddy, sam-mx) pin their base
+# images by digest and every module by version, and are built only by an explicit
+# `docker compose build` (or when the image does not exist yet); `pnpm selfhost:upgrade` rebuilds
+# a service only when its build inputs changed. The pinned celld version must match CELLD_VERSION
+# in scripts/selfhost/versions.ts, which the deploy script uses for `celld deploy`.
+name: sam-selfhost
+
+services:
+  celld:
+    image: ghcr.io/denoland/celld:v0.6.3@sha256:22bca1b40a9e4c434cc149d8913d7eaafa9792961a8c05f9fecf921d416216dc
+    network_mode: host
+    depends_on:
+      objectstore-init:
+        condition: service_completed_successfully
+        required: false # only with the local-store profile
+    environment:
+      CELLD_BUCKET: ${CELLD_BUCKET:?set CELLD_BUCKET in .env}
+      # Empty means unset: gs:// buckets take no endpoint and use Application Default Credentials
+      # (on GCE, the VM's service account through the metadata server).
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      CELLD_ADDR: 127.0.0.1:${CELLD_PORT:-8080}
+      # Unauthenticated operator API (work, eviction, state, shutdown): loopback only.
+      CELLD_INTERNAL_ADDR: 127.0.0.1:${CELLD_INTERNAL_PORT:-7001}
+      CELLD_WATCH: /var/lib/celld
+      # Caddy replaces X-Forwarded-Host/-Proto, so request.url is https://<host>/...
+      CELLD_TRUST_FORWARDED_HEADERS: '1'
+      # Delete superseded LTX epochs; without it the bucket grows on every cell activation.
+      CELLD_LTX_RETENTION_SECS: ${CELLD_LTX_RETENTION_SECS:-86400}
+      # Outbound fetch timeout. celld's default (120 s) cuts Worker-proxied streams mid-body.
+      # Worker-proxied node responses (file transfers, port previews) are cut at this cap.
+      CELLD_FETCH_TIMEOUT_S: ${CELLD_FETCH_TIMEOUT_S:-3600}
+      RUST_LOG: ${CELLD_RUST_LOG:-info}
+    volumes:
+      # A cache on one node: the bucket is the durable copy.
+      - celld-data:/var/lib/celld
+    # Runs the Workers: no capability (its listeners are loopback ports above 1023) and a
+    # read-only root. It writes only CELLD_WATCH (the volume above) and nothing to /tmp; the
+    # tmpfs is there for the runtime's scratch files. Checked on the pinned image: a Worker and a
+    # SQLite Durable Object serve and keep their state across a restart.
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    read_only: true
+    tmpfs: [/tmp]
+    # Above CELLD_SHUTDOWN_TOTAL_MS (40 s) so a stop is a clean lease handoff.
+    stop_grace_period: 50s
+    # celld docs: restart without an attempt limit. An immediate restart can hit
+    # "Address already in use"; Docker's restart backoff covers that.
+    restart: unless-stopped
+
+  # One-shot, before Caddy: Caddy runs as uid 7101 (caddy/Dockerfile), but a box upgraded from a
+  # release whose Caddy ran as root has root-owned files in its volumes, which Caddy could then no
+  # longer read or renew. Hands both volumes to 7101 and exits; idempotent, so it runs every start.
+  # Root only for this, with just the capabilities chown needs (CHOWN, and DAC_READ_SEARCH to walk
+  # directories 7101 already owns with mode 0700).
+  caddy-volumes:
+    image: sam-selfhost-caddy:local
+    pull_policy: never
+    network_mode: none
+    user: '0:0'
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_READ_SEARCH]
+    security_opt: ['no-new-privileges:true']
+    entrypoint: ['/bin/chown', '-R', '7101:7101', '/data', '/config']
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: 'no'
+
+  caddy:
+    # Built only by `docker compose build caddy` (or when the image is missing): caddy/Dockerfile
+    # pins both base images by digest and both modules by version. caddy/.dockerignore keeps the
+    # build context empty, so editing the Caddyfile never changes the build.
+    build:
+      context: ./caddy
+      args:
+        CADDY_DNS_MODULE: ${CADDY_DNS_MODULE:-github.com/caddy-dns/googleclouddns@v1.1.0}
+    image: sam-selfhost-caddy:local
+    pull_policy: never
+    network_mode: host
+    # Internet-facing and holds the DNS-01 identity: only the capability to bind 80/443.
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    depends_on:
+      celld:
+        condition: service_started
+      caddy-volumes:
+        condition: service_completed_successfully
+    # Validates its settings (start.sh: mail collector password, keep-warm, frp login rate limit,
+    # and that no box port lies inside the reverse-tunnel range) before starting Caddy.
+    entrypoint: ['/bin/sh', '/etc/caddy/start.sh']
+    # REVERSE_TUNNEL_GATEWAY_SECRET (sent on forward_auth) and the lease port range. Written by
+    # `pnpm selfhost:deploy --init`.
+    # mail-collector.env: SAM_MAIL_COLLECTOR=on|off and the collector UI password (on only).
+    env_file:
+      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/gateway.env
+        required: true
+      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/mail-collector.env
+        required: false
+    environment:
+      SAM_DOMAIN: ${SAM_DOMAIN:?set SAM_DOMAIN in .env}
+      SAM_TLS_MODE: ${SAM_TLS_MODE:?set SAM_TLS_MODE in .env (internal or dns-<provider>)}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+      ACME_CA: ${ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
+      GCP_PROJECT: ${GCP_PROJECT:-}
+      # Every box listener (scripts/selfhost/box-settings.ts BOX_RESERVED_PORTS), with the values
+      # the other services get from the same interpolation. start.sh refuses to start Caddy when
+      # one lies inside the reverse-tunnel range from gateway.env, so a shell override passed
+      # straight to `docker compose` cannot put a box port in the range the deploy checked.
+      HTTP_PORT: ${HTTP_PORT:-80}
+      HTTPS_PORT: ${HTTPS_PORT:-443}
+      CELLD_PORT: ${CELLD_PORT:-8080}
+      CELLD_INTERNAL_PORT: ${CELLD_INTERNAL_PORT:-7001}
+      FRPS_BIND_PORT: ${FRPS_BIND_PORT:-7000}
+      OBJECTSTORE_PORT: ${OBJECTSTORE_PORT:-9000}
+      OBJECTSTORE_CONSOLE_PORT: ${OBJECTSTORE_CONSOLE_PORT:-9001}
+      MAIL_COLLECTOR_SMTP_PORT: ${MAIL_COLLECTOR_SMTP_PORT:-1025}
+      MAIL_COLLECTOR_UI_PORT: ${MAIL_COLLECTOR_UI_PORT:-8025}
+      # sam-mx's public listen address; start.sh checks the port after the last ':'.
+      SAM_MX_LISTEN: ${SAM_MX_LISTEN:-:25}
+      # Keep-warm for celld's stateless Worker isolate (caddy/keep-warm/on.caddy): on unless set
+      # to off; the interval (1s-6s) sets how long a cold window follows each 30 s celld pool tick.
+      # start.sh validates both.
+      SAM_KEEP_WARM: ${SAM_KEEP_WARM:-on}
+      SAM_KEEP_WARM_INTERVAL: ${SAM_KEEP_WARM_INTERVAL:-5s}
+      # frp connections (each one a Login the Worker checks) per client address per window, at
+      # wss://api.SAM_DOMAIN/~!frp (caddy/sam.d/frp.caddy). Nodes multiplex over one connection,
+      # so the default leaves room for a NAT gateway full of nodes reconnecting at once.
+      SAM_FRP_LOGIN_RATE_LIMIT_EVENTS: ${SAM_FRP_LOGIN_RATE_LIMIT_EVENTS:-60}
+      SAM_FRP_LOGIN_RATE_LIMIT_WINDOW: ${SAM_FRP_LOGIN_RATE_LIMIT_WINDOW:-1m}
+    # The access log goes to stdout. Docker's default json-file driver never rotates, so cap
+    # this service's log: about CADDY_LOG_MAX_SIZE x CADDY_LOG_MAX_FILES on disk.
+    logging:
+      driver: json-file
+      options:
+        max-size: ${CADDY_LOG_MAX_SIZE:-50m}
+        max-file: '${CADDY_LOG_MAX_FILES:-5}'
+    volumes:
+      - ./caddy:/etc/caddy:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+  frps:
+    profiles: [tunnel]
+    image: ghcr.io/fatedier/frps:v0.72.0@sha256:17abb20dd392557a44070d9726954630c0eb1f7a9bd6ead5ae9150d165179ea4
+    network_mode: host
+    command: ['-c', '/etc/frp/frps.toml']
+    # REVERSE_TUNNEL_GATEWAY_SECRET (frps server-plugin auth) and the lease port range.
+    # Written by `pnpm selfhost:deploy --init`.
+    env_file:
+      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/gateway.env
+        required: true
+    environment:
+      FRPS_BIND_PORT: ${FRPS_BIND_PORT:-7000}
+      CELLD_PORT: ${CELLD_PORT:-8080}
+      SAM_DOMAIN: ${SAM_DOMAIN:?set SAM_DOMAIN in .env}
+      # REVERSE_TUNNEL_PORT_RANGE_START/END come from gateway.env: the deploy script writes the
+      # same resolved range there and into the Worker's vars (scripts/selfhost/box-settings.ts).
+    volumes:
+      - ./frps:/etc/frp:ro
+    # No capability (it binds FRPS_BIND_PORT and lease ports, all loopback and above 1023) and
+    # a read-only root: frps.toml logs to the console and frps writes no file.
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    read_only: true
+    restart: unless-stopped
+
+  # Mail collector for TEST installs (profile `mail-collector`, off by default): catches every
+  # email SAM sends (sign-in codes) so it can be read at https://mail.SAM_DOMAIN behind basic
+  # auth (caddy/mail-collector/on.caddy). Anyone who can read it can sign in as any account.
+  # SMTP and the UI listen on loopback only; the deploy points the Worker at the SMTP port
+  # (scripts/selfhost/mail-settings.ts) and refuses the profile without the generated UI password.
+  mail-collector:
+    profiles: [mail-collector]
+    # Mailpit v1.33.1
+    image: axllent/mailpit:v1.33.1@sha256:aef2aacc11f075ec0fb6874275ee4a421e688e11a96ebb296134d1735c7761ce
+    network_mode: host
+    user: '65534:65534'
+    # MP_UI_AUTH=collector:<generated password>: Mailpit requires it for its UI, API and send API
+    # too, so nothing on the box (celld included) reads codes on loopback without it. Written by
+    # `pnpm selfhost:deploy --init`; compose refuses to start the collector without the file.
+    env_file:
+      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/mail-collector-ui.env
+        required: true
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    command:
+      - --smtp
+      - 127.0.0.1:${MAIL_COLLECTOR_SMTP_PORT:-1025}
+      - --listen
+      - 127.0.0.1:${MAIL_COLLECTOR_UI_PORT:-8025}
+      # Messages live in /tmp (tmpfs) and are gone on restart; codes expire in minutes anyway.
+      - --max-age
+      - 1d
+      - --disable-version-check
+      - --smtp-disable-rdns
+      - --block-remote-css-and-fonts
+    restart: unless-stopped
+
+  # Inbound agent email (profile `mail-in`, off by default): sam-mx (./sam-mx) accepts SMTP on
+  # port 25 for agent+<key>@agents.SAM_DOMAIN only, requires aligned SPF or DKIM (DMARC pass) for
+  # the From domain, and hands each message during the SMTP session to the Worker's loopback
+  # gateway route (POST /api/self-host/gateway/inbound-email, which Caddy hides from the internet).
+  # Refusals are SMTP replies (550/552/451): it never relays, bounces, or sends mail. Replies to
+  # senders go out through the Worker's SMTP relay (SMTP_* or the mail-collector profile), which
+  # the deploy requires when this profile is on. Needs the MX record and an inbound tcp/25
+  # firewall rule (README "Inbound agent email").
+  sam-mx:
+    profiles: [mail-in]
+    # Built only by `docker compose build sam-mx` (or when the image is missing): sam-mx/Dockerfile
+    # pins both base images by digest; go.sum pins every module.
+    build: ./sam-mx
+    image: sam-selfhost-sam-mx:local
+    pull_policy: never
+    # Host network: it calls celld on 127.0.0.1, and the sender's address must be the real one for
+    # SPF and the per-address limits.
+    network_mode: host
+    user: '${SAM_MX_UID:-7102}:${SAM_MX_UID:-7102}'
+    # The binary's file capability binds port 25; every other capability is dropped.
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ['no-new-privileges:true']
+    read_only: true
+    # Parses untrusted mail before authentication: bound its memory and processes so a flood
+    # cannot push celld or Caddy into the OOM killer. SAM_MX_MAX_CONNECTIONS (20) x 5 MiB
+    # messages, plus the copies the checks make, fits well inside this.
+    mem_limit: ${SAM_MX_MEM_LIMIT:-512m}
+    pids_limit: 128
+    depends_on: [celld]
+    # Room for SAM_MX_SHUTDOWN_GRACE (8 s) to drain in-flight deliveries before SIGKILL.
+    stop_grace_period: 10s
+    # REVERSE_TUNNEL_GATEWAY_SECRET, the gateway route's shared secret. Written by
+    # `pnpm selfhost:deploy --init`.
+    env_file:
+      - path: ${SAM_SELFHOST_STATE_DIR:-./.state}/gateway.env
+        required: true
+    environment:
+      SAM_DOMAIN: ${SAM_DOMAIN:?set SAM_DOMAIN in .env}
+      CELLD_PORT: ${CELLD_PORT:-8080}
+      SAM_MX_LISTEN: ${SAM_MX_LISTEN:-:25}
+      SAM_MX_HOSTNAME: ${SAM_MX_HOSTNAME:-}
+      SAM_MX_MAX_MESSAGE_BYTES: ${SAM_MX_MAX_MESSAGE_BYTES:-}
+      SAM_MX_MAX_CONNECTIONS: ${SAM_MX_MAX_CONNECTIONS:-}
+      SAM_MX_MAX_CONNECTIONS_PER_IP: ${SAM_MX_MAX_CONNECTIONS_PER_IP:-}
+      SAM_MX_MAX_SESSION: ${SAM_MX_MAX_SESSION:-}
+      # The Go runtime collects harder as it nears this, below mem_limit.
+      GOMEMLIMIT: ${SAM_MX_GOMEMLIMIT:-400MiB}
+      SAM_MX_CONNECTIONS_PER_IP_PER_MINUTE: ${SAM_MX_CONNECTIONS_PER_IP_PER_MINUTE:-}
+      SAM_MX_MESSAGES_PER_CONNECTION: ${SAM_MX_MESSAGES_PER_CONNECTION:-}
+      SAM_MX_GATEWAY_TIMEOUT: ${SAM_MX_GATEWAY_TIMEOUT:-}
+      # Strict SPF/DKIM alignment unless `true` (deploy/selfhost/sam-mx/config.go RelaxedAlignment).
+      SAM_MX_RELAXED_ALIGNMENT: ${SAM_MX_RELAXED_ALIGNMENT:-}
+      # Oldest Date a message authenticated by DKIM alone may carry (default 168h).
+      SAM_MX_DKIM_MAX_AGE: ${SAM_MX_DKIM_MAX_AGE:-}
+      # Drain time for in-flight deliveries on stop; keep it below stop_grace_period.
+      SAM_MX_SHUTDOWN_GRACE: ${SAM_MX_SHUTDOWN_GRACE:-}
+      # Loopback CIDRs whose mail skips SPF/DKIM/DMARC (smoke tests from the box itself). Empty
+      # by default; the receiver refuses any non-loopback network here.
+      SAM_MX_TRUSTED_NETWORKS: ${SAM_MX_TRUSTED_NETWORKS:-}
+      # Optional STARTTLS certificate and key, mounted read-only by an override file.
+      SAM_MX_TLS_CERT: ${SAM_MX_TLS_CERT:-}
+      SAM_MX_TLS_KEY: ${SAM_MX_TLS_KEY:-}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${SAM_MX_LOG_MAX_SIZE:-20m}
+        max-file: '${SAM_MX_LOG_MAX_FILES:-3}'
+    restart: unless-stopped
+
+  # Bundled object store for boxes without an external bucket. celld does not qualify it for
+  # production (MinIO community fork; it passes celld's storage test). Prefer GCS/S3/R2/Azure.
+  objectstore:
+    profiles: [local-store]
+    # pgsty/minio RELEASE.2026-08-04T00-00-00Z (minio/minio images are no longer published).
+    image: pgsty/minio@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
+    network_mode: host
+    command:
+      [
+        'server',
+        '/data',
+        '--address',
+        '127.0.0.1:${OBJECTSTORE_PORT:-9000}',
+        '--console-address',
+        '127.0.0.1:${OBJECTSTORE_CONSOLE_PORT:-9001}',
+      ]
+    # Compose interpolates every service, including ones whose profile is off, so a `:?` here
+    # would stop a gs:// or s3:// install that never runs this store. The store checks instead:
+    # it refuses an unset credential (MinIO would fall back to minioadmin), MinIO's well-known
+    # default, and a secret under 24 characters (the root credential reads every deployed Worker
+    # secret in the fleet bucket, so it must not be guessable). /usr/bin/docker-entrypoint.sh is the image's
+    # own ENTRYPOINT at the pinned digest.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        case "$$MINIO_ROOT_USER:$$MINIO_ROOT_PASSWORD" in
+        :* | *: | minioadmin:* | *:minioadmin)
+        echo 'objectstore: set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env (not minioadmin)' >&2; exit 64;;
+        esac;
+        test "$${#MINIO_ROOT_PASSWORD}" -ge 24 ||
+        { echo 'objectstore: AWS_SECRET_ACCESS_KEY must be at least 24 characters (openssl rand -hex 24)' >&2; exit 64; };
+        exec /usr/bin/docker-entrypoint.sh "$$@"
+      - objectstore
+    environment:
+      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:-}
+      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:-}
+    volumes:
+      - objectstore-data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      retries: 30
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  objectstore-init:
+    profiles: [local-store]
+    image: pgsty/minio@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
+    network_mode: host
+    depends_on:
+      objectstore:
+        condition: service_healthy
+    entrypoint: ['sh', '/init/init.sh']
+    environment:
+      OBJECTSTORE_URL: http://127.0.0.1:${OBJECTSTORE_PORT:-9000}
+      CELLD_BUCKET: ${CELLD_BUCKET:?set CELLD_BUCKET in .env}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+    volumes:
+      - ./objectstore/init.sh:/init/init.sh:ro
+    restart: 'no'
+
+volumes:
+  celld-data:
+  caddy-data:
+  caddy-config:
+  objectstore-data:

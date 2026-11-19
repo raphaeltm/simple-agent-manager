@@ -18,6 +18,7 @@ import {
   getProjectDeleteCleanupBatchSize,
 } from '../../services/file-library';
 import { resolveArtifactsBackendForCleanup } from '../../services/artifacts/backend';
+import { reconcileGcpWifPoolIndex } from '../../services/gcp-wif-pool-ownership';
 import { getRuntimeLimits } from '../../services/limits';
 import { deleteWorkspaceResourceHistoryObjectsForProject } from '../../services/workspace-resource-history';
 import { registerProjectCreateRoute } from './project-create';
@@ -160,6 +161,20 @@ crudRoutes.delete('/:id', async (c) => {
 
   const project = await requireProjectCapability(db, projectId, userId, 'project:delete');
   await assertNoReservedCloudflareBuilds(db, { projectId });
+  // Deleting the project deletes its GCP cloud credentials. Record the pools they name first:
+  // Google may still trust them after the rows are gone (gcp-wif-pool-ownership.ts).
+  const [gcpCredential] = await db
+    .select({ id: schema.credentials.id })
+    .from(schema.credentials)
+    .where(
+      and(
+        eq(schema.credentials.projectId, projectId),
+        eq(schema.credentials.provider, 'gcp'),
+        eq(schema.credentials.credentialType, 'cloud-provider')
+      )
+    )
+    .limit(1);
+  if (gcpCredential) await reconcileGcpWifPoolIndex(c.env, 'delete_project');
 
   // Explicitly delete child records instead of relying on D1 CASCADE.
   // SQLite ignores REFERENCES constraints added via ALTER TABLE, so

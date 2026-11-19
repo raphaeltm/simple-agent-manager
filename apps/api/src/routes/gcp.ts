@@ -39,13 +39,23 @@ import {
 import { listGcpProjects, runGcpSetup } from '../services/gcp-setup';
 import {
   clearGcpAccessTokenCache,
+  type GcpTokenRequester,
   getGcpAccessToken,
   verifyGcpOidcSetup,
 } from '../services/gcp-sts';
+import {
+  assertGcpWifPoolOwnership,
+  isGcpWifPoolOwnershipError,
+} from '../services/gcp-wif-pool-ownership';
 import { getGoogleInfraOAuthConfig } from '../services/platform-config';
 import { parseGcpCredential } from '../services/provider-credentials';
 
 const gcpRoutes = new Hono<{ Bindings: Env }>();
+
+/** A user acting on their own user-level GCP credential. */
+function userTokenRequester(userId: string): GcpTokenRequester {
+  return { cacheUserId: userId, poolOwner: { kind: 'user', userId } };
+}
 
 gcpRoutes.use('*', requireAuth(), requireApproved());
 
@@ -171,7 +181,7 @@ gcpRoutes.put(
 
     try {
       const accessToken = await getGcpAccessToken(
-        userId,
+        userTokenRequester(userId),
         'service-account-setup',
         credential,
         c.env
@@ -212,8 +222,15 @@ gcpRoutes.post('/setup', jsonValidator(GcpSetupSchema), async (c) => {
   const previous = await getStoredGcpCredential(c.env, userId).catch(() => null);
   let credential: Awaited<ReturnType<typeof runGcpSetup>>;
   try {
-    credential = await runGcpSetup(oauthToken, body.gcpProjectId, body.defaultZone, c.env);
+    credential = await runGcpSetup(oauthToken, body.gcpProjectId, body.defaultZone, c.env, {
+      userId,
+      // Runs once the project number is known and before SAM creates or changes anything in
+      // Google: a pool another owner already uses must not be re-pointed at this user.
+      assertPoolAvailable: (pool) =>
+        assertGcpWifPoolOwnership(c.env, pool, { kind: 'user', userId }, 'gcp_setup'),
+    });
   } catch (err) {
+    if (isGcpWifPoolOwnershipError(err)) throw err;
     throw toSanitizedAppError(err, 'gcp-setup');
   }
 
@@ -224,7 +241,7 @@ gcpRoutes.post('/setup', jsonValidator(GcpSetupSchema), async (c) => {
   await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'user', userId });
 
   try {
-    await verifyGcpOidcSetup(userId, 'setup-verification', credential, c.env);
+    await verifyGcpOidcSetup(userTokenRequester(userId), 'setup-verification', credential, c.env);
   } catch (verifyErr) {
     log.warn('gcp.oidc_verification_failed', {
       error: verifyErr instanceof Error ? verifyErr.message : String(verifyErr),
@@ -272,16 +289,24 @@ gcpRoutes.post('/verify', async (c) => {
 
   try {
     if (gcpCredential.authType === 'service-account-key') {
-      const token = await getGcpAccessToken(userId, 'verification', gcpCredential, c.env);
+      const token = await getGcpAccessToken(
+        userTokenRequester(userId),
+        'verification',
+        gcpCredential,
+        c.env
+      );
       await verifyGcpServiceAccountAccess(gcpCredential, token, c.env);
     } else {
-      await verifyGcpOidcSetup(userId, 'verification', gcpCredential, c.env);
+      await verifyGcpOidcSetup(userTokenRequester(userId), 'verification', gcpCredential, c.env);
     }
   } catch (err) {
     return c.json({
       success: false,
       verified: false,
-      error: sanitizeGcpError(err, 'gcp-verify'),
+      // An ownership refusal is the reason, not a Google failure: say so.
+      error: isGcpWifPoolOwnershipError(err)
+        ? (err as Error).message
+        : sanitizeGcpError(err, 'gcp-verify'),
       apiIssues: await listGcpApiIssuesSafely(c.env, credentialId, gcpCredential),
     });
   }

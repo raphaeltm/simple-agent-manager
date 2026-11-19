@@ -70,6 +70,8 @@ jobs:
       browser-install: ${{ steps.filter.outputs.browser-install }}
       go-modules: ${{ steps.filter.outputs.go-modules }}
       selfhost-email: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.selfhost-email }}
+      # Path-filtered on main pushes too: the live suite runs only for self-host changes (D9).
+      selfhost-live: ${{ steps.filter.outputs.selfhost-live }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -150,6 +152,12 @@ jobs:
               - 'scripts/selfhost/selfhost-migrations.ts'
               # selfhost-inbound-email.test.ts builds this receiver (Self-host Email job only).
               - 'deploy/selfhost/sam-mx/**'
+              # The self-host access-log redaction guard scans the API routes against this filter.
+              - 'deploy/selfhost/caddy/log-redaction.caddy'
+              # gcp-bootstrap-credential.test.ts runs the bootstrap against the fake gcloud and parses
+              # its output with the app's credential parser.
+              - 'deploy/selfhost/gcp-bootstrap.sh'
+              - 'scripts/selfhost/testdata/fake-gcloud-iam.mjs'
               - 'scripts/quality/node-pool-boundary.ts'
               - 'scripts/quality/node-pool-boundary/**'
               - 'tests/fixtures/acp-activity-report-v1.json'
@@ -164,6 +172,8 @@ jobs:
               - 'packages/terminal/**'
               - 'packages/ui/**'
               - 'tests/fixtures/diagnostic-secret-canaries.json'
+              # The self-host access-log redaction guard scans App.tsx against this filter.
+              - 'deploy/selfhost/caddy/log-redaction.caddy'
             # Storybook (packages/ui) and the public site (apps/www, which depends on ui).
             public-site:
               - *workspace-root
@@ -251,6 +261,12 @@ jobs:
               - 'scripts/deploy/**'
               # Self-hosted (celld) packaging: config generator, deploy, upgrade, create-account.
               - 'scripts/selfhost/**'
+              # The box files its static tests read: compose, Caddy fragments and start.sh, frps.toml,
+              # gcp-bootstrap.sh, .env.example.
+              - 'deploy/selfhost/**'
+              # gcp-bootstrap.test.ts pins the script's APIs and roles to the guided setup's.
+              - 'packages/shared/src/constants/gcp-required-apis.ts'
+              - 'apps/api/src/services/gcp-setup.ts'
               # ...and what its tests read outside it: the self-host migration projection and the
               # SMTP settings parser.
               - 'apps/api/src/selfhost/**'
@@ -337,6 +353,12 @@ jobs:
               - 'apps/api/tests/workers/smtp-client-workerd.test.ts'
               - 'apps/api/tests/workers/support/smtp-native-entry.ts'
               - '.github/workflows/selfhost-email-tests.yml'
+            # Self-host box runtime: the Docker live suite (landing plan D9). Self-host paths
+            # only: not packages/cloud-init (whose frpc.toml one live test renders) and not nightly.
+            selfhost-live:
+              - 'deploy/selfhost/**'
+              - 'scripts/selfhost/**'
+              - 'apps/api/src/selfhost/**'
 
   # One job for the PR-body and PR-content checks. They used to be three jobs that each
   # spent a runner slot on checkout and install for a few seconds of work. Each check
@@ -872,6 +894,8 @@ jobs:
       - name: Enforce source file size limits
         run: pnpm quality:file-sizes
 
+      # No workspace build here: neither these scripts nor their tests import a workspace package
+      # (the self-host tests that do live in the API unit suite and the Self-host Live job).
       - name: Type check deployment scripts
         run: |
           pnpm exec tsc --project scripts/deploy/tsconfig.json --noEmit
@@ -1128,6 +1152,7 @@ jobs:
       - pulumi-infra
       - vm-agent-test
       - selfhost-email
+      - selfhost-live
       - cli-test
       - vm-agent-integration
       - devcontainer
@@ -1221,6 +1246,43 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.selfhost-email == 'true' && !github.event.pull_request.draft
     uses: ./.github/workflows/selfhost-email-tests.yml
+
+  # The box runtime on real software (scripts/selfhost/live): Caddy built from
+  # deploy/selfhost/caddy/Dockerfile running the box's Caddyfile and start.sh (gateway 404s and
+  # path tricks, frp rate limit, X-SAM-* stripping, access log, keep-warm, mail collector), the
+  # pinned frpc/frps with the frpc.toml cloud-init renders, and the pinned celld (guarded fetch,
+  # shared in-flight reads). Needs Docker with host networking; no sudo or nftables.
+  selfhost-live:
+    name: Self-host Live (Docker)
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && needs.changes.outputs.selfhost-live == 'true'
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      # No lifecycle scripts: nothing in this job needs one. celld runs esbuild's own bin entry
+      # (celld-binary.ts resolveEsbuild), which finds the platform binary without a postinstall.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # celld bundles API modules (worker-core's shared-flight) through their built dist/, and the
+      # live tests type-check against them.
+      - name: Build the API Worker's workspace dependencies
+        run: pnpm exec turbo run build --filter=@simple-agent-manager/api^...
+
+      - name: Type check the live tests
+        run: pnpm exec tsc --project scripts/selfhost/live/tsconfig.json --noEmit
+
+      - name: Run self-host live tests
+        run: pnpm selfhost:live-test
 
   cli-test:
     name: CLI Test
