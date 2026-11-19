@@ -4,7 +4,9 @@
  *  1. Refuse a checkout with uncommitted tracked changes; fetch; resolve the ref.
  *  2. Check out the ref (detached) and `pnpm install --frozen-lockfile`.
  *  3. `pnpm selfhost:deploy --init`: regenerates gateway.env and the other generated state for the
- *     new code. It never regenerates platform keys.
+ *     new code. It never regenerates platform keys. Every deploy call gets this box's
+ *     `--env-file` and `--state-dir` (and `--secrets` when given): without them the deploy would
+ *     read the checkout's default .env and .state, a different box.
  *  4. Restart the stack (`docker compose up -d --build`) only when compose inputs changed: a
  *     non-README file under deploy/selfhost/, or a generated file in .state/ that step 3 changed.
  *     This must precede step 5: deploy refuses to update the Worker while gateway.env differs
@@ -47,6 +49,8 @@ export interface BoxContext {
   box: Readonly<Record<string, string>>;
   envFile: string;
   stateDir: string;
+  /** The deploy's `--secrets` file, when not the default `<stateDir>/secrets.env`. */
+  secretsFile?: string;
   /** Every compose file the box runs with, in order (composeFilesFor). */
   composeFiles: string[];
   run: Runner;
@@ -111,7 +115,11 @@ function composeArgs(ctx: Pick<BoxContext, 'composeFiles' | 'envFile'>, args: st
 }
 
 /** The box context from an .env file (which must exist and be private: it holds the bucket key). */
-export function loadBox(envFile: string, stateDirOverride?: string): BoxContext {
+export function loadBox(
+  envFile: string,
+  stateDirOverride?: string,
+  secretsFile?: string
+): BoxContext {
   if (!existsSync(envFile)) throw new Error(`${envFile} does not exist`);
   assertPrivateFile(envFile);
   const box = parseDotenv(readFileSync(envFile, 'utf8'), envFile);
@@ -121,6 +129,7 @@ export function loadBox(envFile: string, stateDirOverride?: string): BoxContext 
     envFile,
     // Same default and base directory docker compose and deploy.ts use.
     stateDir: resolve(dirname(envFile), stateDirOverride ?? box.SAM_SELFHOST_STATE_DIR ?? '.state'),
+    ...(secretsFile ? { secretsFile: resolve(secretsFile) } : {}),
     composeFiles: composeFilesFor(box, SELFHOST_DIR),
     run: runCommand,
     log: (message) => process.stdout.write(`[selfhost] ${message}\n`),
@@ -150,6 +159,19 @@ function stateFingerprint(stateDir: string): string {
   return hash.digest('hex');
 }
 
+/** The `pnpm selfhost:deploy` arguments that select this box (env file, state dir, secrets). */
+export function deployBoxArgs(
+  ctx: Pick<BoxContext, 'envFile' | 'stateDir' | 'secretsFile'>
+): string[] {
+  return [
+    '--env-file',
+    ctx.envFile,
+    '--state-dir',
+    ctx.stateDir,
+    ...(ctx.secretsFile ? ['--secrets', ctx.secretsFile] : []),
+  ];
+}
+
 /**
  * Rollback steps run compose from deploy/selfhost with no `-f`, so it reads .env there and honours
  * its COMPOSE_FILE (an explicit `-f docker-compose.yml` would drop every other listed file).
@@ -159,14 +181,16 @@ const composeInBoxDir = (args: string) => `(cd deploy/selfhost && docker compose
 export function rollbackSteps(
   from: string,
   migrationsChanged: boolean,
-  composeChanged: boolean
+  composeChanged: boolean,
+  boxArgs: readonly string[] = []
 ): string[] {
+  const deploy = ['pnpm selfhost:deploy', ...boxArgs].join(' ');
   if (!migrationsChanged) {
     return [
       `git checkout ${from}`,
       'pnpm install --frozen-lockfile',
-      ...(composeChanged ? ['pnpm selfhost:deploy --init', composeInBoxDir('up -d --build')] : []),
-      'pnpm selfhost:deploy',
+      ...(composeChanged ? [`${deploy} --init`, composeInBoxDir('up -d --build')] : []),
+      deploy,
     ];
   }
   return [
@@ -215,12 +239,13 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
   ctx.log('no backup is taken: keep your own copy of the fleet bucket and .state before upgrading');
 
   let composeRestarted = false;
+  const boxArgs = deployBoxArgs(ctx);
   const pnpm = (args: string[]) => check(ctx.run('pnpm', args), `pnpm ${args.join(' ')}`);
   try {
     git(['checkout', '--detach', to]);
     pnpm(['install', '--frozen-lockfile']);
     const before = stateFingerprint(ctx.stateDir);
-    pnpm(['selfhost:deploy', '--init']);
+    pnpm(['selfhost:deploy', '--init', ...boxArgs]);
     const stateChanged = stateFingerprint(ctx.stateDir) !== before;
     if (composeFilesChanged || stateChanged) {
       ctx.log(
@@ -234,17 +259,17 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
     } else {
       ctx.log('compose inputs unchanged; the stack keeps running');
     }
-    pnpm(['selfhost:deploy']);
+    pnpm(['selfhost:deploy', ...boxArgs]);
     if (!(await opts.checkHealth())) throw new Error('the API is not healthy after the upgrade');
   } catch (error) {
-    const steps = rollbackSteps(from, migrationsChanged, composeFilesChanged);
+    const steps = rollbackSteps(from, migrationsChanged, composeFilesChanged, boxArgs);
     ctx.log(`upgrade FAILED: ${error instanceof Error ? error.message : String(error)}`);
     ctx.log('to roll back:');
     for (const step of steps) ctx.log(`  ${step}`);
     throw error;
   }
 
-  const rollback = rollbackSteps(from, migrationsChanged, composeFilesChanged);
+  const rollback = rollbackSteps(from, migrationsChanged, composeFilesChanged, boxArgs);
   ctx.log(`upgraded to ${to}; healthy. To roll back:`);
   for (const step of rollback) ctx.log(`  ${step}`);
   return { from, to, composeRestarted, migrationsChanged, rollback };

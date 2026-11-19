@@ -1,5 +1,5 @@
 /**
- * `pnpm selfhost:upgrade --to <ref> [--box-env <path>] [--state-dir <dir>]`
+ * `pnpm selfhost:upgrade --to <ref> [--box-env <path>] [--state-dir <dir>] [--secrets <path>]`
  *
  * Fetch and check out a SAM git ref, migrate, deploy, restart the stack only when its compose
  * inputs changed, verify health and print how to roll back (upgrade-lib.ts).
@@ -17,6 +17,7 @@ const { values } = parseArgs({
     to: { type: 'string' },
     'box-env': { type: 'string' },
     'state-dir': { type: 'string' },
+    secrets: { type: 'string' },
   },
 });
 if (!values.to) {
@@ -25,7 +26,12 @@ if (!values.to) {
       'backup: copy the fleet bucket and .state first'
   );
 }
-const ctx = loadBox(resolve(values['box-env'] ?? join(SELFHOST_DIR, '.env')), values['state-dir']);
+// Each is passed on to every `pnpm selfhost:deploy` the upgrade runs (upgrade-lib.ts).
+const ctx = loadBox(
+  resolve(values['box-env'] ?? join(SELFHOST_DIR, '.env')),
+  values['state-dir'],
+  values.secrets
+);
 const port = ctx.box.CELLD_PORT ?? '8080';
 
 await runUpgrade(ctx, {
