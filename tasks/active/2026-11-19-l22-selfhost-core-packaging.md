@@ -106,18 +106,24 @@ and trimmed. Nothing in L22 may change Cloudflare behaviour.
       head e7ac643b, which contains #2906's head 08e2f605a unchanged. Box upgraded in place; a
       hosted project was created; agent task 01M7T0VJHK2381FBXA2VG6PM8Q replied "pong"; push
       164c22e3d was verified by a separate clone. Everything was cleaned up (BOX FREE, seq 405).
-      Merged alone, #2906 cannot run a session (hosted git lives in #2907), so the two merge back
-      to back with nothing in between (coordinator's hold path; Raphaël removes needs-human-review).
+      Merged alone, #2906 cannot run a session (hosted git lives in #2907). Raphaël decided on
+      2026-11-19 (inbox ask 01M7SVG6J5MJT8Q7T4EE5ERH2N): "Merge L22c now; the agent-session proof
+      moves to H2". The validator HIGH is deferred to #2907 with his explicit approval.
 - [x] Still owed (not acceptance criteria), as agreed by the coordinator on 2026-11-19:
   - L19 celld guided-login teardown: no gVisor; guided login is held.
   - L13 metered ceiling: the box has no platform AI key.
 - [x] task-completion-validator: the agent-session gap is recorded as owed (above) and the HIGH
       is blocked on #2905. The live suite passed locally at 795bf674f (6 files, 208 tests); CI
       `Self-host Live (Docker)` runs on every head.
-- [x] CI green on 08e2f605a. One main-owned flaky test was re-run (idea 01M7T0AY9DBBWVM48HD6EJABF6).
+- [x] CI green on 4cefefcec. One main-owned flaky test was re-run earlier
+      (idea 01M7T0AY9DBBWVM48HD6EJABF6).
 - [x] Codex review rounds: every finding fixed (cd175f708, eba71510c, 662a092f9, 3e3ef8d30,
-      539625202, 0991b27ff) or deferred with a plan to idea 01M7SXD931W6SR8S8PT0EXPNT2 (3 P2s).
-- [ ] Paired merge with #2907 after Raphaël removes needs-human-review, then Deploy Production
+      539625202, 0991b27ff, e14044338, 7c00e5b0f, 4cefefcec) or deferred with a plan to idea
+      01M7SXD931W6SR8S8PT0EXPNT2.
+- [x] gcp-bootstrap security: the delta review, its confirmation and an adversarial review all
+      PASS (0 CRITICAL/HIGH). The deferred MEDIUMs (project-level grants, existing consumers,
+      extra roles) are bounded by the dedicated-project requirement (idea item 8).
+- [ ] Merge #2906 (Raphaël: merge now), then Deploy Production
 
 Not fixed here (accepted as tracked by the coordinator):
 
@@ -136,6 +142,6 @@ Not fixed here (accepted as tracked by the coordinator):
 - Cloudflare Worker import graph unchanged by PRs 2-3; Worker behaviour unchanged except the
   bounded joins in PR 1.
 - A box installed from main alone deploys, serves the app, creates an admin by email, runs one
-  agent session and heartbeats a reverse-tunnel node. (The agent session is met on main by merging
-  #2906 and #2907 back to back; it was proven on their combined head e7ac643b. Every other part was
-  proven in BOX round R18.)
+  agent session and heartbeats a reverse-tunnel node. (The agent session was proven on #2906 plus
+  hosted git #2907, head e7ac643b. On main it arrives with #2907; Raphaël approved merging #2906
+  first. Every other part was proven in BOX round R18.)
