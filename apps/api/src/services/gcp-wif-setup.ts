@@ -11,20 +11,75 @@ import {
   requireOperationName,
 } from './gcp-setup-transport';
 
-const serviceAccountPolicySchema = v.object({
-  bindings: v.optional(v.array(iamBindingSchema)),
+// Loose, so a binding's IAM `condition` and the policy `version` survive the read-modify-write.
+const serviceAccountBindingSchema = v.looseObject({
+  ...iamBindingSchema.entries,
+  condition: v.optional(v.unknown()),
+});
+const serviceAccountPolicySchema = v.looseObject({
+  bindings: v.optional(v.array(serviceAccountBindingSchema)),
   etag: v.string(),
+  version: v.optional(v.number()),
 });
 
 /**
- * Validate a value is safe for interpolation into a GCP CEL attribute condition.
- * SAM project IDs are ULIDs (alphanumeric), but this guard enforces the invariant
- * at the function boundary to prevent injection if a non-ULID value is ever passed.
+ * Validate a value is safe for interpolation into a GCP CEL attribute condition or an IAM
+ * principal path. SAM project and user IDs are alphanumeric, but this guard enforces the
+ * invariant at the function boundary to prevent injection if another value is ever passed.
  */
 function assertSafeCelValue(value: string, fieldName: string): void {
-  if (!/^[a-zA-Z0-9_:.-]+$/.test(value)) {
+  if (typeof value !== 'string' || !/^[a-zA-Z0-9_:.-]+$/.test(value)) {
     throw new Error(`${fieldName} contains characters unsafe for CEL interpolation`);
   }
+}
+
+/**
+ * Whose tokens a workload identity provider and its service-account binding accept.
+ * - `project`: one SAM project (deployment setup). Tokens carry `project_id` and
+ *   `sub = project:<id>`.
+ * - `user`: one SAM user (user-level guided setup). Tokens carry `user_id`, mapped to
+ *   `attribute.sam_user`.
+ * There is no issuer-only scope: a provider that checks only SAM's issuer accepts a token SAM
+ * signs for any user, so any user could name the pool and impersonate its service account.
+ */
+export type WifTrustScope =
+  { kind: 'project'; samProjectId: string } | { kind: 'user'; userId: string };
+
+function assertSafeTrustScope(scope: WifTrustScope): void {
+  if (scope.kind === 'project') assertSafeCelValue(scope.samProjectId, 'samProjectId');
+  else assertSafeCelValue(scope.userId, 'userId');
+}
+
+/** The provider's attribute condition: SAM's issuer plus the scope's own claim. */
+export function wifAttributeCondition(issuerUri: string, scope: WifTrustScope): string {
+  assertSafeTrustScope(scope);
+  return scope.kind === 'project'
+    ? `assertion.iss == '${issuerUri}' && assertion.project_id == '${scope.samProjectId}'`
+    : `assertion.iss == '${issuerUri}' && assertion.user_id == '${scope.userId}'`;
+}
+
+function poolPrincipalPrefix(projectNumber: string, poolId: string): string {
+  return `iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}`;
+}
+
+/** The service-account binding member that admits exactly the scope's tokens. */
+export function wifServiceAccountMember(
+  projectNumber: string,
+  poolId: string,
+  scope: WifTrustScope
+): string {
+  assertSafeTrustScope(scope);
+  const pool = poolPrincipalPrefix(projectNumber, poolId);
+  // A project token's `sub` is `project:<samProjectId>`; a user token's `user_id` is mapped
+  // to `attribute.sam_user`.
+  return scope.kind === 'project'
+    ? `principal://${pool}/subject/project:${scope.samProjectId}`
+    : `principalSet://${pool}/attribute.sam_user/${scope.userId}`;
+}
+
+/** The pool-wide member earlier user-level setups granted. Re-running setup removes it. */
+export function legacyPoolWideMember(projectNumber: string, poolId: string): string {
+  return `principalSet://${poolPrincipalPrefix(projectNumber, poolId)}/*`;
 }
 
 /** Google allows 4-32 characters of [a-z0-9-] for a provider ID and reserves the "gcp-" prefix. */
@@ -122,20 +177,14 @@ export async function createOidcProvider(
   providerId: string,
   issuerUri: string,
   timeoutMs: number,
-  samProjectId?: string
+  scope: WifTrustScope
 ): Promise<void> {
   // The OIDC provider's allowedAudiences must match the JWT aud claim (https:// scheme).
   // GCP STS uses the protocol-relative format (//iam.googleapis.com/...) separately in gcp-sts.ts.
   const wifAudience = `https://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
 
-  // Enforce both issuer and SAM project ID in the attribute condition to prevent
-  // cross-project impersonation within the same WIF pool.
-  if (samProjectId) {
-    assertSafeCelValue(samProjectId, 'samProjectId');
-  }
-  const attributeCondition = samProjectId
-    ? `assertion.iss == '${issuerUri}' && assertion.project_id == '${samProjectId}'`
-    : `assertion.iss == '${issuerUri}'`;
+  // Issuer plus the scope's own claim, so a token SAM signs for anyone else is refused.
+  const attributeCondition = wifAttributeCondition(issuerUri, scope);
 
   const url = `${IAM_URL}/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers?workloadIdentityPoolProviderId=${providerId}`;
   const res = await fetchWithTimeout(
@@ -173,7 +222,7 @@ export async function createOidcProvider(
       providerId,
       issuerUri,
       timeoutMs,
-      samProjectId
+      scope
     );
     return;
   }
@@ -238,16 +287,13 @@ export async function updateOidcProvider(
   providerId: string,
   issuerUri: string,
   timeoutMs: number,
-  samProjectId?: string
+  scope: WifTrustScope
 ): Promise<void> {
   const wifAudience = `https://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
 
-  if (samProjectId) {
-    assertSafeCelValue(samProjectId, 'samProjectId');
-  }
-  const attributeCondition = samProjectId
-    ? `assertion.iss == '${issuerUri}' && assertion.project_id == '${samProjectId}'`
-    : `assertion.iss == '${issuerUri}'`;
+  // Re-running setup rewrites an existing provider's condition, so a provider created by an
+  // earlier issuer-only setup is narrowed to the scope here.
+  const attributeCondition = wifAttributeCondition(issuerUri, scope);
 
   const name = `projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
   await requireOidcProviderIssuer(oauthToken, name, issuerUri, timeoutMs);
@@ -302,12 +348,11 @@ export async function grantWifUserOnSa(
   saEmail: string,
   poolId: string,
   timeoutMs: number,
-  samProjectId?: string
+  scope: WifTrustScope
 ): Promise<void> {
   // Validate early, before any network calls (fail-fast pattern).
-  if (samProjectId) {
-    assertSafeCelValue(samProjectId, 'samProjectId');
-  }
+  const member = wifServiceAccountMember(projectNumber, poolId, scope);
+  const legacyMember = legacyPoolWideMember(projectNumber, poolId);
 
   const saResource = `projects/${projectId}/serviceAccounts/${saEmail}`;
 
@@ -321,7 +366,10 @@ export async function grantWifUserOnSa(
         Authorization: `Bearer ${oauthToken}`,
         'Content-Type': 'application/json',
       },
-      body: '{}',
+      // Version 3 returns conditional bindings under their real role with a `condition` field.
+      // Without it Google appends `_withcond_<hash>` to the role, and a conditional `pool/*`
+      // grant would escape the removal below.
+      body: JSON.stringify({ options: { requestedPolicyVersion: 3 } }),
     },
     timeoutMs
   );
@@ -342,27 +390,30 @@ export async function grantWifUserOnSa(
     'gcp.iam.service_account_policy'
   );
 
-  // Use subject-scoped principal to prevent cross-project impersonation.
-  // The `sub` claim in the identity token is `project:${samProjectId}`, so the principal
-  // matches only tokens issued for this specific SAM project.
-  const member = samProjectId
-    ? `principal://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/subject/project:${samProjectId}`
-    : `principalSet://iam.googleapis.com/projects/${projectNumber}/locations/global/workloadIdentityPools/${poolId}/*`;
   const role = 'roles/iam.workloadIdentityUser';
 
-  // Check if binding already exists
-  const existingBinding = (policy.bindings || []).find((b) => b.role === role);
-  if (existingBinding?.members?.includes(member)) {
-    return; // Already granted
+  // Grant the scoped member and drop the pool-wide member an earlier user-level setup granted:
+  // while `pool/*` stays, any provider in the pool that still trusts SAM's issuer alone lets
+  // every SAM user impersonate this service account.
+  const roleBindings = (policy.bindings || []).filter((b) => b.role === role);
+  // Only an unconditional grant counts: a member under someone's IAM condition may be denied.
+  const granted = roleBindings.some((b) => b.condition === undefined && b.members.includes(member));
+  const legacyPresent = roleBindings.some((b) => b.members.includes(legacyMember));
+  if (granted && !legacyPresent) {
+    return; // Already granted, nothing to remove
   }
 
-  // Add our binding
-  const bindings = [...(policy.bindings || [])];
-  if (existingBinding) {
-    existingBinding.members.push(member);
-  } else {
-    bindings.push({ role, members: [member] });
+  const bindings = (policy.bindings || []).map((b) =>
+    b.role === role ? { ...b, members: b.members.filter((m) => m !== legacyMember) } : b
+  );
+  if (!granted) {
+    // Never add the member under another binding's IAM condition.
+    const target = bindings.find((b) => b.role === role && b.condition === undefined);
+    if (target) target.members.push(member);
+    else bindings.push({ role, members: [member] });
   }
+  // A binding left with no members after removing `pool/*` is dropped rather than sent empty.
+  const nonEmptyBindings = bindings.filter((b) => b.members.length > 0);
 
   // Write updated policy
   const setUrl = `${IAM_URL}/${saResource}:setIamPolicy`;
@@ -374,7 +425,18 @@ export async function grantWifUserOnSa(
         Authorization: `Bearer ${oauthToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ policy: { bindings, etag: policy.etag } }),
+      body: JSON.stringify({
+        policy: {
+          bindings: nonEmptyBindings,
+          etag: policy.etag,
+          // Conditional bindings can only be written back in a version 3 policy.
+          ...(nonEmptyBindings.some((b) => b.condition !== undefined)
+            ? { version: 3 }
+            : policy.version !== undefined
+              ? { version: policy.version }
+              : {}),
+        },
+      }),
     },
     timeoutMs
   );

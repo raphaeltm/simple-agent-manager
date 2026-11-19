@@ -58,6 +58,18 @@ export const NODE_TEARDOWN_BLOCKED_REASONS = [
   'teardown_delete_refused',
   /** A started provider deletion is still not confirmed by the provider's own record. */
   'teardown_deletion_unconfirmed',
+  /**
+   * Providerless node: its pinned credential row still exists and is enabled, but its secret was
+   * re-saved or rotated after placement. Only that exact generation could prove the node's VM was
+   * never created, so SAM can never finish this node by itself; an operator must attest.
+   */
+  'teardown_credential_generation_changed',
+  /**
+   * Providerless node: the exact credential's complete inventory shows no server for this node.
+   * List absence is never accepted as allocation finality (a late create stays discoverable),
+   * so an operator must attest that the create never produced a server.
+   */
+  'teardown_allocation_unresolved',
 ] as const;
 
 export type NodeTeardownBlockedReason = (typeof NODE_TEARDOWN_BLOCKED_REASONS)[number];

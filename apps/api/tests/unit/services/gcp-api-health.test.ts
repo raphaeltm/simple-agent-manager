@@ -313,7 +313,8 @@ describe('runGcpSetup', () => {
         'oauth-token',
         'owner-project',
         'us-central1-a',
-        setupEnv
+        setupEnv,
+        { userId: 'user-1' }
       );
 
       expect(enabledServices).toEqual([ALL_REQUIRED]);
@@ -326,7 +327,7 @@ describe('runGcpSetup', () => {
     stubGoogleSetup(false, true);
 
     await expect(
-      runGcpSetup('oauth-token', 'owner-project', 'us-central1-a', setupEnv)
+      runGcpSetup('oauth-token', 'owner-project', 'us-central1-a', setupEnv, { userId: 'user-1' })
     ).rejects.toMatchObject({ step: 'enable_apis' });
   });
 });

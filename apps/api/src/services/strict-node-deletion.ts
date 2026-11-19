@@ -4,7 +4,6 @@ import {
   DEFAULT_NODE_PROVIDER_DELETION_REQUEST_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
 import { isUserOwnedNodeClass } from '@simple-agent-manager/shared';
-import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -43,6 +42,10 @@ import {
 } from './strict-node-deletion-shared';
 import { deleteStrictNodeDnsRecord } from './strict-node-dns-cleanup';
 import { reconcileStrictProviderlessVm } from './strict-node-providerless-reconcile';
+import {
+  markRuntimeTerminationConfirmed,
+  markWorkspaceRuntimeTerminationConfirmed,
+} from './strict-node-termination-proof';
 import { destroyVmAgentContainer } from './vm-agent-container';
 
 export type StrictNodeDeletionResult = {
@@ -160,107 +163,6 @@ async function deleteStrictProviderInstance(
     requestContext,
     (provider) =>
       sendProviderDeletion(db, node, provider, deletion.mode, deletion.sendGraceMs, requestContext)
-  );
-}
-
-/**
- * Mark the Cloudflare tunnel of every non-live incarnation of this node for deletion (one D1
- * write; the cron sweep does the Cloudflare I/O, so teardown never waits on that API). Only
- * managed tunnel-transport VM nodes own tunnels: legacy nodes and Instant containers pay
- * nothing, and an incarnation missed here is still found by the sweep's own non-live scan.
- */
-
-async function markWorkspaceRuntimeTerminationConfirmed(
-  db: NodeDb,
-  node: NodeRow,
-  confirmedAt: string
-): Promise<void> {
-  await db
-    .update(schema.workspaces)
-    .set({
-      status: 'deleted',
-      errorMessage: null,
-      runtimeDeletionConfirmedAt: confirmedAt,
-      runtimeDeletionProof: 'node_runtime_terminated',
-      updatedAt: confirmedAt,
-    })
-    .where(
-      and(
-        eq(schema.workspaces.nodeId, node.id),
-        eq(schema.workspaces.userId, node.userId),
-        sql`EXISTS (
-          SELECT 1
-            FROM nodes AS proof_node
-           WHERE proof_node.id = ${node.id}
-             AND proof_node.user_id IS ${node.userId}
-             AND proof_node.status IS ${node.status}
-             AND proof_node.runtime IS ${node.runtime}
-             AND proof_node.provider_instance_id IS ${node.providerInstanceId}
-             AND proof_node.runtime_incarnation_id IS ${node.runtimeIncarnationId}
-             AND proof_node.runtime_termination_confirmed_at IS ${confirmedAt}
-        )`
-      )
-    );
-}
-
-async function markRuntimeTerminationConfirmed(
-  db: NodeDb,
-  node: NodeRow,
-  provenance: 'strict' | 'owner_attested' = 'strict'
-): Promise<string> {
-  await requireSameNodeIncarnation(db, node, 'termination proof write');
-  const confirmedAt = new Date().toISOString();
-  const result = await db
-    .update(schema.nodes)
-    .set({
-      runtimeTerminationConfirmedAt: confirmedAt,
-      // Written in the same CAS as the proof, so a reader can never see the proof
-      // without its provenance. See `isOwnerAttestedTermination`.
-      runtimeTerminationAttestedAt: provenance === 'owner_attested' ? confirmedAt : null,
-      // The deletion this record tracked is now proven; nothing is in flight any more.
-      providerDeletionRequestedAt: null,
-      providerDeletionJson: null,
-    })
-    .where(exactNodeIncarnationPredicate(node))
-    .run();
-  if ((result.meta.changes ?? 0) !== 1) {
-    throw new Error(`Strict node deletion proof CAS failed: node=${node.id}`);
-  }
-  await requireSameNodeIncarnation(
-    db,
-    { ...node, runtimeTerminationConfirmedAt: confirmedAt },
-    'termination proof verification'
-  );
-  await markWorkspaceRuntimeTerminationConfirmed(db, node, confirmedAt);
-  return confirmedAt;
-}
-
-/**
- * The owner states they deleted the server at their provider after SAM's strict
- * teardown could not. Writes the same proof markers as a strict delete, fenced on
- * the exact incarnation the caller loaded, so every proof reader and the shared
- * removal tail treat the node uniformly. Callers must first refuse when the
- * provider positively reports the server still exists (`services/node-manual-deletion.ts`).
- */
-export async function recordOwnerAttestedRuntimeTermination(
-  db: NodeDb,
-  node: NodeRow
-): Promise<string> {
-  return await markRuntimeTerminationConfirmed(db, node, 'owner_attested');
-}
-
-/**
- * True when the node's current termination proof is the owner's attestation, not
- * SAM's strict deletion. Keyed on equality with the proof itself, so any later
- * writer that replaces or clears the proof (re-provisioning, a strict delete,
- * container recovery) ends the attestation without having to know about it.
- */
-export function isOwnerAttestedTermination(
-  node: Pick<NodeRow, 'runtimeTerminationConfirmedAt' | 'runtimeTerminationAttestedAt'>
-): boolean {
-  return (
-    node.runtimeTerminationConfirmedAt !== null &&
-    node.runtimeTerminationAttestedAt === node.runtimeTerminationConfirmedAt
   );
 }
 

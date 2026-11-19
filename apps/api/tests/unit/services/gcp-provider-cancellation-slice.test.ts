@@ -139,13 +139,13 @@ describe('GCP provider credential cancellation wiring', () => {
         mocks.resolveForConsumer.mockResolvedValue(composableGcpResolution());
         return makeCredentialDbMock();
       },
-      expectedCacheUserId: USER_ID,
+      expectedRequester: { cacheUserId: USER_ID, poolOwner: { kind: 'user', userId: USER_ID } },
       expectedSource: 'user',
     },
     {
       name: 'legacy user credential',
       setup: () => makeCredentialDbMock(legacyGcpCredential()),
-      expectedCacheUserId: USER_ID,
+      expectedRequester: { cacheUserId: USER_ID, poolOwner: { kind: 'user', userId: USER_ID } },
       expectedSource: 'user',
     },
     {
@@ -157,19 +157,19 @@ describe('GCP provider credential cancellation wiring', () => {
         });
         return makeCredentialDbMock();
       },
-      expectedCacheUserId: `platform:${USER_ID}`,
+      expectedRequester: { cacheUserId: `platform:${USER_ID}`, poolOwner: { kind: 'platform' } },
       expectedSource: 'platform',
     },
   ])(
     'forwards caller cancellation through the $name token closure',
-    async ({ setup, expectedCacheUserId, expectedSource }) => {
+    async ({ setup, expectedRequester, expectedSource }) => {
       const fetchMock = vi.fn();
       const kvPut = vi.fn();
       vi.stubGlobal('fetch', fetchMock);
       let receivedSignal: AbortSignal | undefined;
       mocks.getGcpAccessToken.mockImplementation(
         (
-          _userId: string,
+          _requester: unknown,
           _projectId: string,
           _credential: unknown,
           _env: unknown,
@@ -207,7 +207,7 @@ describe('GCP provider credential cancellation wiring', () => {
       expect(await validation).toBe(reason);
       expect(receivedSignal).toBe(caller.signal);
       expect(mocks.getGcpAccessToken).toHaveBeenCalledWith(
-        expectedCacheUserId,
+        expectedRequester,
         PROJECT_ID,
         expect.objectContaining({ provider: 'gcp' }),
         expect.any(Object),

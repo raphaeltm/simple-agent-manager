@@ -21,18 +21,15 @@ import {
   NO_DEPLOYMENT_RELOCATION_CLAIM_SQL,
   RECOVER_ERRORED_ENVIRONMENT_SET_SQL,
 } from './deployment-environment-state';
+import type { DeploymentNodeAdmissionRejection } from './deployment-node-admission-result';
 import type { DeploymentPlacement } from './deployment-provisioning';
 import { buildPlacementAuthoritySqlPredicate } from './placement-authority';
 import {
   type CapacityAwareNodePlacementRow,
   resolveReusableNodeCapacitySnapshot,
 } from './placement-resolver';
-import {
-  trustedWorkspaceNodeCapacityColumnsSql,
-} from './workspace-admission-sql';
-import {
-  RESOURCE_REQUIREMENTS_SOURCE_SQL,
-} from './workspace-reservation-usage';
+import { trustedWorkspaceNodeCapacityColumnsSql } from './workspace-admission-sql';
+import { RESOURCE_REQUIREMENTS_SOURCE_SQL } from './workspace-reservation-usage';
 
 /** Default maximum number of deployment environments placed on one deployment node. */
 export const DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE = 5;
@@ -90,6 +87,10 @@ export async function findDeploymentNodeWithCapacity(
     nodeId?: string;
     excludeEnvironmentId?: string;
     nodeMode?: 'shared' | 'exclusive';
+    onRejection?: (
+      reason: DeploymentNodeAdmissionRejection,
+      placement?: DeploymentPlacement
+    ) => void;
   } = {}
 ): Promise<DeploymentNodeMatch | null> {
   const nodeMode = options.nodeMode ?? 'shared';
@@ -101,6 +102,8 @@ export async function findDeploymentNodeWithCapacity(
     return null;
   }
   const policy = resolveWorkspaceAdmissionPolicy(env);
+  // A linked node is sticky across provider priorities; the scheduler checks every
+  // candidate in the effective pool below. Fresh admission stays provider-scoped.
   const nodes = await env.DATABASE.prepare(
     `SELECT n.id,
             n.vm_size AS vmSize,
@@ -137,11 +140,11 @@ export async function findDeploymentNodeWithCapacity(
        AND n.health_status != 'unhealthy'
        AND n.node_role = 'deployment'
        AND COALESCE(n.node_mode, 'shared') = ?
-       AND n.cloud_provider = ?
+       ${options.nodeId ? '' : 'AND n.cloud_provider = ?'}
        ${options.nodeId ? 'AND n.id = ?' : ''}
      ORDER BY n.id`
   )
-    .bind(userId, nodeMode, placement.provider, ...(options.nodeId ? [options.nodeId] : []))
+    .bind(userId, nodeMode, ...(options.nodeId ? [options.nodeId] : [placement.provider]))
     .all<DeploymentNodeCandidate>();
 
   const candidates = nodes.results ?? [];
@@ -173,6 +176,10 @@ export async function findDeploymentNodeWithCapacity(
     rowsByNode.set(row.nodeId, rows);
   }
 
+  let rejection: DeploymentNodeAdmissionRejection = placement.capacityPoolSelection
+    ? 'pool-ineligible'
+    : 'direct-placement';
+  let rejectedPlacement: DeploymentPlacement | undefined;
   const scored = candidates.flatMap((node) => {
     const capacityPlacementSnapshot = resolveReusableNodeCapacitySnapshot({
       selection: placement.capacityPoolSelection,
@@ -181,14 +188,21 @@ export async function findDeploymentNodeWithCapacity(
       requestedVmSize: placement.vmSize,
       requestedReservation: placement.reservation,
     });
-    if (capacityPlacementSnapshot === undefined) return [];
+    if (capacityPlacementSnapshot === undefined) {
+      const failure = classifyReusableNodeRejection(node, placement);
+      rejection = failure.reason;
+      rejectedPlacement = failure.placement;
+      return [];
+    }
     if (
       placement.capacityPoolSelection === null &&
       !directDeploymentNodeMatchesPlacement(node, placement)
     ) {
+      rejection = 'direct-placement';
       return [];
     }
 
+    const currentPlacement = deploymentPlacementForNode(placement, node, capacityPlacementSnapshot);
     const usage = aggregateWorkspaceReservationRows(rowsByNode.get(node.id) ?? []);
     const maxEnvironments =
       nodeMode === 'exclusive'
@@ -197,14 +211,22 @@ export async function findDeploymentNodeWithCapacity(
             env.MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE,
             DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE
           );
-    if (usage.activeCount >= maxEnvironments) return [];
+    if (usage.activeCount >= maxEnvironments) {
+      rejection = 'capacity';
+      rejectedPlacement = currentPlacement;
+      return [];
+    }
     const decision = evaluateWorkspaceReservationCapacity(
       node,
       usage,
       placement.reservation,
       policy
     );
-    if (!decision.admitted) return [];
+    if (!decision.admitted) {
+      rejection = 'capacity';
+      rejectedPlacement = currentPlacement;
+      return [];
+    }
 
     const trusted = resolveTrustedWorkspaceNodeCapacity(node);
     const remainingCpu =
@@ -223,12 +245,24 @@ export async function findDeploymentNodeWithCapacity(
         nodeId: node.id,
         remainingCpu,
         remainingMemory,
-        placement: deploymentPlacementForNode(placement, node, capacityPlacementSnapshot),
+        placement: currentPlacement,
       },
     ];
   });
 
-  if (scored.length === 0) return null;
+  return selectDeploymentNodeMatch(scored, () =>
+    options.onRejection?.(rejection, rejectedPlacement)
+  );
+}
+
+function selectDeploymentNodeMatch(
+  scored: Array<DeploymentNodeMatch & { remainingMemory: number; remainingCpu: number }>,
+  onRejection: () => void
+): DeploymentNodeMatch | null {
+  if (scored.length === 0) {
+    onRejection();
+    return null;
+  }
 
   scored.sort((a, b) => {
     return (
@@ -242,11 +276,27 @@ export async function findDeploymentNodeWithCapacity(
   return selected ? { nodeId: selected.nodeId, placement: selected.placement } : null;
 }
 
+function classifyReusableNodeRejection(
+  node: DeploymentNodeCandidate,
+  placement: DeploymentPlacement
+): { reason: DeploymentNodeAdmissionRejection; placement?: DeploymentPlacement } {
+  const eligible = resolveReusableNodeCapacitySnapshot({
+    selection: placement.capacityPoolSelection,
+    node,
+    projectId: placement.projectId,
+    requestedVmSize: placement.vmSize,
+  });
+  if (eligible !== undefined)
+    return { reason: 'capacity', placement: deploymentPlacementForNode(placement, node, eligible) };
+  return { reason: placement.capacityPoolSelection ? 'pool-ineligible' : 'direct-placement' };
+}
+
 function directDeploymentNodeMatchesPlacement(
   node: DeploymentNodeCandidate,
   placement: DeploymentPlacement
 ): boolean {
   return (
+    node.cloudProvider === placement.provider &&
     node.vmLocation === placement.location &&
     node.providerInstanceType === placement.providerInstanceType &&
     node.providerInstanceBootDiskSizeGb === placement.providerInstanceBootDiskSizeGb &&
@@ -260,8 +310,22 @@ function deploymentPlacementForNode(
   node: DeploymentNodeCandidate,
   capacityPlacementSnapshot: CapacityPlacementSnapshot | null
 ): DeploymentPlacement {
+  const candidate = request.capacityPoolSelection?.candidates.find(
+    (candidate) => candidate.id === capacityPlacementSnapshot?.capacityPoolCandidateId
+  );
   return {
     ...request,
+    provider: candidate?.provider ?? request.provider,
+    credentialSource: candidate?.credentialAttributionSource ?? request.credentialSource,
+    credentialAttributionProjectId:
+      candidate?.credentialAttributionSource === 'project' ? request.projectId : null,
+    placementCredentialSource:
+      capacityPlacementSnapshot?.placementCredentialSource ?? request.placementCredentialSource,
+    placementCredentialReference:
+      capacityPlacementSnapshot?.placementCredentialReference ??
+      request.placementCredentialReference,
+    placementCredentialVersion:
+      capacityPlacementSnapshot?.placementCredentialVersion ?? request.placementCredentialVersion,
     location: node.vmLocation ?? request.location,
     vmSize: node.vmSize ?? request.vmSize,
     providerInstanceType: node.providerInstanceType ?? null,
@@ -302,6 +366,7 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
     workloadRole: 'deployment',
     capacityPlacementSnapshot: placement.capacityPlacementSnapshot,
     requireProjectMembership: true,
+    authorityMode: expectedNodeStatus === 'running' ? 'existing-node' : 'allocation-plan',
   });
   const nativeIdentity = deploymentNativeIdentityPredicate(placement);
   const policy = resolveWorkspaceAdmissionPolicy(env);
@@ -492,6 +557,10 @@ export async function claimDeploymentEnvironmentRelocation(params: {
   reservation: ResolvedResourceReservation;
   releaseId?: string;
 }): Promise<string | null> {
+  const node = await params.env.DATABASE.prepare('SELECT status FROM nodes WHERE id = ?')
+    .bind(params.nodeId)
+    .first<{ status: string }>();
+  if (!node || (node.status !== 'creating' && node.status !== 'running')) return null;
   const authority = buildPlacementAuthoritySqlPredicate({
     nodeAlias: 'n',
     userId: params.userId,
@@ -500,6 +569,7 @@ export async function claimDeploymentEnvironmentRelocation(params: {
     workloadRole: 'deployment',
     capacityPlacementSnapshot: params.placement.capacityPlacementSnapshot,
     requireProjectMembership: true,
+    authorityMode: node.status === 'running' ? 'existing-node' : 'allocation-plan',
   });
   const claimJson = JSON.stringify({
     ...params.reservation,
@@ -526,7 +596,7 @@ export async function claimDeploymentEnvironmentRelocation(params: {
             : ''
         }
         AND de.node_id = ? AND de.resolved_reservation_json IS ?
-        AND n.id = de.node_id
+        AND n.id = de.node_id AND n.status = ?
         AND ${NO_DEPLOYMENT_RELOCATION_CLAIM_SQL}
         ${authority.sql}
       RETURNING id`
@@ -538,6 +608,7 @@ export async function claimDeploymentEnvironmentRelocation(params: {
       ...(params.releaseId ? [params.releaseId] : []),
       params.nodeId,
       params.expectedReservationJson,
+      node.status,
       ...authority.binds
     )
     .first<{ id: string }>();

@@ -67,8 +67,8 @@ describe('runGcpDeploySetup', () => {
       'fake-oauth-token',
       'my-project',
       mockEnv(),
-      (step, status) => progressSteps.push({ step, status }),
-      'sam-project-123'
+      'sam-project-123',
+      { onProgress: (step, status) => progressSteps.push({ step, status }) }
     );
 
     // Verify result
@@ -154,7 +154,8 @@ describe('runGcpDeploySetup', () => {
         GCP_DEPLOY_WIF_POOL_ID: 'custom-pool',
         GCP_DEPLOY_WIF_PROVIDER_ID: 'custom-provider',
         GCP_DEPLOY_SERVICE_ACCOUNT_ID: 'custom',
-      })
+      }),
+      'sam-project-123'
     );
 
     expect(result.wifPoolId).toBe('custom-pool');
@@ -170,7 +171,7 @@ describe('runGcpDeploySetup', () => {
     mockFetch.mockResolvedValueOnce(mockGcpResponse(JSON.parse(rawBody), 403));
 
     try {
-      await runGcpDeploySetup('fake-token', 'my-project', mockEnv());
+      await runGcpDeploySetup('fake-token', 'my-project', mockEnv(), 'sam-project-123');
       expect.fail('Should have thrown');
     } catch (err) {
       expect(err).toBeInstanceOf(GcpApiError);
@@ -202,7 +203,7 @@ describe('runGcpDeploySetup', () => {
     mockFetch.mockResolvedValueOnce(mockGcpResponse(JSON.parse(rawBody), 403));
 
     try {
-      await runGcpDeploySetup('fake-token', 'p1', mockEnv());
+      await runGcpDeploySetup('fake-token', 'p1', mockEnv(), 'sam-project-123');
       expect.fail('Should have thrown');
     } catch (err) {
       expect(err).toBeInstanceOf(GcpApiError);

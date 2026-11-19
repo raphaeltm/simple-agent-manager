@@ -706,8 +706,15 @@ reason a new machine can appear while an existing one still looks roomy. The poo
 [**Deployment strategy**](#the-four-policy-fields) only orders the _provisioning_ step; under its
 **Smallest fit** default that means the smallest allowed machine that can hold the deployment.
 
-A deployment **with** persistent volumes skips that search entirely and always gets its own
-machine — see below.
+On a new release, a healthy linked deployment node stays in use while it matches any candidate
+in the effective pool and has room for the declared reservation. Adding a provider or changing
+provider priorities does not move an eligible deployment. The preferred candidate is used when
+a fresh machine must be provisioned.
+
+A deployment **with** persistent volumes gets an exclusive machine. New releases keep that
+machine under the same eligibility and capacity checks. Existing volumes pin release placement
+and any newly declared volumes to their provider and location. If the pool no longer allows that
+placement, the release fails rather than moving the volumes to another provider.
 
 What drives the size is your **deployment manifest**:
 
