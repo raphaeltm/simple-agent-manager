@@ -58,13 +58,13 @@ export const BOX_LISTEN_ADDRESSES: readonly string[] = ['SAM_MX_LISTEN'];
  * Listeners of services that run with no capability (docker-compose.yml cap_drop: [ALL]), so
  * they cannot bind a privileged port.
  */
-const UNPRIVILEGED_LISTENERS: readonly string[] = [
+const UNPRIVILEGED_LISTENERS: ReadonlySet<string> = new Set([
   'CELLD_PORT',
   'CELLD_INTERNAL_PORT',
   'FRPS_BIND_PORT',
   'MAIL_COLLECTOR_SMTP_PORT',
   'MAIL_COLLECTOR_UI_PORT',
-];
+]);
 
 /**
  * The box settings with the values docker compose will actually run with. Compose takes every
@@ -150,7 +150,7 @@ const PORT = { min: 1024, max: 65535 };
 /** A box listener's port (BOX_RESERVED_PORTS), from the setting or its compose default. */
 function boxPort(box: Readonly<Record<string, string>>, name: string, fallback: number): number {
   const raw = box[name];
-  const bounds = UNPRIVILEGED_LISTENERS.includes(name) ? PORT : { min: 1, max: 65535 };
+  const bounds = UNPRIVILEGED_LISTENERS.has(name) ? PORT : { min: 1, max: 65535 };
   if (!BOX_LISTEN_ADDRESSES.includes(name) || raw === undefined || raw === '') {
     return integer(raw, fallback, name, bounds);
   }

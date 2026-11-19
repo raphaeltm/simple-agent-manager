@@ -46,6 +46,7 @@ case "${SAM_FRP_LOGIN_RATE_LIMIT_EVENTS:-60}" in
 	echo "caddy: SAM_FRP_LOGIN_RATE_LIMIT_EVENTS must be a positive integer" >&2
 	exit 64
 	;;
+*) ;;
 esac
 case "${SAM_FRP_LOGIN_RATE_LIMIT_WINDOW:-1m}" in
 [1-9]s | [1-9][0-9]s | [1-9]m | [1-9][0-9]m | 1h) ;;
@@ -69,6 +70,7 @@ for bound in "$start" "$end"; do
 		echo "caddy: REVERSE_TUNNEL_PORT_RANGE_START/END missing from gateway.env or not a number; run pnpm selfhost:deploy --init" >&2
 		exit 64
 		;;
+	*) ;;
 	esac
 done
 # SAM_MX_LISTEN is a listen address ([host]:port): its port is the part after the last ':'. sam-mx
@@ -90,6 +92,7 @@ for name in HTTP_PORT HTTPS_PORT CELLD_PORT CELLD_INTERNAL_PORT FRPS_BIND_PORT O
 		echo "caddy: $name must be set to a port number (docker-compose.yml passes every box port)" >&2
 		exit 64
 		;;
+	*) ;;
 	esac
 	if [ "$port" -ge "$start" ] && [ "$port" -le "$end" ]; then
 		echo "caddy: $name ($port) lies inside the reverse-tunnel range $start-$end; a node could be leased it. Change the port or REVERSE_TUNNEL_PORT_RANGE_START/END, then pnpm selfhost:deploy --init" >&2

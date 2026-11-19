@@ -44,13 +44,13 @@ export const skipWithoutDocker = !hasDocker && !process.env.CI;
  * Host variables a test child process may inherit (as the deploy's celldChildEnv does): what the
  * tools need to run and find their caches. Host secrets and cloud credentials stay out.
  */
-const INHERITED_ENV = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'RUST_LOG'];
+const INHERITED_ENV: ReadonlySet<string> = new Set(['PATH', 'HOME', 'TMPDIR', 'LANG', 'RUST_LOG']);
 
 /** The allowlisted host environment (plus any DOCKER_* setting) with `extra` on top. */
 export function childEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [name, value] of Object.entries(process.env)) {
-    if (value !== undefined && (INHERITED_ENV.includes(name) || name.startsWith('DOCKER_'))) {
+    if (value !== undefined && (INHERITED_ENV.has(name) || name.startsWith('DOCKER_'))) {
       env[name] = value;
     }
   }

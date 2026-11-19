@@ -59,9 +59,9 @@ NODE_ROLES=(roles/compute.instanceAdmin.v1 roles/compute.securityAdmin)
 
 die() { echo "gcp-bootstrap: $*" >&2; exit 1; }
 # `--flag value`: refuse a trailing flag with no value instead of failing on `shift 2`.
-need_value() { [ "$2" -ge 2 ] || die "$1 needs a value (see --help)"; }
+need_value() { [[ "$2" -ge 2 ]] || die "$1 needs a value (see --help)"; }
 
-while [ $# -gt 0 ]; do
+while [[ $# -gt 0 ]]; do
   case "$1" in
     --) shift ;;
     --project) need_value "$1" $#; PROJECT="$2"; shift 2 ;;
@@ -79,10 +79,13 @@ done
 
 # grep checks below are line by line: refuse any value with a newline before they run.
 for value in "$PROJECT" "$API_URL" "$POOL_ID" "$PROVIDER_ID" "$SA_ID"; do
-  case "$value" in *$'\n'*|*$'\r'*) die "arguments must not contain line breaks" ;; esac
+  case "$value" in
+    *$'\n'*|*$'\r'*) die "arguments must not contain line breaks" ;;
+    *) ;;
+  esac
 done
-[ -n "$PROJECT" ] || die "--project is required"
-[ -n "$API_URL" ] || die "--api-url is required (https://api.<your SAM domain>)"
+[[ -n "$PROJECT" ]] || die "--project is required"
+[[ -n "$API_URL" ]] || die "--api-url is required (https://api.<your SAM domain>)"
 ISSUER="${API_URL%/}"
 case "$ISSUER" in
   https://api.*) ;;
@@ -95,7 +98,7 @@ printf '%s' "$PROJECT" | grep -Eq '^[a-z][a-z0-9-]{4,28}[a-z0-9]$' || die "inval
 
 if command -v sha256sum >/dev/null 2>&1; then hash_cmd=(sha256sum); else hash_cmd=(shasum -a 256); fi
 INSTALL_HASH="$(printf '%s' "$ISSUER" | "${hash_cmd[@]}" | cut -c1-8)"
-[ -n "$POOL_ID" ] || POOL_ID="sam-${INSTALL_HASH}"
+[[ -n "$POOL_ID" ]] || POOL_ID="sam-${INSTALL_HASH}"
 printf '%s' "$POOL_ID" | grep -Eq '^[a-z][a-z0-9-]{3,31}$' || die "invalid --pool-id: $POOL_ID"
 printf '%s' "$PROVIDER_ID" | grep -Eq '^[a-z][a-z0-9-]{3,31}$' || die "invalid --provider-id: $PROVIDER_ID"
 printf '%s' "$SA_ID" | grep -Eq '^[a-z][a-z0-9-]{5,29}$' || die "invalid --service-account: $SA_ID"
@@ -104,7 +107,7 @@ CONDITION="assertion.iss == '${ISSUER}'"
 
 # Read-only calls run in every mode; changes go through `change`.
 change() {
-  if [ "$DRY_RUN" -eq 1 ]; then
+  if [[ "$DRY_RUN" -eq 1 ]]; then
     printf 'would run: gcloud'; printf ' %q' "$@"; printf '\n'
   else
     gcloud "$@"
@@ -116,7 +119,7 @@ change_retry() {
   local attempt
   for attempt in 1 2 3 4 5; do
     change "$@" && return 0
-    [ "$attempt" -lt 5 ] && sleep "${GCP_BOOTSTRAP_RETRY_SECONDS:-5}"
+    [[ "$attempt" -lt 5 ]] && sleep "${GCP_BOOTSTRAP_RETRY_SECONDS:-5}"
   done
   return 1
 }
@@ -124,7 +127,7 @@ change_retry() {
 command -v gcloud >/dev/null 2>&1 || die "gcloud is not installed or not on PATH"
 
 # The OIDC provider trusts the issuer the install advertises: check it before trusting it.
-if [ "$CHECK_ISSUER" -eq 1 ]; then
+if [[ "$CHECK_ISSUER" -eq 1 ]]; then
   discovery="$(curl -fsS --max-time 10 "${ISSUER}/.well-known/openid-configuration" 2>/dev/null)" \
     || die "could not read ${ISSUER}/.well-known/openid-configuration: the node setup trusts this install's token issuer, so it runs once the install answers (after \`pnpm selfhost:deploy\`; README order). --skip-issuer-check skips the check if you are sure ${ISSUER} is right."
   issuer_re="$(printf '%s' "$ISSUER" | sed 's/[.]/\\./g')"
@@ -134,7 +137,7 @@ fi
 
 PROJECT_NUMBER="$(gcloud projects describe "$PROJECT" --format='value(projectNumber)' 2>/dev/null)" \
   || die "cannot read project ${PROJECT}; run 'gcloud auth login' as a project owner"
-[ -n "$PROJECT_NUMBER" ] || die "project ${PROJECT} has no project number"
+[[ -n "$PROJECT_NUMBER" ]] || die "project ${PROJECT} has no project number"
 
 echo "Project ${PROJECT} (${PROJECT_NUMBER}), issuer ${ISSUER}, pool ${POOL_ID}"
 echo "Note: use a project dedicated to SAM nodes. The node service account's roles apply to the whole project, so in a shared project it could also change the box VM and its firewall."
@@ -147,7 +150,7 @@ change services enable "${NODE_APIS[@]}" --project="$PROJECT"
 # "exists" would then try to create a provider in a deleted pool (R13 D5).
 if pool_state="$(gcloud iam workload-identity-pools describe "$POOL_ID" --project="$PROJECT" \
   --location=global --format='value(state)' 2>/dev/null)"; then
-  [ "$pool_state" != "DELETED" ] \
+  [[ "$pool_state" != "DELETED" ]] \
     || die "workload identity pool ${POOL_ID} was deleted (Google keeps a deleted pool for 30 days, and its id cannot be reused until it is purged). Either undelete it: gcloud iam workload-identity-pools undelete ${POOL_ID} --project=${PROJECT} --location=global, then run this again; or pass --pool-id <a new id> and put the new values in the platform credential (Admin -> Credentials)."
   # The service account binding below is pool-wide, so every provider in the pool would be
   # admitted: reuse the pool only when each provider in it (deleted ones too, which can be
@@ -156,8 +159,8 @@ if pool_state="$(gcloud iam workload-identity-pools describe "$POOL_ID" --projec
     --location=global --workload-identity-pool="$POOL_ID" --show-deleted \
     --format='value(name,oidc.issuerUri)')" || die "cannot list the providers of pool ${POOL_ID}"
   while IFS=$'\t' read -r provider_name provider_issuer; do
-    [ -n "$provider_name" ] || continue
-    if [ "${provider_name##*/}" != "$PROVIDER_ID" ] || [ "$provider_issuer" != "$ISSUER" ]; then
+    [[ -n "$provider_name" ]] || continue
+    if [[ "${provider_name##*/}" != "$PROVIDER_ID" ]] || [[ "$provider_issuer" != "$ISSUER" ]]; then
       die "pool ${POOL_ID} is not dedicated to this install: its provider ${provider_name##*/} already trusts ${provider_issuer:-a non-OIDC issuer}, and the node service account would admit every provider in the pool. Use another --pool-id."
     fi
   done <<<"$pool_providers"
@@ -171,12 +174,12 @@ fi
 if provider_state="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
   --project="$PROJECT" --location=global --workload-identity-pool="$POOL_ID" \
   --format='value(state)' 2>/dev/null)"; then
-  [ "$provider_state" != "DELETED" ] \
+  [[ "$provider_state" != "DELETED" ]] \
     || die "provider ${POOL_ID}/${PROVIDER_ID} was deleted (Google keeps it for 30 days). Undelete it: gcloud iam workload-identity-pools providers undelete ${PROVIDER_ID} --workload-identity-pool=${POOL_ID} --project=${PROJECT} --location=global, then run this again; or pass --provider-id <a new id>."
   current="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
     --project="$PROJECT" --location=global --workload-identity-pool="$POOL_ID" \
     --format='value(oidc.issuerUri)')"
-  [ "$current" = "$ISSUER" ] \
+  [[ "$current" = "$ISSUER" ]] \
     || die "provider ${POOL_ID}/${PROVIDER_ID} already trusts ${current}, not ${ISSUER}; refusing to retarget it. Use another --pool-id."
   echo "provider ${PROVIDER_ID}: exists, issuer ${ISSUER}"
 else
@@ -216,7 +219,7 @@ change_retry iam service-accounts add-iam-policy-binding "$SA_EMAIL" --project="
   --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/*" \
   --condition=None --quiet --format=none
 
-[ "$DRY_RUN" -eq 1 ] && echo "Dry run: nothing was changed."
+[[ "$DRY_RUN" -eq 1 ]] && echo "Dry run: nothing was changed."
 # The shape parseGcpCredential (apps/api/src/services/provider-credential-codecs.ts) reads.
 cat <<EOF
 
