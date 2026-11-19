@@ -157,8 +157,18 @@ describe('pnpm selfhost:gcp-bootstrap', () => {
       other
     );
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain(`already trusts ${ISSUER}`);
+    expect(result.stderr).toContain(`provider sam-api trusts ${ISSUER}, not ${other}`);
     expect(gcp().providers['sam-api'].issuer).toBe(ISSUER);
+  });
+
+  it('says a failed first IAM binding on the new service account is being retried', () => {
+    const result = run(['--project', 'sam-vm-test', '--api-url', ISSUER], ISSUER, {
+      FAKE_GCLOUD_FAIL_ONCE: 'projects add-iam-policy-binding',
+      GCP_BOOTSTRAP_RETRY_SECONDS: '0',
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('Retrying in 0s (attempt 1 of 5)');
+    expect(gcp().bindings.length).toBeGreaterThan(0);
   });
 
   // S1: the node service account binding is pool-wide, so a reused pool must hold nothing but
@@ -185,9 +195,8 @@ describe('pnpm selfhost:gcp-bootstrap', () => {
       seedPool({ 'github-actions': { issuer: 'https://token.actions.githubusercontent.com' } });
       const result = run(args);
       expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain('pool sam-shared is not dedicated to this install');
       expect(result.stderr).toContain(
-        'provider github-actions already trusts https://token.actions.githubusercontent.com'
+        'pool sam-shared holds provider github-actions (issuer https://token.actions.githubusercontent.com) besides sam-api'
       );
       expect(changes(result)).toEqual([]);
       expect(gcp().bindings).toEqual([]);
@@ -197,7 +206,9 @@ describe('pnpm selfhost:gcp-bootstrap', () => {
       seedPool({ 'sam-api': { issuer: ISSUER }, 'sam-api-2': { issuer: ISSUER } });
       const result = run(args);
       expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain('provider sam-api-2 already trusts');
+      expect(result.stderr).toContain(
+        `holds provider sam-api-2 (issuer ${ISSUER}) besides sam-api`
+      );
       expect(changes(result)).toEqual([]);
     });
 
@@ -205,7 +216,9 @@ describe('pnpm selfhost:gcp-bootstrap', () => {
       seedPool({ other: { issuer: 'https://idp.example.com', state: 'DELETED' } });
       const result = run(args);
       expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain('provider other already trusts https://idp.example.com');
+      expect(result.stderr).toContain(
+        'holds provider other (issuer https://idp.example.com) besides sam-api'
+      );
       expect(changes(result)).toEqual([]);
     });
 

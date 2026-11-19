@@ -26,6 +26,13 @@ const fail = (message) => {
   process.exit(1);
 };
 const out = (text) => process.stdout.write(`${text}\n`);
+// FAKE_GCLOUD_FAIL_ONCE=<command prefix>: the first matching call fails, as a new service
+// account's first IAM binding does on real GCP while it propagates.
+const failOnce = process.env.FAKE_GCLOUD_FAIL_ONCE;
+if (failOnce && cmd.startsWith(failOnce) && !existsSync(join(STATE, 'failed-once'))) {
+  writeFileSync(join(STATE, 'failed-once'), cmd);
+  fail('Service account does not exist (propagating)');
+}
 const format = flag('format') ?? '';
 
 if (cmd.startsWith('projects describe')) out('123456789012');

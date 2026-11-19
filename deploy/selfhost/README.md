@@ -22,7 +22,9 @@ DNS of their own. The fleet bucket (`CELLD_BUCKET`) is the durable copy of every
 ## Prerequisites
 
 - A Linux VM (GCE is what the team tests) with Docker Engine and the Compose plugin, Node.js 22,
-  pnpm 9 and git, and a checkout of this repository.
+  pnpm 9, git, a C/C++ build toolchain (`make`, `g++`, `python3`; on Ubuntu
+  `apt-get install build-essential`: `pnpm install` compiles `better-sqlite3`), and a checkout of
+  this repository.
 - A domain with a wildcard record `*.SAM_DOMAIN` pointing at the VM. SAM serves `api.`, `app.`,
   `ws-<id>.` and `ws-<id>--<port>.` under it; the apex is unused.
 - Inbound TCP 80 and 443 to the VM (and 25 for inbound agent email).
@@ -44,7 +46,8 @@ From the repository root on the VM:
 2. `cp deploy/selfhost/.env.example deploy/selfhost/.env && chmod 600 deploy/selfhost/.env`, then
    edit it. The comments in `.env.example` explain every setting. The bucket credential in it can
    read every Worker secret, so the file must stay private (the scripts refuse a readable one).
-3. Optional: secrets for the Worker go in `deploy/selfhost/.state/secrets.env` (mode 0600), for
+3. Optional: secrets for the Worker go in `deploy/selfhost/.state/secrets.env` (mode 0600; create
+   the directory first with `mkdir -m 700 deploy/selfhost/.state`), for
    example `SMTP_PASSWORD=...` and `BOOTSTRAP_OWNER_EMAIL=you@example.com`. With an owner email set,
    only that address can claim the new install by signing in with an emailed code.
 4. `pnpm selfhost:deploy --init`: generates the platform keys (`.state/platform-keys.json`; back
@@ -64,7 +67,14 @@ From the repository root on the VM:
    It runs after step 7 because it checks the token issuer the running install advertises. It
    creates a workload identity pool and provider trusting only this install, and a node service
    account, then prints the credential JSON to paste in **Admin -> Credentials** (Cloud Provider,
-   GCP). Add machines to the installation pool in **Admin -> Infrastructure**.
+   GCP). Add machines to the installation pool in **Admin -> Infrastructure**. For the first
+   few minutes after the credential is added, Google is still propagating the new service
+   account: the box logs impersonation 403s and the pool shows `migration-pending` until the
+   catalog publishes on its own. If the first price refresh falls in that window, machines show
+   "Price unavailable" until the next retry (`gcpCatalog.priceRetryMinutes`, 60 by default).
+   A node created through the API without `vmLocation` defaults to a Hetzner location (`nbg1`),
+   so pass a zone the pool offers. A previously deleted pool id is refused (Google keeps it for 30 days); pass a new
+   `--pool-id`.
    **Use a GCP project dedicated to SAM's nodes**, not the box's: the node service account's
    roles apply to the whole project, so in a shared project it could change or delete the box VM
    and its firewall. An existing `--pool-id` is reused only when its sole provider is this
@@ -189,7 +199,10 @@ bucket's deploy manifests, so the bucket credential is the install's master key.
   network or the cloud metadata server on the box.
 - **Sealed secrets**: no key agent or KMS-backed encryption of the Worker's secrets.
 - **Guided credential login** (sandboxed agent sign-in on the box).
-- **Hosted git.**
+- **Hosted git.** Every project needs a repository, so on this install users can create projects
+  and run agents only once a GitHub App (the `GITHUB_*` Worker secrets in `.state/secrets.env`)
+  or a GitLab integration is configured.
+  Without one, sign-in, administration and nodes work, but no agent session can start.
 - **Backup, restore and teardown** commands. Back up the fleet bucket and `.state/` yourself.
 
 Do not put data on this box that you could not afford to lose or leak.

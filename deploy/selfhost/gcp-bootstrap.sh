@@ -119,7 +119,9 @@ change_retry() {
   local attempt
   for attempt in 1 2 3 4 5; do
     change "$@" && return 0
-    [[ "$attempt" -lt 5 ]] && sleep "${GCP_BOOTSTRAP_RETRY_SECONDS:-5}"
+    [[ "$attempt" -lt 5 ]] || break
+    echo "Retrying in ${GCP_BOOTSTRAP_RETRY_SECONDS:-5}s (attempt ${attempt} of 5): a new service account takes a few seconds to appear to IAM, so the error above is expected once."
+    sleep "${GCP_BOOTSTRAP_RETRY_SECONDS:-5}"
   done
   return 1
 }
@@ -160,8 +162,11 @@ if pool_state="$(gcloud iam workload-identity-pools describe "$POOL_ID" --projec
     --format='value(name,oidc.issuerUri)')" || die "cannot list the providers of pool ${POOL_ID}"
   while IFS=$'\t' read -r provider_name provider_issuer; do
     [[ -n "$provider_name" ]] || continue
-    if [[ "${provider_name##*/}" != "$PROVIDER_ID" ]] || [[ "$provider_issuer" != "$ISSUER" ]]; then
-      die "pool ${POOL_ID} is not dedicated to this install: its provider ${provider_name##*/} already trusts ${provider_issuer:-a non-OIDC issuer}, and the node service account would admit every provider in the pool. Use another --pool-id."
+    if [[ "${provider_name##*/}" != "$PROVIDER_ID" ]]; then
+      die "pool ${POOL_ID} holds provider ${provider_name##*/} (issuer ${provider_issuer:-not OIDC}) besides ${PROVIDER_ID}, deleted providers included, and the node service account would admit every provider in the pool. Use another --pool-id."
+    fi
+    if [[ "$provider_issuer" != "$ISSUER" ]]; then
+      die "pool ${POOL_ID} is not dedicated to this install: its provider ${PROVIDER_ID} trusts ${provider_issuer:-a non-OIDC issuer}, not ${ISSUER}. Use another --pool-id."
     fi
   done <<<"$pool_providers"
   echo "pool ${POOL_ID}: exists"
