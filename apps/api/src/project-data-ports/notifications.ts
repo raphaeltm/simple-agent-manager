@@ -1,5 +1,6 @@
+import type { NotificationsPort } from '@simple-agent-manager/project-data';
+
 import type { NotificationService } from '../durable-objects/notification';
-import type { NotificationsPort } from '../durable-objects/project-data/ports';
 import type { ProjectDataEnv } from '../durable-objects/project-data/types';
 
 function notificationStub(

@@ -165,12 +165,18 @@ describe('a slept VM task is woken through the durable prompt queue', () => {
       await runDeliveryAlarm();
 
       expect(recovery.ensure).toHaveBeenCalledOnce();
-      expect(recovery.ensure).toHaveBeenCalledWith(env, PROJECT, CHAT, {
-        taskId: TASK,
-        projectId: PROJECT,
-        chatSessionId: CHAT,
-        requiredProjectMemberId: USER,
-      });
+      expect(recovery.ensure).toHaveBeenCalledWith(
+        env,
+        PROJECT,
+        CHAT,
+        {
+          taskId: TASK,
+          projectId: PROJECT,
+          chatSessionId: CHAT,
+          requiredProjectMemberId: USER,
+        },
+        { isDeliveryStillAuthorized: expect.any(Function) }
+      );
       // A wake in progress keeps the message queued for retry rather than failing it.
       expect(inbox('scheduled_action')).toEqual([
         { target: CHAT, sourceTask: TASK, state: 'retry_wait' },
@@ -287,12 +293,18 @@ describe('a slept VM task is woken through the durable prompt queue', () => {
       await runDeliveryAlarm();
 
       expect(recovery.ensure).toHaveBeenCalledOnce();
-      expect(recovery.ensure).toHaveBeenCalledWith(env, PROJECT, CHAT, {
-        taskId: TASK,
-        projectId: PROJECT,
-        chatSessionId: CHAT,
-        projectEventWake: { batchId: expect.any(String), subscriptionId: subscription.id },
-      });
+      expect(recovery.ensure).toHaveBeenCalledWith(
+        env,
+        PROJECT,
+        CHAT,
+        {
+          taskId: TASK,
+          projectId: PROJECT,
+          chatSessionId: CHAT,
+          projectEventWake: { batchId: expect.any(String), subscriptionId: subscription.id },
+        },
+        { isDeliveryStillAuthorized: expect.any(Function) }
+      );
       expect(inbox('project_event_wake')).toEqual([
         { target: CHAT, sourceTask: TASK, state: 'retry_wait' },
       ]);

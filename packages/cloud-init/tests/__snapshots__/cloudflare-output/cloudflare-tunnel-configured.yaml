@@ -1,0 +1,731 @@
+#cloud-config
+
+# Skip default apt-get update/upgrade — the vm-agent handles package installs.
+# Without this, cloud-init blocks runcmd for 5-10 min on apt operations.
+package_update: false
+package_upgrade: false
+
+hostname: node-01snapshotnode0000000000000
+
+users:
+  - name: workspace
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+
+runcmd:
+  # =====================================================================
+  # Cloud-init keeps bootstrap minimal: download vm-agent, perform
+  # start vm-agent, then perform role-specific service setup required before
+  # traffic can be served. The agent handles Docker, firewall, Node.js, release
+  # apply, and heartbeats; release apply remains retryable while role-specific
+  # dependencies are still converging.
+  # =====================================================================
+
+  # Disable automatic OS upgrades — ephemeral VMs gain nothing from them
+  # and unattended-upgrades can trigger systemd daemon-reexec which kills
+  # the vm-agent mid-work. Must run before vm-agent starts.
+  - systemctl disable --now apt-daily.timer apt-daily-upgrade.timer || true
+  - systemctl disable --now unattended-upgrades || true
+  - chage -E -1 -M -1 -d "$(date +%Y-%m-%d)" root || true
+
+  - 'logger -t sam-boot "PHASE START: swap-setup"'
+  - |
+    SWAP_SIZE_MB="2048"
+    SWAP_SWAPPINESS="60"
+    if [ "$SWAP_SIZE_MB" -gt 0 ] 2>/dev/null; then
+      logger -t sam-boot "Configuring ${SWAP_SIZE_MB}MB swap file"
+      fallocate -l "${SWAP_SIZE_MB}M" /swapfile
+      chmod 600 /swapfile
+      mkswap /swapfile
+      swapon /swapfile
+      echo '/swapfile none swap sw 0 0' >> /etc/fstab
+      sysctl -w "vm.swappiness=${SWAP_SWAPPINESS}"
+      logger -t sam-boot "Swap configured: ${SWAP_SIZE_MB}MB, swappiness=${SWAP_SWAPPINESS}"
+    else
+      logger -t sam-boot "Swap disabled (SWAP_SIZE_MB=0)"
+    fi
+  - 'logger -t sam-boot "PHASE END: swap-setup"'
+
+  - 'logger -t sam-boot "PHASE START: vm-agent-download"'
+  - mkdir -p /var/lib/vm-agent /etc/sam/tls /etc/sam/firewall /etc/sam/cloudflared
+  - |
+    ARCH=$(uname -m)
+    case $ARCH in
+      x86_64) ARCH="amd64" ;;
+      aarch64) ARCH="arm64" ;;
+    esac
+    logger -t sam-boot "Downloading vm-agent for arch=$ARCH"
+    curl_output=$(mktemp)
+    if curl --max-time 60 -fLo /usr/local/bin/vm-agent "https://api.example.com/api/agent/download?arch=${ARCH}&release=0123456789abcdef0123456789abcdef01234567" >"$curl_output" 2>&1; then
+      cat "$curl_output" | logger -t sam-boot
+      rm -f "$curl_output"
+    else
+      curl_status=$?
+      cat "$curl_output" | logger -t sam-boot
+      rm -f "$curl_output"
+      logger -t sam-boot "vm-agent download failed status=$curl_status"
+      /usr/local/sbin/sam-boot-failure vm_agent_download
+      exit "$curl_status"
+    fi
+    chmod +x /usr/local/bin/vm-agent
+    logger -t sam-boot "vm-agent binary downloaded, size=$(stat -c%s /usr/local/bin/vm-agent 2>/dev/null || echo unknown)"
+  - 'logger -t sam-boot "PHASE END: vm-agent-download"'
+
+  - 'logger -t sam-boot "PHASE START: tunnel-bootstrap"'
+  - |
+    case $(uname -m) in
+      x86_64) CF_ARCH=amd64 CF_SHA256=1f99fb518b83dec2ba8d870a7cc991d82a77e6196295a3d2754ba17ab9f91872 ;;
+      aarch64) CF_ARCH=arm64 CF_SHA256=3df43aedc9ff291d1735b5cb576cb97e0b157488796db2e32b28aecabb445775 ;;
+      *) CF_ARCH="" ;;
+    esac
+    CF_TMP=$(mktemp)
+    if [ -z "$CF_ARCH" ] || ! curl --max-time 60 -fsSLo "$CF_TMP" "https://github.com/cloudflare/cloudflared/releases/download/2026.10.7/cloudflared-linux-$CF_ARCH" ||
+      [ "$(sha256sum "$CF_TMP" | cut -d' ' -f1)" != "$CF_SHA256" ]; then
+      rm -f "$CF_TMP"
+      /usr/local/sbin/sam-boot-failure cloudflared_install
+      exit 1
+    fi
+    install -m 0755 "$CF_TMP" /usr/local/bin/cloudflared
+    rm -f "$CF_TMP"
+    id sam-cloudflared >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin sam-cloudflared
+    (umask 077; printf '%s' 'eyJhIjoiZml4dHVyZS1hY2NvdW50IiwidCI6ImZpeHR1cmUtdHVubmVsIiwicyI6ImZpeHR1cmUtc2VjcmV0In0=' > /etc/sam/cloudflared/tunnel-token)
+    chown sam-cloudflared /etc/sam/cloudflared/tunnel-token
+    chmod 0400 /etc/sam/cloudflared/tunnel-token
+    if ! /etc/sam/firewall/setup-firewall.sh; then
+      /usr/local/sbin/sam-boot-failure tunnel_firewall
+      exit 1
+    fi
+    logger -t sam-boot "cloudflared installed (sha256 verified); public agent/SSH ingress closed"
+  - 'logger -t sam-boot "PHASE END: tunnel-bootstrap"'
+
+  - 'logger -t sam-boot "PHASE START: resource-headroom"'
+  - /usr/local/sbin/sam-configure-docker-memory.sh || exit $?
+  - 'logger -t sam-boot "PHASE END: resource-headroom"'
+
+  - 'logger -t sam-boot "PHASE START: vm-agent-start"'
+  - systemctl daemon-reload
+  - systemctl enable vm-agent
+  - systemctl start vm-agent
+  - 'logger -t sam-boot "PHASE END: vm-agent-start"'
+
+  - 'logger -t sam-boot "PHASE START: tunnel-connector"'
+  - |
+    if ! systemctl enable --now sam-cloudflared.service; then
+      /usr/local/sbin/sam-boot-failure tunnel_connector
+      exit 1
+    fi
+  - 'logger -t sam-boot "PHASE END: tunnel-connector"'
+
+  - 'logger -t sam-boot "PHASE START: caddy-setup"'
+  - |
+    set -eu
+    ROLE=""
+    if [ "$ROLE" = "deployment" ]; then
+      logger -t sam-boot "Preparing Caddy paths for deployment node routing"
+      mkdir -p /etc/caddy /var/lib/caddy /var/log/caddy
+      logger -t sam-boot "Caddy paths ready; vm-agent owns Caddy install/start"
+    else
+      logger -t sam-boot "Skipping Caddy setup for ROLE=$ROLE"
+    fi
+  - 'logger -t sam-boot "PHASE END: caddy-setup"'
+  - 'logger -t sam-boot "ALL PHASES COMPLETE"'
+
+write_files:
+  - path: /etc/systemd/system/vm-agent.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=VM Agent
+      After=network.target
+
+      [Service]
+      Type=simple
+      User=root
+      Environment=NODE_ID=01SNAPSHOTNODE0000000000000
+      Environment=NODE_USER_ID=user-snapshot
+      Environment=NODE_RUNTIME_INCARNATION_ID=incarnation-snapshot
+      Environment=CONTROL_PLANE_URL=https://api.example.com
+      Environment=JWKS_ENDPOINT=https://api.example.com/.well-known/jwks.json
+      Environment=CALLBACK_TOKEN_FILE=/etc/sam/callback-token
+      Environment=PROJECT_ID=
+      Environment=CHAT_SESSION_ID=
+      Environment=TASK_ID=
+      Environment=TASK_MODE=task
+      Environment=VM_AGENT_PORT=8080
+      Environment=VM_AGENT_TUNNEL_ENABLED=true
+      Environment=VM_AGENT_TUNNEL_PORT=8555
+      Environment=TLS_CERT_PATH=
+      Environment=TLS_KEY_PATH=
+      Environment=PROVIDER=hetzner
+      Environment=DEVCONTAINER_CACHE_ENABLED=false
+      Environment=WORKSPACE_BUILD_QUEUE_DEPTH=1
+      Environment=ROLE=
+      Environment=NODE_ROLE=
+      Environment=ENVIRONMENT_ID=
+      Environment=DEPLOY_SIGNING_PUB_KEY=
+      Environment=DEPLOY_ACME_EMAIL=
+      Environment=DEPLOY_ACME_CA=
+      Environment="DEPLOY_COMPOSE_CMD="
+      Environment=DEPLOY_HEALTH_TIMEOUT=
+      Environment=SESSION_SNAPSHOT_OPERATION_TIMEOUT=15m
+      Environment=SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL=15s
+      Environment=SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT=5s
+      Environment=ERROR_REPORT_FLUSH_INTERVAL=30s
+      Environment=ERROR_REPORT_MAX_BATCH_SIZE=10
+      Environment=ERROR_REPORT_MAX_BATCH_BYTES=32768
+      Environment=ERROR_REPORT_MAX_QUEUE_SIZE=1000
+      Environment=ERROR_REPORT_HTTP_TIMEOUT=10s
+      Environment=ERROR_REPORT_RETRY_INITIAL=1s
+      Environment=ERROR_REPORT_RETRY_MAX=5m
+      Environment=ERROR_REPORT_MAX_ATTEMPTS=20
+      Environment=ERROR_REPORT_DB_PATH=/var/lib/vm-agent/error-reports.db
+      Environment=ERROR_REPORT_DB_BUSY_TIMEOUT=5s
+      Environment=ERROR_REPORT_SPOOL_DIR=/var/lib/vm-agent/diagnostic-incidents
+      Environment=ERROR_REPORT_ARTIFACT_MAX_BYTES=2097152
+      Environment=ERROR_REPORT_SPOOL_MAX_BYTES=20971520
+      Environment=ERROR_REPORT_RETENTION=24h
+      Environment=ERROR_REPORT_COLLECTOR_TIMEOUT=10s
+      Environment=ERROR_REPORT_MAX_COLLECTOR_DOCS=8
+      Environment=ERROR_REPORT_MAX_DOCUMENT_BYTES=131072
+      Environment=ERROR_REPORT_MAX_VALUE_DEPTH=8
+      Environment=ERROR_REPORT_MAX_VALUE_ITEMS=256
+      Environment=ERROR_REPORT_MAX_STRING_BYTES=4096
+      Environment=ERROR_REPORT_EVENT_LIMIT=100
+      Environment=ERROR_REPORT_RESPONSE_MAX_BYTES=4096
+      Environment=ERROR_REPORT_STORED_ERROR_MAX_BYTES=512
+      Environment=ERROR_REPORT_COLLECTOR_CONCURRENCY=1
+      Environment=HEARTBEAT_DOCKER_STATS_TIMEOUT=2s
+      Environment=HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS=8
+      Environment=HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES=65536
+      Slice=sam-infra.slice
+      MemoryAccounting=yes
+      OOMScoreAdjust=-900
+      ExecStartPre=/etc/sam/firewall/setup-firewall.sh
+      ExecStart=/usr/local/bin/vm-agent
+      Restart=always
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/sam.slice
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=SAM managed services and workload hierarchy
+      Before=slices.target
+
+      [Slice]
+      MemoryAccounting=yes
+      MemoryMin=256M
+
+  - path: /etc/systemd/system/sam-infra.slice
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=SAM infrastructure services
+      Before=slices.target
+
+      [Slice]
+      MemoryAccounting=yes
+      MemoryMin=256M
+      CPUAccounting=yes
+      CPUWeight=1000
+
+  - path: /etc/systemd/system/sam-workload.slice
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=SAM Docker workload containers
+      Before=slices.target
+
+      [Slice]
+      MemoryAccounting=yes
+      CPUAccounting=yes
+      CPUWeight=100
+
+  - path: /usr/local/sbin/sam-configure-docker-memory.sh
+    permissions: '0755'
+    content: |
+      #!/bin/sh
+      set -eu
+
+      RESERVE_MB="1024"
+      SYSTEMD_SYSTEM_DIR="${SAM_SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}"
+      if [ "$RESERVE_MB" = "0" ]; then
+        rm -f "$SYSTEMD_SYSTEM_DIR/sam-workload.slice.d/50-headroom.conf"
+        systemctl daemon-reload
+        logger -t sam-headroom "SAM workload MemoryMax reserve disabled"
+        exit 0
+      fi
+
+      MIN_DOCKER_MB="512"
+      PROC_MEMINFO="${SAM_PROC_MEMINFO:-/proc/meminfo}"
+      TOTAL_KB="$(awk '/MemTotal:/ { print $2; exit }' "$PROC_MEMINFO")"
+      case "$TOTAL_KB" in
+        ''|*[!0-9]*)
+          echo "cannot determine host memory from $PROC_MEMINFO" >&2
+          logger -t sam-headroom "Cannot determine host memory from $PROC_MEMINFO"
+          exit 78
+          ;;
+      esac
+      TOTAL_MB="$((TOTAL_KB / 1024))"
+      DOCKER_MEMORY_MAX_MB="$((TOTAL_MB - RESERVE_MB))"
+
+      if [ "$DOCKER_MEMORY_MAX_MB" -lt "$MIN_DOCKER_MB" ]; then
+        echo "refusing to run without SAM workload MemoryMax: total=${TOTAL_MB}M reserve=${RESERVE_MB}M leaves ${DOCKER_MEMORY_MAX_MB}M below minimum ${MIN_DOCKER_MB}M" >&2
+        logger -t sam-headroom "Refusing to run without SAM workload MemoryMax: total=${TOTAL_MB}M reserve=${RESERVE_MB}M leaves ${DOCKER_MEMORY_MAX_MB}M below minimum ${MIN_DOCKER_MB}M"
+        exit 78
+      fi
+
+      mkdir -p "$SYSTEMD_SYSTEM_DIR/sam-workload.slice.d"
+      cat >"$SYSTEMD_SYSTEM_DIR/sam-workload.slice.d/50-headroom.conf" <<EOF
+      [Slice]
+      MemoryAccounting=yes
+      MemoryMax=${DOCKER_MEMORY_MAX_MB}M
+      EOF
+      systemctl daemon-reload
+      if systemctl is-active --quiet docker; then
+        systemctl restart docker
+      fi
+      logger -t sam-headroom "Configured sam-workload.slice MemoryMax=${DOCKER_MEMORY_MAX_MB}M with reserve=${RESERVE_MB}M"
+
+  - path: /usr/local/sbin/sam-verify-workload-cgroup.sh
+    permissions: '0755'
+    content: |
+      #!/bin/sh
+      set -eu
+
+      CONTAINER_ID="${1:-}"
+      if [ -z "$CONTAINER_ID" ]; then
+        echo "usage: $0 <container-id-or-name>" >&2
+        exit 64
+      fi
+
+      RESERVE_MB="1024"
+      INFRA_MIN_MB="256"
+      MIN_DOCKER_MB="512"
+      INFRA_CPU_WEIGHT_EXPECTED="1000"
+      WORKLOAD_CPU_WEIGHT_EXPECTED="100"
+      PROC_ROOT="${SAM_PROC_ROOT:-/proc}"
+      CGROUP_ROOT="${SAM_CGROUP_ROOT:-/sys/fs/cgroup}"
+      PROC_MEMINFO="${SAM_PROC_MEMINFO:-/proc/meminfo}"
+
+      PID="$(docker inspect -f '{{.State.Pid}}' "$CONTAINER_ID")"
+      if [ -z "$PID" ] || [ "$PID" = "0" ]; then
+        echo "container $CONTAINER_ID is not running" >&2
+        exit 65
+      fi
+
+      CGROUP_FILE="$PROC_ROOT/$PID/cgroup"
+      if [ ! -r "$CGROUP_FILE" ]; then
+        echo "cannot read cgroup for container $CONTAINER_ID pid $PID at $CGROUP_FILE" >&2
+        exit 66
+      fi
+
+      CGROUP="$(cat "$CGROUP_FILE")"
+      CGROUP_PATH="$(awk -F: '$1 == "0" && $2 == "" { print $3; found = 1 } END { if (!found) exit 1 }' "$CGROUP_FILE")" || {
+        echo "container $CONTAINER_ID pid $PID has no cgroup v2 entry" >&2
+        echo "$CGROUP" >&2
+        exit 66
+      }
+
+      find_cgroup_ancestor() {
+        target="$1"
+        path="$2"
+        while [ "$path" != "/" ] && [ "$path" != "." ] && [ -n "$path" ]; do
+          if [ "$(basename "$path")" = "$target" ]; then
+            printf '%s\n' "$path"
+            return 0
+          fi
+          path="$(dirname "$path")"
+        done
+        return 1
+      }
+
+      SAM_CGROUP="$(find_cgroup_ancestor sam.slice "$CGROUP_PATH")" || {
+        echo "container $CONTAINER_ID pid $PID is outside sam.slice" >&2
+        echo "$CGROUP" >&2
+        exit 66
+      }
+      WORKLOAD_CGROUP="$(find_cgroup_ancestor sam-workload.slice "$CGROUP_PATH")" || {
+        echo "container $CONTAINER_ID pid $PID is outside sam-workload.slice" >&2
+        echo "$CGROUP" >&2
+        exit 66
+      }
+      if [ "$SAM_CGROUP" != "/sam.slice" ] || [ "$WORKLOAD_CGROUP" != "/sam.slice/sam-workload.slice" ]; then
+        echo "container $CONTAINER_ID pid $PID has unexpected SAM cgroup ancestry: $CGROUP_PATH" >&2
+        exit 66
+      fi
+
+      read_cgroup_value() {
+        name="$1"
+        rel_path="$2"
+        file="$CGROUP_ROOT$rel_path/$name"
+        if [ ! -r "$file" ]; then
+          echo "missing cgroup $name at $file" >&2
+          exit 67
+        fi
+        tr -d '\n' < "$file"
+      }
+
+      require_bytes_equal() {
+        name="$1"
+        actual="$2"
+        expected="$3"
+        case "$actual" in
+          ''|*[!0-9]*)
+            echo "$name expected $expected bytes, got $actual" >&2
+            exit 67
+            ;;
+        esac
+        if [ "$actual" -ne "$expected" ]; then
+          echo "$name expected $expected bytes, got $actual" >&2
+          exit 67
+        fi
+      }
+
+      require_bytes_at_least() {
+        name="$1"
+        actual="$2"
+        minimum="$3"
+        case "$actual" in
+          ''|*[!0-9]*)
+            echo "$name expected at least $minimum bytes, got $actual" >&2
+            exit 67
+            ;;
+        esac
+        if [ "$actual" -lt "$minimum" ]; then
+          echo "$name expected at least $minimum bytes, got $actual" >&2
+          exit 67
+        fi
+      }
+
+      require_int_equal() {
+        name="$1"
+        actual="$2"
+        expected="$3"
+        case "$actual" in
+          ''|*[!0-9]*)
+            echo "$name is not an integer: $actual" >&2
+            exit 67
+            ;;
+        esac
+        if [ "$actual" != "$expected" ]; then
+          echo "$name expected $expected, got $actual" >&2
+          exit 67
+        fi
+      }
+
+      prop_value() {
+        props="$1"
+        key="$2"
+        printf '%s\n' "$props" | awk -F= -v key="$key" '$1 == key { print $2; found = 1; exit } END { if (!found) exit 1 }'
+      }
+
+      # CPU weights are verified BEFORE the memory-reserve early return on
+      # purpose: disabling the memory reserve must not silently disable the CPU
+      # check too. Memory starvation kills the agent and CPU starvation only
+      # delays its heartbeat, but a delayed heartbeat is what gets a healthy node
+      # declared dead, so both are load-bearing.
+      INFRA_CPU_WEIGHT="$(read_cgroup_value cpu.weight /sam.slice/sam-infra.slice)"
+      WORKLOAD_CPU_WEIGHT="$(read_cgroup_value cpu.weight "$WORKLOAD_CGROUP")"
+      require_int_equal "sam-infra.slice cgroup cpu.weight" "$INFRA_CPU_WEIGHT" "$INFRA_CPU_WEIGHT_EXPECTED"
+      require_int_equal "sam-workload.slice cgroup cpu.weight" "$WORKLOAD_CPU_WEIGHT" "$WORKLOAD_CPU_WEIGHT_EXPECTED"
+      if [ "$INFRA_CPU_WEIGHT" -le "$WORKLOAD_CPU_WEIGHT" ]; then
+        echo "vm-agent slice cpu.weight $INFRA_CPU_WEIGHT does not outrank workload $WORKLOAD_CPU_WEIGHT" >&2
+        exit 67
+      fi
+
+      if [ "$RESERVE_MB" = "0" ]; then
+        echo "SAM workload MemoryMax reserve disabled; verified cgroup ancestry and CPU weights only"
+        systemctl show sam.slice sam-infra.slice sam-workload.slice           -p MemoryMin -p MemoryMax -p EffectiveMemoryMax -p CPUWeight --no-pager
+        echo "$CGROUP"
+        exit 0
+      fi
+
+      TOTAL_KB="$(awk '/MemTotal:/ { print $2; exit }' "$PROC_MEMINFO")"
+      case "$TOTAL_KB" in
+        ''|*[!0-9]*)
+          echo "cannot determine host memory from $PROC_MEMINFO" >&2
+          exit 67
+          ;;
+      esac
+      TOTAL_MB="$((TOTAL_KB / 1024))"
+      DOCKER_MEMORY_MAX_MB="$((TOTAL_MB - RESERVE_MB))"
+      if [ "$DOCKER_MEMORY_MAX_MB" -lt "$MIN_DOCKER_MB" ]; then
+        echo "SAM workload MemoryMax is not enforceable: total=${TOTAL_MB}M reserve=${RESERVE_MB}M leaves ${DOCKER_MEMORY_MAX_MB}M below minimum ${MIN_DOCKER_MB}M" >&2
+        exit 67
+      fi
+
+      EXPECTED_WORKLOAD_MAX_BYTES="$((DOCKER_MEMORY_MAX_MB * 1024 * 1024))"
+      EXPECTED_INFRA_MIN_BYTES="$((INFRA_MIN_MB * 1024 * 1024))"
+      WORKLOAD_MEMORY_MAX="$(read_cgroup_value memory.max "$WORKLOAD_CGROUP")"
+      SAM_MEMORY_MIN="$(read_cgroup_value memory.min "$SAM_CGROUP")"
+      INFRA_MEMORY_MIN="$(read_cgroup_value memory.min /sam.slice/sam-infra.slice)"
+
+      require_bytes_equal "sam-workload.slice cgroup memory.max" "$WORKLOAD_MEMORY_MAX" "$EXPECTED_WORKLOAD_MAX_BYTES"
+      require_bytes_at_least "sam.slice cgroup memory.min" "$SAM_MEMORY_MIN" "$EXPECTED_INFRA_MIN_BYTES"
+      require_bytes_at_least "sam-infra.slice cgroup memory.min" "$INFRA_MEMORY_MIN" "$EXPECTED_INFRA_MIN_BYTES"
+
+      WORKLOAD_PROPS="$(systemctl show sam-workload.slice -p MemoryMax -p EffectiveMemoryMax --no-pager)"
+      SAM_PROPS="$(systemctl show sam.slice -p MemoryMin --no-pager)"
+      INFRA_PROPS="$(systemctl show sam-infra.slice -p MemoryMin --no-pager)"
+
+      require_bytes_equal "sam-workload.slice MemoryMax" "$(prop_value "$WORKLOAD_PROPS" MemoryMax)" "$EXPECTED_WORKLOAD_MAX_BYTES"
+      require_bytes_equal "sam-workload.slice EffectiveMemoryMax" "$(prop_value "$WORKLOAD_PROPS" EffectiveMemoryMax)" "$EXPECTED_WORKLOAD_MAX_BYTES"
+      require_bytes_at_least "sam.slice MemoryMin" "$(prop_value "$SAM_PROPS" MemoryMin)" "$EXPECTED_INFRA_MIN_BYTES"
+      require_bytes_at_least "sam-infra.slice MemoryMin" "$(prop_value "$INFRA_PROPS" MemoryMin)" "$EXPECTED_INFRA_MIN_BYTES"
+
+      printf '%s\n' "$SAM_PROPS" "$INFRA_PROPS" "$WORKLOAD_PROPS"
+      echo "$CGROUP"
+
+  - path: /etc/caddy/Caddyfile
+    permissions: '0644'
+    content: |
+      # Managed by SAM deployment agent.
+      # Release applies replace this file and run caddy reload.
+      {
+        auto_https off
+      }
+
+      :80 {
+        respond "SAM deployment node awaiting release" 200
+      }
+
+  - path: /etc/sam/callback-token
+    permissions: '0600'
+    owner: root:root
+    content: |
+      CALLBACK-SNAPSHOT
+
+  - path: /usr/local/sbin/sam-boot-failure
+    permissions: '0700'
+    content: |
+      #!/bin/sh
+      # Best-effort boot failure report while the vm-agent is not running yet.
+      # Reads the token file so the callback token is not repeated in user-data.
+      logger -t sam-boot "ERROR: boot failed reason=$1"
+      curl -sS --max-time 45 -o /dev/null -X POST \
+        -H "Authorization: Bearer $(cat /etc/sam/callback-token)" \
+        -H "Content-Type: application/json" --data "{\"reason\":\"$1\"}" \
+        "https://api.example.com/api/nodes/01SNAPSHOTNODE0000000000000/boot-failure" 2>/dev/null || true
+
+  - path: /usr/local/sbin/sam-wait-tunnel-listener
+    permissions: '0755'
+    content: |
+      #!/bin/sh
+      # Expose nothing until the vm-agent's loopback tunnel listener answers,
+      # giving up after an elapsed-time deadline (not an attempt count).
+      deadline=$(($(date +%s) + 200))
+      until curl -fsS --max-time 3 -o /dev/null "http://127.0.0.1:8555/health"; do
+        if [ "$(date +%s)" -ge "$deadline" ]; then
+          logger -t sam-tunnel "tunnel listener 127.0.0.1:8555 not ready"
+          exit 1
+        fi
+        sleep 2
+      done
+
+  - path: /etc/systemd/system/sam-cloudflared.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=SAM Cloudflare Tunnel connector
+      After=network-online.target vm-agent.service
+      Wants=network-online.target
+      StartLimitIntervalSec=0
+
+      [Service]
+      User=sam-cloudflared
+      ExecStartPre=/usr/local/sbin/sam-wait-tunnel-listener
+      ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate run --token-file /etc/sam/cloudflared/tunnel-token
+      TimeoutStartSec=infinity
+      Restart=always
+      RestartSec=7
+      Slice=sam-infra.slice
+      NoNewPrivileges=yes
+      ProtectSystem=strict
+      ProtectHome=yes
+      PrivateTmp=yes
+      PrivateDevices=yes
+      ProtectKernelTunables=yes
+      ProtectKernelModules=yes
+      ProtectControlGroups=yes
+      ProtectClock=yes
+      ProtectHostname=yes
+      RestrictSUIDSGID=yes
+      RestrictRealtime=yes
+      LockPersonality=yes
+      RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+      CapabilityBoundingSet=
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/workspace/config.json
+    content: |
+      {
+        "node_id": "01SNAPSHOTNODE0000000000000",
+        "control_plane_url": "https://api.example.com"
+      }
+    permissions: '0644'
+
+  - path: /etc/sam/firewall/setup-firewall.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # SAM tunnel-node firewall: no public ingress to the VM agent, its loopback
+      # tunnel listener, or SSH, on IPv4 and IPv6. Docker bridges may reach the
+      # agent port (Git credential helper). Egress and INPUT policy are untouched.
+      # The rules live in one chain replaced by a single iptables-restore
+      # transaction, so a re-run (cron, provisioning, every vm-agent start)
+      # never opens a gap.
+      set -euo pipefail
+      VM_AGENT_PORT="8080"
+      TUNNEL_PORT="8555"
+      CHAIN=SAM-TUNNEL-INGRESS
+      # Whether the INPUT jump exists is decided BEFORE iptables-restore starts. The restore
+      # holds the xtables lock while it reads stdin, so an iptables call inside the producer
+      # below would wait on that lock forever under iptables-legacy.
+      # -w waits for the lock instead of misreading contention as "absent" (a duplicate jump).
+      jump_state() { if "$1" -C INPUT -j "$CHAIN" -w 2>/dev/null; then echo present; else echo absent; fi; }
+      rules() {
+        echo '*filter'
+        echo ":$CHAIN - [0:0]"
+        [ "$2" = present ] || echo "-I INPUT 1 -j $CHAIN"
+        echo "-A $CHAIN -i lo -j RETURN"
+        echo "-A $CHAIN -i docker0 -p tcp --dport $VM_AGENT_PORT -j RETURN"
+        echo "-A $CHAIN -i br-+ -p tcp --dport $VM_AGENT_PORT -j RETURN"
+        for port in "$VM_AGENT_PORT" "$TUNNEL_PORT"; do
+          echo "-A $CHAIN -p tcp --dport $port -j DROP"
+          echo "-A $CHAIN -p udp --dport $port -j DROP"
+        done
+        echo "-A $CHAIN -p tcp --dport 22 -j DROP"
+        echo COMMIT
+      }
+      jump_v4=$(jump_state iptables)
+      rules iptables "$jump_v4" | iptables-restore --noflush
+      # Usability of ip6tables, not modprobe, decides: the module may be built in.
+      modprobe ip6_tables 2>/dev/null || true
+      if ip6tables -L -n >/dev/null 2>&1; then
+        jump_v6=$(jump_state ip6tables)
+        rules ip6tables "$jump_v6" | ip6tables-restore --noflush
+      elif [ -n "$(ip -6 addr show scope global 2>/dev/null)" ]; then
+        # Go serves 0.0.0.0 dual-stack: global IPv6 without ip6tables is exposure.
+        logger -t sam-firewall "ERROR: ip6tables unavailable on a tunnel node with global IPv6; refusing"
+        exit 1
+      fi
+      mkdir -p /etc/iptables
+      iptables-save > /etc/iptables/rules.v4
+      ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
+      logger -t sam-firewall "Firewall configured: tunnel node, no public agent/SSH ingress"
+
+  - path: /etc/iptables/rules.v4
+    permissions: '0644'
+    content: |
+      *filter
+      :INPUT ACCEPT [0:0]
+      :FORWARD ACCEPT [0:0]
+      :OUTPUT ACCEPT [0:0]
+      COMMIT
+
+  - path: /etc/iptables/rules.v6
+    permissions: '0644'
+    content: |
+      *filter
+      :INPUT ACCEPT [0:0]
+      :FORWARD ACCEPT [0:0]
+      :OUTPUT ACCEPT [0:0]
+      COMMIT
+
+  - path: /etc/cron.daily/update-cloudflare-firewall
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      /etc/sam/firewall/setup-firewall.sh 2>&1 | logger -t sam-firewall-update
+
+  - path: /etc/sam/firewall/apply-metadata-block.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      METADATA_IP="169.254.169.254"
+      if iptables -L DOCKER-USER -n >/dev/null 2>&1; then
+        iptables -D DOCKER-USER -d "$METADATA_IP" -j DROP 2>/dev/null || true
+        iptables -I DOCKER-USER 1 -d "$METADATA_IP" -j DROP
+        logger -t sam-firewall "Metadata API blocked for containers (DOCKER-USER chain)"
+      else
+        logger -t sam-firewall "WARNING: DOCKER-USER chain not found, cannot block metadata API"
+      fi
+
+  - path: /etc/systemd/system/sam-metadata-block.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=SAM metadata API block for Docker containers
+      After=docker.service
+      Requires=docker.service
+      PartOf=docker.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/etc/sam/firewall/apply-metadata-block.sh
+      RemainAfterExit=yes
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/journald.conf.d/sam.conf
+    content: |
+      [Journal]
+      Storage=persistent
+      Compress=yes
+      SystemMaxUse=500M
+      SystemKeepFree=1G
+      MaxRetentionSec=7day
+    permissions: '0644'
+
+  - path: /etc/sysctl.d/99-sam-swap.conf
+    content: |
+      vm.swappiness=60
+    permissions: '0644'
+
+  - path: /etc/docker/daemon.json
+    content: |
+      {
+        "log-driver": "journald",
+        "log-opts": {
+          "tag": "docker/{{.Name}}"
+        },
+        "cgroup-parent": "sam-workload.slice",
+        "dns": ["1.1.1.1", "8.8.8.8"],
+        "live-restore": true
+      }
+    permissions: '0644'
+
+  - path: /etc/apt/apt.conf.d/80-retries
+    content: |
+      Acquire::Retries "3";
+      Acquire::http::Timeout "30";
+      Acquire::https::Timeout "30";
+    permissions: '0644'
+
+  - path: /etc/sam/apt-mirror-config.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Provider-specific apt mirror configuration for Docker containers.
+      # Sourced by the VM agent bootstrap to inject fast mirrors into containers.
+      # Only overrides for providers with known fast local mirrors.
+      PROVIDER="hetzner"
+      case "$PROVIDER" in
+        hetzner)
+          APT_MIRROR="mirror.hetzner.com"
+          ;;
+        *)
+          APT_MIRROR=""
+          ;;
+      esac
+      export APT_MIRROR
+
+final_message: "Simple Agent Manager node 01SNAPSHOTNODE0000000000000 provisioning started!"

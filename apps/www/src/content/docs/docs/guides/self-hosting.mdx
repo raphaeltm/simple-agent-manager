@@ -23,6 +23,12 @@ projection after the shared migrations, rejecting filename collisions. Cloudflar
 not receive the reverse-tunnel lease table. Existing boxes keep the additive table created by
 the earlier migration number.
 
+Product analytics on the box use the same pattern. The self-host entry installs a D1 analytics
+sink (`installAnalyticsD1Sink()` in `apps/api/src/selfhost/analytics/`), and the build appends
+`apps/api/src/selfhost/observability-migrations.ts` to the **observability** database's flat
+projection (`appendSelfhostObservabilityMigrations()` in `scripts/selfhost/`). Cloudflare
+observability databases never receive the `analytics_events` table.
+
 The transport setting admits new leases. Existing allocations adopt their original lease only
 while its exact stored owner remains live. Cleanup and the backstop follow the installed
 self-host driver, so changing the setting cannot strand an old lease. A build without that
@@ -33,7 +39,47 @@ instance owns session replacement. Its Login plugin must apply the server-select
 with `unchange: false`, and every subsequent operation checks that session against the lease.
 Credential-key rotation recovery is tracked separately. Changing the root key rejects stale
 resume derivation and old session IDs, but a credential matching the stored lease hash can
-still log in and obtain the new session ID; root-key rotation alone does not revoke that lease. Full gateway, cloud-init and installer packaging follow this foundation.
+still log in and obtain the new session ID; root-key rotation alone does not revoke that lease. Installer packaging follows this foundation.
+
+The node boot document for this transport comes from `@simple-agent-manager/cloud-init`. A
+non-empty `reverseTunnelCredential` selects reverse-tunnel mode (`isReverseTunnelMode` in
+`packages/cloud-init/src/reverse-tunnel.ts`). The node then gets the Cloudflare Tunnel firewall
+(no public agent or SSH ingress), no Origin CA certificate and no cloudflared. It installs a
+pinned frpc release, checked against a per-architecture sha256, and runs it as the unprivileged
+`sam-frpc` unit (`packages/cloud-init/src/template-reverse-tunnel.ts`). frpc dials the control
+plane host over `wss` on its public HTTPS port, verifies its certificate against the system CA
+store, and exposes only the agent's loopback tunnel listener as one TCP proxy on the leased port.
+The credential is written only to the root-only `/etc/sam/frpc/credential.env`; `frpc.toml`
+reads it through frp's environment template. A failed frpc install reports the
+`frpc_install` boot-failure reason. Cloudflare nodes never set these variables and render
+exactly as before.
+
+The self-host entry wraps the shared Worker with `withReverseTunnel(worker, render)` from
+`apps/api/src/selfhost/reverse-tunnel/entry.ts`. That call installs the transport driver, serves
+the gateway endpoints under `/api/self-host/gateway/` before the shared app sees the request,
+and runs the lease backstop after the shared handler on the five-minute sweep cron. The
+backstop logs `cron.reverse_tunnel_lease_sweep` with its release count, or why it skipped, and
+it honours the operational cron switch. The gateway has two endpoints:
+
+- `POST /api/self-host/gateway/frps-plugin`: the frps server plugin. frps authenticates with
+  HTTP basic auth, user `frps`, password `REVERSE_TUNNEL_GATEWAY_SECRET`. A Login allow is
+  answered `{reject:false, unchange:false, content}`, so frps applies the server-selected
+  `run_id`. Every other allow is `{reject:false, unchange:true}`.
+- `GET /api/self-host/gateway/node-websocket`: Caddy `forward_auth` for node WebSockets,
+  authenticated with the `X-SAM-Gateway-Secret` header. The original request runs through the
+  normal ws-* or node log-stream authentication. The answer is either that handler's refusal or
+  `X-SAM-Upstream`/`X-SAM-Upstream-*` headers naming the loopback lease port and the credentials
+  Caddy forwards.
+
+Without a gateway secret of at least 32 characters, both endpoints answer 404; a wrong secret
+gets 401. The Cloudflare Worker never imports this entry.
+
+Control-plane requests, the task liveness probe and WebSocket decisions reach a reverse-tunnel
+node through the active lease of its current incarnation (`resolveNodeAgentRoute` in
+`apps/api/src/services/node-agent-route.ts`). A released or superseded lease is never routed to,
+so revocation applies to control-plane traffic on the next request. frps drops the node's
+control session within one heartbeat timeout, because a refused Ping does not refresh it. A
+reverse-tunnel node is never chosen as a snapshot-upload relay, since it has no public hostname.
 
 The self-host build supplies these bootstrap settings; they are not Cloudflare Worker bindings:
 
@@ -48,7 +94,7 @@ The self-host build supplies these bootstrap settings; they are not Cloudflare W
 Allocation considers the whole bounded port range in one atomic SQL statement, with indexed
 history lookups. Release checks all active leases in one local statement, without network calls
 or pagination. At the outer normal limit of 20,000 active leases, one backstop pass releases all
-eligible leases; the later gateway slice schedules that backstop every five minutes. A newly
+eligible leases; the self-host entry runs that backstop every five minutes. A newly
 freed port still waits for its cooling interval. A full range and a cooling range have distinct
 errors so operators can distinguish capacity exhaustion from a wait for safe reuse.
 
@@ -107,6 +153,51 @@ per user per clock hour). The hourly limit uses an atomic database counter and i
 hits and failed requests; database-counter failures refuse synthesis. A 429 response includes
 `Retry-After` seconds until the next window. Provider billing, models, voices, availability and
 quotas remain the endpoint operator's responsibility.
+
+## Email on a single-box build
+
+A Cloudflare deployment sends SAM's email through Cloudflare Email Sending (the `AGENT_EMAIL`
+binding) and receives agent email through Email Routing; nothing below changes that. The
+transport is chosen in one place, `emailTransportKind()` in
+`packages/agent-email/src/provider.ts`, and the binding wins whenever it exists.
+
+A single-box build has no binding. It can send sign-in codes, owner security alerts and
+account-link confirmations through an SMTP relay instead. These are bootstrap settings in the
+box configuration, because the first account may sign up by email before any administrator
+exists. The Cloudflare pipeline does not forward them.
+
+| Setting         | Default                               | Description                                                                                                                     |
+| --------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `SMTP_HOST`     | _(unset)_                             | Relay host. Unset means no SMTP transport.                                                                                      |
+| `SMTP_TLS`      | `starttls`                            | `starttls`, `tls` (implicit TLS) or `none`. `none` is accepted only for a loopback host (a mail collector on the same machine). |
+| `SMTP_PORT`     | `587` for `starttls`, `465` for `tls` | Required with `none`.                                                                                                           |
+| `SMTP_USERNAME` | _(unset)_                             | Sent with `AUTH PLAIN`, only after TLS (or over loopback). Set with `SMTP_PASSWORD` (a secret) or not at all.                   |
+| `SMTP_FROM`     | _(required)_                          | The address SAM's email comes from. It must be one the relay accepts.                                                           |
+
+`resolveSmtpConfig()` (`packages/agent-email/src/smtp-config.ts`) refuses an invalid set as a
+whole and logs the reason once; email sign-in is then not offered. A server that does not offer
+STARTTLS in `starttls` mode is refused rather than used in plaintext, and the certificate chain is
+verified by the runtime. The whole exchange is bounded by the `agentEmail.smtpTimeoutMs` admin
+setting (15 seconds by default). Every other email sign-in rule (codes only for existing accounts
+or the installer's owner, identical responses, rate limits) is the same as on Cloudflare.
+
+Before first-run setup can finish on email alone, SAM checks the relay
+(`emailSignInReadiness()` in `apps/api/src/services/email-sign-in.ts`): it connects, starts TLS,
+authenticates, and offers `SMTP_FROM` as sender and the owner email as recipient, then abandons the
+transaction so nothing is sent. If the relay refuses any step or does not answer, setup asks for a
+sign-in provider instead, and the reason is logged as `email_sign_in.smtp_relay_unusable`. The check
+cannot prove the mailbox receives mail, only that the relay would accept it.
+
+**Inbound agent email.** The box can also run `sam-mx` (`deploy/selfhost/sam-mx`), an SMTP
+receiver for `agent+<key>@agents.<BASE_DOMAIN>`. It requires the From domain to be authenticated
+(aligned SPF or DKIM) and hands each message, during the SMTP session, to the loopback-only route
+`POST /api/self-host/gateway/inbound-email` (`apps/api/src/selfhost/reverse-tunnel/inbound-email.ts`),
+which runs the same inbound handler as Cloudflare Email Routing. Replies from `reply_to_email` go
+through the SMTP relay above, from `SMTP_FROM` with `Reply-To` set to the trigger's address
+(`selfHostAgentEmailSender()` in `apps/api/src/services/agent-email/self-host-inbound.ts`). Agent
+email is on only when `AGENT_EMAIL_INBOUND_SMTP=true` (the receiver is installed), the gateway
+secret is set and an SMTP relay works. The admin loopback test needs Email Routing and is refused
+on a box; send a test email from an allowed sender instead.
 
 ## Prerequisites
 
@@ -235,7 +326,7 @@ When the deployment can send email (see the optional email permissions above), S
 - first-run setup completes;
 - a GitHub, Google or GitLab sign-in is linked to an admin or superadmin account.
 
-The emails come from `security@agents.yourdomain.com` and link to the admin page to review. Before the first superadmin exists, the owner email the installer recorded (`BOOTSTRAP_OWNER_EMAIL`) gets them instead. Sending is best-effort: a failed email is logged (`security_alert.send_failed`) and never blocks the change. Without email, nothing is sent.
+The emails come from `security@agents.yourdomain.com` (on a single-box build that sends through SMTP, from `SMTP_FROM`; see [Email on a single-box build](#email-on-a-single-box-build)) and link to the admin page to review. Before the first superadmin exists, the owner email the installer recorded (`BOOTSTRAP_OWNER_EMAIL`) gets them instead. Sending is best-effort: a failed email is logged (`security_alert.send_failed`) and never blocks the change. Without email, nothing is sent.
 
 ### Set up GitLab sign-in
 
@@ -1036,3 +1127,16 @@ statement metadata; restrict access to observability data as you would for produ
 Instant sessions publish applications through a dedicated Cloudflare Container build executor. Cloudflare Containers are already part of SAM's supported setup, so this adds no separate cloud account or manual secret prerequisite. Deployment targets remain VMs. VM sessions retain the node executor by default; keep `deployments.buildExecutor=node` in **Admin → Settings** until a staging VM trial verifies a served release with unchanged source build/save counters. VM publishing through Cloudflare remains unverified. `DEPLOY_BUILDER_INSTANCE_TYPE` and `DEPLOY_BUILDER_MAX_INSTANCES` are deployment-time sizing controls; see the [configuration reference](/docs/reference/configuration/#cloudflare-application-build-executor).
 
 The builder runs one job per ephemeral container and can execute arbitrary Dockerfile steps as root inside DinD with host build networking and unrestricted internet access, just like VM workspaces. Context and image transfers use direct presigned URLs; no outbound proxy or HTTPS interception CA is installed. It receives no user or installation credentials, runtime secret values or workspace token. Its callback token stays in the Go supervisor's memory and authorizes only one job and attempt until that job's deadline or terminal state. Treat arbitrary root code as having that job's authority. The bootstrap listener closes before build steps run, and a durable alarm attempts to destroy the microVM at the hard deadline, independent of source-session liveness. If shutdown cannot be confirmed, cron force-releases the reservation after the stored deadline plus `deployments.builderReservationGraceMs` (five minutes by default), marks unfinished jobs `unknown` and records an alert. This permits deletion and new admissions without claiming physical shutdown; Cloudflare capacity can remain occupied until reclaimed. See the [build trust model](/docs/architecture/security/#application-build-executor) for the enforcing code paths.
+
+
+### Connect a repository sign-in to an email account
+
+A person who signs in by email or Google can open **Settings → GitHub** to connect GitHub or GitLab, if that provider is configured. Connecting adds a sign-in method and repository authorization to the same SAM account. Google cannot be linked to an existing account.
+
+Choose **Connect**, then open the confirmation email in the same browser. Choose **Confirm connection** to continue to the provider's consent screen. The email is a fresh, one-time sign-in check for that account, session and provider; an existing session alone cannot add a new sign-in method. Confirmation expires after five minutes by default. An administrator can change `security.accountLinkProofTtlSeconds` (60–900 seconds) in **Admin → Settings → Email**; new confirmation emails use the updated value and existing proofs keep their original deadline. A revoked session or expired confirmation must start again. Your account email must already be confirmed and the installation must support email delivery. If your provider has not confirmed it, sign in with that provider after confirming your email there, or contact the installation administrator.
+
+The existing OAuth application registration stays unchanged: GitHub uses `https://api.<your-domain>/api/auth/callback/github` and GitLab uses `https://api.<your-domain>/api/auth/callback/gitlab`. Flow context travels in protected OAuth state, never in per-user redirect URIs. GitLab retains its configured host and identity-trust restrictions.
+
+The connected provider may have a different email. Linking and later provider sign-ins preserve the already-verified SAM account email; name and avatar may refresh. SAM sends a linked-provider security notification to the account owner's stored email. Review the connected provider in **Settings → GitHub** and choose **Disconnect** if you do not recognize it. Disconnect requires a confirmed account email and available email sign-in, so removing a provider cannot remove your last sign-in method. An old session may require signing out and signing in again first.
+
+Accounts created by a provider with an unverified email receive a provider-sign-in reminder instead of a sign-in code. Their email-code redemption is refused so BetterAuth cannot remove their provider link while proving a previously unverified email. Existing verified email users can continue using email codes after connecting or disconnecting a provider.

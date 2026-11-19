@@ -6,6 +6,7 @@ import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
+import { emailTransportKind } from '../services/agent-email/provider';
 import { isAgentSignInSession, isPastHardExpiry } from '../services/agent-sign-in/session-cap';
 import {
   assertCodeAttemptBudget,
@@ -18,8 +19,10 @@ import {
 } from '../services/email-sign-in';
 import { readAuthSession } from '../services/read-auth-session';
 import { assertUserNotSuspended } from '../services/signup-approval';
+import { accountLinkingRoutes } from './account-linking';
 
 const authRoutes = new Hono<{ Bindings: Env }>();
+authRoutes.route('/', accountLinkingRoutes);
 
 /**
  * GET /api/auth/me - Get current authenticated user
@@ -207,12 +210,25 @@ function withoutSessionCookieCache(request: Request): Request {
   return new Request(request, { headers });
 }
 
+let reportedMissingWaitUntil = false;
+
 /** The request's waitUntil, when the runtime provides one (Workers do; unit-test apps do not). */
-function executionWaitUntil(c: Context): ((promise: Promise<unknown>) => void) | undefined {
+function executionWaitUntil(
+  c: Context<{ Bindings: Env }>
+): ((promise: Promise<unknown>) => void) | undefined {
   try {
     const ctx = c.executionCtx;
     return (promise) => ctx.waitUntil(promise);
   } catch {
+    // Without waitUntil BetterAuth sends sign-in codes inline, so the response time would show
+    // which addresses have accounts. Cloudflare and celld both provide it (verified on a celld
+    // box, task 2026-11-18-l21); a runtime that does not is reported once per isolate.
+    if (!reportedMissingWaitUntil && emailTransportKind(c.env) === 'smtp') {
+      reportedMissingWaitUntil = true;
+      log.error('email_sign_in.wait_until_unavailable', {
+        action: 'codes_sent_inline_timing_reveals_accounts',
+      });
+    }
     return undefined;
   }
 }

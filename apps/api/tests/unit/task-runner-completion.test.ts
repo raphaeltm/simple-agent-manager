@@ -12,6 +12,7 @@ import type { Env } from '../../src/env';
 const mocks = vi.hoisted(() => ({
   drizzle: vi.fn(),
   cleanupTaskRun: vi.fn(),
+  retireTaskCancellationPrompts: vi.fn(),
   stopSession: vi.fn(),
   failSession: vi.fn(),
   queueWorkspaceSessionSleep: vi.fn(),
@@ -26,6 +27,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: (...args: unknown[]) => mocks.drizzle(...args),
+}));
+
+// Task-bound retirement has real SQL/Workers coverage; this suite isolates cleanup orchestration.
+vi.mock('../../src/services/task-cancellation-prompts', () => ({
+  retireTaskCancellationPrompts: mocks.retireTaskCancellationPrompts,
 }));
 
 vi.mock('../../src/services/task-runner', () => ({
@@ -76,6 +82,11 @@ describe('cleanupTerminalTaskResources behavioral tests', () => {
     vi.resetModules();
     vi.clearAllMocks();
     mocks.stopSession.mockResolvedValue(undefined);
+    mocks.retireTaskCancellationPrompts.mockResolvedValue({
+      matched: true,
+      cancelled: 0,
+      sessionId: 'session-3',
+    });
     mocks.failSession.mockResolvedValue(undefined);
     mocks.cleanupTaskRun.mockResolvedValue(undefined);
     mocks.queueWorkspaceSessionSleep.mockResolvedValue(undefined);
@@ -152,6 +163,8 @@ describe('cleanupTerminalTaskResources behavioral tests', () => {
       [
         {
           id: 'task-3',
+          userId: 'cancelling-user',
+          chatSessionId: 'session-3',
           projectId: 'proj-3',
           workspaceId: 'ws-3',
           errorMessage: null,
@@ -170,6 +183,14 @@ describe('cleanupTerminalTaskResources behavioral tests', () => {
       requiredUserId: 'cancelling-user',
     });
 
+    expect(mocks.retireTaskCancellationPrompts).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ id: 'task-3', projectId: 'proj-3', userId: 'cancelling-user' }),
+      undefined
+    );
+    expect(mocks.stopSession).toHaveBeenCalledWith(env, 'proj-3', 'session-3', {
+      guard: { taskId: 'task-3' },
+    });
     expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-3', env, undefined, 'cancelling-user');
   });
 

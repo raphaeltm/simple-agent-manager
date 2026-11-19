@@ -15,13 +15,14 @@ import {
 } from '../../helpers/selfhost-only-modules';
 
 describe('self-host speech backend placement', () => {
+  // Walking the full Worker graph can exceed Vitest's default under shared CI load.
   it('the Worker entry reaches the speech seam but no self-host speech module', () => {
     const graph = collectImportGraph(resolve(API_SRC, 'index.ts'));
     expect(graph.files).toContain('apps/api/src/services/speech-backend.ts');
     expect(graph.files.filter((file) => file.startsWith('apps/api/src/selfhost/speech/'))).toEqual(
       []
     );
-  });
+  }, 30_000);
 
   it('positive control: the speech module is flagged as self-host-only when walked', () => {
     const graph = collectImportGraph(resolve(API_SRC, 'selfhost/speech/index.ts'));

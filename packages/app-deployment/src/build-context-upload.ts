@@ -3,23 +3,25 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 import type { BuildContextDescriptor, BuildContextOwner } from './build-context-state';
 import { buildContextKey } from './build-context-state';
-import { getS3Client } from './compose-image-artifacts';
+import type { ComposeImageArtifactPresignTarget as PresignTarget } from './compose-image-artifacts';
 import type { AppDeploymentEnv as Env } from './env';
 
 /** Only job-derived keys are signed. Metadata binds the uploaded object to the
- * digest declared before upload; builders must still hash bytes after download. */
+ * digest declared before upload; builders must still hash bytes after download.
+ * The URL is signed through the worker's shared R2 S3 client (`target`, bound with the
+ * `WHEN_REQUIRED` checksum mode), as compose artifacts are, so an operator store works too. */
 export async function createBuildContextUpload(
-  env: Env,
   owner: BuildContextOwner,
   descriptor: BuildContextDescriptor,
-  expiresIn: number
+  expiresIn: number,
+  target: PresignTarget
 ) {
   const r2Key = buildContextKey(owner);
   const uploadUrl = await getSignedUrl(
-    getS3Client(env, 'WHEN_REQUIRED'),
+    target.client,
     new PutObjectCommand({
-      Bucket: env.R2_BUCKET_NAME,
-      Key: r2Key,
+      Bucket: target.bucket,
+      Key: target.objectKey(r2Key),
       ContentLength: descriptor.sizeBytes,
       ContentType: 'application/zstd',
       Metadata: { sha256: descriptor.sha256 },
@@ -43,10 +45,14 @@ export async function verifyBuildContextObject(
   );
 }
 
-export async function createBuildContextDownload(env: Env, r2Key: string, expiresIn: number) {
+export async function createBuildContextDownload(
+  r2Key: string,
+  expiresIn: number,
+  target: PresignTarget
+) {
   return getSignedUrl(
-    getS3Client(env, 'WHEN_REQUIRED'),
-    new GetObjectCommand({ Bucket: env.R2_BUCKET_NAME, Key: r2Key }),
+    target.client,
+    new GetObjectCommand({ Bucket: target.bucket, Key: target.objectKey(r2Key) }),
     { expiresIn }
   );
 }

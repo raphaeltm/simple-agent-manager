@@ -62,6 +62,12 @@ vi.mock('../../../src/services/project-data', () => ({
   enqueueMailboxMessage: vi.fn().mockResolvedValue({ id: 'msg-123' }),
 }));
 
+vi.mock('../../../src/services/task-cancellation-prompts', () => ({
+  retireTaskCancellationPrompts: vi
+    .fn()
+    .mockResolvedValue({ matched: true, cancelled: 0, sessionId: null }),
+}));
+
 vi.mock('../../../src/services/task-terminal-cleanup', () => ({
   cleanupTerminalTaskResources: vi.fn().mockResolvedValue(undefined),
 }));
@@ -215,6 +221,8 @@ describe('stop_subtask', () => {
     queueD1Result(ctx._db._statement, [
       {
         id: 'task-1',
+        user_id: 'user-123',
+        chat_session_id: null,
         status: 'completed',
         workspace_id: null,
         project_id: 'proj-1',
@@ -232,7 +240,15 @@ describe('stop_subtask', () => {
   it.each(['running', 'provisioning'])('rejects the non-status %s', async (status) => {
     const ctx = buildCtx();
     queueD1Result(ctx._db._statement, [
-      { id: 'task-1', status, workspace_id: null, project_id: 'proj-1', title: 'Ghost' },
+      {
+        id: 'task-1',
+        user_id: 'user-123',
+        chat_session_id: null,
+        status,
+        workspace_id: null,
+        project_id: 'proj-1',
+        title: 'Ghost',
+      },
     ]);
     const result = (await stopSubtask({ taskId: 'task-1' }, ctx)) as { error?: string };
     expect(result.error).toContain('only active tasks');
@@ -243,7 +259,15 @@ describe('stop_subtask', () => {
     async (status) => {
       const ctx = buildCtx();
       queueD1Result(ctx._db._statement, [
-        { id: 'task-1', status, workspace_id: null, project_id: 'proj-1', title: 'Live' },
+        {
+          id: 'task-1',
+          user_id: 'user-123',
+          chat_session_id: null,
+          status,
+          workspace_id: null,
+          project_id: 'proj-1',
+          title: 'Live',
+        },
       ]);
       const result = (await stopSubtask({ taskId: 'task-1' }, ctx)) as Record<string, unknown>;
       expect(result.stopped).toBe(true);
@@ -254,7 +278,15 @@ describe('stop_subtask', () => {
   it('reports a lost cancel race instead of claiming the task stopped', async () => {
     const ctx = buildCtx({ dbRunChanges: 0 });
     queueD1Result(ctx._db._statement, [
-      { id: 'task-1', status: 'in_progress', workspace_id: null, project_id: 'proj-1', title: 'R' },
+      {
+        id: 'task-1',
+        user_id: 'user-123',
+        chat_session_id: null,
+        status: 'in_progress',
+        workspace_id: null,
+        project_id: 'proj-1',
+        title: 'R',
+      },
     ]);
     const result = (await stopSubtask({ taskId: 'task-1' }, ctx)) as Record<string, unknown>;
     expect(result.stopped).toBeUndefined();
@@ -266,7 +298,15 @@ describe('stop_subtask', () => {
     vi.mocked(stopAgentSessionOnNode).mockClear();
     const ctx = buildCtx();
     queueD1Result(ctx._db._statement, [
-      { id: 'task-1', status: 'sleeping', workspace_id: 'ws-1', project_id: 'proj-1', title: 'Z' },
+      {
+        id: 'task-1',
+        user_id: 'user-123',
+        chat_session_id: null,
+        status: 'sleeping',
+        workspace_id: 'ws-1',
+        project_id: 'proj-1',
+        title: 'Z',
+      },
     ]);
     const result = (await stopSubtask({ taskId: 'task-1' }, ctx)) as Record<string, unknown>;
     expect(result.stopped).toBe(true);
@@ -281,6 +321,8 @@ describe('stop_subtask', () => {
     queueD1Result(ctx._db._statement, [
       {
         id: 'task-1',
+        user_id: 'user-123',
+        chat_session_id: null,
         status: 'in_progress',
         workspace_id: null,
         project_id: 'proj-1',
@@ -311,6 +353,8 @@ describe('stop_subtask', () => {
     queueD1Result(stmt, [
       {
         id: 'task-1',
+        user_id: 'user-123',
+        chat_session_id: null,
         status: 'queued',
         workspace_id: 'ws-1',
         project_id: 'proj-1',
@@ -547,7 +591,8 @@ describe('cancel_mission', () => {
     ]);
     const result = await cancelMission({ missionId: 'mission-1' }, ctx);
     const r = result as Record<string, unknown>;
-    expect(r.cancelled).toBe(true);
+    expect(r.cancellationRequested).toBe(true);
+    expect(r.status).toBe('cancellation_requested');
     expect(r.missionId).toBe('mission-1');
   });
 });

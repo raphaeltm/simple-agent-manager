@@ -1,5 +1,6 @@
+import type { RuntimePort } from '@simple-agent-manager/project-data';
+
 import type { NodeLifecycle } from '../durable-objects/node-lifecycle';
-import type { RuntimePort } from '../durable-objects/project-data/ports';
 import type { VmAgentContainer } from '../durable-objects/vm-agent-container';
 import { isVmAgentContainerLifecycleTerminal } from '../durable-objects/vm-agent-container-lifecycle';
 import { cancelAgentSessionOnNode, listAgentSessionsOnNode } from '../services/node-agent';

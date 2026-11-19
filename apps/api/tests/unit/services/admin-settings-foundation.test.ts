@@ -116,6 +116,7 @@ describe('Phase 1 settings registry', () => {
       'agentEmail.signInCodesPerEmailPerHour': 5,
       'agentEmail.signInCodesPerIpPerHour': 20,
       'agentEmail.signInCodeAttemptsPerEmailPerHour': 10,
+      'agentEmail.smtpTimeoutMs': 15000,
     });
     expect(agentEmail.every((setting) => setting.category === 'Email')).toBe(true);
     expect(findAdminSetting('feedback.projectId')).toBeUndefined();

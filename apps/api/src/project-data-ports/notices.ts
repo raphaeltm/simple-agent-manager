@@ -1,4 +1,5 @@
-import type { NoticesPort } from '../durable-objects/project-data/ports';
+import type { NoticesPort } from '@simple-agent-manager/project-data';
+
 import {
   parentWakeNotice,
   projectEventWakeNotice,

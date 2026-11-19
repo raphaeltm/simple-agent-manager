@@ -195,8 +195,9 @@ An agent can also file an item in your [Inbox](/docs/guides/inbox/#what-agents-f
 in a **Task** too. The item appears as a card in the conversation as well, marked with where it
 stands: **Agent paused on this** for a question the agent is stopped on (every
 `request_human_input` question), **Needs your answer** for one it keeps working through, or
-**Waiting for your review** for a review. Once it is settled the card reads **Answered**,
-**Reviewed**, **Archived**, **Withdrawn by the agent** or **Expired**. Answer it on the card or in your Inbox: it is the same
+**Waiting for your review** for a review, or **New result** for a result (the answer or
+finished work you asked for). Once it is settled the card reads **Answered**, **Reviewed**,
+**Done**, **Archived**, **Withdrawn by the agent** or **Expired**. Answer it on the card or in your Inbox: it is the same
 record wherever you answer it.
 
 ### Links to open
@@ -450,7 +451,15 @@ rather than guessing.
   shows the same totals. For an API-key account the list also shows spend, labelled as an estimate
   from SAM's model prices (cache writes are priced as input, so it reads low for Anthropic). Only
   the person who ran the session sees spend on their own personal key. Subscription accounts show
-  tokens only.
+  tokens only. Admin → Settings controls `insights.runUsageMaxRowsPerSession` (default 256),
+  the lifetime ceiling on new harness usage rows per chat across epochs, models, and credentials.
+  Once full, new keys are refused; counters already recorded can still increase. Existing usage
+  history is preserved. Refused reports mark the totals as incomplete: token counts show **+**,
+  spend estimates say **At least**, and a run with no accepted usage says **Incomplete**.
+  Raising the cap later does not clear this disclosure of previously lost usage.
+  Insights Accounts marks affected reporting windows as incomplete; Agent setups warns when
+  a selected run has incomplete token totals or comparisons. Complete measurements
+  from SAM’s AI proxy take precedence over incomplete harness reports.
 
 - **CPU**: the run's CPU per minute, with a marker on each minute in which the agent started tool
   calls, from the same history as **Resources**.

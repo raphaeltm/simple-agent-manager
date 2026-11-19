@@ -88,6 +88,9 @@ export async function recoverNodeBoot(
     intent.terminated = true;
     await rc.ctx.storage.put('state', state);
   }
+  // Provider termination can outlive owner cancellation. Persist its proof, then
+  // re-read executable authority before clearing the failed-node ownership.
+  await assertTaskExecutionAuthority(rc.env, state);
   await rc.env.DATABASE.batch([
     rc.env.DATABASE.prepare(
       `UPDATE nodes SET status = 'deleted', cleanup_blocked_since = NULL, cleanup_blocked_reason = NULL, updated_at = ? WHERE runtime_termination_confirmed_at IS NOT NULL AND id = ? AND status = 'destroying'`
@@ -103,6 +106,8 @@ export async function recoverNodeBoot(
     state.admissionLeaseToken,
     'node_boot_failed'
   );
+  // Lease release is another I/O boundary; it must not revive a cancelled task.
+  await assertTaskExecutionAuthority(rc.env, state);
   state.admissionScopeKey = null;
   state.admissionLeaseToken = null;
   state.stepResults.nodeId = null;

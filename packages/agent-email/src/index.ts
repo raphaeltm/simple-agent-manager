@@ -104,7 +104,13 @@ export {
   type AgentEmailSender,
   agentEmailSenderFor,
   createCloudflareAgentEmailSender,
+  createSmtpAgentEmailSender,
+  type EmailTransport,
+  type EmailTransportEnv,
+  type EmailTransportKind,
+  emailTransportKind,
   type OutboundAgentEmail,
+  systemEmailTransportFor,
 } from './provider';
 export { type AgentEmailRecoveryStats, runAgentEmailRecovery } from './recovery';
 export {
@@ -166,6 +172,7 @@ export {
   replaceSetupAttempt,
   type StoredSetupAttempt,
 } from './setup-state';
+export { type SmtpConnect } from './smtp-client';
 export {
   loadEmailTriggerConfig,
   parseAllowedSenders,

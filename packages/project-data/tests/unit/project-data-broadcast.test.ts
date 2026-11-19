@@ -140,7 +140,7 @@ describe('ProjectData DO — session-scoped broadcasting', () => {
       try {
         await pd.fetch(
           new Request('https://do.internal/ws?sessionId=a1b2c3d4-e5f6-7890-abcd-ef1234567890', {
-            headers: { Upgrade: 'websocket' },
+            headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': 'test-user' },
           })
         );
       } catch {
@@ -148,11 +148,12 @@ describe('ProjectData DO — session-scoped broadcasting', () => {
       }
 
       expect(freshCtx.acceptWebSocket).toHaveBeenCalledWith(serverWs, [
+        'actor:test-user',
         'session:a1b2c3d4-e5f6-7890-abcd-ef1234567890',
       ]);
     });
 
-    it('accepts WebSocket without tags when no sessionId param', async () => {
+    it('accepts WebSocket with only the actor tag when no sessionId param', async () => {
       const freshCtx = createMockCtx([]);
       const pd = new ProjectData(freshCtx as any, createMockEnv() as any);
 
@@ -169,14 +170,14 @@ describe('ProjectData DO — session-scoped broadcasting', () => {
       try {
         await pd.fetch(
           new Request('https://do.internal/ws', {
-            headers: { Upgrade: 'websocket' },
+            headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': 'test-user' },
           })
         );
       } catch {
         // Expected in Node.js — status 101 not supported
       }
 
-      expect(freshCtx.acceptWebSocket).toHaveBeenCalledWith(serverWs, []);
+      expect(freshCtx.acceptWebSocket).toHaveBeenCalledWith(serverWs, ['actor:test-user']);
     });
 
     it('rejects WebSocket upgrade with malformed sessionId', async () => {
@@ -185,7 +186,7 @@ describe('ProjectData DO — session-scoped broadcasting', () => {
 
       const response = await pd.fetch(
         new Request('https://do.internal/ws?sessionId=../../../etc/passwd', {
-          headers: { Upgrade: 'websocket' },
+          headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': 'test-user' },
         })
       );
 

@@ -50,7 +50,7 @@ const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
 const mockFetchNodeAgent = vi.fn((_nodeId: string, _env: Env, url: string, options: RequestInit) =>
-  mockFetch(url, options)
+  consumeMockUpload(url, options)
 );
 vi.mock('../../../src/services/node-agent', () => ({
   fetchNodeAgent: (...args: Parameters<typeof mockFetchNodeAgent>) => mockFetchNodeAgent(...args),
@@ -82,6 +82,17 @@ const mockEnv: Partial<Env> = {
   VM_AGENT_PROTOCOL: 'https',
   VM_AGENT_PORT: '8443',
 };
+
+/** Model the VM consuming successful multipart uploads before it acknowledges them. */
+async function consumeMockUpload(url: string, options: RequestInit): Promise<Response> {
+  const response = await mockFetch(url, options);
+  if (response.ok && options.body instanceof ReadableStream) {
+    const form = await new Response(options.body, { headers: options.headers }).formData();
+    expect(typeof form.get('destination')).toBe('string');
+    expect(form.get('files')).toBeInstanceOf(File);
+  }
+  return response;
+}
 
 const tokenData = {
   taskId: 'task-001',

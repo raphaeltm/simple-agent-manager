@@ -8,6 +8,7 @@ import { bucketUserAgent } from '../middleware/analytics';
 import { optionalAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { getRateLimit, rateLimit } from '../middleware/rate-limit';
+import { resolveAnalyticsSink } from '../services/analytics-sink';
 
 /** Default max body size: 64 KB (configurable via MAX_ANALYTICS_INGEST_BODY_BYTES) */
 const DEFAULT_MAX_BODY_BYTES = 65_536;
@@ -122,11 +123,11 @@ analyticsIngestRoutes.post('/', async (c) => {
     return c.body(null, 204);
   }
 
-  // Check if Analytics Engine binding exists (graceful degradation)
-  if (!c.env.ANALYTICS) {
+  // Analytics Engine, or a self-host local sink (graceful degradation)
+  const analytics = resolveAnalyticsSink(c.env);
+  if (!analytics) {
     return c.body(null, 204);
   }
-  const analytics = c.env.ANALYTICS;
 
   const maxBodyBytes = parseInt(
     c.env.MAX_ANALYTICS_INGEST_BODY_BYTES || String(DEFAULT_MAX_BODY_BYTES),
@@ -202,9 +203,10 @@ analyticsIngestRoutes.post('/', async (c) => {
     /* malformed origin — ignore */
   }
 
-  // Write each valid event to Analytics Engine (fire-and-forget via waitUntil)
+  // Write every valid event to the sink in one call (fire-and-forget via waitUntil)
   const writeAll = async () => {
     try {
+      const points: AnalyticsEngineDataPoint[] = [];
       for (const raw of events) {
         const validated = validateEvent(raw, maxDurationMs);
         if (!validated) continue;
@@ -217,7 +219,7 @@ analyticsIngestRoutes.post('/', async (c) => {
         // (browsers enforce Origin on cross-origin requests; client JSON body is untrusted)
         const host = serverHost || validated.host;
 
-        analytics.writeDataPoint({
+        points.push({
           indexes: [index],
           blobs: [
             validated.event, // blob1: event name
@@ -239,6 +241,7 @@ analyticsIngestRoutes.post('/', async (c) => {
           ],
         });
       }
+      await analytics.write(points);
     } catch (err) {
       log.warn('analytics_ingest.write_failed', {
         error: err instanceof Error ? err.message : String(err),

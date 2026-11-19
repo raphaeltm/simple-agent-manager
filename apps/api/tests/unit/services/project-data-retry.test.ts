@@ -172,11 +172,12 @@ describe('project-data Durable Object retry', () => {
       ensureProjectId: vi.fn().mockResolvedValue(undefined),
       fetch: vi.fn().mockRejectedValueOnce(doResetError).mockResolvedValue(response),
     };
+    // A browser naming another user in the actor header must not be believed.
     const request = new Request('https://api.example.test/api/projects/proj-1/sessions/ws', {
-      headers: { Upgrade: 'websocket' },
+      headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': 'someone-else' },
     });
 
-    const result = await svc.forwardWebSocket(makeEnv(stub), 'proj-1', request);
+    const result = await svc.forwardWebSocket(makeEnv(stub), 'proj-1', request, 'user-1');
 
     expect(result).toBe(response);
     expect(stub.ensureProjectId).toHaveBeenCalledTimes(2);
@@ -184,6 +185,9 @@ describe('project-data Durable Object retry', () => {
     for (const [forwardedRequest] of stub.fetch.mock.calls) {
       expect(forwardedRequest).toBeInstanceOf(Request);
       expect(new URL((forwardedRequest as Request).url).pathname).toBe('/ws');
+      expect((forwardedRequest as Request).headers.get('x-sam-browser-socket-actor')).toBe(
+        'user-1'
+      );
     }
   });
 

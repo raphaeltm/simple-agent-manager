@@ -20,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { setTaskStatus } from '../../../src/routes/tasks/_helpers';
 import { deriveAgentActivityState } from '../../../src/services/agent-activity';
 import { failAndRestoreSessionRecoveryHandoff } from '../../../src/services/session-recovery-authority';
 import {
@@ -138,6 +139,43 @@ beforeEach(() => {
 });
 
 describe('wake attempt budget', () => {
+  it('a burst of real wake cancellations decays before the next fresh follow-up claim', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    seedSleepingSnapshot();
+    const database = db();
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+      const taskId = `cancelled-wake-${attempt}`;
+      const [task] = await database
+        .insert(schema.tasks)
+        .values({
+          id: taskId,
+          projectId: PROJECT_ID,
+          userId: USER_ID,
+          title: taskId,
+          status: 'queued',
+        })
+        .returning();
+      expect(await wake(taskId)).toEqual({ status: 'claimed', taskId });
+      await setTaskStatus(database, task!, 'cancelled', 'user', USER_ID);
+      expect(readSnapshot()).toMatchObject({
+        recovery_attempts: attempt + 1,
+        recovery_status: 'failed',
+      });
+    }
+    await expect(wake('fresh-follow-up')).resolves.toMatchObject({
+      status: 'unavailable',
+      reason: 'recovery_attempts_exhausted',
+    });
+    const afterDecay = new Date(NOW.getTime() + DECAY_MS + 1);
+    vi.setSystemTime(afterDecay);
+    await expect(wake('fresh-follow-up', afterDecay)).resolves.toEqual({
+      status: 'claimed',
+      taskId: 'fresh-follow-up',
+    });
+    expect(readSnapshot().recovery_attempts).toBe(1);
+  });
+
   it('releases a spent budget once the last clean failure ages past the decay window', async () => {
     // The incident: three transient placement failures, the last one an hour ago.
     seedSleepingSnapshot({ recoveryAttempts: MAX_ATTEMPTS, recoveryFailedAt: minutesAgo(60) });
