@@ -177,7 +177,7 @@ export const InboxRow = memo(function InboxRow({
 const EMPTY_COPY: Record<InboxView, { title: string; body: string }> = {
   needs_you: {
     title: 'Nothing needs you',
-    body: 'Questions, approvals and reviews from your agents land here.',
+    body: 'Questions, approvals, reviews and results from your agents land here.',
   },
   blocking: { title: 'No agent is waiting on you', body: 'Asks an agent is stopped on show here.' },
   tasks: { title: 'No tasks for you', body: 'Tasks agents assign to you show here.' },

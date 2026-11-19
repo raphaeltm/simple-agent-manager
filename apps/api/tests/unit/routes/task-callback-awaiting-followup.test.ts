@@ -61,12 +61,6 @@ describe('task callback awaiting_followup code structure', () => {
     expect(block).not.toContain('markAgentCompleted');
   });
 
-  it('awaiting_followup block does NOT emit session_ended notification', () => {
-    const block = extractAwaitingFollowupBlock();
-    expect(block).not.toBe('');
-    expect(block).not.toContain('notifySessionEnded');
-  });
-
   it('awaiting_followup block does NOT emit pr_created notification', () => {
     const block = extractAwaitingFollowupBlock();
     expect(block).not.toBe('');

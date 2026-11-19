@@ -316,17 +316,22 @@ the login page offers.
 ### `GET /api/config/platform-capabilities`
 
 Public. `{ "speechToText": bool, "textToSpeech": bool, "agentModelCalls": bool }`: which platform
-services this installation has, so the app hides controls that cannot work here. Computed from the
-Worker's bindings and settings with no D1 or KV read (`publicPlatformCapabilities()` in
-`apps/api/src/services/platform-capabilities.ts`). On Cloudflare, with the Workers AI binding
-present, every field is true; `textToSpeech` is also false when `TTS_ENABLED` is `"false"`. The
+services this installation has, so the app hides controls that cannot work here. On Cloudflare it
+is computed from the Worker's bindings and settings with no D1 or KV read
+(`resolvePublicPlatformCapabilities()` in `apps/api/src/services/speech-backend.ts`, over
+`publicPlatformCapabilities()` in `apps/api/src/services/platform-capabilities.ts`). With the
+Workers AI binding present, every field is true; `textToSpeech` is also false when `TTS_ENABLED` is
+`"false"`. Only a runtime without the binding whose entry installed a speech backend (the self-host
+build's OpenAI-compatible speech endpoints, `apps/api/src/selfhost/speech/`) reads that backend's
+settings to answer `speechToText` and `textToSpeech`. The
 web app treats a missing field, a failed request or a pending answer as "available", so controls
 never flicker away while it loads.
 
 Routes that need a missing service answer `404` with
 `{ "error": "FEATURE_UNAVAILABLE", "message": "…", "details": { "feature": "<capability>" } }`
 (`errors.featureUnavailable()` in `apps/api/src/middleware/error.ts`): `POST /api/transcribe`,
-`POST /api/tts/synthesize` and `GET /api/agent-models/catalog` without the Workers AI binding.
+`POST /api/tts/synthesize` and `GET /api/agent-models/catalog` without the Workers AI binding
+(the two speech routes only when no speech backend is installed and configured either).
 Agent-facing model calls (`list_ai_models`, `run_ai_model`) answer with the non-retryable
 `not_available` code in that case.
 
@@ -538,7 +543,7 @@ The list returns `{ pending, settled, cursor }` and needs `task:read` on the pro
 Everything agents are waiting on from you, one item per ask, across projects
 (`apps/api/src/routes/inbox.ts`, operations in `packages/operations/src/inbox-*.ts`). The list reads
 each ask where it is stored: inbox asks (questions agents ask with `request_human_input`, and the
-reviews and tasks they file), permission requests from the chat index (`session_summaries`),
+reviews, results and tasks they file), permission requests from the chat index (`session_summaries`),
 [secret requests](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret) and Operations
 approvals. Nothing is copied.
 
@@ -550,7 +555,7 @@ approvals. Nothing is copied.
 | GET    | `/api/projects/:projectId/inbox/count`              | One project's counts                           |
 | GET    | `/api/projects/:projectId/inbox/items/:ref`         | One item; `?context=true` adds the transcript  |
 | POST   | `/api/projects/:projectId/inbox/items/:ref/answer`  | Answer it through the path its store uses      |
-| POST   | `/api/projects/:projectId/inbox/items/:ref/archive` | Close it; the agent is told you will not act   |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/archive` | Close it (see below for what the agent hears)  |
 
 A human task (`ask:<id>` of kind `task`) adds its own routes beside these
 (`apps/api/src/routes/inbox-tasks.ts`, operations in `packages/operations/src/inbox-task-core.ts`).
@@ -585,7 +590,7 @@ from the chat index (`attention:` ref, the newest one per chat) until it is answ
 
 Each item has a `ref` naming its store (`ask:<id>`, `attention:<sessionId>:<markerId>`,
 `secret:<id>`, `approval:<id>`), `kind` (`question`, `permission`, `form`, `url`, `secret`,
-`approval`, `review`, `task`, `error`), project and chat, `title` and `body` (agent text, untrusted),
+`approval`, `review`, `result`, `task`, `error`), project and chat, `title` and `body` (agent text, untrusted),
 `blocking`, `agentState` (`waiting`, `working`, `finished`, `not_started`, `unknown`), `status`,
 `createdAt`, `updatedAt`, `failureCount` (error items only, otherwise `null`), `expiresAt`, `dueAt`,
 `links`, `canAct`, and `answerSpec`, which says what an answer
@@ -599,14 +604,23 @@ store: the question answer (the same one the chat card uses, so two answers meet
 compare-and-set and the loser gets `409`), the permission answer, secret fulfil/decline, and the
 approval decision.
 Secret values and Operations approval decisions are accepted only from the SAM app, never through
-an app connected to the Connector (`403`). Answering or archiving an item filed from a chat needs
-the same right to wake that chat's agent as answering in the chat.
+an app connected to the Connector (`403`). Answering an item filed from a chat needs the same
+right to wake that chat's agent as answering in the chat. Archiving wakes nothing: an inbox ask
+needs only that it is yours to act on, and a question asked before questions moved to inbox asks
+needs the right to write in its chat.
 
-Archive closes an item for every kind: an inbox ask (a question too) becomes `archived`, a
-question asked before that change is resolved with reason `archived`, a permission or approval is denied, and a secret request is declined. Each
-tells the agent you will not act. Both writes return `{ ref, outcome, agentNotified }`;
-`agentNotified: false` on an ask means its notice was not queued yet, and SAM retries it for
-`inbox.noticeRetryMinutes`. Writes must come from the app's own origin with
+Archive closes an item for every kind. A question, review or result becomes `archived` (a
+question asked before questions moved to inbox asks is resolved with reason `archived`) and the
+agent is not told: it stays where it is until you answer something or write in its chat. Archiving
+a question also holds SAM's automatic check-ins off that chat until someone writes in it, for at
+most `inbox.archiveCheckinHoldHours`. A permission or approval is denied and a secret request is
+declined, which the agent does hear. Archiving a task tells the chats watching it. Both writes
+return `{ ref, outcome, agentNotified }`; for an answer or an archived task, `agentNotified: false`
+means the notice was not queued yet, and SAM retries it for `inbox.noticeRetryMinutes`. The
+exception is **Got it** on a result (an empty `acknowledge` answer): it closes the item without
+telling the agent, by design, so nothing is retried. A non-empty reply to a review or result whose
+agent has finished returns `400`, because it could not be delivered. Writes must come from the
+app's own origin with
 `Content-Type: application/json`, like the other answer routes. A missing item and one in another
 project both return `404`; an item that is already closed returns `409`, and one you cannot act
 on returns `403`. The transcript context is returned only to a member who can read the source chat.
@@ -1101,7 +1115,7 @@ Query `range` is `7d`, `30d` or `90d` (default `30d`; anything else is `400`). R
 membership. Sent with `Cache-Control: private, no-store`: the body carries the caller's own account
 names and limit windows. Returns `ProjectAccountsResponse`
 (`packages/shared/src/types/insights-accounts.ts`):
-`{ projectId, range, since, until, bucket, buckets, accounts, stallEpisodes, totals, usageLimited, unavailable, generatedAt }`.
+`{ projectId, range, since, until, bucket, buckets, accounts, stallEpisodes, totals, usageLimited, usageAdmissionLimited?, unavailable, generatedAt }`.
 
 - `accounts`: most runs first. Each is `{ key, name, owner, kind, agentType, credentials, runs, merged, runsByBucket, stalls, usage, tokens, spend }`.
   `owner` is `you`, `teammate`, `project`, `platform` or `not_recorded`; `kind` is `subscription`,
@@ -1123,6 +1137,8 @@ names and limit windows. Returns `ProjectAccountsResponse`
   `outcome` is `resumed`, `ended` (the run ended while waiting), `blocked` or `ongoing`. `truncated` means the scan cap
   (`insights.accountsStallScanCap`) left older limit waits out.
 - `usageLimited`: the usage read hit `insights.accountsUsageRowCap`, so tokens and spend are a floor.
+- `usageAdmissionLimited`: some run in the usage window lost harness usage. This optional page-level
+  warning does not mark every account as incomplete; complete account labels stay exact.
 - `unavailable`: sections whose read failed this time (`runs`, `stalls`, `usage`, `tokens`).
 
 ### `GET /api/projects/:projectId/insights/setups`
@@ -1132,7 +1148,7 @@ Query `range` is `7d`, `30d` or `90d` (default `30d`) and `groupBy` is `profile`
 `model` (default `profile`); anything else is `400`. Requires project membership. Sent with
 `Cache-Control: private, no-store`: the body names the caller's own personal profiles and skills.
 Returns `ProjectSetupsResponse` (`packages/shared/src/types/insights-setups.ts`):
-`{ projectId, range, groupBy, since, until, rework, sample, groups, suggestions, suggestionMinRuns, unavailable, generatedAt }`.
+`{ projectId, range, groupBy, since, until, rework, sample, groups, suggestions, suggestionMinRuns, usageAdmissionLimited?, unavailable, generatedAt }`.
 
 - `groups`: most runs first, with the rows for no profile/skill and an unrecorded model last. Each
   is `{ key, label, owner, agentType, usedFor, runs, finished, mergedClean, mergedCleanRate, merged, medianToPullRequestMs, pullRequests, nudges, tokens, memory }`.
@@ -1146,6 +1162,9 @@ Returns `ProjectSetupsResponse` (`packages/shared/src/types/insights-setups.ts`)
 - `suggestions`: each is `default_profile` (`{ skill, profile, compared, currentDefault, apply }`) or
   `request_size` (`{ skill, currentGb, suggestedGb, runs, p90Bytes, maxBytes, oomKills, apply }`).
   `apply` is `{ skillId, patch }`, the body to send to `PATCH /api/projects/:projectId/skills/:skillId`.
+- `usageAdmissionLimited`: a selected run has incomplete harness token data; the page warns that
+  token totals and comparisons may be understated. Complete proxy measurements take precedence.
+  Older servers may omit this field.
 - `unavailable`: sections whose read failed this time (`runs`, `nudges`).
 
 ### `GET /api/projects/:projectId/insights/people`
@@ -1175,6 +1194,37 @@ items the caller may open. Returns `ProjectPeopleResponse`
   `truncated` means the scan cap (`insights.peopleReviewScanCap`) kept only the newest requests.
 - `firstPerson`: `{ closed, firstPerson, share }`, `share` `null` when nothing closed.
 - `unavailable`: sections whose read failed this time (`waiting`, `reviews`, `first_person`).
+
+### Insights for agents: MCP `project_insights` / Connector `sam_project_insights`
+
+The same Insights reads, for agents, as one tool with a `method` (`projectInsights`,
+`packages/operations/src/insights-agent.ts`; catalog operation `sam_project_insights`, which the SAM
+Connector lists; sam-mcp tool `project_insights`, `apps/api/src/routes/mcp/project-insights-tool.ts`).
+
+- `receipt` (`taskId`): `runReceipt`. `flow` (`range`): `projectFlow`. `setups` (`range`,
+  `groupBy`): `projectSetups`. `accounts` (`range`): `projectAccounts`. `phases` (`skillId` or
+  `agentProfileId`, optional `operation`, `phaseNames` and `windowDays`): median and p90 per
+  lifecycle phase from `phaseDurationStats`, over at most the 500 newest successful rows of each
+  operation and phase. Each (operation, phase) is read newest first from one range of an index
+  keyed on every filter (migration 0260), and the read stops at its sample, so the cost does not
+  grow with stored history. Each stat's `truncated` says its pair had older rows left out (the
+  response-level `truncated` says any did, or that the total row bound was reached). An undeclared argument, an argument the method does not
+  read, or a missing one it needs is `invalid_input`.
+- Numbers only: no task, pull request or idea titles, no idea notes, no agent questions, no account
+  names or credential references, no names of a teammate's profiles. CI check names are kept
+  (capped at 100 characters) because they identify a flaky check. Accounts are keyed `account-1`,
+  `account-2`, ... in the order the page lists them. Dollar spend appears only where the receipt
+  page would show it, and is hidden when the run's account was not recorded.
+- On sam-mcp the project always comes from the MCP token; a different `projectId` is refused with
+  `Project does not match workspace token`. Each chat may call it `insights.agentToolCallsPerWindow`
+  times per `insights.agentToolWindowSeconds` (see [admin settings](/docs/guides/admin-settings/));
+  the next call returns JSON-RPC error `-32000` with the retry time. A call refused for its
+  arguments does not count. The Connector has no chat, so
+  there it spends the per-user `connector.readRateLimitPerMinute` budget instead.
+- Round trips in the handler are the page read's plus one rate-limit RPC: receipt at most 8 (it
+  skips the account-name read), flow at most 11, setups at most 6, accounts at most 5, phases 3.
+  Every sam-mcp call also pays the token, storage-activation and HTTP rate-limit checks that all
+  sam-mcp tools share.
 
 ### `POST /api/projects/:id/tasks`
 

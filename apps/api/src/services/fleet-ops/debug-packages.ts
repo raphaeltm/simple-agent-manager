@@ -15,8 +15,10 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { releaseArrayBuffer } from '../../lib/release-array-buffer';
 import { deleteFiles, uploadFile } from '../file-library';
 import { getUploadMaxBytes } from '../file-library-config';
+import { acquireLibraryMemory } from '../library-memory';
 import { openNodeDiagnosticDownload } from '../node-agent-diagnostics';
 import { type NodeAccess, runNodeDiagnostic } from '../node-diagnostics-access';
 import { configuredFeedbackProjectId } from '../platform-feedback-incident-config';
@@ -86,59 +88,72 @@ export async function captureDebugPackage(
   if (outcome.status !== 'ok') return outcome;
 
   const response = outcome.value;
-  const declared = Number(response.headers.get('Content-Length'));
-  let data: ArrayBuffer;
+  let release: () => void;
   try {
-    if (Number.isFinite(declared) && declared > capBytes) {
-      await response.body?.cancel('debug package byte cap exceeded').catch(() => undefined);
-      throw new DebugPackageTooLargeError(capBytes);
-    }
-    data = await readStreamCapped(response.body, capBytes);
+    release = acquireLibraryMemory();
   } catch (error) {
-    if (error instanceof DebugPackageTooLargeError) {
-      return {
-        status: 'too_large' as const,
-        capBytes,
-        declaredBytes: Number.isFinite(declared) ? declared : null,
-      };
-    }
+    // The diagnostic response is already open, but no archive has been buffered.
+    void response.body?.cancel().catch(() => {});
     throw error;
   }
-
-  const capturedAt = new Date(ctx.now ?? Date.now());
-  const filename = `${capturedAt.toISOString().replace(/[:.]/g, '-')}.tar.gz`;
-  const directory = debugPackageDirectory(node.id);
-  const file = await uploadFile(
-    drizzle(env.DATABASE, { schema }),
-    env.R2,
-    ctx.encryptionKey,
-    env,
-    ctx.operationsProjectId,
-    ctx.actorUserId,
-    filename,
-    'application/gzip',
-    data,
-    {
-      directory,
-      uploadSource: 'agent',
-      uploadTaskId: ctx.taskId,
-      tags: ['debug-package'],
-      description:
-        `Raw, unredacted debug package from node ${node.id}. ` +
-        `Deleted automatically after ${ctx.settings.debugPackageRetentionDays} day(s).`,
+  let data: ArrayBuffer | undefined;
+  try {
+    const declared = Number(response.headers.get('Content-Length'));
+    try {
+      if (Number.isFinite(declared) && declared > capBytes) {
+        await response.body?.cancel('debug package byte cap exceeded').catch(() => undefined);
+        throw new DebugPackageTooLargeError(capBytes);
+      }
+      data = await readStreamCapped(response.body, capBytes);
+    } catch (error) {
+      if (error instanceof DebugPackageTooLargeError) {
+        return {
+          status: 'too_large' as const,
+          capBytes,
+          declaredBytes: Number.isFinite(declared) ? declared : null,
+        };
+      }
+      throw error;
     }
-  );
-  return {
-    status: 'ok' as const,
-    fileId: file.id,
-    filename,
-    directory: file.directory,
-    sizeBytes: data.byteLength,
-    capBytes,
-    expiresAt: new Date(
-      capturedAt.getTime() + ctx.settings.debugPackageRetentionDays * DAY_MS
-    ).toISOString(),
-  };
+
+    const capturedAt = new Date(ctx.now ?? Date.now());
+    const filename = `${capturedAt.toISOString().replace(/[:.]/g, '-')}.tar.gz`;
+    const directory = debugPackageDirectory(node.id);
+    const file = await uploadFile(
+      drizzle(env.DATABASE, { schema }),
+      env.R2,
+      ctx.encryptionKey,
+      env,
+      ctx.operationsProjectId,
+      ctx.actorUserId,
+      filename,
+      'application/gzip',
+      data,
+      {
+        directory,
+        uploadSource: 'agent',
+        uploadTaskId: ctx.taskId,
+        tags: ['debug-package'],
+        description:
+          `Raw, unredacted debug package from node ${node.id}. ` +
+          `Deleted automatically after ${ctx.settings.debugPackageRetentionDays} day(s).`,
+      }
+    );
+    return {
+      status: 'ok' as const,
+      fileId: file.id,
+      filename,
+      directory: file.directory,
+      sizeBytes: data.byteLength,
+      capBytes,
+      expiresAt: new Date(
+        capturedAt.getTime() + ctx.settings.debugPackageRetentionDays * DAY_MS
+      ).toISOString(),
+    };
+  } finally {
+    if (data) releaseArrayBuffer(data);
+    release();
+  }
 }
 
 /**

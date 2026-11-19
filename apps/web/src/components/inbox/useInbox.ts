@@ -80,8 +80,9 @@ export function useInvalidateInbox() {
 }
 
 /**
- * How long an archive can be undone before it is sent. Archive closes the item and tells the
- * agent, so a slip of the thumb must be recoverable. Override with VITE_INBOX_ARCHIVE_UNDO_MS.
+ * How long an archive can be undone before it is sent. Archive closes the item (and denies a
+ * permission, approval or secret request), so a slip of the thumb must be recoverable. Override
+ * with VITE_INBOX_ARCHIVE_UNDO_MS.
  */
 const DEFAULT_INBOX_ARCHIVE_UNDO_MS = 5_000;
 const configuredUndoMs = Number.parseInt(import.meta.env.VITE_INBOX_ARCHIVE_UNDO_MS ?? '', 10);

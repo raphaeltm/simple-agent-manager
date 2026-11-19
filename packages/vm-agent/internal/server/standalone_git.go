@@ -32,11 +32,13 @@ const standaloneGitCredentialHelperScriptTemplate = `#!/bin/sh
 [ "${1:-get}" = "get" ] || exit 0
 host=""
 path=""
+protocol=""
 while IFS= read -r line; do
   [ -z "$line" ] && break
   case "$line" in
     host=*) host="${line#host=}" ;;
     path=*) path="${line#path=}" ;;
+    protocol=*) protocol="${line#protocol=}" ;;
   esac
 done
 [ -n "$host" ] || exit 0
@@ -61,7 +63,8 @@ fi
 
 workspace_id=$(url_encode_query_value "$SAM_WORKSPACE_ID")
 encoded_host=$(url_encode_query_value "$host")
-credential_query="workspaceId=${workspace_id}&host=${encoded_host}"
+encoded_protocol=$(url_encode_query_value "$protocol")
+credential_query="workspaceId=${workspace_id}&host=${encoded_host}&protocol=${encoded_protocol}"
 if [ -n "$path" ]; then
   encoded_path=$(url_encode_query_value "$path")
   credential_query="${credential_query}&path=${encoded_path}"

@@ -312,9 +312,9 @@ export async function getTaskSessions(
   return request<TaskSessionsResponse>(`/api/projects/${projectId}/tasks/${taskId}/sessions`);
 }
 
-/** Start a never-started task now despite its provider-limit admission hold (owner only). */
+/** Owner override for a held first start or saved waiting session. */
 export function startProviderLimitTaskAnyway(projectId: string, taskId: string) {
-  return request<{ status: 'starting'; taskId: string }>(
+  return request<{ status: 'starting' | 'waking'; taskId: string }>(
     `/api/projects/${projectId}/tasks/${taskId}/provider-limit/start-anyway`,
     { method: 'POST' }
   );

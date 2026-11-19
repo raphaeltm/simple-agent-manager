@@ -18,6 +18,7 @@ import {
 import { readSetting } from '../platform-config-store';
 import type { TriggerTaskSubmitter } from '../trigger-admission';
 import { renderTemplate } from '../trigger-template';
+import { isSelfHostInboundEmailConfigured, selfHostAgentEmailSender } from './self-host-inbound';
 
 export interface AgentEmailPortOverrides {
   /** Replaces task submission inside trigger admission (tests). */
@@ -51,5 +52,7 @@ export function agentEmailPorts(
       defaultTimeoutMs: DEFAULT_CF_API_TIMEOUT_MS,
       readErrorDetail: readCloudflareErrorDetail,
     },
+    selfHostInboundEmailConfigured: () => isSelfHostInboundEmailConfigured(env),
+    selfHostAgentEmailSender: (options) => selfHostAgentEmailSender(env, options),
   };
 }

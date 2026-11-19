@@ -112,13 +112,17 @@ import { runStandingWatchAlarm } from './project-standing-watches-runner';
 import * as standingWatches from './project-standing-watches-storage';
 import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from './prompt-delivery';
 import * as promptDelivery from './prompt-delivery';
+import { cancelUnissuedSessionPrompts } from './prompt-delivery-cancellation';
 import {
   type ProviderLimitAttentionResult,
   syncProviderLimitAttention,
 } from './provider-limit-attention';
 import * as questionAsks from './question-asks';
 import * as reconciliation from './reconciliation';
-import { releaseQuestionHold } from './reconciliation-candidate-state';
+import {
+  holdReconciliationAfterArchive,
+  releaseQuestionHold,
+} from './reconciliation-candidate-state';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import { instrumentRowUsage, RowUsage } from './row-usage';
 import { countRunNudges } from './run-nudges';
@@ -134,6 +138,9 @@ import { countLegacyToolSockets } from './session-sockets';
 import {
   admitBrowserSocket,
   broadcastToBrowserSockets,
+  BROWSER_SOCKET_ACTOR_HEADER,
+  closeBrowserSocketsForActor as closeActorSockets,
+  closeIfAccessRevoked,
   closeQuietly,
   countLegacySockets,
 } from './session-sockets';
@@ -519,9 +526,27 @@ export class ProjectData extends DurableObject<Env> {
    */
   async stopSession(
     sessionId: string,
-    options: { deferAlarm?: boolean; source?: 'workspace_eviction_finalization' } = {}
+    options: {
+      deferAlarm?: boolean;
+      source?: 'workspace_eviction_finalization';
+      guard?: sessions.SessionIdentityGuard;
+    } = {}
   ): Promise<boolean> {
-    const result = sessions.stopSession(this.sql, sessionId, undefined, options);
+    let result: ReturnType<typeof sessions.stopSession>;
+    try {
+      result = sessions.stopSession(this.sql, sessionId, options.guard, options);
+    } catch (error) {
+      // An expected owner change is a refused stop, not a failed RPC. Keep the
+      // decision at the DO mutation boundary so no successor mirror is touched.
+      if (
+        options.guard &&
+        error instanceof Error &&
+        (error.message.startsWith(`Session ${sessionId} cannot stopped: expected `) ||
+          error.message === `Session ${sessionId} not found`)
+      )
+        return false;
+      throw error;
+    }
     if (result) {
       attention.resolveAttentionMarkersByKind(
         this.sql,
@@ -943,6 +968,37 @@ export class ProjectData extends DurableObject<Env> {
     });
   }
 
+  /** Retire only unissued prompts of the exact cancelled task; later messages stay eligible. */
+  async cancelUnissuedSessionPrompts(
+    sessionId: string,
+    taskId: string,
+    options?: { acceptedBefore: number }
+  ): Promise<import('./prompt-delivery-cancellation').CancelUnissuedSessionPromptsResult> {
+    const cancelled = await this.withArchiveTranscriptLock(() => {
+      messages.assertTranscriptWriteAllowed(this.sql, sessionId, 'cancelUnissuedSessionPrompts');
+      return this.meteredStorage.transactionSync(() =>
+        cancelUnissuedSessionPrompts(
+          this.sql,
+          sessionId,
+          taskId,
+          this.getProjectId(),
+          options?.acceptedBefore
+        )
+      );
+    });
+    // An uncertain retry can settle a wake batch without increasing the cancelled count.
+    if (cancelled.matched) {
+      this.recalculateAlarm().catch((error) =>
+        log.warn('prompt_delivery.cancel_recalculate_alarm_failed', {
+          sessionId,
+          taskId,
+          ...serializeError(error),
+        })
+      );
+    }
+    return cancelled;
+  }
+
   async acceptPromptDelivery(input: AcceptPromptDeliveryInput): Promise<AcceptedPromptDelivery> {
     return this.withArchiveTranscriptLock(() =>
       durability.acceptPromptDelivery(this.sql, this.env, this.durabilityHooks(), input)
@@ -1037,7 +1093,9 @@ export class ProjectData extends DurableObject<Env> {
         sessionId,
       }),
     ]);
-    if (closed > 0 && releaseQuestionHold(this.sql, sessionId)) await this.recalculateAlarm();
+    // Any person's message releases a question hold, including the one an archive leaves when
+    // no question is open any more (`holdReconciliationAfterArchive`).
+    if (releaseQuestionHold(this.sql, sessionId)) await this.recalculateAlarm();
     return closed;
   }
 
@@ -2961,6 +3019,36 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   /**
+   * The person archived a question in this chat: open chat views stop showing it, and SAM's
+   * check-ins stay off the chat until `holdCheckinsUntil` or until the person writes in it
+   * (`holdReconciliationAfterArchive`), so archiving does not nudge the agent (archive tells the
+   * agent nothing; Raphaël, 2026-11-17).
+   *
+   * The archive closed its record before this call, so a person's message can land in between;
+   * its persistence released a hold that did not exist yet. A message newer than `archivedAt`
+   * therefore means no hold. `archivedAt` is absent only from an earlier build's call.
+   */
+  async recordQuestionArchived(input: {
+    sessionId: string;
+    askId: string;
+    holdCheckinsUntil: number;
+    archivedAt?: number;
+  }): Promise<void> {
+    const wroteSince =
+      input.archivedAt !== undefined &&
+      questionAsks.humanMessageSince(this.sql, input.sessionId, input.archivedAt);
+    if (!wroteSince) {
+      holdReconciliationAfterArchive(this.sql, input.sessionId, input.holdCheckinsUntil);
+      await this.recalculateAlarm();
+    }
+    this.broadcastEvent(
+      'attention.resolved',
+      { sessionId: input.sessionId, markerId: input.askId, reason: 'archived' },
+      input.sessionId
+    );
+  }
+
+  /**
    * The agent cancelled its blocking question in D1 `asks` (`inbox_write` method `cancel`, inbox
    * slice D): the chat stops showing it as paused, as when a question is answered. Nothing is
    * stored here; the row is already closed.
@@ -3817,11 +3905,26 @@ export class ProjectData extends DurableObject<Env> {
       const upgradeHeader = request.headers.get('Upgrade');
       if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket')
         return new Response('Expected WebSocket upgrade', { status: 426 });
-      return admitBrowserSocket(this.ctx, this.sql, url, () => {
-        const metrics = emptyMessageIngestMetrics();
-        metrics.toolSealedSessions = 1;
-        this.rowUsage.recordMessageIngest(metrics);
-      });
+      const actorId = request.headers.get(BROWSER_SOCKET_ACTOR_HEADER);
+      const projectId = this.getProjectId();
+      return admitBrowserSocket(
+        this.ctx,
+        this.sql,
+        url,
+        actorId,
+        () => {
+          const metrics = emptyMessageIngestMetrics();
+          metrics.toolSealedSessions = 1;
+          this.rowUsage.recordMessageIngest(metrics);
+        },
+        (ws, admittedActor) => {
+          if (!projectId) {
+            log.warn('websocket.admission_recheck_skipped_no_project', { action: 'kept_open' });
+            return;
+          }
+          this.ctx.waitUntil(closeIfAccessRevoked(this.env.DATABASE, projectId, admittedActor, ws));
+        }
+      );
     }
     return new Response('Not found', { status: 404 });
   }
@@ -3854,6 +3957,11 @@ export class ProjectData extends DurableObject<Env> {
     } catch {
       /* Ignore non-JSON messages */
     }
+  }
+
+  /** Close a user's browser sockets after their access to this project was revoked. */
+  closeBrowserSocketsForActor(actorId: string): number {
+    return closeActorSockets(this.ctx, actorId);
   }
 
   async webSocketClose(

@@ -16,6 +16,7 @@ import type {
   PermissionOption,
 } from '../project-message-view/useAcpPermissionCard';
 import {
+  acknowledgeReceipt,
   deliveryNote,
   errorText,
   type InboxAnswerHandlers,
@@ -24,7 +25,10 @@ import {
   useInboxSend,
 } from './inbox-actions';
 import {
+  acknowledgeLabel,
+  canReplyToAgent,
   type InboxErrorActionModel,
+  isAcknowledgeable,
   isIrreversibleApproval,
   readErrorActions,
 } from './inbox-model';
@@ -178,13 +182,28 @@ function StaleNotice({ onStale }: { onStale: () => void }) {
   );
 }
 
-function ReviewControls({ item, handlers }: { item: InboxItem; handlers: InboxAnswerHandlers }) {
+/** A review ("Looks good") or a result ("Got it"), each with Reply. */
+function AcknowledgeControls({
+  item,
+  handlers,
+}: {
+  item: InboxItem;
+  handlers: InboxAnswerHandlers;
+}) {
   const { busy, error, send } = useInboxSend(item, handlers);
+  const ackLabel = acknowledgeLabel(item);
   const [replying, setReplying] = useState(false);
   const [text, setText] = useState('');
+  const replyRef = useRef<HTMLTextAreaElement>(null);
+  // The Reply button unmounts as the form mounts; keep keyboard and screen-reader focus with it.
+  useEffect(() => {
+    if (replying) replyRef.current?.focus();
+  }, [replying]);
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      {replying ? (
+      {/* If the agent finishes while a reply is being written, the form gives way to Open chat;
+          the draft stays in state. */}
+      {replying && canReplyToAgent(item) ? (
         <form
           className="flex min-w-0 flex-col gap-2"
           onSubmit={(e) => {
@@ -198,6 +217,7 @@ function ReviewControls({ item, handlers }: { item: InboxItem; handlers: InboxAn
             Your reply
           </label>
           <textarea
+            ref={replyRef}
             id={`reply-${item.ref}`}
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -229,19 +249,24 @@ function ReviewControls({ item, handlers }: { item: InboxItem; handlers: InboxAn
         <div className="grid min-w-0 grid-cols-2 gap-2">
           <Button
             disabled={busy !== null}
-            onClick={() => void send('ack', {}, (r) => `Marked “Looks good”${deliveryNote(r)}`)}
+            onClick={() => void send('ack', {}, (r) => acknowledgeReceipt(item, r))}
             className="min-h-11"
           >
-            {busy === 'ack' ? 'Sending…' : 'Looks good'}
+            {busy === 'ack' ? 'Sending…' : ackLabel}
           </Button>
-          <Button
-            variant="secondary"
-            disabled={busy !== null}
-            onClick={() => setReplying(true)}
-            className="min-h-11"
-          >
-            Reply
-          </Button>
+          {canReplyToAgent(item) ? (
+            <Button
+              variant="secondary"
+              disabled={busy !== null}
+              onClick={() => setReplying(true)}
+              className="min-h-11"
+            >
+              Reply
+            </Button>
+          ) : (
+            // The agent has finished, so a reply would reach no one: continue in the chat.
+            <OpenChatButton item={item} label="Open chat" />
+          )}
         </div>
       )}
       <ErrorLine error={error} />
@@ -397,8 +422,8 @@ export function InboxAnswerControls({
     case 'acknowledge':
       // Human tasks and SAM's own error items are read-only here until their slices ship
       // (`hasPinnedControls` hides their strip); Open chat is in the top bar.
-      return item.kind === 'review' ? (
-        <ReviewControls key={item.ref} item={item} handlers={handlers} />
+      return isAcknowledgeable(item) ? (
+        <AcknowledgeControls key={item.ref} item={item} handlers={handlers} />
       ) : null;
   }
 }

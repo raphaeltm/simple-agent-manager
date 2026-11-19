@@ -58,7 +58,7 @@ Required pattern:
 
 1. Edit `packages/cloud-init/src/template.ts`
 2. Update variable types in `src/variables.ts`, validation in `src/validate.ts` and wiring in `src/generate.ts` when needed
-3. Ingress-mode blocks (Origin CA direct mode, Cloudflare Tunnel mode) live in `src/template-ingress.ts` and render only for their mode; keep user-data under the 32 KB Hetzner limit
+3. Ingress-mode blocks (Origin CA direct mode, Cloudflare Tunnel mode) live in `src/template-ingress.ts`, and the self-host reverse-tunnel (frpc) blocks in `src/template-reverse-tunnel.ts`; each renders only for its mode. Keep user-data under the 32 KB Hetzner limit, and keep `tests/cloudflare-output-snapshot.test.ts` passing unchanged when editing shared fragments
 4. Test cloud-init generation through the workspace provisioning flow
 
 ### Runcmd Interpreter Contract

@@ -741,40 +741,38 @@ describe('an answer whose agent notice the inbox sweep gave up on', () => {
       updated_at: 1,
     });
     const resolvedAt = Date.now() - 61 * 60_000;
+    const closedQuestion = (
+      id: string,
+      title: string,
+      status: string,
+      at: number,
+      kind = 'question'
+    ) =>
+      insert('asks', {
+        id,
+        project_id: P1,
+        assignee_kind: 'user',
+        assignee_user_id: 'owner',
+        kind,
+        blocking: 1,
+        title,
+        status,
+        source_session_id: 'chat-answer',
+        source_task_id: 't-answer',
+        resolved_by_user_id: 'owner',
+        resolved_at: at,
+        created_at: at - 1000,
+        updated_at: at,
+      });
     // A question the owner answered an hour ago whose notice was never queued.
-    insert('asks', {
-      id: 'q-lost',
-      project_id: P1,
-      assignee_kind: 'user',
-      assignee_user_id: 'owner',
-      kind: 'question',
-      blocking: 1,
-      title: 'Which region?',
-      status: 'answered',
-      source_session_id: 'chat-answer',
-      source_task_id: 't-answer',
-      resolved_by_user_id: 'owner',
-      resolved_at: resolvedAt,
-      created_at: resolvedAt - 1000,
-      updated_at: resolvedAt,
-    });
+    closedQuestion('q-lost', 'Which region?', 'answered', resolvedAt);
+    // A question an earlier build archived without a notice: archiving tells the agent nothing,
+    // so no notice was lost and no delivery item may name it.
+    closedQuestion('q-archived', 'Which bucket?', 'archived', resolvedAt);
+    // The same for a result an earlier build archived (it then told the agent).
+    closedQuestion('r-archived', 'The bucket is ready', 'archived', resolvedAt, 'result');
     // Control: one still inside its retry window is left to the notice sweep.
-    insert('asks', {
-      id: 'q-retrying',
-      project_id: P1,
-      assignee_kind: 'user',
-      assignee_user_id: 'owner',
-      kind: 'question',
-      blocking: 1,
-      title: 'Which zone?',
-      status: 'answered',
-      source_session_id: 'chat-answer',
-      source_task_id: 't-answer',
-      resolved_by_user_id: 'owner',
-      resolved_at: Date.now() - 5 * 60_000,
-      created_at: Date.now() - 6 * 60_000,
-      updated_at: Date.now() - 5 * 60_000,
-    });
+    closedQuestion('q-retrying', 'Which zone?', 'answered', Date.now() - 5 * 60_000);
 
     expect((await runInboxSystemErrorSweep(env)).filed).toBe(1);
     const [item] = (await listInbox(ctx('owner'), { projectId: P1 })).items;
@@ -783,6 +781,8 @@ describe('an answer whose agent notice the inbox sweep gave up on', () => {
       title: "Your answer didn't reach the agent in “Pick a region”",
       links: expect.arrayContaining([{ kind: 'ask', id: 'q-lost', label: null }]),
     });
+    expect(item!.links).not.toContainEqual(expect.objectContaining({ id: 'q-archived' }));
+    expect(item!.links).not.toContainEqual(expect.objectContaining({ id: 'r-archived' }));
     expect((await runInboxSystemErrorSweep(env)).filed).toBe(0);
     expect(errorAsks()).toHaveLength(1);
     expect(errorAsks()[0]!.failure_count).toBe(1);

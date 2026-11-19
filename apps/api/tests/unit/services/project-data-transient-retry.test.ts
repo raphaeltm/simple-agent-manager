@@ -105,7 +105,7 @@ describe('ProjectData transient retry wrappers', () => {
       headers: { Upgrade: 'websocket' },
     });
 
-    await expect(forwardWebSocket(envForStub(stub), 'project-1', request)).resolves.toBe(accepted);
+    await expect(forwardWebSocket(envForStub(stub), 'project-1', request, 'user-1')).resolves.toBe(accepted);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0]?.[0]).toBeInstanceOf(Request);
     expect(new URL((fetchMock.mock.calls[0]?.[0] as Request).url).pathname).toBe('/ws');
@@ -151,7 +151,7 @@ describe('ProjectData transient retry wrappers', () => {
       headers: { Upgrade: 'websocket' },
     });
 
-    await expect(forwardWebSocket(envForStub(stub), 'project-1', request)).resolves.toBe(accepted);
+    await expect(forwardWebSocket(envForStub(stub), 'project-1', request, 'user-1')).resolves.toBe(accepted);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 

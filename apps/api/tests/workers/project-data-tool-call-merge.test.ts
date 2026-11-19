@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { projectDataStub } from './helpers/archive-fixtures';
 import { profileObject, type WriteSample } from './helpers/archive-write-profile';
+import { socketMember } from './helpers/socket-member';
 
 const source = {
   workspaceId: 'tool-workspace',
@@ -625,13 +626,15 @@ it('keeps legacy admission session scoped and permanent after disconnect', async
   const { stub, session } = await fixture();
   const other = await stub.createSession(source.workspaceId, 'Other session');
   const project = await stub.fetch(
-    new Request('https://test/ws', { headers: { Upgrade: 'websocket' } })
+    new Request('https://test/ws', {
+      headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': await socketMember(stub) },
+    })
   );
   project.webSocket!.accept();
   await stub.persistMessageBatch(session, [notification(1, { status: 'pending' })], source);
   const legacy = await stub.fetch(
     new Request(`https://test/ws?sessionId=${session}&messageAppend=append-v1`, {
-      headers: { Upgrade: 'websocket' },
+      headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': await socketMember(stub) },
     })
   );
   legacy.webSocket!.accept();

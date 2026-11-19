@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import reporterMessages from './fixtures/archive-reporter-messages.json';
 import { projectDataStub } from './helpers/archive-fixtures';
 import { profileObject, type WriteSample } from './helpers/archive-write-profile';
+import { socketMember } from './helpers/socket-member';
 
 const source = {
   workspaceId: 'merge-workspace',
@@ -451,7 +452,7 @@ describe('canonical streamed chunks through real ProjectData persistence', () =>
     await stub.persistMessageBatch(session, batch.slice(1, 5), source);
     const response = await stub.fetch(
       new Request(`https://test/ws?sessionId=${session}`, {
-        headers: { Upgrade: 'websocket' },
+        headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': await socketMember(stub) },
       })
     );
     expect(response.status).toBe(101);

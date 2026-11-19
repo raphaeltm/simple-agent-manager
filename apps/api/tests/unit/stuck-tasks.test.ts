@@ -617,8 +617,12 @@ describe('recoverStuckTasks', () => {
       expect(fetchWithTimeoutMock).toHaveBeenCalledWith(
         'https://node-1.vm.example.test:8443/health',
         { method: 'GET', redirect: 'manual' },
-        DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS
+        expect.any(Number)
       );
+      // Route resolution consumes part of the same probe budget.
+      const fetchBudgetMs = fetchWithTimeoutMock.mock.calls[0]?.[2] as number;
+      expect(fetchBudgetMs).toBeGreaterThan(0);
+      expect(fetchBudgetMs).toBeLessThanOrEqual(DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS);
       expect(result.failedInProgress).toBe(0);
       expect(result.heartbeatSkipped).toBe(1);
     });

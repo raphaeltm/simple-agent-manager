@@ -173,6 +173,14 @@ export {
 } from './hetzner-account-limits';
 export { HETZNER_SIZE_CONFIGS } from './hetzner-metadata';
 export {
+  applyInfomaniakBootVolumeSize,
+  assertInfomaniakRequestedBootVolumeAllowed,
+  DEFAULT_INFOMANIAK_BOOT_VOLUME_GB,
+  INFOMANIAK_BOOT_VOLUME_MAX_GB,
+  INFOMANIAK_BOOT_VOLUME_MIN_GB,
+  INFOMANIAK_ROOT_DISK_METADATA_KEY,
+} from './infomaniak-boot-volume';
+export {
   classifyInfomaniakError,
   DEFAULT_INFOMANIAK_AUTH_URL,
   DEFAULT_INFOMANIAK_IMAGE_NAME,
@@ -187,9 +195,9 @@ export {
   INFOMANIAK_VOLUME_CAPABILITIES,
   INFOMANIAK_VOLUME_MAX_SIZE_GB,
   INFOMANIAK_VOLUME_MIN_SIZE_GB,
-  InfomaniakProvider,
   mapInfomaniakStatus,
-} from './infomaniak';
+} from './infomaniak-metadata';
+export { InfomaniakProvider };
 export {
   getProviderCatalogOfferings,
   getProviderInstanceOfferingForLegacySize,
@@ -277,6 +285,7 @@ export function createProvider(config: ProviderConfig): Provider {
           requestTimeoutMs: config.requestTimeoutMs,
           ipPollTimeoutMs: config.ipPollTimeoutMs,
           ipPollIntervalMs: config.ipPollIntervalMs,
+          bootVolumeSizeGb: config.bootVolumeSizeGb,
           logger: config.logger,
         }
       );

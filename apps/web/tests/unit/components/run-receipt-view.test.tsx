@@ -312,7 +312,13 @@ describe('RunReceiptView — disclosures and loading', () => {
             state: 'reported',
             source: 'harness',
             limited: false,
-            total: { input: 320_000, output: 41_000, cacheRead: 2_100_000, cacheWrite: 0, reasoning: null },
+            total: {
+              input: 320_000,
+              output: 41_000,
+              cacheRead: 2_100_000,
+              cacheWrite: 0,
+              reasoning: null,
+            },
             spend: { state: 'estimate', usd: 4.12, unpricedModels: [] },
             models: [
               {
@@ -349,6 +355,47 @@ describe('RunReceiptView — disclosures and loading', () => {
       '~$4.12 estimated at SAM’s model prices'
     );
     expect(screen.queryByText('Not reported')).not.toBeInTheDocument();
+  });
+
+  it('discloses rejected usage even when no usage rows were accepted', () => {
+    render(
+      <RunReceiptView
+        receipt={receipt({ tokens: { state: 'not_reported', limited: true } })}
+        resourceIndex={undefined}
+      />
+    );
+    expect(screen.getByText('Incomplete')).toBeInTheDocument();
+    expect(screen.getByText('Usage rows could not be recorded')).toBeInTheDocument();
+    expect(screen.queryByText('Not reported')).not.toBeInTheDocument();
+  });
+
+  it('labels priced incomplete usage as a spend floor', () => {
+    render(
+      <RunReceiptView
+        receipt={receipt({
+          tokens: {
+            state: 'reported',
+            source: 'harness',
+            limited: true,
+            total: { input: 10, output: 1, cacheRead: 0, cacheWrite: 0, reasoning: null },
+            spend: { state: 'estimate', usd: 4.12, unpricedModels: [] },
+            models: [
+              {
+                model: 'claude-opus-5-5',
+                input: 10,
+                output: 1,
+                cacheRead: 0,
+                cacheWrite: 0,
+                reasoning: null,
+                estimatedSpendUsd: 4.12,
+              },
+            ],
+          },
+        })}
+        resourceIndex={undefined}
+      />
+    );
+    expect(screen.getByTestId('receipt-token-spend')).toHaveTextContent('At least ~$4.12');
   });
 
   it('shows tokens without money for a subscription account', () => {
@@ -396,7 +443,12 @@ describe('RunReceiptView — disclosures and loading', () => {
   });
 
   it('says tokens are not reported yet while the run is live', () => {
-    render(<RunReceiptView receipt={receipt({ live: true, status: 'in_progress' })} resourceIndex={undefined} />);
+    render(
+      <RunReceiptView
+        receipt={receipt({ live: true, status: 'in_progress' })}
+        resourceIndex={undefined}
+      />
+    );
     expect(screen.getByText('Not reported yet')).toBeInTheDocument();
   });
 
@@ -408,8 +460,24 @@ describe('RunReceiptView — disclosures and loading', () => {
       limited: false,
       total: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, reasoning: null },
       models: [
-        { model: 'a', input: 5, output: 2, cacheRead: 0, cacheWrite: 0, reasoning: null, estimatedSpendUsd: 0.004 },
-        { model: 'b', input: 5, output: 3, cacheRead: 0, cacheWrite: 0, reasoning: null, estimatedSpendUsd: null },
+        {
+          model: 'a',
+          input: 5,
+          output: 2,
+          cacheRead: 0,
+          cacheWrite: 0,
+          reasoning: null,
+          estimatedSpendUsd: 0.004,
+        },
+        {
+          model: 'b',
+          input: 5,
+          output: 3,
+          cacheRead: 0,
+          cacheWrite: 0,
+          reasoning: null,
+          estimatedSpendUsd: null,
+        },
       ],
     };
     const { unmount } = render(
@@ -424,7 +492,10 @@ describe('RunReceiptView — disclosures and loading', () => {
     render(
       <RunReceiptView
         receipt={receipt({
-          tokens: tokens({ ...base, spend: { state: 'estimate', usd: 0.004, unpricedModels: ['b'] } }),
+          tokens: tokens({
+            ...base,
+            spend: { state: 'estimate', usd: 0.004, unpricedModels: ['b'] },
+          }),
         })}
         resourceIndex={undefined}
       />

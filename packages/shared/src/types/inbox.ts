@@ -4,7 +4,7 @@
  * inbox keeps no copy (`packages/operations/src/inbox-list-core.ts`).
  *
  * Stores:
- * - `ask`: D1 `asks` (questions since slice G, reviews, human tasks, errors)
+ * - `ask`: D1 `asks` (questions since slice G, reviews, results, human tasks, errors)
  * - `attention`: a permission (until slice J), or a question asked before slice G, held as a
  *   ProjectData attention marker and read from the `session_summaries.attention_json` index
  * - `secret`: D1 `runtime_secret_requests`
@@ -24,13 +24,14 @@ export const INBOX_ITEM_KINDS = [
   'secret',
   'approval',
   'review',
+  'result',
   'task',
   'error',
 ] as const;
 export type InboxItemKind = (typeof INBOX_ITEM_KINDS)[number];
 
 /** Kinds an `asks` row may hold. */
-export const ASK_KINDS = ['question', 'review', 'task', 'error'] as const;
+export const ASK_KINDS = ['question', 'review', 'result', 'task', 'error'] as const;
 export type AskKind = (typeof ASK_KINDS)[number];
 
 export const ASK_STATUSES = [
@@ -242,7 +243,7 @@ export function formatInboxRef(ref: ParsedInboxRef): string {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Agent inbox tools (slice D): `inbox_write` (ask, review, update, cancel) and `inbox_read`
+// Agent inbox tools (slice D): `inbox_write` (ask, review, result, update, cancel) and `inbox_read`
 // (list, get), thin MCP adapters over `packages/operations/src/inbox-agent-*.ts`.
 // ---------------------------------------------------------------------------------------------
 

@@ -12,8 +12,8 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 - **One Inbox for everything waiting on you.** Questions, permission requests, secrets,
   approvals, reviews and tasks from every project are in one list, with **Inbox** in the navigation
   and an inbox icon where the notification bell was. Answer from the item, with the answer buttons
-  pinned at the bottom; the next item opens with a one-line receipt. **Archive** closes an item and
-  tells the agent, with a few seconds to **Undo**. Other notifications are under **Updates**.
+  pinned at the bottom; the next item opens with a one-line receipt. **Archive** closes an item,
+  with a few seconds to **Undo**. Other notifications are under **Updates**.
   → [Inbox](/docs/guides/inbox/)
 - **SAM tells you when something of yours fails.** A task that couldn't start or stopped before
   finishing, a chat that couldn't wake, a sleep that may have lost work, an automation that keeps
@@ -27,6 +27,14 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
   production secret, arrives as a **Task**; something to evaluate arrives as a **Review** with
   **Looks good**. To give a teammate a task, ask the agent to assign it to them.
   → [Tasks for people](/docs/guides/inbox/#tasks-for-people)
+- **Agents put their answers in your Inbox.** When you ask an agent for something, its answer or
+  finished work arrives as a **Result**: the outcome in one plain sentence, then the details.
+  **Got it** closes it without waking the agent; **Reply** sends it your reply while it is still
+  running (after it finishes, **Open chat** takes Reply's place). Every item now comes with brief,
+  easy-to-read context, formatted with lists and bold where it helps. Agents are told
+  nobody reads their chat, to file only what is worth your time, and to file nothing for routine
+  runs or work another agent handed out. The content-free "Agent finished — your turn" update is
+  gone. → [What agents file](/docs/guides/inbox/#what-agents-file)
 - **Projects open on their Overview.** Opening a project shows **Needs you** (the first items of its
   Inbox) above what is running, this week's numbers, budgets, automations and recent work, with a
   task box that starts work without leaving the page. Chat is one tap away: **Chat** in the project
@@ -75,6 +83,9 @@ Also changed this week:
 - **The sign-in page waits for your instance** to say which sign-in options it has, instead of
   briefly showing a GitHub button that might not work.
 - **A task waiting on a usage limit is no longer failed as "stuck"** when the limit resets.
+- **A VM chat whose sleep saved no recovery point wakes again.** Every wake of such a chat used to
+  fail; the agent now starts fresh in a new workspace and rebuilds its context from the transcript.
+  → [Continue from the transcript](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot)
 
 ### For self-hosters & admins
 
@@ -503,7 +514,7 @@ Also changed this week:
 - **Agents can take over a pull request they didn't open** and record that they're responsible for
   it, which other agents can look up.
   → [Pull requests an agent takes over](/docs/guides/agents/#pull-requests-an-agent-takes-over)
-- **Agents waiting on CI use exact event names** (`check_run.completed`, with the full commit SHA);
+- **Agents waiting on CI use exact event names** (`check_suite.completed` + `workflow_run.completed` by default, with the full commit SHA; `check_run.completed` is opt-in for early per-job failure);
   bare names like `check_run` never matched.
 
 ### For self-hosters & admins

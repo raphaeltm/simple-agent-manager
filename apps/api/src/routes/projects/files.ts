@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 
 import type { Env } from '../../env';
+import { requireTrustedWriteOrigin } from '../../lib/browser-write-origin';
 import { log } from '../../lib/logger';
 import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
@@ -227,8 +228,12 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/raw', async (c) => {
   });
 });
 
+// Multipart is a CORS-simple request, so a same-site workspace page could post it with the
+// session cookie and no preflight. See lib/browser-write-origin.ts.
+const uploadOrigin = requireTrustedWriteOrigin('workspace file upload');
+
 /** POST /:id/sessions/:sessionId/files/upload — Proxy file upload to workspace */
-fileProxyRoutes.post('/:id/sessions/:sessionId/files/upload', async (c) => {
+fileProxyRoutes.post('/:id/sessions/:sessionId/files/upload', uploadOrigin, async (c) => {
   const userId = getUserId(c);
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');

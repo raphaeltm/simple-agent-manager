@@ -13,6 +13,8 @@ import { log } from '../../../lib/logger';
 import { ulid } from '../../../lib/ulid';
 import { stopAgentSessionOnNode } from '../../../services/node-agent';
 import { isSleepingContainerNode } from '../../../services/sleeping-container-runtime';
+import { retireTaskCancellationPrompts } from '../../../services/task-cancellation-prompts';
+import { taskRecoveryCancellationStatement } from '../../../services/task-recovery-cancellation';
 import { WAKEABLE_TASK_STATUSES } from '../../../services/task-status';
 import { cleanupTerminalTaskResources } from '../../../services/task-terminal-cleanup';
 import { syncTriggerExecutionStatus } from '../../../services/trigger-execution-sync';
@@ -50,17 +52,26 @@ type Db = ReturnType<typeof drizzle<typeof schema>>;
  */
 async function cancelTaskWithCas(
   env: Env,
-  task: { status: string },
+  task: {
+    id: string;
+    status: string;
+    projectId: string;
+    userId: string;
+    chatSessionId: string | null;
+    workspaceId: string | null;
+  },
   taskId: string,
   userId: string
 ): Promise<'cancelled' | 'lost_race' | 'error'> {
   const now = new Date().toISOString();
   try {
+    await retireTaskCancellationPrompts(env, task);
     const [transition] = await env.DATABASE.batch([
       env.DATABASE.prepare(
         `UPDATE tasks SET status = 'cancelled', error_message = 'Stopped by user via SAM', updated_at = ?, completed_at = ?
-          WHERE id = ? AND status = ?`
-      ).bind(now, now, taskId, task.status),
+          WHERE id = ? AND project_id = ? AND status = ?`
+      ).bind(now, now, taskId, task.projectId, task.status),
+      taskRecoveryCancellationStatement(env.DATABASE, task, now),
       env.DATABASE.prepare(
         `INSERT INTO task_status_events (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
          SELECT ?, ?, ?, 'cancelled', 'user', ?, 'Stopped via SAM', ?
@@ -142,6 +153,8 @@ export async function stopSubtask(input: { taskId: string }, ctx: ToolContext): 
   const rows = await db
     .select({
       id: schema.tasks.id,
+      userId: schema.tasks.userId,
+      chatSessionId: schema.tasks.chatSessionId,
       status: schema.tasks.status,
       workspaceId: schema.tasks.workspaceId,
       projectId: schema.tasks.projectId,

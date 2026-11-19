@@ -23,7 +23,10 @@ import {
 } from '../../src/ai-gateway-logs';
 
 /** The worker binds this from the `performance.externalReadTimeoutMs` admin setting. */
-const TEST_PORTS = { externalReadTimeoutMs: async () => 15_000 };
+const TEST_PORTS = {
+  externalReadTimeoutMs: async () => 15_000,
+  monthlyCostCeilingUsd: async () => 0,
+};
 const iterateGatewayLogs = (
   env: Parameters<typeof iterateGatewayLogsWithPorts>[0],
   ...rest: Parameters<typeof iterateGatewayLogsWithPorts> extends [unknown, unknown, ...infer R]

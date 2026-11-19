@@ -24,6 +24,8 @@ import {
 import type { AiProxyEnv as Env } from '../../src/env';
 
 /** Create a mock KV namespace with in-memory storage. */
+const NO_CEILING = { monthlyCostCeilingUsd: async () => 0 };
+
 function createMockKV(): KVNamespace & { _store: Map<string, string> } {
   const store = new Map<string, string>();
   return {
@@ -145,11 +147,16 @@ describe('monthly cost cap', () => {
       })
     );
 
-    const result = await checkMonthlyCostCap(kv, 'user-cap', {
-      AI_GATEWAY_ID: 'gateway',
-      CF_ACCOUNT_ID: 'account',
-      CF_API_TOKEN: 'token',
-    } as never);
+    const result = await checkMonthlyCostCap(
+      kv,
+      'user-cap',
+      {
+        AI_GATEWAY_ID: 'gateway',
+        CF_ACCOUNT_ID: 'account',
+        CF_API_TOKEN: 'token',
+      } as never,
+      NO_CEILING
+    );
     expect(result).toEqual({ allowed: true, costUsd: 0, capUsd: 10 });
   });
 
@@ -166,11 +173,16 @@ describe('monthly cost cap', () => {
     );
     kv._store.set(buildMonthlyCostCacheKey('user-over-cap'), '10.000000');
 
-    const result = await checkMonthlyCostCap(kv, 'user-over-cap', {
-      AI_GATEWAY_ID: 'gateway',
-      CF_ACCOUNT_ID: 'account',
-      CF_API_TOKEN: 'token',
-    } as never);
+    const result = await checkMonthlyCostCap(
+      kv,
+      'user-over-cap',
+      {
+        AI_GATEWAY_ID: 'gateway',
+        CF_ACCOUNT_ID: 'account',
+        CF_API_TOKEN: 'token',
+      } as never,
+      NO_CEILING
+    );
     expect(result).toEqual({ allowed: false, costUsd: 10, capUsd: 10 });
   });
 });
@@ -445,7 +457,7 @@ describe('checkAiUsageGate', () => {
 
   it('allows when daily budget and monthly cap both allow', async () => {
     const kv = createMockKV();
-    const result = await checkAiUsageGate(kv, 'user-ok', makeEnv());
+    const result = await checkAiUsageGate(kv, 'user-ok', makeEnv(), NO_CEILING);
     expect(result).toEqual({ allowed: true });
   });
 
@@ -466,7 +478,7 @@ describe('checkAiUsageGate', () => {
     );
     kv._store.set(buildMonthlyCostCacheKey('user-daily'), '11.000000');
 
-    const result = await checkAiUsageGate(kv, 'user-daily', makeEnv());
+    const result = await checkAiUsageGate(kv, 'user-daily', makeEnv(), NO_CEILING);
     expect(result.allowed).toBe(false);
     if (!result.allowed) {
       expect(result.reason).toBe('daily-token-budget');
@@ -489,7 +501,8 @@ describe('checkAiUsageGate', () => {
     const result = await checkAiUsageGate(
       kv,
       'user-monthly',
-      makeEnv({ AI_GATEWAY_ID: 'gateway', CF_ACCOUNT_ID: 'account', CF_API_TOKEN: 'token' })
+      makeEnv({ AI_GATEWAY_ID: 'gateway', CF_ACCOUNT_ID: 'account', CF_API_TOKEN: 'token' }),
+      NO_CEILING
     );
     expect(result.allowed).toBe(false);
     if (!result.allowed) {
@@ -645,7 +658,9 @@ describe('validateBudgetUpdate', () => {
         monthlyCostCapUsd: 25.5,
         alertThresholdPercent: 90,
       },
-      makeEnv()
+      makeEnv(),
+      null,
+      null
     );
 
     expect(settings.dailyInputTokenLimit).toBe(100_000);
@@ -660,7 +675,9 @@ describe('validateBudgetUpdate', () => {
         dailyInputTokenLimit: null,
         monthlyCostCapUsd: null,
       },
-      makeEnv()
+      makeEnv(),
+      null,
+      null
     );
 
     expect(settings.dailyInputTokenLimit).toBeNull();
@@ -673,7 +690,9 @@ describe('validateBudgetUpdate', () => {
         {
           dailyInputTokenLimit: 500,
         },
-        makeEnv()
+        makeEnv(),
+        null,
+        null
       )
     ).toThrow('dailyInputTokenLimit must be between 1000 and');
   });
@@ -684,7 +703,9 @@ describe('validateBudgetUpdate', () => {
         {
           dailyInputTokenLimit: 999_999_999,
         },
-        makeEnv()
+        makeEnv(),
+        null,
+        null
       )
     ).toThrow('dailyInputTokenLimit must be between 1000 and');
   });
@@ -695,7 +716,9 @@ describe('validateBudgetUpdate', () => {
         {
           monthlyCostCapUsd: 0.001,
         },
-        makeEnv()
+        makeEnv(),
+        null,
+        null
       )
     ).toThrow('monthlyCostCapUsd must be between 0.01 and');
   });
@@ -706,7 +729,9 @@ describe('validateBudgetUpdate', () => {
         {
           alertThresholdPercent: 0,
         },
-        makeEnv()
+        makeEnv(),
+        null,
+        null
       )
     ).toThrow('alertThresholdPercent must be between 1 and 100');
 
@@ -715,7 +740,9 @@ describe('validateBudgetUpdate', () => {
         {
           alertThresholdPercent: 101,
         },
-        makeEnv()
+        makeEnv(),
+        null,
+        null
       )
     ).toThrow('alertThresholdPercent must be between 1 and 100');
   });
@@ -725,7 +752,9 @@ describe('validateBudgetUpdate', () => {
       {
         dailyInputTokenLimit: 10_500.7,
       },
-      makeEnv()
+      makeEnv(),
+      null,
+      null
     );
     expect(settings.dailyInputTokenLimit).toBe(10_500);
   });
@@ -735,7 +764,9 @@ describe('validateBudgetUpdate', () => {
       {
         monthlyCostCapUsd: 25.555,
       },
-      makeEnv()
+      makeEnv(),
+      null,
+      null
     );
     expect(settings.monthlyCostCapUsd).toBe(25.56);
   });
@@ -746,7 +777,9 @@ describe('validateBudgetUpdate', () => {
         {
           dailyInputTokenLimit: '50000' as unknown as number,
         },
-        makeEnv()
+        makeEnv(),
+        null,
+        null
       )
     ).toThrow('dailyInputTokenLimit must be between');
   });
@@ -757,7 +790,9 @@ describe('validateBudgetUpdate', () => {
         {
           alertThresholdPercent: '90' as unknown as number,
         },
-        makeEnv()
+        makeEnv(),
+        null,
+        null
       )
     ).toThrow('alertThresholdPercent must be between 1 and 100');
   });
@@ -768,7 +803,9 @@ describe('validateBudgetUpdate', () => {
         {
           monthlyCostCapUsd: true as unknown as number,
         },
-        makeEnv()
+        makeEnv(),
+        null,
+        null
       )
     ).toThrow('monthlyCostCapUsd must be between');
   });
@@ -778,7 +815,9 @@ describe('validateBudgetUpdate', () => {
       {
         dailyInputTokenLimit: 5_000,
       },
-      makeEnv({ AI_USAGE_MAX_DAILY_TOKEN_LIMIT: '10000' })
+      makeEnv({ AI_USAGE_MAX_DAILY_TOKEN_LIMIT: '10000' }),
+      null,
+      null
     );
     expect(settings.dailyInputTokenLimit).toBe(5_000);
 
@@ -788,7 +827,9 @@ describe('validateBudgetUpdate', () => {
         {
           dailyInputTokenLimit: 15_000,
         },
-        makeEnv({ AI_USAGE_MAX_DAILY_TOKEN_LIMIT: '10000' })
+        makeEnv({ AI_USAGE_MAX_DAILY_TOKEN_LIMIT: '10000' }),
+        null,
+        null
       )
     ).toThrow('dailyInputTokenLimit must be between 1000 and 10000');
   });
@@ -799,7 +840,9 @@ describe('validateBudgetUpdate', () => {
         {
           monthlyCostCapUsd: 600,
         },
-        makeEnv({ AI_USAGE_MAX_MONTHLY_COST_CAP_USD: '500' })
+        makeEnv({ AI_USAGE_MAX_MONTHLY_COST_CAP_USD: '500' }),
+        null,
+        null
       )
     ).toThrow('monthlyCostCapUsd must be between 0.01 and 500');
   });
@@ -811,7 +854,9 @@ describe('validateBudgetUpdate', () => {
         {
           dailyInputTokenLimit: 3_000,
         },
-        makeEnv({ AI_USAGE_MIN_DAILY_TOKEN_LIMIT: '5000' })
+        makeEnv({ AI_USAGE_MIN_DAILY_TOKEN_LIMIT: '5000' }),
+        null,
+        null
       )
     ).toThrow('dailyInputTokenLimit must be between 5000 and');
   });
