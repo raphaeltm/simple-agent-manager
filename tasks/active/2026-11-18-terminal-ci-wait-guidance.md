@@ -18,7 +18,7 @@ Sources: https://docs.github.com/en/rest/guides/using-the-rest-api-to-interact-w
 - [x] Pin terminal default, per-job opt-in and fallback wording; verify test red before guidance edits.
 - [x] Update instructions, MCP descriptions, recovery guide, rule09, do/workflow skills/commands, public agent docs/examples. Audit all check_run.completed occurrences; historical evidence/tests remain valid.
 - [x] Document app/workflow scope, failures, fallback gaps and natural expiry/no migration.
-- [ ] Relevant tests/lint/typecheck/build/context budget, specialist review, ready CI and CodeRabbit request/wait.
+- [x] Relevant tests/lint/typecheck/build/context budget, specialist review, ready CI and CodeRabbit request/wait.
 - [ ] Merge/deploy after gates; guidance-only staging exemption authorized by dispatch.
 - [ ] Measure covered production row_usage windows using Library rpc-split.mjs via exec_with_secrets. Compare check_run/h and admission/wake/prompt writes/h; disclose coverage, new-session ramp and sibling confounding; durable wait while accumulating hours.
 
@@ -38,3 +38,7 @@ Baseline reproduced via Library exec_with_secrets job sx-22f00d8c45c14b053e5a703
 ## Sonar duplication correction
 
 Current-head Sonar check134669719389 blocked on11.9% duplication. Public duplication API identified only two repeated15-line fixture/subscription setup blocks in the new workerd test (lines21/128). Extracted one small withCiSubscription helper without changing assertions or runtime code. Workerd4/4 and affected ESLint pass after extraction. Test-engineer/Cloudflare and task-completion reviewers rechecked PASS; all4cases and full producer-to-delivery path remain. Fresh CI/Sonar required on corrected head; no exclusion or gate bypass.
+
+## Takeover (task 01M7RHQG0DNQ3BXDB0DWSRP5CE, 2026-11-19)
+
+Previous agent ran out of usage. Head 62ab30db had all checks green (CI 44267154993, Durable Object Workers pass). main had moved 173 commits; merged origin/main (no conflicts) and re-ran full CI before merge. Task stays active until the coordinator's production measurement completes.
