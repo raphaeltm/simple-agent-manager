@@ -145,6 +145,7 @@ describe('caddy/start.sh', () => {
       ...composeEnv(),
       REVERSE_TUNNEL_PORT_RANGE_START: '7002',
       REVERSE_TUNNEL_PORT_RANGE_END: '7999',
+      GCE_METADATA_PROXY_PORT: '8000',
     });
     expect(run.status, run.out).toBe(0);
   });
