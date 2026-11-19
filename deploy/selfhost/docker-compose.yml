@@ -56,6 +56,14 @@ services:
     volumes:
       # A cache on one node: the bucket is the durable copy.
       - celld-data:/var/lib/celld
+    # Runs the Workers: no capability (its listeners are loopback ports above 1023) and a
+    # read-only root. It writes only CELLD_WATCH (the volume above) and nothing to /tmp; the
+    # tmpfs is there for the runtime's scratch files. Checked on the pinned image: a Worker and a
+    # SQLite Durable Object serve and keep their state across a restart.
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    read_only: true
+    tmpfs: [/tmp]
     # Above CELLD_SHUTDOWN_TOTAL_MS (40 s) so a stop is a clean lease handoff.
     stop_grace_period: 50s
     # celld docs: restart without an attempt limit. An immediate restart can hit
@@ -148,6 +156,11 @@ services:
       # same resolved range there and into the Worker's vars (scripts/selfhost/box-settings.ts).
     volumes:
       - ./frps:/etc/frp:ro
+    # No capability (it binds FRPS_BIND_PORT and lease ports, all loopback and above 1023) and
+    # a read-only root: frps.toml logs to the console and frps writes no file.
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    read_only: true
     restart: unless-stopped
 
   # Mail collector for TEST installs (profile `mail-collector`, off by default): catches every

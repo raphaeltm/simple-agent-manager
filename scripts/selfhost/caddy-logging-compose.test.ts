@@ -17,6 +17,11 @@ const SELFHOST = resolve(REPO, 'deploy/selfhost');
 
 interface Service {
   environment?: Record<string, string>;
+  cap_drop?: string[];
+  cap_add?: string[];
+  security_opt?: string[];
+  read_only?: boolean;
+  tmpfs?: string[];
   logging?: { driver?: string; options?: Record<string, string> };
 }
 
@@ -60,5 +65,31 @@ describe('Caddy logging and keep-warm wiring', () => {
     expect(keepWarm).toContain('handle @sam_keep_warm {');
     expect(keepWarm).toContain('health_uri /health');
     expect(keepWarm).toContain('health_interval {$SAM_KEEP_WARM_INTERVAL:5s}');
+  });
+});
+
+// Every long-running box service on the host network runs without capabilities it does not need.
+// celld and frps listen only on loopback ports above 1023, so they need none; Caddy keeps only
+// NET_BIND_SERVICE for 80/443. Read-only roots: frps writes no file (frps.toml logs to the
+// console); celld writes only its CELLD_WATCH volume (checked on the pinned image).
+describe('box service privileges', () => {
+  it.each(['celld', 'frps'])('%s drops every capability and cannot gain one', (name) => {
+    const service = compose.services[name];
+    expect(service?.cap_drop).toEqual(['ALL']);
+    expect(service?.cap_add).toBeUndefined();
+    expect(service?.security_opt).toEqual(['no-new-privileges:true']);
+    expect(service?.read_only).toBe(true);
+  });
+
+  it('celld writes only its data volume and a tmpfs /tmp', () => {
+    const celld = compose.services.celld as Service & { volumes?: string[] };
+    expect(celld.tmpfs).toEqual(['/tmp']);
+    expect(celld.volumes).toEqual(['celld-data:/var/lib/celld']);
+    expect(celld.environment?.CELLD_WATCH).toBe('/var/lib/celld');
+  });
+
+  it('control: Caddy keeps only NET_BIND_SERVICE, for 80 and 443', () => {
+    expect(caddy?.cap_drop).toEqual(['ALL']);
+    expect(caddy?.cap_add).toEqual(['NET_BIND_SERVICE']);
   });
 });
