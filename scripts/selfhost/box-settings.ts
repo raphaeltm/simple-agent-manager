@@ -3,26 +3,24 @@
  * so the Worker, frps and Caddy cannot disagree.
  */
 
+// The Worker's own defaults and bounds (apps/api/src/selfhost/reverse-tunnel/config.ts re-exports
+// them): the deploy always passes the resolved range and heartbeat timeout to BOTH the Worker
+// (vars) and frps (gateway.env), so the two cannot disagree. Overridable per box with
+// REVERSE_TUNNEL_* in the compose .env.
+import {
+  DEFAULT_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
+  DEFAULT_REVERSE_TUNNEL_PORT_RANGE_END,
+  DEFAULT_REVERSE_TUNNEL_PORT_RANGE_START,
+  MAX_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
+  MAX_REVERSE_TUNNEL_PORT_RANGE_SIZE,
+  MAX_REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS,
+  MIN_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
+  REVERSE_TUNNEL_PORT_REUSE_HEARTBEAT_MULTIPLE,
+} from '../../apps/api/src/selfhost/reverse-tunnel/limits.js';
 import {
   DEFAULT_MAIL_COLLECTOR_SMTP_PORT,
   DEFAULT_MAIL_COLLECTOR_UI_PORT,
 } from './mail-settings.js';
-
-/**
- * Loopback ports frps may bind for node tunnels. The deploy script always passes the resolved
- * range to BOTH the Worker (vars) and frps (gateway.env), so neither side's own default is ever
- * relied on. Overridable per box with REVERSE_TUNNEL_PORT_RANGE_START/END in the compose .env.
- */
-export const DEFAULT_REVERSE_TUNNEL_PORT_RANGE_START = 20000;
-export const DEFAULT_REVERSE_TUNNEL_PORT_RANGE_END = 29999;
-/** Same cap the Worker enforces (MAX_REVERSE_TUNNEL_PORT_RANGE_SIZE); a bigger range fails here. */
-export const MAX_REVERSE_TUNNEL_PORT_RANGE_SIZE = 20000;
-/** frps heartbeatTimeout; same default and bounds as the Worker (apps/api/src/selfhost/reverse-tunnel/config.ts). */
-export const DEFAULT_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS = 90;
-export const MIN_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS = 60;
-export const MAX_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS = 3600;
-/** A released port is not reissued before this many heartbeat timeouts (Worker floor too). */
-export const REVERSE_TUNNEL_PORT_REUSE_HEARTBEAT_MULTIPLE = 2;
 
 /**
  * Every other loopback/host listener on the box, with the default docker-compose.yml uses. A
@@ -119,7 +117,7 @@ export function resolveTunnelSettings(box: Readonly<Record<string, string>>): Tu
       ? null
       : integer(reuse, floor, 'REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS', {
           min: floor,
-          max: 86_400,
+          max: MAX_REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS,
         });
   return { range: resolveTunnelPortRange(box), heartbeatTimeoutSeconds, portReuseMinAgeSeconds };
 }
