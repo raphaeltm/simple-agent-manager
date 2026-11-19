@@ -41,8 +41,8 @@ describe('withSelfHostBuild', () => {
 
   it('leaves the sink inactive on an installation that does not switch it on', () => {
     withSelfHostBuild(shared);
-    expect(activeLocalAnalyticsSink({ OBSERVABILITY_DATABASE: {} } as unknown as Env)).toBe(
-      undefined
-    );
+    expect(
+      activeLocalAnalyticsSink({ OBSERVABILITY_DATABASE: {} } as unknown as Env)
+    ).toBeUndefined();
   });
 });

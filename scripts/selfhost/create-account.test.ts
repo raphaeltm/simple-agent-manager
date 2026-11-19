@@ -126,9 +126,9 @@ describe('--superadmin before the bootstrap owner is established', () => {
     const teammate = plan('teammate@example.com');
     db.exec(createAccountSql(teammate));
     expect(rows(db)).toEqual([{ email: 'teammate@example.com', role: 'user' }]);
-    expect(ownerLockoutRefusal(teammate, { id: 'x', role: 'user', status: 'active' })).not.toBe(
-      null
-    );
+    expect(
+      ownerLockoutRefusal(teammate, { id: 'x', role: 'user', status: 'active' })
+    ).not.toBeNull();
   });
 
   it('control: the owner themselves may be made superadmin', async () => {
@@ -136,9 +136,9 @@ describe('--superadmin before the bootstrap owner is established', () => {
     const owner = plan(OWNER);
     db.exec(createAccountSql(owner));
     expect(rows(db)).toEqual([{ email: OWNER, role: 'superadmin' }]);
-    expect(ownerLockoutRefusal(owner, { id: 'x', role: 'superadmin', status: 'active' })).toBe(
-      null
-    );
+    expect(
+      ownerLockoutRefusal(owner, { id: 'x', role: 'superadmin', status: 'active' })
+    ).toBeNull();
   });
 
   it('control: a plain account for another address is still created', async () => {
@@ -146,7 +146,7 @@ describe('--superadmin before the bootstrap owner is established', () => {
     const teammate = plan('teammate@example.com', { superadmin: false });
     db.exec(createAccountSql(teammate));
     expect(rows(db)).toEqual([{ email: 'teammate@example.com', role: 'user' }]);
-    expect(ownerLockoutRefusal(teammate, { id: 'x', role: 'user', status: 'active' })).toBe(null);
+    expect(ownerLockoutRefusal(teammate, { id: 'x', role: 'user', status: 'active' })).toBeNull();
   });
 
   it.each([
@@ -179,9 +179,9 @@ describe('--superadmin before the bootstrap owner is established', () => {
     const teammate = plan('teammate@example.com', { bootstrapOwnerEmail: undefined });
     db.exec(createAccountSql(teammate));
     expect(rows(db)).toEqual([{ email: 'teammate@example.com', role: 'superadmin' }]);
-    expect(ownerLockoutRefusal(teammate, { id: 'x', role: 'superadmin', status: 'active' })).toBe(
-      null
-    );
+    expect(
+      ownerLockoutRefusal(teammate, { id: 'x', role: 'superadmin', status: 'active' })
+    ).toBeNull();
   });
 
   it('refuses an owner email it cannot safely put in SQL', () => {

@@ -94,6 +94,42 @@ export function mailCollectorHostLabel(box: Box): string {
   return label;
 }
 
+/** SMTP vars set in the .env that no relay will use (a half-applied set). */
+function straySmtpVars(
+  box: Box,
+  secrets: Readonly<Record<string, string>>,
+  configured: boolean,
+  collector: boolean
+): string[] {
+  const stray: string[] = [];
+  if (!configured && !collector) stray.push(...SMTP_VAR_NAMES.filter((name) => box[name]));
+  if (collector) {
+    const relayOnly = SMTP_VAR_NAMES.filter((name) => name !== 'SMTP_FROM' && name !== 'SMTP_HOST');
+    stray.push(...relayOnly.filter((name) => box[name]));
+  }
+  if (!configured && secrets.SMTP_PASSWORD) stray.push('SMTP_PASSWORD');
+  return stray;
+}
+
+/** The collector's relay settings, or the operator's SMTP_* vars. */
+function selectedSmtpVars(
+  box: Box,
+  baseDomain: string,
+  collector: boolean
+): Record<string, string> {
+  if (collector) {
+    return {
+      SMTP_HOST: '127.0.0.1',
+      SMTP_PORT: String(mailCollectorPorts(box).smtp),
+      SMTP_TLS: 'none',
+      SMTP_FROM: box.SMTP_FROM || `sign-in@${baseDomain}`,
+    };
+  }
+  const vars: Record<string, string> = {};
+  for (const name of SMTP_VAR_NAMES) if (box[name]) vars[name] = box[name];
+  return vars;
+}
+
 /**
  * The SMTP Worker vars for this box ({} when it sends no email). Validated with the Worker's own
  * parser, so a setting the Worker would refuse fails the deploy instead of silently turning email
@@ -117,36 +153,17 @@ export function smtpWorkerVars(
     );
   }
   // A half-applied set would deploy with email sign-in silently off (or silently ignored).
-  const relayOnly = SMTP_VAR_NAMES.filter((name) => name !== 'SMTP_FROM' && name !== 'SMTP_HOST');
-  const stray = [
-    ...(configured || collector ? [] : SMTP_VAR_NAMES.filter((name) => box[name])),
-    ...(collector ? relayOnly.filter((name) => box[name]) : []),
-    ...(!configured && secrets.SMTP_PASSWORD ? ['SMTP_PASSWORD'] : []),
-  ];
+  const stray = straySmtpVars(box, secrets, configured, collector);
   if (stray.length > 0) {
     throw new Error(
       `${stray.join(', ')} set without an SMTP relay (SMTP_HOST); remove it or set SMTP_HOST`
     );
   }
-  let vars: Record<string, string> = {};
-  if (collector) {
-    vars = {
-      SMTP_HOST: '127.0.0.1',
-      SMTP_PORT: String(mailCollectorPorts(box).smtp),
-      SMTP_TLS: 'none',
-      SMTP_FROM: box.SMTP_FROM || `sign-in@${baseDomain}`,
-    };
-  } else if (configured) {
-    for (const name of SMTP_VAR_NAMES) if (box[name]) vars[name] = box[name];
-  } else {
-    return {};
-  }
+  if (!collector && !configured) return {};
+  const vars = selectedSmtpVars(box, baseDomain, collector);
   const result = resolveSmtpConfig({ ...vars, SMTP_PASSWORD: secrets.SMTP_PASSWORD });
-  if (result.status !== 'ok') {
-    throw new Error(
-      `SMTP settings: ${result.status === 'invalid' ? result.problem : 'incomplete'}`
-    );
-  }
+  if (result.status === 'invalid') throw new Error(`SMTP settings: ${result.problem}`);
+  if (result.status !== 'ok') throw new Error('SMTP settings: incomplete');
   return vars;
 }
 

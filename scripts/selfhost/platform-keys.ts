@@ -146,19 +146,15 @@ function assertNoPriorDeploy(stateDir: string, keysPath: string): void {
 }
 
 /**
- * Loads `<stateDir>/platform-keys.json`, generating any missing group, and writes it back
- * (atomically, keeping the previous file as `.bak`) only when something was generated.
- *
- * - No file: only `init` on a state dir with no `PRIOR_DEPLOY_EVIDENCE` creates one; `deploy`
- *   refuses, and `dry-run` reports placeholders.
- * - A file missing a whole group (a key added by a newer version) is completed in `init` and
- *   `deploy`. A pair with one half missing, or a key present with an empty value, is an error:
- *   regenerating would silently rotate a key the box already uses.
+ * Reads the keys file (or `{}` when there is none and `mode` may create one) and the platform
+ * keys in it. A key present with an empty value is an error.
  */
-export function ensurePlatformKeys(stateDir: string, mode: PlatformKeysMode): PlatformKeysResult {
-  const path = join(stateDir, PLATFORM_KEYS_FILE);
-  const exists = existsSync(path);
-  if (!exists) {
+function readExistingKeys(
+  stateDir: string,
+  path: string,
+  mode: PlatformKeysMode
+): { existing: Record<string, string>; keys: Record<string, string> } {
+  if (!existsSync(path)) {
     assertNoPriorDeploy(stateDir, path);
     if (mode === 'deploy') {
       throw new Error(
@@ -166,8 +162,9 @@ export function ensurePlatformKeys(stateDir: string, mode: PlatformKeysMode): Pl
           'platform keys once), or restore the file from your backup'
       );
     }
+    return { existing: {}, keys: {} };
   }
-  const existing = exists ? readPrivateJson(path) : {};
+  const existing = readPrivateJson(path);
   const keys: Record<string, string> = {};
   for (const name of PLATFORM_KEY_NAMES) {
     if (!(name in existing)) continue;
@@ -179,6 +176,18 @@ export function ensurePlatformKeys(stateDir: string, mode: PlatformKeysMode): Pl
     }
     keys[name] = value;
   }
+  return { existing, keys };
+}
+
+/**
+ * Fills every wholly missing key group into `keys` (placeholders in a dry run) and returns the
+ * names it filled. A group with only some of its keys present is an error.
+ */
+function completeKeyGroups(
+  keys: Record<string, string>,
+  path: string,
+  mode: PlatformKeysMode
+): PlatformKeyName[] {
   const generated: PlatformKeyName[] = [];
   for (const group of GENERATORS) {
     const present = group.names.filter((name) => keys[name]);
@@ -196,6 +205,23 @@ export function ensurePlatformKeys(stateDir: string, mode: PlatformKeysMode): Pl
     }
     generated.push(...group.names);
   }
+  return generated;
+}
+
+/**
+ * Loads `<stateDir>/platform-keys.json`, generating any missing group, and writes it back
+ * (atomically, keeping the previous file as `.bak`) only when something was generated.
+ *
+ * - No file: only `init` on a state dir with no `PRIOR_DEPLOY_EVIDENCE` creates one; `deploy`
+ *   refuses, and `dry-run` reports placeholders.
+ * - A file missing a whole group (a key added by a newer version) is completed in `init` and
+ *   `deploy`. A pair with one half missing, or a key present with an empty value, is an error:
+ *   regenerating would silently rotate a key the box already uses.
+ */
+export function ensurePlatformKeys(stateDir: string, mode: PlatformKeysMode): PlatformKeysResult {
+  const path = join(stateDir, PLATFORM_KEYS_FILE);
+  const { existing, keys } = readExistingKeys(stateDir, path, mode);
+  const generated = completeKeyGroups(keys, path, mode);
   // Any other value already in the file is kept, as before.
   const all = { ...existing, ...keys } as Record<PlatformKeyName, string>;
   if (generated.length > 0 && mode !== 'dry-run') {

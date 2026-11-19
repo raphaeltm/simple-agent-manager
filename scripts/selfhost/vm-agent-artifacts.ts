@@ -130,7 +130,8 @@ export function resolveVmAgentRelease(repoRoot: string): VmAgentRelease {
 function docker(args: string[], what: string): void {
   const result = spawnSync('docker', args, { stdio: ['ignore', 'inherit', 'inherit'] });
   if (result.status !== 0) {
-    throw new Error(`${what} failed (docker ${result.error?.message ?? `exit ${result.status}`})`);
+    const reason = result.error?.message ?? `exit ${result.status}`;
+    throw new Error(`${what} failed (docker ${reason})`);
   }
 }
 

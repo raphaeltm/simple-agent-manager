@@ -184,8 +184,10 @@ async function main(): Promise<void> {
 }
 
 if (isEntrypoint(import.meta.url)) {
-  main().catch((error: unknown) => {
+  try {
+    await main();
+  } catch (error: unknown) {
     console.error(`[selfhost] ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
-  });
+  }
 }

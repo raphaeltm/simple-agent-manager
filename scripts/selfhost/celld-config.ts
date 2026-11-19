@@ -356,23 +356,20 @@ const REQUIRED_OUTPUT_KEYS = [
   'triggers',
 ] as const;
 
-/**
- * Builds the celld config for one deployment.
- *
- * Throws on any wrangler.toml key without a translation rule, on binding fields it does not
- * know, and on Durable Object migrations celld cannot apply (renames, deletes, transfers).
- */
-export function buildCelldConfig(
-  source: WranglerToml,
-  options: CelldConfigOptions
-): CelldConfigPlan {
+function assertCelldConfigOptions(options: CelldConfigOptions): void {
   if (!/^[a-z0-9.-]+$/i.test(options.baseDomain) || !options.baseDomain.includes('.')) {
     fail(`baseDomain "${options.baseDomain}" is not a domain name`);
   }
   for (const key of GENERATED_VAR_KEYS) {
     if (options.vars && key in options.vars) fail(`vars.${key} is generated; do not pass it`);
   }
+}
 
+/** Applies each top-level key's rule; throws on a key with none, or a missing required key. */
+function translateTopLevelKeys(
+  source: WranglerToml,
+  options: CelldConfigOptions
+): TranslateContext {
   const unknownKeys = Object.keys(source).filter((key) => !(key in RULES));
   if (unknownKeys.length > 0) {
     fail(
@@ -392,6 +389,40 @@ export function buildCelldConfig(
   for (const key of REQUIRED_OUTPUT_KEYS) {
     if (ctx.out[key] === undefined) fail(`wrangler.toml is missing ${key}`);
   }
+  return ctx;
+}
+
+/** Serves the web build through the ASSETS binding, Worker first. */
+function assetsConfig(assetsDirectory: string, out: CelldWranglerConfig): CelldAssets {
+  if (assetsDirectory.startsWith('/') || assetsDirectory.split('/').includes('..')) {
+    fail('assetsDirectory must be relative to the project dir with no ..');
+  }
+  if (out.durable_objects.bindings.some((b) => b.name === ASSETS_BINDING)) {
+    fail(`binding name ${ASSETS_BINDING} is already used`);
+  }
+  // run_worker_first: every request reaches the Worker, which sends only
+  // app.${BASE_DOMAIN} to env.ASSETS (lib/pages-proxy.ts). Without it celld would answer
+  // api./ws-* requests whose path matches a file in the web build.
+  return {
+    directory: assetsDirectory,
+    binding: ASSETS_BINDING,
+    not_found_handling: 'single-page-application',
+    run_worker_first: true,
+  };
+}
+
+/**
+ * Builds the celld config for one deployment.
+ *
+ * Throws on any wrangler.toml key without a translation rule, on binding fields it does not
+ * know, and on Durable Object migrations celld cannot apply (renames, deletes, transfers).
+ */
+export function buildCelldConfig(
+  source: WranglerToml,
+  options: CelldConfigOptions
+): CelldConfigPlan {
+  assertCelldConfigOptions(options);
+  const ctx = translateTopLevelKeys(source, options);
 
   const out = ctx.out as CelldWranglerConfig;
   out.compatibility_flags ??= [];
@@ -399,30 +430,13 @@ export function buildCelldConfig(
   out.vars = {
     ...out.vars,
     ...SELFHOST_VAR_OVERRIDES,
-    ...(options.vars ?? {}),
+    ...options.vars,
     BASE_DOMAIN: options.baseDomain,
     ...(r2 ? { R2_BUCKET_NAME: r2.bucket_name } : {}),
   };
 
   if (options.assetsDirectory !== undefined) {
-    if (
-      options.assetsDirectory.startsWith('/') ||
-      options.assetsDirectory.split('/').includes('..')
-    ) {
-      fail('assetsDirectory must be relative to the project dir with no ..');
-    }
-    if (out.durable_objects.bindings.some((b) => b.name === ASSETS_BINDING)) {
-      fail(`binding name ${ASSETS_BINDING} is already used`);
-    }
-    // run_worker_first: every request reaches the Worker, which sends only
-    // app.${BASE_DOMAIN} to env.ASSETS (lib/pages-proxy.ts). Without it celld would answer
-    // api./ws-* requests whose path matches a file in the web build.
-    out.assets = {
-      directory: options.assetsDirectory,
-      binding: ASSETS_BINDING,
-      not_found_handling: 'single-page-application',
-      run_worker_first: true,
-    };
+    out.assets = assetsConfig(options.assetsDirectory, out);
   }
 
   return { config: out, migrationDirs: ctx.plan.migrationDirs, report: ctx.plan.report };

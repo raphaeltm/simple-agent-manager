@@ -31,8 +31,8 @@ import { assertPrivateFile, parseDotenv } from './secret-files.js';
 
 export const SELFHOST_DIR = join(REPO_ROOT, 'deploy/selfhost');
 
-/** Files under .state/ that docker compose services read (`env_file`). */
-const GENERATED_STATE_FILE = /\.env$/;
+/** Suffix of the files under .state/ that docker compose services read (`env_file`). */
+const GENERATED_STATE_FILE_SUFFIX = '.env';
 const MIGRATIONS_DIR = 'apps/api/src/db/migrations/';
 
 export interface RunResult {
@@ -149,7 +149,7 @@ function stateFingerprint(stateDir: string): string {
   const hash = createHash('sha256');
   if (!existsSync(stateDir)) return '';
   for (const name of readdirSync(stateDir).sort()) {
-    if (!GENERATED_STATE_FILE.test(name)) continue;
+    if (!name.endsWith(GENERATED_STATE_FILE_SUFFIX)) continue;
     try {
       hash.update(name).update(readFileSync(join(stateDir, name)));
     } catch {
@@ -204,8 +204,55 @@ function rollbackSteps(
   ];
 }
 
+type Git = (args: string[], what?: string) => string;
+
+/** `origin/<ref>` after the fetch, else `<ref>` as given (a tag or a commit). */
+function resolveUpgradeTarget(git: Git, ref: string): string {
+  try {
+    return git(['rev-parse', '--verify', `origin/${ref}^{commit}`]);
+  } catch {
+    return git(['rev-parse', '--verify', `${ref}^{commit}`], `resolve ${ref}`);
+  }
+}
+
+/**
+ * Checks out `to`, runs `--init` (it may rewrite generated compose inputs), restarts the stack
+ * when its inputs changed, deploys and checks health. Returns whether the stack was restarted.
+ */
+async function applyUpgrade(
+  ctx: BoxContext,
+  opts: UpgradeOptions,
+  git: Git,
+  to: string,
+  composeFilesChanged: boolean,
+  boxArgs: string[]
+): Promise<boolean> {
+  const pnpm = (args: string[]) => check(ctx.run('pnpm', args), `pnpm ${args.join(' ')}`);
+  git(['checkout', '--detach', to]);
+  pnpm(['install', '--frozen-lockfile']);
+  const before = stateFingerprint(ctx.stateDir);
+  pnpm(['selfhost:deploy', '--init', ...boxArgs]);
+  const stateChanged = stateFingerprint(ctx.stateDir) !== before;
+  let composeRestarted = false;
+  if (composeFilesChanged || stateChanged) {
+    ctx.log(
+      `restarting the stack (${composeFilesChanged ? 'compose files' : 'generated state'} changed)`
+    );
+    check(
+      ctx.run('docker', composeArgs(ctx, ['up', '-d', '--build'])),
+      'docker compose up -d --build'
+    );
+    composeRestarted = true;
+  } else {
+    ctx.log('compose inputs unchanged; the stack keeps running');
+  }
+  pnpm(['selfhost:deploy', ...boxArgs]);
+  if (!(await opts.checkHealth())) throw new Error('the API is not healthy after the upgrade');
+  return composeRestarted;
+}
+
 export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise<UpgradeResult> {
-  const git = (args: string[], what = `git ${args.join(' ')}`) => check(ctx.run('git', args), what);
+  const git: Git = (args, what = `git ${args.join(' ')}`) => check(ctx.run('git', args), what);
 
   if (git(['status', '--porcelain', '--untracked-files=no']) !== '') {
     throw new Error(
@@ -214,12 +261,7 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
   }
   git(['fetch', '--tags', 'origin']);
   const from = git(['rev-parse', 'HEAD']);
-  let to: string;
-  try {
-    to = git(['rev-parse', '--verify', `origin/${opts.to}^{commit}`]);
-  } catch {
-    to = git(['rev-parse', '--verify', `${opts.to}^{commit}`], `resolve ${opts.to}`);
-  }
+  const to = resolveUpgradeTarget(git, opts.to);
   const changed = git(['diff', '--name-only', from, to]).split('\n').filter(Boolean);
   const composeFilesChanged = changed.some(
     (f) => f.startsWith('deploy/selfhost/') && !f.endsWith('.md')
@@ -236,38 +278,18 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
   }
   ctx.log('no backup is taken: keep your own copy of the fleet bucket and .state before upgrading');
 
-  let composeRestarted = false;
   const boxArgs = deployBoxArgs(ctx);
-  const pnpm = (args: string[]) => check(ctx.run('pnpm', args), `pnpm ${args.join(' ')}`);
+  const rollback = rollbackSteps(from, migrationsChanged, composeFilesChanged, boxArgs);
+  let composeRestarted: boolean;
   try {
-    git(['checkout', '--detach', to]);
-    pnpm(['install', '--frozen-lockfile']);
-    const before = stateFingerprint(ctx.stateDir);
-    pnpm(['selfhost:deploy', '--init', ...boxArgs]);
-    const stateChanged = stateFingerprint(ctx.stateDir) !== before;
-    if (composeFilesChanged || stateChanged) {
-      ctx.log(
-        `restarting the stack (${composeFilesChanged ? 'compose files' : 'generated state'} changed)`
-      );
-      check(
-        ctx.run('docker', composeArgs(ctx, ['up', '-d', '--build'])),
-        'docker compose up -d --build'
-      );
-      composeRestarted = true;
-    } else {
-      ctx.log('compose inputs unchanged; the stack keeps running');
-    }
-    pnpm(['selfhost:deploy', ...boxArgs]);
-    if (!(await opts.checkHealth())) throw new Error('the API is not healthy after the upgrade');
+    composeRestarted = await applyUpgrade(ctx, opts, git, to, composeFilesChanged, boxArgs);
   } catch (error) {
-    const steps = rollbackSteps(from, migrationsChanged, composeFilesChanged, boxArgs);
     ctx.log(`upgrade FAILED: ${error instanceof Error ? error.message : String(error)}`);
     ctx.log('to roll back:');
-    for (const step of steps) ctx.log(`  ${step}`);
+    for (const step of rollback) ctx.log(`  ${step}`);
     throw error;
   }
 
-  const rollback = rollbackSteps(from, migrationsChanged, composeFilesChanged, boxArgs);
   ctx.log(`upgraded to ${to}; healthy. To roll back:`);
   for (const step of rollback) ctx.log(`  ${step}`);
   return { from, to, composeRestarted, migrationsChanged, rollback };

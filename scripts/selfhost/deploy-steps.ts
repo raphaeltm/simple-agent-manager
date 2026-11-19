@@ -75,7 +75,7 @@ const DEFAULT_HEALTH_REQUEST_TIMEOUT_MS = 10_000;
 
 export function intEnv(name: string, fallback: number): number {
   const raw = process.env[name];
-  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
