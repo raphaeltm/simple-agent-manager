@@ -1,0 +1,67 @@
+#!/usr/bin/env node
+// Fake `gcloud` for gcp-bootstrap.test.ts: the IAM and workload identity commands
+// deploy/selfhost/gcp-bootstrap.sh runs. State is one JSON file ($STATE/gcp.json), so a later run
+// sees what an earlier one did; every call is appended to $STATE/calls.
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+const STATE = process.env.STATE;
+const args = process.argv.slice(2);
+appendFileSync(join(STATE, 'calls'), `${args.join(' ')}\n`);
+const file = join(STATE, 'gcp.json');
+const db = existsSync(file)
+  ? JSON.parse(readFileSync(file, 'utf8'))
+  : { pools: {}, providers: {}, accounts: {}, bindings: [] };
+const save = () => writeFileSync(file, JSON.stringify(db, null, 2));
+const flag = (name) => {
+  const hit = args.find((a) => a.startsWith(`--${name}=`));
+  if (hit) return hit.slice(name.length + 3);
+  const i = args.indexOf(`--${name}`);
+  return i >= 0 ? args[i + 1] : undefined;
+};
+const words = args.filter((a, i) => !a.startsWith('--') && (args[i - 1] ?? '') !== '--project');
+const cmd = words.slice(0, 4).join(' ');
+const fail = (message) => {
+  process.stderr.write(`ERROR: ${message}\n`);
+  process.exit(1);
+};
+const out = (text) => process.stdout.write(`${text}\n`);
+const format = flag('format') ?? '';
+
+if (cmd.startsWith('projects describe')) out('123456789012');
+else if (cmd.startsWith('services enable')) save();
+else if (cmd.startsWith('iam workload-identity-pools providers')) {
+  const [, , , op, id] = words;
+  if (op === 'describe') {
+    if (!db.providers[id]) fail('not found');
+    if (format.includes('issuerUri')) out(db.providers[id].issuer);
+    if (format.includes('state')) out(db.providers[id].state ?? 'ACTIVE');
+  } else if (op === 'create-oidc') {
+    db.providers[id] = { issuer: flag('issuer-uri') };
+    save();
+  } else fail(`unexpected ${cmd}`);
+} else if (cmd.startsWith('iam workload-identity-pools')) {
+  const [, , op, id] = words;
+  if (op === 'describe') {
+    // A deleted pool still describes, with state DELETED, for 30 days (as Google keeps it).
+    if (!db.pools[id]) fail('not found');
+    if (format.includes('state')) out(db.pools[id].state ?? 'ACTIVE');
+  } else if (op === 'create') {
+    db.pools[id] = { description: flag('description') };
+    save();
+  } else fail(`unexpected ${cmd}`);
+} else if (cmd.startsWith('iam service-accounts add-iam-policy-binding')) save();
+else if (cmd.startsWith('iam service-accounts')) {
+  const [, , op, id] = words;
+  const email = id.includes('@') ? id : `${id}@${flag('project')}.iam.gserviceaccount.com`;
+  if (op === 'describe') {
+    if (!db.accounts[email]) fail('not found');
+  } else if (op === 'create') {
+    db.accounts[email] = { description: flag('description') };
+    save();
+  } else fail(`unexpected ${cmd}`);
+} else if (cmd.startsWith('projects add-iam-policy-binding')) {
+  const entry = `project:${words[2]} ${flag('role')} ${flag('member')}`;
+  if (!db.bindings.includes(entry)) db.bindings.push(entry);
+  save();
+} else fail(`fake gcloud: unexpected: ${args.join(' ')}`);
