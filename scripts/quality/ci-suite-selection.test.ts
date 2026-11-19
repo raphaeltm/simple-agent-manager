@@ -712,6 +712,18 @@ describe('runner budget (jobs a ready PR starts)', () => {
     expect(jobs(['apps/web/src/main.tsx']).get('deploy-scripts')).not.toBe('success');
   });
 
+  // Its tests import no workspace package, so it builds none (a full API-dependency build was
+  // most of its runtime); the tests that need one run in the API unit suite and Self-host Live.
+  it('Validate Deploy Scripts builds no workspace package; Self-host Live builds before its type check', () => {
+    const steps = (job: string) => loadWorkflow().jobs[job]!.steps!.map((step) => step.run ?? '');
+    expect(steps('deploy-scripts').filter((run) => run.includes('turbo run build'))).toEqual([]);
+    const live = steps('selfhost-live');
+    const build = live.findIndex((run) => run.includes('turbo run build'));
+    const typecheck = live.findIndex((run) => run.includes('scripts/selfhost/live/tsconfig.json'));
+    expect(build).toBeGreaterThanOrEqual(0);
+    expect(typecheck).toBeGreaterThan(build);
+  });
+
   // The access-log redaction guards: the API one runs with the API unit suite, the App.tsx one
   // with the web suite, and either runs when the redaction filter itself changes.
   it('a credential route or the redaction filter selects the suite holding its guard', () => {

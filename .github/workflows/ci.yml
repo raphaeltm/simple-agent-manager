@@ -154,6 +154,10 @@ jobs:
               - 'deploy/selfhost/sam-mx/**'
               # The self-host access-log redaction guard scans the API routes against this filter.
               - 'deploy/selfhost/caddy/log-redaction.caddy'
+              # gcp-bootstrap-credential.test.ts runs the bootstrap against the fake gcloud and parses
+              # its output with the app's credential parser.
+              - 'deploy/selfhost/gcp-bootstrap.sh'
+              - 'scripts/selfhost/testdata/fake-gcloud-iam.mjs'
               - 'scripts/quality/node-pool-boundary.ts'
               - 'scripts/quality/node-pool-boundary/**'
               - 'tests/fixtures/acp-activity-report-v1.json'
@@ -887,12 +891,8 @@ jobs:
       - name: Enforce source file size limits
         run: pnpm quality:file-sizes
 
-      # The self-host scripts and their tests load API modules (the GCP credential parser, the
-      # shared-flight helper) that import workspace packages through their built dist/, as
-      # `pnpm selfhost:deploy` does after building them (deploy.ts buildApiDependencies).
-      - name: Build the API Worker's workspace dependencies
-        run: pnpm exec turbo run build --filter=@simple-agent-manager/api^...
-
+      # No workspace build here: neither these scripts nor their tests import a workspace package
+      # (the self-host tests that do live in the API unit suite and the Self-host Live job).
       - name: Type check deployment scripts
         run: |
           pnpm exec tsc --project scripts/deploy/tsconfig.json --noEmit
@@ -1268,9 +1268,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # celld bundles API modules (worker-core's shared-flight) through their built dist/.
+      # celld bundles API modules (worker-core's shared-flight) through their built dist/, and the
+      # live tests type-check against them.
       - name: Build the API Worker's workspace dependencies
         run: pnpm exec turbo run build --filter=@simple-agent-manager/api^...
+
+      - name: Type check the live tests
+        run: pnpm exec tsc --project scripts/selfhost/live/tsconfig.json --noEmit
 
       - name: Run self-host live tests
         run: pnpm selfhost:live-test
