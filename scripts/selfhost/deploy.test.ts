@@ -1,7 +1,7 @@
 /**
  * `pnpm selfhost:deploy --init` and `--dry-run` run as child processes on a throwaway `.env` and
- * `.state/`, exactly as an operator runs them (deploy-harness.ts). This is the plaintext path end to
- * end, short of `celld deploy`: --init generates the platform keys and gateway.env once, and the
+ * `.state/`, exactly as an operator runs them (deploy-harness.ts). This is the deploy end to end,
+ * short of `celld deploy`: --init generates the platform keys and gateway.env once, and the
  * config celld would store carries every secret as a Worker var, redacted in the printed copy.
  */
 import { randomBytes } from 'node:crypto';
@@ -9,6 +9,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -20,7 +21,11 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { CHILD_TEST_TIMEOUT_MS, runDeploy, writeBox } from './deploy-harness.js';
-import { PLATFORM_KEY_NAMES, PLATFORM_KEYS_FILE } from './platform-keys.js';
+import {
+  DRY_RUN_KEY_PLACEHOLDER,
+  PLATFORM_KEY_NAMES,
+  PLATFORM_KEYS_FILE,
+} from './platform-keys.js';
 
 // Generated per run so no secret-shaped literal sits in the tree.
 const OPERATOR_SECRET = randomBytes(16).toString('hex');
@@ -46,7 +51,7 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-describe('selfhost:deploy, plaintext', { timeout: CHILD_TEST_TIMEOUT_MS }, () => {
+describe('selfhost:deploy', { timeout: CHILD_TEST_TIMEOUT_MS }, () => {
   it('--init writes the platform keys and gateway.env once; --dry-run renders them as redacted vars', async () => {
     const envFile = writeBox(dir);
     const init = await runDeploy(envFile, ['--init']);
@@ -77,7 +82,7 @@ describe('selfhost:deploy, plaintext', { timeout: CHILD_TEST_TIMEOUT_MS }, () =>
     expect(vars.SAM_INSTALLATION_ID).toBe(keys.SAM_INSTALLATION_ID);
     expect(vars.ENVIRONMENT).toBe('selfhost');
     expect(vars.BASE_DOMAIN).toBe('sam.example.com');
-    // The plaintext path is the only one: no key agent, no containers.
+    // Keys travel as plain Worker vars: no key agent, no containers.
     expect(Object.keys(vars).filter((name) => name.startsWith('SAM_KEY_'))).toEqual([]);
     expect(config).not.toHaveProperty('containers');
     expect(config.main).toBe('celld-main.ts');
@@ -89,8 +94,48 @@ describe('selfhost:deploy, plaintext', { timeout: CHILD_TEST_TIMEOUT_MS }, () =>
     writeFileSync(join(state, 'key-agent', 'bundles', 'b1.json'), '{}');
     const result = await runDeploy(envFile, ['--init']);
     expect(result.status).toBe(1);
-    expect(result.out).toContain('platform keys are sealed');
+    expect(result.out).toContain(`restore ${PLATFORM_KEYS_FILE} from your backup`);
     expect(existsSync(join(state, PLATFORM_KEYS_FILE))).toBe(false);
+  });
+
+  it('a deploy without --init on a fresh dir generates no keys', async () => {
+    const envFile = writeBox(dir);
+    mkdirSync(state, { mode: 0o700 });
+    const result = await runDeploy(envFile, ['--skip-vm-agent']);
+    expect(result.status).toBe(1);
+    expect(result.out).toContain('run pnpm selfhost:deploy --init first');
+    expect(readdirSync(state)).toEqual([]);
+  });
+
+  it('--dry-run on a fresh dir writes nothing and shows placeholders for the keys', async () => {
+    const envFile = writeBox(dir, ['COMPOSE_PROFILES=tunnel,local-store,mail-collector']);
+    mkdirSync(state, { mode: 0o700 });
+    const { out, config } = await dryRun(envFile);
+    expect(readdirSync(state)).toEqual([]);
+    expect(out).toContain('--init would generate platform keys');
+    const vars = config.vars as Record<string, string>;
+    expect(vars.SAM_INSTALLATION_ID).toBe(DRY_RUN_KEY_PLACEHOLDER);
+    expect(vars.ENCRYPTION_KEY).toBe('<redacted>');
+
+    // Nor does it create a state dir that does not exist yet.
+    const elsewhere = join(dir, 'never-created');
+    const result = await runDeploy(envFile, [
+      '--dry-run',
+      '--skip-vm-agent',
+      '--state-dir',
+      elsewhere,
+    ]);
+    expect(result.status, result.out).toBe(0);
+    expect(existsSync(elsewhere)).toBe(false);
+  });
+
+  it('refuses secrets.env overriding a generated platform key', async () => {
+    const envFile = writeBox(dir);
+    expect((await runDeploy(envFile, ['--init'])).status).toBe(0);
+    writeSecrets(['SAM_INSTALLATION_ID=0123456789abcdef0123456789abcdef']);
+    const result = await runDeploy(envFile, ['--dry-run', '--skip-vm-agent']);
+    expect(result.status).toBe(1);
+    expect(result.out).toContain('SAM_INSTALLATION_ID differs from the generated value');
   });
 
   it('refuses an s3:// operator store without R2_S3_REGION, and passes one through', async () => {

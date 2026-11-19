@@ -1,8 +1,8 @@
 import {
   chmodSync,
-  existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   statSync,
   writeFileSync,
@@ -12,12 +12,11 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { ensurePlatformKeys, PLATFORM_KEY_NAMES, PLATFORM_KEYS_FILE } from './platform-keys.js';
 import {
-  assertPrivateFile,
   ensurePrivateDir,
   parseDotenv,
   readSecretsFile,
+  replacePrivateFile,
   writePrivateFile,
 } from './secret-files.js';
 
@@ -98,67 +97,36 @@ describe('root-only secret files', () => {
   });
 });
 
-describe('ensurePlatformKeys', () => {
-  it('generates every key once, root-only, and reuses them on the next run', () => {
+describe('replacePrivateFile', () => {
+  it('creates a 0600 file and leaves no temp file behind', () => {
     const dir = tempDir();
-    const path = join(dir, PLATFORM_KEYS_FILE);
-    const first = ensurePlatformKeys(dir);
-    expect(first.generated).toEqual([...PLATFORM_KEY_NAMES]);
+    const path = join(dir, 'keys.json');
+    replacePrivateFile(path, 'one\n', { backup: true });
+    expect(readFileSync(path, 'utf8')).toBe('one\n');
     expect(statSync(path).mode & 0o777).toBe(0o600);
-    expect(() => assertPrivateFile(path)).not.toThrow();
-    expect(Buffer.from(first.keys.ENCRYPTION_KEY, 'base64')).toHaveLength(32);
-    expect(first.keys.SAM_INSTALLATION_ID).toMatch(/^[0-9a-f]{32}$/);
-    expect(first.keys.JWT_PRIVATE_KEY).toContain('BEGIN PRIVATE KEY');
-
-    const before = readFileSync(path, 'utf8');
-    const second = ensurePlatformKeys(dir);
-    expect(second.generated).toEqual([]);
-    expect(second.keys).toEqual(first.keys);
-    expect(readFileSync(path, 'utf8')).toBe(before);
+    // Nothing to back up on the first write.
+    expect(readdirSync(dir)).toEqual(['keys.json']);
   });
 
-  it('completes a file missing a whole group without touching existing keys', () => {
+  it('keeps the previous content as a 0600 .bak when replacing', () => {
     const dir = tempDir();
-    const path = join(dir, PLATFORM_KEYS_FILE);
-    const { keys } = ensurePlatformKeys(dir);
-    const rest: Record<string, string> = { ...keys };
-    delete rest.PREVIEW_SIGNING_KEY;
-    writeFileSync(path, JSON.stringify(rest), { mode: 0o600 });
-    const result = ensurePlatformKeys(dir);
-    expect(result.generated).toEqual(['PREVIEW_SIGNING_KEY']);
-    expect(result.keys.ENCRYPTION_KEY).toBe(keys.ENCRYPTION_KEY);
+    const path = join(dir, 'keys.json');
+    writeFileSync(path, 'old\n', { mode: 0o600 });
+    replacePrivateFile(path, 'new\n', { backup: true });
+    expect(readFileSync(path, 'utf8')).toBe('new\n');
+    expect(readFileSync(`${path}.bak`, 'utf8')).toBe('old\n');
+    expect(statSync(`${path}.bak`).mode & 0o777).toBe(0o600);
+    expect(readdirSync(dir).sort()).toEqual(['keys.json', 'keys.json.bak']);
   });
 
-  it('refuses to regenerate half of a key pair', () => {
+  it('leaves the original untouched and no temp file when the rename fails', () => {
     const dir = tempDir();
-    const path = join(dir, PLATFORM_KEYS_FILE);
-    const { keys } = ensurePlatformKeys(dir);
-    const rest: Record<string, string> = { ...keys };
-    delete rest.JWT_PUBLIC_KEY;
-    writeFileSync(path, JSON.stringify(rest), { mode: 0o600 });
-    expect(() => ensurePlatformKeys(dir)).toThrow(/has JWT_PRIVATE_KEY but not JWT_PUBLIC_KEY/);
-  });
-
-  // A box sealed by a later self-host build keeps its keys in key-agent/bundles, not this file.
-  it('refuses to generate keys for a state dir whose keys are sealed elsewhere', () => {
-    const dir = tempDir();
-    mkdirSync(join(dir, 'key-agent', 'bundles'), { recursive: true });
-    writeFileSync(join(dir, 'key-agent', 'bundles', 'b1.json'), '{}');
-    expect(() => ensurePlatformKeys(dir)).toThrow(/platform keys are sealed/);
-    expect(existsSync(join(dir, PLATFORM_KEYS_FILE))).toBe(false);
-  });
-
-  it('control: an empty bundles dir, or platform-keys.json beside bundles, deploys as usual', () => {
-    const empty = tempDir();
-    mkdirSync(join(empty, 'key-agent', 'bundles'), { recursive: true });
-    expect(ensurePlatformKeys(empty).generated).toEqual([...PLATFORM_KEY_NAMES]);
-
-    const both = tempDir();
-    const { keys } = ensurePlatformKeys(both);
-    mkdirSync(join(both, 'key-agent', 'bundles'), { recursive: true });
-    writeFileSync(join(both, 'key-agent', 'bundles', 'b1.json'), '{}');
-    const again = ensurePlatformKeys(both);
-    expect(again.generated).toEqual([]);
-    expect(again.keys).toEqual(keys);
+    // A non-empty directory where the file should go: rename(2) cannot replace it.
+    const path = join(dir, 'keys.json');
+    mkdirSync(path);
+    writeFileSync(join(path, 'inside'), 'x');
+    expect(() => replacePrivateFile(path, 'new\n')).toThrow();
+    expect(readdirSync(dir)).toEqual(['keys.json']);
+    expect(readFileSync(join(path, 'inside'), 'utf8')).toBe('x');
   });
 });
