@@ -423,7 +423,7 @@ describe('pinned workspace requests refuse authority drift as a designed conflic
     ).rejects.toMatchObject({
       statusCode: 409,
       error: 'CONFLICT',
-      message: 'Node allocation plan is no longer current',
+      message: 'Node allocation plan is no longer current. Choose another node or omit nodeId.',
     });
   });
 

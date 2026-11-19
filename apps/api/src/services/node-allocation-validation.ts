@@ -6,6 +6,7 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import { resolveCapacityPoolPlacementSettings } from './capacity-pool-placement-settings';
 import {
@@ -79,8 +80,16 @@ export async function assertPinnedNodeAllocationPlanCurrent(
   try {
     await assertNodeAllocationPlanCurrent(...args);
   } catch (error) {
-    if (error instanceof NodeAllocationAuthorityChangedError) throw errors.conflict(error.message);
-    throw error;
+    if (!(error instanceof NodeAllocationAuthorityChangedError)) throw error;
+    const [, nodeId, userId, projectId] = args;
+    log.warn('node_allocation.pinned_authority_refused', {
+      nodeId,
+      userId,
+      projectId,
+      reason: error.message,
+      action: 'rejected',
+    });
+    throw errors.conflict(`${error.message}. Choose another node or omit nodeId.`);
   }
 }
 

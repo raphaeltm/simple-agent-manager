@@ -42,3 +42,8 @@ error groups and is reported as a server fault (rule 72: categorize by recovery 
   passes, an excluded source answers 409 with no workspace created, and an unavailable database is
   not a 409. With the typed error removed, the 409 test fails. The route itself is exercised live by
   the staging kit's excluded-source probe.
+- Security review (PASS, LOW notes addressed): the wrapper logs `node_allocation.pinned_authority_refused`
+  with node, user and project IDs plus `action: 'rejected'` (rule 11), and the 409 names the recovery
+  action ("Choose another node or omit nodeId."). Deferred LOW: a route-level unit test of the pinned
+  409. The route is exercised live by the staging excluded-source probe, which also asserts no
+  workspace row persists.
