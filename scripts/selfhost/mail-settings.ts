@@ -16,7 +16,7 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { resolveSmtpConfig } from '../../packages/agent-email/src/smtp-config.js';
-import { writePrivateFile } from './secret-files.js';
+import { replacePrivateFile, writePrivateFile } from './secret-files.js';
 
 const MAIL_COLLECTOR_PROFILE = 'mail-collector';
 /** Mailpit's SMTP listener (loopback, no TLS: plaintext SMTP is accepted only to loopback). */
@@ -218,7 +218,8 @@ function dotenv(values: Record<string, string>): string {
 
 function writeIfChanged(path: string, content: string): boolean {
   if (existsSync(path) && readFileSync(path, 'utf8') === content) return false;
-  writePrivateFile(path, content);
+  // Replaced, not rewritten in place: compose reads these as env_files.
+  replacePrivateFile(path, content);
   return true;
 }
 

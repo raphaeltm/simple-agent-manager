@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 
 import { BOX_RESERVED_PORTS, gatewayEnvAction } from './box-settings.js';
 import type { CelldWranglerConfig } from './celld-config.js';
-import { writePrivateFile } from './secret-files.js';
+import { replacePrivateFile } from './secret-files.js';
 
 /** The repository checkout the self-host scripts run from. */
 export const REPO_ROOT = resolve(import.meta.dirname, '../..');
@@ -40,7 +40,8 @@ export function syncGatewayEnv(path: string, content: string, init: boolean): vo
   const existing = existsSync(path) ? readFileSync(path, 'utf8') : null;
   const action = gatewayEnvAction(existing, content, init);
   if (action === 'unchanged') return;
-  writePrivateFile(path, content);
+  // Replaced, not rewritten in place: compose may be reading it right now.
+  replacePrivateFile(path, content);
   log(`wrote ${path}; (re)start the stack: docker compose up -d`);
   if (action === 'write-then-restart') {
     throw new Error(

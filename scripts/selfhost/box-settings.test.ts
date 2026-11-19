@@ -1,3 +1,16 @@
+import {
+  closeSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -12,6 +25,7 @@ import {
   trimSlashes,
   tunnelWorkerVars,
 } from './box-settings.js';
+import { syncGatewayEnv } from './deploy-steps.js';
 import { parseDotenv } from './secret-files.js';
 
 const SECRET = 'ab'.repeat(32);
@@ -224,5 +238,33 @@ describe('gatewayEnvAction', () => {
 
   it('control: an unchanged file lets the deploy continue', () => {
     expect(gatewayEnvAction(current, current, false)).toBe('unchanged');
+  });
+});
+
+describe('syncGatewayEnv', () => {
+  /** Everything still readable through a descriptor opened before the write. */
+  function readAll(fd: number): string {
+    const buffer = Buffer.alloc(4096);
+    const length = readSync(fd, buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, length).toString('utf8');
+  }
+
+  it('replaces gateway.env whole: a reader that already opened it keeps the old file intact', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sam-gateway-env-'));
+    const path = join(dir, 'gateway.env');
+    const old = 'FRPS_PORT_RANGE=20000-29999\n';
+    writeFileSync(path, old, { mode: 0o644 });
+    // docker compose reading the env_file while --init rewrites it.
+    const reader = openSync(path, 'r');
+    try {
+      syncGatewayEnv(path, 'FRPS_PORT_RANGE=21000-21999\n', true);
+      // Rewritten in place, this descriptor would see the new or a truncated file.
+      expect(readAll(reader)).toBe(old);
+    } finally {
+      closeSync(reader);
+    }
+    expect(readFileSync(path, 'utf8')).toBe('FRPS_PORT_RANGE=21000-21999\n');
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(readdirSync(dir)).toEqual(['gateway.env']);
   });
 });

@@ -178,6 +178,15 @@ describe('writeMailCollectorFiles', () => {
     expect(writeMailCollectorFiles(dir, COLLECTOR, password)).toEqual([]);
   });
 
+  it('replaces a changed env file rather than truncating the one compose may be reading', () => {
+    writeMailCollectorFiles(dir, COLLECTOR, password);
+    const path = join(dir, 'mail-collector.env');
+    const before = statSync(path).ino;
+    writeMailCollectorFiles(dir, { COMPOSE_PROFILES: 'tunnel' }, null);
+    expect(statSync(path).ino).not.toBe(before);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
   it('turning the profile off turns the Caddy route off and removes the password copy', () => {
     writeMailCollectorFiles(dir, COLLECTOR, password);
     writeMailCollectorFiles(dir, { COMPOSE_PROFILES: 'tunnel' }, null);

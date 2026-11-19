@@ -13,6 +13,7 @@ import {
   fchmodSync,
   fstatSync,
   fsyncSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -90,14 +91,21 @@ function fsyncDir(dir: string): void {
 
 /**
  * Replaces `path` with `content` so a crash leaves either the old or the new file, never a torn
- * one: a 0600 temp file in the same directory is written and fsynced, then renamed over `path`.
- * With `backup`, an existing file's content is first kept as `<path>.bak` (0600, same way).
+ * one, and a concurrent reader (docker compose reading an env_file) sees one of them whole: a
+ * 0600 temp file in the same directory is written and fsynced, then renamed over `path`. An
+ * existing `path` owned by another user is refused first. With `backup`, an existing file's
+ * content is first kept as `<path>.bak` (0600, same way).
  */
 export function replacePrivateFile(
   path: string,
   content: string,
   options: { backup?: boolean } = {}
 ): void {
+  const current = lstatSync(path, { throwIfNoEntry: false });
+  const uid = process.getuid?.();
+  if (current && uid !== undefined && current.uid !== uid) {
+    throw new Error(`${path} is owned by uid ${current.uid}, not the deploying user (${uid})`);
+  }
   const dir = dirname(path);
   const temp = join(dir, `.${basename(path)}.${process.pid}.tmp`);
   const stage = (target: string, text: string): void => {

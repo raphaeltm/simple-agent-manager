@@ -164,6 +164,16 @@ describe('replacePrivateFile', () => {
     expect(readdirSync(dir).sort()).toEqual(['keys.json', 'keys.json.bak']);
   });
 
+  it('tightens a world-readable file it replaces', () => {
+    const dir = tempDir();
+    const path = join(dir, 'gateway.env');
+    writeFileSync(path, 'old\n', { mode: 0o644 });
+    replacePrivateFile(path, 'new\n');
+    expect(readFileSync(path, 'utf8')).toBe('new\n');
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(readdirSync(dir)).toEqual(['gateway.env']);
+  });
+
   it('leaves the original untouched and no temp file when the rename fails', () => {
     const dir = tempDir();
     // A non-empty directory where the file should go: rename(2) cannot replace it.
