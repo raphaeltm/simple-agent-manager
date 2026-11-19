@@ -68,16 +68,22 @@ errors a day. The owner confirmed in the Hetzner console that no such server exi
       inventory throws `teardown_allocation_unresolved`. Add both reasons to
       `NODE_TEARDOWN_BLOCKED_REASONS`.
 - [x] (b) Service `recordOperatorNodeDeletion` (shared helpers with the owner path, no fork):
-      superadmin only, platform capacity only, managed VM only, status destroying/deleting/error,
-      providerless nodes outside the provisioning recovery window, provider existence check
-      (pinned or current platform/owner credentials; any server with this node's instance ID or
-      exact labels → 409; lookup failure → 503; no credential can look → operator's word).
+      superadmin only, platform capacity only, managed VM only, `destroying` with a recorded
+      refusal in `OPERATOR_REMOVABLE_BLOCK_REASONS`, providerless nodes outside the provisioning
+      recovery window, provider existence check (pinned, else platform credentials only; any
+      returned server → 409; lookup failure → 503; providerless without buildable labels while a
+      credential could look → 409; no credential can look → operator's word, recorded).
+- [x] Coordinator guardrails: typed node ID + required note; audit row (who/when/note/lookup
+      evidence/agentSignIn) written BEFORE the proof, fail-closed; final CAS re-checks the exact
+      refusal, no active/pending workspace, no non-terminal task placement claim, stale heartbeat.
+      Tests: `node-operator-deletion.test.ts` (claim queued/draft + completed control, active
+      workspace, heartbeat, audit-down, reason allowlist, labels, multi-credential, 5xx).
 - [x] Record proof as attested (`runtime_termination_attested_at`), audit event
       `deleted_by_operator` / `operator_attested_manual_deletion` in `node_health_events`,
       plus an `operations_audit_log` row naming the superadmin.
-- [x] Route `POST /api/admin/nodes/:id/operator-deletion` (`{confirmed:true}`) and
-      `GET /api/admin/nodes/stranded` (platform-capacity VM nodes stuck in
-      destroying/deleting/error, capped, with total).
+- [x] Route `POST /api/admin/nodes/:id/operator-deletion` (`{confirmation, note}`) and
+      `GET /api/admin/nodes/stranded` (platform-capacity VM nodes in `destroying` with a recorded
+      refusal, capped, with total and per-row `operatorRemovable`).
 - [x] Admin UI: "Stuck nodes" panel on Admin → Infrastructure with a confirm dialog naming the
       provider and instance (or "no server ID was recorded"), phone usable.
 - [x] Docs: self-hosting / admin docs mention the operator path; api reference.
@@ -95,7 +101,8 @@ errors a day. The owner confirmed in the Hetzner console that no such server exi
 - [x] A node whose server still exists at the provider is refused (409) with nothing changed.
 - [x] Non-superadmins cannot list or act; user-capacity nodes are refused by the admin path.
 - [x] The providerless refusal names its condition in `cleanup_blocked_reason` and keeps the full
-      failure backoff.
+      failure backoff (`keeps the full failure backoff…` drives `handleCleanupFailure` with the
+      real error).
 - [ ] Staging2 node `01M7MTMV89F5ZV23VSF0ZVPJPS` cleared through the new UI path.
 
 ## Implementation notes

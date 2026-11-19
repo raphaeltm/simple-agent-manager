@@ -510,10 +510,10 @@ Active workspaces and provider ownership checks remain protected. When SAM can't
 ### Stuck nodes on SAM's capacity
 
 **Admin → Infrastructure → Stuck nodes** lists managed VM nodes on the installation's own cloud
-credential that are `destroying` (`listStrandedPlatformNodes()` in
-`apps/api/src/services/node-operator-deletion.ts`), oldest failure first, with the reason SAM
-recorded. Two reasons mean SAM can never finish by itself, because the node has no server ID and
-only the exact credential it was created with could prove no server exists:
+credential that are `destroying` with a recorded teardown refusal (`listStrandedPlatformNodes()`
+in `apps/api/src/services/node-operator-deletion.ts`), oldest first, with the reason SAM recorded.
+Two reasons mean SAM can never finish by itself, because the node has no server ID and only the
+exact credential it was created with could prove no server exists:
 
 - `teardown_credential_generation_changed`: that platform credential was re-saved or rotated
   since. A re-saved credential is never accepted as proof: SAM cannot show it is the same
@@ -522,16 +522,30 @@ only the exact credential it was created with could prove no server exists:
   credential's complete inventory shows no server. SAM keeps retrying (a late server would
   still be found and deleted) but never treats an empty list as proof.
 
-After checking the provider's console yourself, select **Server is gone…**, type the node ID
-and say what you checked. SAM then asks the provider with every credential it still has and
-refuses if any returns a server for the node. It also refuses if the node has an active
-workspace, a task holding a placement on it, a recent heartbeat, no recorded teardown failure,
-or (with no server ID) was created inside the provisioning window; these are re-checked in the
-same database write that records the proof (`recordOperatorNodeDeletion()`). It deletes nothing
-at the provider. The removal is recorded as `operator_attested_manual_deletion` in the node's
-health events and, with your note, name and time, in the Operations audit log
-(`admin_operator_node_deletion`). Nodes on a user's own cloud account are refused here; their
-owner removes them from the node page.
+**Remove…** is offered only when the refusal means SAM cannot see the server
+(`OPERATOR_REMOVABLE_BLOCK_REASONS` in `packages/shared`: the two above,
+`teardown_credential_unavailable`, `teardown_instance_not_visible` and `provenance`). A refusal
+that means the server may be live (a delete the provider refused or never confirmed, or an
+ownership mismatch) shows a note to resolve it at the provider instead.
+
+After checking the provider's console yourself, select **Remove…**, type the node ID and say what
+you checked (`recordOperatorNodeDeletion()`):
+
+1. SAM asks the provider with the node's own credential, or every enabled platform credential if
+   that one no longer resolves (never the owner's own credentials), and refuses if any returns a
+   server for the node. A node with no server ID whose ownership labels cannot be built is
+   refused while a credential could look.
+2. It writes the audit entry (your note, name, time, and what the lookup could check) to the
+   Operations audit log (`admin_operator_node_deletion`) **before** anything changes, and changes
+   nothing if that write fails.
+3. It records the attested termination proof in one database write that re-checks the exact
+   refusal you were shown, that no workspace is active or pending, that no live task holds a
+   placement claim on the node, and that its heartbeat is stale. It also refuses a node with no
+   server ID created inside the provisioning window.
+
+It deletes nothing at the provider. The removal is recorded as `operator_attested_manual_deletion`
+(`deleted_by_operator`) in the node's health events. Nodes on a user's own cloud account are
+refused here; their owner removes them from the node page.
 
 Blocked nodes show the time and reason in their error message on the node list and detail page, as **Cleanup blocked since** _time_ followed by reason codes; [A node won't go away](/docs/guides/session-troubleshooting/#a-node-wont-go-away) explains each one.
 
