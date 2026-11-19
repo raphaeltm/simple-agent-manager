@@ -39,10 +39,14 @@ and trimmed. Nothing in L22 may change Cloudflare behaviour.
       platform-config-core, project-data `compact-r2`; reviewed allow markers in range-report
 - [x] Unrelated OAuth `validStoredValue` hunk trimmed out
 - [x] `pnpm quality:shared-flight-joins` check + tests, wired into CI and ast-checks scope
-- [x] Discrimination: platform-config-core reverted to main turns exactly the two platform-config
-      abandonment tests red (Cloudflare and celld join modes)
-- [ ] Full lint / typecheck / test / build
-- [ ] Reviews: security-auditor, architecture-reviewer, cloudflare-specialist, task-completion-validator
+- [x] Discrimination, one surgical revert per site, each turning only its own cases red:
+      platform-config-core (main), AdminSettingsCache and LLM snapshot (plain await), the
+      platform-config attempt cap (raised to 99), compact-r2 (main: the celld own-timer test)
+- [x] Full lint / typecheck / test (41/41 tasks; API 17,686 passed)
+- [x] Reviews: security-auditor PASS, architecture-reviewer ADDRESSED, cloudflare-specialist PASS,
+      task-completion-validator ADDRESSED
+- [x] Deferred MEDIUM (rule 42): compact-r2 does not evict an abandoned R2 operation on celld,
+      tracked in tasks/backlog/2026-11-19-compact-r2-celld-abandoned-op-eviction.md
 - [ ] Staging smoke on primary (settings, platform config, agent credential path)
 - [ ] Merge, Deploy Production success
 

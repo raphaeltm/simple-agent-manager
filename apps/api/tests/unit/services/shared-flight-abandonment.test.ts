@@ -302,5 +302,40 @@ describe.each([
       await untilSettled(resolvePlatformConfig(env));
       expect(legacyReads()).toBe(0);
     });
+
+    it('after three revoked reads, answers from one read of its own that it does not publish', async () => {
+      const { env, counter } = createEnv();
+      await untilSettled(resolvePlatformConfig(env));
+      __resetPlatformConfigCacheForTest();
+      counter.reset();
+      await untilSettled(resolvePlatformConfig(env));
+      const isLegacy = (sql: string) => /WHERE key = \?|AS encryptedToken/.test(sql);
+      const perRead = counter.executed.filter(isLegacy).length;
+      __resetPlatformConfigCacheForTest();
+      counter.reset();
+
+      // A settings write lands during each of the first three reads (the same revocation
+      // invalidatePlatformConfigCache performs), so each read loses its right to publish.
+      let legacyStatements = 0;
+      const realPrepare = env.DATABASE.prepare.bind(env.DATABASE);
+      env.DATABASE.prepare = ((sql: string) => {
+        if (isLegacy(sql)) {
+          if (legacyStatements % perRead === 0 && legacyStatements / perRead < 3) {
+            __resetPlatformConfigCacheForTest();
+          }
+          legacyStatements += 1;
+        }
+        return realPrepare(sql);
+      }) as typeof env.DATABASE.prepare;
+
+      const config = await untilSettled(resolvePlatformConfig(env));
+      expect(config.github.appSlug.value).toBe('env-app-slug');
+      // Three revoked reads, then exactly one more: the bounded fallback, not a fourth retry.
+      expect(legacyStatements).toBe(4 * perRead);
+
+      // The fallback read was not published, so the next caller reads again.
+      await untilSettled(resolvePlatformConfig(env));
+      expect(legacyStatements).toBe(5 * perRead);
+    });
   });
 });
