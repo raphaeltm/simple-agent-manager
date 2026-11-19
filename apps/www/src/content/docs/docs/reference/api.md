@@ -374,6 +374,8 @@ Create a new workspace.
 }
 ```
 
+With `nodeId`, the workspace is placed on that existing node. The request returns `409` when the node no longer has current placement authority (for example its compute source was excluded from the pool, or its credential was rotated or revoked) or no longer has capacity (`assertPinnedNodeAllocationPlanCurrent` and `reserveWorkspacePlacement`, `apps/api/src/routes/workspaces/workspace-create.ts`).
+
 ### `GET /api/workspaces`
 
 List all workspaces for the authenticated user.

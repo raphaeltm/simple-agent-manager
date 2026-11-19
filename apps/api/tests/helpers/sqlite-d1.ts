@@ -168,7 +168,11 @@ export function createSqliteD1(sqlite: Database.Database): D1Database {
   return database as unknown as D1Database;
 }
 
-/** D1 adapter wrapper that fails when one statement exceeds Cloudflare's bind parameter limit. */
+/**
+ * D1 adapter wrapper that fails when one statement exceeds Cloudflare's bind parameter limit.
+ * It cannot enforce D1's expression-depth cap of 100 (better-sqlite3 allows 1000); prove deep
+ * statements on Miniflare's D1, as `tests/workers/composable-authority-d1-expression-depth.test.ts` does.
+ */
 export function createSqliteD1WithBindLimit(
   sqlite: Database.Database,
   maxBoundParameters: number
