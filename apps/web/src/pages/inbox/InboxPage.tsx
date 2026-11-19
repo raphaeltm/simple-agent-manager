@@ -159,7 +159,7 @@ function ItemPane({
         </span>
         {canArchive && (
           <IconButton
-            label="Archive: close it and tell the agent"
+            label="Archive: close it"
             icon={<Archive size={18} />}
             onClick={() => walk.archiveItem(item)}
             showTooltip={false}

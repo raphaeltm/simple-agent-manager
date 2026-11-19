@@ -23,6 +23,7 @@ import {
   requireOperationsAccess,
 } from '../../services/operations-access';
 import {
+  INTERNAL_ERROR,
   INVALID_PARAMS,
   jsonRpcError,
   type JsonRpcResponse,
@@ -136,6 +137,13 @@ async function runOpsTool(
     await audit('failed', { error: message.slice(0, 500) });
     if (error instanceof OpsToolInputError) {
       return jsonRpcError(requestId, INVALID_PARAMS, message);
+    }
+    // Capacity can recover without changing the parameters, unlike other caller errors.
+    if (error instanceof AppError && error.statusCode === 429) {
+      return jsonRpcError(requestId, INTERNAL_ERROR, message, {
+        httpStatus: 429,
+        retryable: true,
+      });
     }
     if (error instanceof AppError && error.statusCode >= 400 && error.statusCode < 500) {
       return jsonRpcError(requestId, INVALID_PARAMS, message);

@@ -51,7 +51,13 @@ describe('GET /api/config/platform-capabilities', () => {
     const { res, body } = await getCapabilities(cloudflareEnv());
 
     expect(res.status).toBe(200);
-    expect(body).toEqual({ speechToText: true, textToSpeech: true, agentModelCalls: true });
+    expect(body).toEqual({
+      speechToText: true,
+      textToSpeech: true,
+      logSearch: true,
+      liveLogStream: true,
+      agentModelCalls: true,
+    });
     // Public config: cacheable by the browser like the other /api/config answers.
     expect(res.headers.get('Cache-Control')).toMatch(/max-age=\d+/);
   });
@@ -60,8 +66,30 @@ describe('GET /api/config/platform-capabilities', () => {
     const { res, body } = await getCapabilities(cloudflareEnv({ AI: undefined }));
 
     expect(res.status).toBe(200);
-    expect(body).toEqual({ speechToText: false, textToSpeech: false, agentModelCalls: false });
+    expect(body).toEqual({
+      speechToText: false,
+      textToSpeech: false,
+      logSearch: true,
+      liveLogStream: true,
+      agentModelCalls: false,
+    });
     expect(res.headers.get('Cache-Control')).toContain('no-store');
+  });
+
+  it('reports log search and the live stream absent on a self-hosted box', async () => {
+    // A box has no Cloudflare account API (Workers Observability) and declares no tail worker.
+    const { body } = await getCapabilities(
+      cloudflareEnv({
+        CF_ACCOUNT_ID: undefined,
+        CF_API_TOKEN: undefined,
+        LOG_TAIL_AVAILABLE: 'false',
+      })
+    );
+
+    expect(body.logSearch).toBe(false);
+    expect(body.liveLogStream).toBe(false);
+    // Liveness: the same answer still reports the services the box does have.
+    expect(body.speechToText).toBe(true);
   });
 
   it('turns text-to-speech off with TTS_ENABLED=false while speech-to-text stays on', async () => {

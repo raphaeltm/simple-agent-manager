@@ -8,4 +8,5 @@ export const NATIVE_RUNTIME_SUITES = [
   'tests/workers/sam-session-do.test.ts',
   'tests/workers/sam-grounding-runtime.test.ts',
   'tests/workers/sam-live-stream.test.ts',
+  'tests/workers/smtp-client-workerd.test.ts',
 ];

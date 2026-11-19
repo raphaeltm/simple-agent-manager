@@ -451,7 +451,15 @@ rather than guessing.
   shows the same totals. For an API-key account the list also shows spend, labelled as an estimate
   from SAM's model prices (cache writes are priced as input, so it reads low for Anthropic). Only
   the person who ran the session sees spend on their own personal key. Subscription accounts show
-  tokens only.
+  tokens only. Admin → Settings controls `insights.runUsageMaxRowsPerSession` (default 256),
+  the lifetime ceiling on new harness usage rows per chat across epochs, models, and credentials.
+  Once full, new keys are refused; counters already recorded can still increase. Existing usage
+  history is preserved. Refused reports mark the totals as incomplete: token counts show **+**,
+  spend estimates say **At least**, and a run with no accepted usage says **Incomplete**.
+  Raising the cap later does not clear this disclosure of previously lost usage.
+  Insights Accounts marks affected reporting windows as incomplete; Agent setups warns when
+  a selected run has incomplete token totals or comparisons. Complete measurements
+  from SAM’s AI proxy take precedence over incomplete harness reports.
 
 - **CPU**: the run's CPU per minute, with a marker on each minute in which the agent started tool
   calls, from the same history as **Resources**.

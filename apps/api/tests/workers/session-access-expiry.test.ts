@@ -18,6 +18,7 @@ import { requireApproved, requireAuth } from '../../src/middleware/auth';
 import { chatRoutes } from '../../src/routes/chat';
 import * as projectDataService from '../../src/services/project-data';
 import { seedInstallation, seedProject, seedSignedInUser, seedUser } from './helpers/seed-d1';
+import { socketMember } from './helpers/socket-member';
 
 const testEnv = env as unknown as Env;
 const suffix = crypto.randomUUID();
@@ -148,7 +149,7 @@ async function runAlarm() {
 
 async function subscribe(sessionId: string) {
   const response = await stub().fetch(`https://do/ws?sessionId=${sessionId}`, {
-    headers: { Upgrade: 'websocket' },
+    headers: { Upgrade: 'websocket', 'x-sam-browser-socket-actor': await socketMember(stub()) },
   });
   expect(response.status).toBe(101);
   const ws = response.webSocket!;

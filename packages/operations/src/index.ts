@@ -272,6 +272,7 @@ export {
 } from './platform-operations';
 export { type ProfileAccountBinding } from './port-types';
 export {
+  type ArchiveCheckinHold,
   type InboxAskAnnouncement,
   type InboxAskNoticeOutcome,
   type InboxAskNoticeRow,

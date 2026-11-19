@@ -668,10 +668,11 @@ describe('runner budget (jobs a ready PR starts)', () => {
     expect(count(paths)).toBeLessThanOrEqual(limit);
   });
 
-  it('a PR that matches every filter starts at most 31 jobs (27 before: four more Workers shards)', () => {
+  // 32: the Self-host Email job (landing plan F12) runs only on self-host email paths.
+  it('a PR that matches every filter starts at most 32 jobs (27 before: four more Workers shards, then Self-host Email)', () => {
     expect(
       jobCount(simulate({ eventName: 'pull_request', filters: allFilters() }))
-    ).toBeLessThanOrEqual(31);
+    ).toBeLessThanOrEqual(32);
   });
 
   it('a draft PR starts 6 jobs', () => {

@@ -217,6 +217,11 @@ The common messages:
 | **The sign-in sandbox hit a network error talking to Claude.**   | Wait a moment, then try again.                                                 |
 | **The Claude sign-in process stopped before returning a token.** | Try again. If it keeps happening, report it.                                   |
 
+For both Claude Code and Codex, **… sign-in is unavailable right now: the sign-in sandbox could not
+start** means the container runtime refused to start the sign-in sandbox (for example, its image is
+missing). Retrying will not help until an administrator fixes it; use the manual API key or token
+fields in the same panel meanwhile.
+
 When reporting a failure, include the message and approximate time; never share the code or token.
 
 ## Managing agent accounts
@@ -634,6 +639,13 @@ before some actions even when SAM sets Bypass Permissions. Google Antigravity ru
 as its YOLO mode and Accept Edits as its Auto Edit mode. It has no plan mode, so in **Plan Mode** it
 asks before acting.
 
+Mistral Vibe runs **Bypass Permissions** as `auto-approve`, **Accept Edits** as `accept-edits`,
+**Plan Mode** as `plan`, and **Manual** as `ask`. Vibe has no equivalent of **Don't Ask**, so
+SAM uses `ask` to keep approval checks: it can still ask when agent requests are enabled, and
+requests count as a no when they are disabled. Unset or unrecognized modes also reset to `ask`,
+including when restoring a conversation (`acpSessionModeID` in
+`packages/vm-agent/internal/acp/antigravity.go`).
+
 #### After a chat wakes from sleep
 
 Chats started since 7 October 2026 (on a self-hosted instance, on v2026.10.08 or later) keep their
@@ -888,7 +900,7 @@ Creating a subscription never backfills earlier CI events. Stored matched events
 their existing replay and acknowledgement behavior. Channel history and credential
 supersession history are retained independently of subscribers.
 
-To wait on a pull request without polling, the agent calls `create_project_event_subscription` and ends its turn. Delivery defaults to `runtime_steer`: if the agent is still working when an event arrives, the notice is added to its running turn; otherwise the event wakes the chat with an ordinary prompt. `existing_session_prompt` always waits for the running turn to end, and `record_only` only records events and never wakes the chat. Use source `github` with subjectType `pull_request` and subjectId set to the PR number for reviews, review comments, PR comments and PR events. CI events are keyed by commit, so use subjectType `commit` with the PR's full 40-character head SHA (a short SHA matches nothing). Event types include the action and must match exactly: a finished CI run is `check_run.completed`, `check_suite.completed`, or `workflow_run.completed`, and a bare `check_run` matches nothing. Check the PR's current head and checks on GitHub before subscribing and again right after, in case CI already finished. An expired subscription wakes no one, so also schedule one follow-up message to the agent's own chat with `schedules_write` (`method: "create"`) as a fallback. A PR comment waking an idle, live chat has been verified end to end; waking a sleeping chat, and CI or review delivery, have not. An agent that resumed from the fallback rather than from an event should say so in its report.
+To wait on a pull request without polling, the agent calls `create_project_event_subscription` and ends its turn. Delivery defaults to `runtime_steer`: if the agent is still working when an event arrives, the notice is added to its running turn; otherwise the event wakes the chat with an ordinary prompt. `existing_session_prompt` always waits for the running turn to end, and `record_only` only records events and never wakes the chat. Use source `github` with subjectType `pull_request` and subjectId set to the PR number for reviews, review comments, PR comments and PR events. CI events are keyed by commit, so use subjectType `commit` with the PR's full 40-character head SHA (a short SHA matches nothing). Event types include the action and must match exactly: default to `check_suite.completed` and `workflow_run.completed` for ordinary all-CI waits; bare names match nothing. Opt in to `check_run.completed` only for early per-job failure or job-specific progress. A terminal event covers one app suite or workflow run and includes failures, so reconcile all current checks, statuses and reviews on GitHub after every resume before proceeding. Subscriptions remain active after delivery. A commit usually has multiple workflows/suites; while required checks remain pending on the same SHA, keep the existing subscription and fallback, then end the turn again. Do not create a new subscription or fallback on each wake; proceed only once required checks finish and their results satisfy the review/release gates. Summary webhooks can be missing (status-only providers, incomplete apps, webhook configuration or delivery gaps), or report a different SHA in fork/merge-commit setups. Check the PR's current head and checks on GitHub before subscribing and again right after, in case CI already finished. An expired subscription wakes no one, so also schedule one follow-up message to the agent's own chat with `schedules_write` (`method: "create"`) as a fallback. A PR comment waking an idle, live chat has been verified end to end; waking a sleeping chat, and CI or review delivery, have not. An agent that resumed from the fallback rather than from an event should say so in its report. Existing active subscriptions are not migrated; they expire naturally, so the reduction in per-job storage and wakes ramps in as new sessions use the updated guidance.
 
 To coordinate several agents on one feature, publish a short kickoff to a project channel and pass it as `coordinationChannel` to `dispatch_task`. Children and their descendants inherit it and are told to publish findings, decisions, blockers and completion evidence with `publish_channel_event`, and to read it with `get_channel_history` or follow it with `follow_event_channel`, passing `requestedDelivery: "runtime_steer"` to be woken and `minWakeIntervalSeconds` so channel traffic wakes them at most that often. A publication never wakes its own author.
 

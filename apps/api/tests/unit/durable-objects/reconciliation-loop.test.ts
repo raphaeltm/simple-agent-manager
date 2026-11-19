@@ -9,6 +9,11 @@ import {
   processReconciliationCandidates,
 } from '@simple-agent-manager/project-data/internal/do/reconciliation';
 import {
+  excludeReconciliationCandidateForTask,
+  holdReconciliationAfterArchive,
+  releaseQuestionHold,
+} from '@simple-agent-manager/project-data/internal/do/reconciliation-candidate-state';
+import {
   ensureReconciliationEpisode,
   readReconciliationEpisode,
   writeReconciliationEpisode,
@@ -406,6 +411,34 @@ describe('bounded delivered check-in episodes', () => {
     const request = JSON.stringify(boundary.ai.mock.calls[0]);
     for (const secret of secrets) expect(request).not.toContain(secret);
     expect(request).toContain('[REDACTED_AUTH]');
+  });
+
+  it('an archived question holds check-ins off the chat until the person writes; then it is due again', async () => {
+    // Selection leases a candidate, so the first read is the one under test.
+    holdReconciliationAfterArchive(sql, 'session-1', Date.now() + 7 * 24 * 3_600_000);
+    expect(await getReconciliationCandidates(sql, env)).toEqual([]);
+    // Control: the person writes in the chat (`releaseQuestionHold`), and the same chat is due.
+    expect(releaseQuestionHold(sql, 'session-1')).toBe(true);
+    expect((await getReconciliationCandidates(sql, env)).map((c) => c.taskId)).toEqual(['1']);
+  });
+
+  it('an archive hold keeps a permanent task exclusion and never shortens a longer hold', () => {
+    const gate = (sessionId: string) => {
+      const row = sql
+        .exec('SELECT value FROM do_meta WHERE key = ?', `taskReconciliationGate:${sessionId}`)
+        .toArray()[0];
+      return JSON.parse(String(row?.value)) as Record<string, unknown>;
+    };
+    excludeReconciliationCandidateForTask(sql, 'session-1', '1');
+    holdReconciliationAfterArchive(sql, 'session-1', Date.now() + 1_000);
+    expect(gate('session-1')).toMatchObject({ excludedTaskId: '1' });
+    expect(gate('session-1').questionHold).toBeUndefined();
+
+    seed('2');
+    const later = Date.now() + 10 * 3_600_000;
+    holdReconciliationAfterArchive(sql, 'session-2', later);
+    holdReconciliationAfterArchive(sql, 'session-2', Date.now() + 1_000);
+    expect(gate('session-2')).toMatchObject({ nextAttemptAt: later, questionHold: true });
   });
 
   it('reaches other work behind a full page of paused candidates', async () => {

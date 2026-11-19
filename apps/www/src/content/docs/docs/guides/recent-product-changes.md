@@ -12,8 +12,8 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 - **One Inbox for everything waiting on you.** Questions, permission requests, secrets,
   approvals, reviews and tasks from every project are in one list, with **Inbox** in the navigation
   and an inbox icon where the notification bell was. Answer from the item, with the answer buttons
-  pinned at the bottom; the next item opens with a one-line receipt. **Archive** closes an item and
-  tells the agent, with a few seconds to **Undo**. Other notifications are under **Updates**.
+  pinned at the bottom; the next item opens with a one-line receipt. **Archive** closes an item,
+  with a few seconds to **Undo**. Other notifications are under **Updates**.
   → [Inbox](/docs/guides/inbox/)
 - **SAM tells you when something of yours fails.** A task that couldn't start or stopped before
   finishing, a chat that couldn't wake, a sleep that may have lost work, an automation that keeps
@@ -514,7 +514,7 @@ Also changed this week:
 - **Agents can take over a pull request they didn't open** and record that they're responsible for
   it, which other agents can look up.
   → [Pull requests an agent takes over](/docs/guides/agents/#pull-requests-an-agent-takes-over)
-- **Agents waiting on CI use exact event names** (`check_run.completed`, with the full commit SHA);
+- **Agents waiting on CI use exact event names** (`check_suite.completed` + `workflow_run.completed` by default, with the full commit SHA; `check_run.completed` is opt-in for early per-job failure);
   bare names like `check_run` never matched.
 
 ### For self-hosters & admins

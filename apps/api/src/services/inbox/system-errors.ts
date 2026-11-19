@@ -335,6 +335,8 @@ async function fileUndeliveredAskAnswers(
       -- The status list is \`idx_asks_unnotified\`'s, term for term, so the index applies.
       WHERE a.notified_at IS NULL AND a.status IN ('answered', 'done', 'archived', 'expired')
         AND a.status != 'expired'
+        -- An archived question, review or result owes the agent no notice (2026-11-17), so none is lost.
+        AND NOT (a.status = 'archived' AND a.kind IN ('question', 'review', 'result'))
         AND a.kind != 'error' AND a.source_session_id IS NOT NULL
         AND a.resolved_by_user_id IS NOT NULL
         AND a.resolved_at > ? AND a.resolved_at <= ?
