@@ -1,16 +1,17 @@
 /**
  * A celld node on loopback for the live suite: the box's object store (the pinned MinIO image),
- * the pinned celld binary serving from it, and `celld deploy` of a probe project. Shared by every
- * live test that runs a Worker on the real runtime, so each test states only what it probes.
+ * the pinned celld binary serving from it, and `celld deploy` of a probe project, so a test that
+ * runs a Worker on the real runtime states only what it probes (shared-flight-cancel today).
+ * writeProject also serves tests that run `celld dev` on a bare project (celld-redirect).
  */
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { parse } from 'yaml';
 
 import { resolveEsbuild } from '../celld-binary.js';
-import { freePort, REPO_ROOT, type Running, start, waitFor } from './harness';
+import { childEnv, DOCKER, freePort, REPO_ROOT, type Running, start, waitFor } from './harness';
 
 /** The object store image docker-compose.yml pins (digest); `mc` ships in it. */
 export const OBJECTSTORE_IMAGE = (
@@ -18,16 +19,6 @@ export const OBJECTSTORE_IMAGE = (
     services: { objectstore: { image: string } };
   }
 ).services.objectstore.image;
-
-/**
- * The docker CLI from a fixed system directory, never resolved through a caller-controlled PATH
- * (as harness.ts does for tar and openssl). Empty when docker is not installed.
- */
-export const DOCKER =
-  ['/usr/bin/docker', '/usr/local/bin/docker', '/bin/docker'].find((path) => existsSync(path)) ??
-  '';
-export const hasDocker =
-  DOCKER !== '' && spawnSync(DOCKER, ['version'], { stdio: 'ignore' }).status === 0;
 
 export interface ObjectStore {
   port: number;
@@ -153,11 +144,10 @@ export async function celldNode(
     deploy: (project) =>
       spawnSync(binary, ['deploy', project, ...bucketArgs()], {
         encoding: 'utf8',
-        env: {
-          ...process.env,
+        env: childEnv({
           ...store.env(),
           CELLD_ESBUILD: resolveEsbuild(join(REPO_ROOT, 'apps/api')),
-        },
+        }),
       }),
     serve: async (project) => {
       const running = node.start();

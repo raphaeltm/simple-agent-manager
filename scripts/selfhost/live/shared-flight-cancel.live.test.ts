@@ -26,14 +26,16 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_SHARED_FLIGHT_JOIN_GRACE_MS } from '../../../apps/api/src/lib/shared-flight';
 import { DEFAULT_CONFIG_READ_TIMEOUT_MS } from '../../../apps/api/src/services/config-read-deadline';
 import { ensureCelldBinary } from '../celld-binary.js';
+import { celldNode, type ObjectStore, startObjectStore, writeProject } from './celld-lab';
 import {
-  celldNode,
-  hasDocker,
-  type ObjectStore,
-  startObjectStore,
-  writeProject,
-} from './celld-lab';
-import { freePort, LIVE_TMP, REPO_ROOT, type Running, sleep, waitFor } from './harness';
+  freePort,
+  LIVE_TMP,
+  REPO_ROOT,
+  type Running,
+  skipWithoutDocker,
+  sleep,
+  waitFor,
+} from './harness';
 
 const SETTINGS_CACHE = join(REPO_ROOT, 'apps/api/src/services/admin-settings-cache.ts');
 const SHARED_FLIGHT = join(REPO_ROOT, 'apps/api/src/lib/shared-flight.ts');
@@ -281,7 +283,7 @@ async function expectJoinersAnswer(path: string, bound: number): Promise<Outcome
   return next;
 }
 
-describe.skipIf(!hasDocker && !process.env.CI)('an aborted request does not poison celld', () => {
+describe.skipIf(skipWithoutDocker)('an aborted request does not poison celld', () => {
   beforeAll(async () => {
     const upstreamPort = await freePort();
     const proxyPort = await freePort();
