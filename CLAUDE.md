@@ -31,6 +31,10 @@ Route common questions to the smallest durable source first:
 
 A serverless monorepo platform for ephemeral AI coding agent environments on Cloudflare Workers + Hetzner Cloud VMs.
 
+## Self-Hosted, Not SaaS
+
+SAM is open source and self-hosted; there is no SaaS. Each installation belongs to one person or organization, usually a team. Users trust each other only where trust is explicitly set up, so cross-user bugs are real. Other users are whoever the installation admits (signup approval is off by default), and an internet-facing control plane still faces anonymous callers. Never frame SAM as multi-tenant SaaS or compare it to GitHub Actions.
+
 ## Repository Structure
 
 ```
@@ -95,7 +99,7 @@ This monorepo has TWO separate web surfaces. Do NOT confuse them:
 | Surface                 | Directory   | Domain                         | Stack             | What it is                                            |
 | ----------------------- | ----------- | ------------------------------ | ----------------- | ----------------------------------------------------- |
 | **Marketing website**   | `apps/www/` | `simple-agent-manager.org`     | Astro + Starlight | Public website, landing pages, blog, docs             |
-| **App (control plane)** | `apps/web/` | `app.simple-agent-manager.org` | React + Vite      | Authenticated SaaS UI (dashboard, projects, settings) |
+| **App (control plane)** | `apps/web/` | `app.simple-agent-manager.org` | React + Vite      | Authenticated app UI (dashboard, projects, settings)  |
 
 When the user mentions **website, marketing, landing page, blog, docs site, or public pages** → look in `apps/www/`.
 When the user mentions **app, dashboard, projects, settings, or UI** → look in `apps/web/`.
@@ -259,8 +263,7 @@ If the bug is blocking the current task or is a small adjacent fix, fix it in th
 
 - **Build errors**: Run builds in dependency order (see Build Order above)
 - **Test failures**: Check Miniflare bindings are configured in `vitest.config.ts`
-- **Type errors**: Run `pnpm typecheck` from root to see all issues
-- **Staging issues**: Query staging state directly via `$CF_TOKEN` and the Cloudflare API — D1 SQL queries, KV reads, DNS checks. See `.claude/rules/32-cf-api-debugging.md` for copy-paste commands. **Always query before guessing.**
+- **Staging issues**: see Development Approach items 3-4.
 
 ## Task Tracking
 
@@ -287,6 +290,4 @@ Tasks tracked as markdown in `tasks/` (backlog -> active -> archive). See `tasks
 
 ## Recent Changes
 
-Do not use `CLAUDE.md` as the source for recent implementation history. Keep detailed recent-change narratives out of root startup instructions to avoid compaction pressure.
-
-Use the `/changelog` skill for structured recent-change queries, and check `git log --oneline -20` for the current branch history.
+Not kept here: use `/changelog`, then `git log --oneline -20`.
