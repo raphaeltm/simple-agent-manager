@@ -70,6 +70,15 @@ describe('parseAccountReport', () => {
     });
   });
 
+  it('reads a stored mixed-case address the SQL matched case-insensitively', () => {
+    const stored = table.replace('teammate@example.com', 'Teammate@Example.COM');
+    expect(parseAccountReport(stored, 'teammate@example.com')).toEqual({
+      id: 'UNX8rGfGHBFjvlB7HLFS4ZRF6XTp3BBI',
+      role: 'user',
+      status: 'active',
+    });
+  });
+
   it('finds nothing when the report has no row, even if the address appears elsewhere', () => {
     const empty = [
       "INSERT INTO users ... '01234567890123456789012345678901', 'teammate@example.com' ...;",
