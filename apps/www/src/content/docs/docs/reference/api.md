@@ -1340,6 +1340,30 @@ Returns the caller's own new-chat picker state for the project: `{ usage, hidden
 
 Takes `{ "hide": ["<profileId>"], "unhide": ["<profileId>"] }` and returns `{ hiddenProfileIds }`. Hiding only removes a profile from the caller's own new-chat picker in this project; the profile, other members' pickers, triggers, dispatch and @mentions are unaffected. Only profiles the caller can use in the project can be hidden (`400` otherwise), and one profile cannot appear in both lists.
 
+## Retained Session Work Downloads (Project Chat)
+
+### `GET /api/projects/:projectId/sessions/:sessionId/retained-snapshot/manifest`
+
+### `GET /api/projects/:projectId/sessions/:sessionId/retained-snapshot/wip`
+
+Download a stopped or sleeping chat's retained snapshot manifest or Git WIP bundle as a private
+attachment, using browser-session authentication. No live workspace is needed. Only the
+approved, active session creator who still has active membership in the original project and
+owns the retained snapshot can download it; project membership, administrator status or a
+shared-session grant alone is insufficient.
+
+The server selects the retained generation, verifies identity, expiry, exact length and
+SHA-256, and rechecks ownership and generation before streaming. Success uses `private, no-store`,
+`nosniff` and attachment headers. Foreign, missing, expired, deleted or inconsistent artifacts
+share `404 NOT_FOUND`; infrastructure errors are generic. There is no HOME download, snapshot
+listing, object-key parameter, agent-token authentication, public URL, lifecycle mutation or
+retention extension.
+
+Both paths also accept authenticated `HEAD` with the same checks and headers but no body. The
+web app checks availability with `HEAD`, then starts a native `GET` download so a phone does not
+buffer the WIP bundle in memory. A capture or expiry change between the two requests makes the
+`GET` fail safely with `404`.
+
 ## File Proxy (Project Chat)
 
 These endpoints proxy file operations to the workspace's VM agent, accessed through a project chat session.
