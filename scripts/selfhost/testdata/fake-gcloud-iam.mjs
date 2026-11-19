@@ -88,6 +88,14 @@ else if (cmd.startsWith('iam workload-identity-pools providers')) {
     members.push(member);
   }
   save();
+} else if (cmd.startsWith('iam service-accounts keys list')) {
+  // --managed-by=user --format=json: the keys a test put in saKeys; FAKE_GCLOUD_KEYS_RAW replaces
+  // the output entirely (malformed-output tests).
+  if (process.env.FAKE_GCLOUD_KEYS_RAW !== undefined) {
+    process.stdout.write(process.env.FAKE_GCLOUD_KEYS_RAW);
+  } else {
+    out(JSON.stringify(db.saKeys?.[flag('iam-account')] ?? []));
+  }
 } else if (cmd.startsWith('iam service-accounts get-iam-policy')) {
   // --format=json, as real gcloud prints a policy: the workloadIdentityUser members this fake
   // recorded, plus any bindings a test put in saExtraBindings. FAKE_GCLOUD_POLICY_RAW replaces

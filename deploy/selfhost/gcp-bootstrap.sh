@@ -256,7 +256,8 @@ POOL_PRINCIPAL="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/loc
 # revoking is the operator's decision. This runs before ANY grant, the project roles included, so
 # a member refused here never gains the node roles. The policy is parsed as JSON and anything
 # unexpected refuses: a filter that silently matched nothing would let the grants through.
-# Roles inherited from the project, folder or organisation are not visible here; that is why the
+# User-managed keys are refused below. Roles inherited from the project, folder or organisation
+# are not visible here; that is why the
 # node project must be dedicated to SAM (README).
 # A just-created account has an empty policy (and IAM may not list it yet), so it is skipped.
 if [[ "$sa_existed" -eq 1 ]]; then
@@ -297,6 +298,25 @@ if [[ "$sa_existed" -eq 1 ]]; then
     printf '%s\n' "$member" | grep -Eq '^[A-Za-z0-9:/._@+*=-]+$' || member="(a member with unusual characters)"
     die "service account ${SA_EMAIL} grants ${role} to ${member}, which this install does not use; that member could act as the node account. Remove it: gcloud iam service-accounts remove-iam-policy-binding ${SA_EMAIL} --project=${PROJECT} --role=${role} --member=${member}, then run this again (every other member is refused the same way); or pass --service-account <a new id>."
   fi
+  # A user-managed key authenticates as the account without any IAM binding, so the policy above
+  # cannot show who holds one. Nodes never use keys (workload identity only): refuse any, and
+  # anything that is not a JSON list, before the grants.
+  sa_keys="$(gcloud iam service-accounts keys list --iam-account="$SA_EMAIL" --project="$PROJECT" \
+    --managed-by=user --format=json)" || die "cannot list the keys of ${SA_EMAIL}"
+  key_count=0
+  key_count="$(printf '%s' "$sa_keys" | node -e '
+    let text = "";
+    process.stdin.on("data", (chunk) => (text += chunk));
+    process.stdin.on("end", () => {
+      let keys;
+      try { keys = JSON.parse(text); } catch { process.exit(2); }
+      if (!Array.isArray(keys)) process.exit(2);
+      console.log(String(keys.length));
+    });
+  ')" || die "could not parse the key list of ${SA_EMAIL}; refusing to grant anything."
+  [[ "$key_count" =~ ^[0-9]+$ ]] || die "could not parse the key list of ${SA_EMAIL}; refusing to grant anything."
+  [[ "$key_count" -eq 0 ]] \
+    || die "service account ${SA_EMAIL} has ${key_count} user-managed key(s); anyone holding one acts as the node account. Delete them (gcloud iam service-accounts keys list --iam-account=${SA_EMAIL} --managed-by=user, then gcloud iam service-accounts keys delete <key-id> --iam-account=${SA_EMAIL}), then run this again; or pass --service-account <a new id>."
 fi
 
 for role in "${NODE_ROLES[@]}"; do

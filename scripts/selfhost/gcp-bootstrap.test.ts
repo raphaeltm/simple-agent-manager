@@ -70,6 +70,7 @@ interface FakeGcp {
   accounts: Record<string, { description: string; disabled?: boolean }>;
   bindings: string[];
   saBindings?: Record<string, string[]>;
+  saKeys?: Record<string, { name: string; keyType: string }[]>;
   saExtraBindings?: Record<string, { role: string; members: string[]; condition?: object }[]>;
 }
 
@@ -300,6 +301,33 @@ describe('pnpm selfhost:gcp-bootstrap', () => {
       expect(result.stderr).toContain('has a conditional IAM binding');
       expect(grants(result.after)).toEqual([]);
     });
+
+    // A user-managed key acts as the account without any IAM binding the policy check could see.
+    it('refuses an account with a user-managed key, granting nothing', () => {
+      const result = rerun((db) => {
+        db.saKeys = {
+          [SA]: [
+            {
+              name: `projects/sam-vm-test/serviceAccounts/${SA}/keys/abc123`,
+              keyType: 'USER_MANAGED',
+            },
+          ],
+        };
+      });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('has 1 user-managed key(s)');
+      expect(grants(result.after)).toEqual([]);
+    });
+
+    it.each(['', 'not json', '{}'])(
+      'refuses an unparseable key list %j, granting nothing',
+      (raw) => {
+        const result = rerun(() => {}, { FAKE_GCLOUD_KEYS_RAW: raw });
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('could not parse the key list');
+        expect(grants(result.after)).toEqual([]);
+      }
+    );
 
     // A policy read that yields nothing usable must not read as "no other members".
     it.each(['', 'not json', '[]', '{"bindings": "x"}'])(
