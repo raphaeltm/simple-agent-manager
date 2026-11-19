@@ -8,10 +8,12 @@ import { randomBytes } from 'node:crypto';
 import {
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -19,10 +21,13 @@ import {
 } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 
+import * as TOML from '@iarna/toml';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { WranglerToml } from '../deploy/types';
 import { decryptBackupTree, encryptBackupTree } from './backup-encryption';
 import {
+  assertRollbackCacheReady,
   type BoxContext,
   MANIFEST_NAME,
   OBJECTSTORE_IMAGE,
@@ -31,9 +36,11 @@ import {
   type RunResult,
   runRollback,
 } from './backup-lib';
-import { recordInstall } from './install-record';
+import { buildCelldConfig } from './celld-config';
+import { prepareCelldProject, writeCelldConfig } from './celld-project';
+import { composeProjectFor, expectedComposeProjectFor, recordInstall } from './install-record';
 
-const PLATFORM_KEYS = JSON.stringify({ SAM_INSTALLATION_ID: 'test-installation' });
+const PLATFORM_KEYS = JSON.stringify({ SAM_INSTALLATION_ID: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' });
 const SECRET = 'store-secret-value-123';
 let root: string;
 let calls: Array<{ command: string; args: string[]; env?: NodeJS.ProcessEnv }>;
@@ -41,8 +48,16 @@ let clock: number;
 /** How many pulls after the live one fail (1: the delta copy; 2: the delta and the full copy). */
 let failDeltaCopy: number;
 let failLiveCopy: boolean;
-let cacheProof: 'owned' | 'foreign' | 'ambiguous' | 'changed';
+let cacheProof:
+  'owned' | 'foreign' | 'ambiguous' | 'changed' | 'replaced' | 'replaced-after-remove';
+let cacheMount: 'canonical' | 'wrong' | 'duplicate' | 'bind' | 'changed';
+let mountInspections: number;
+let selectedProject: string;
+let replaceStateOnPush: boolean;
+let celldStopped: boolean;
 let cacheInspections: number;
+let targetContainers: string;
+let occupiedProject: string | undefined;
 
 function tree(dir: string, base = dir): Record<string, string> {
   const out: Record<string, string> = {};
@@ -64,7 +79,38 @@ function fakeRun(command: string, args: string[], env?: NodeJS.ProcessEnv): RunR
   calls.push({ command, args, env });
   clock += 1000; // every command takes one second of fake time
   const ok = { status: 0, stdout: '', stderr: '' };
-  if (command === 'docker' && args[0] === 'compose') return ok;
+  if (command === 'docker' && args[0] === 'compose') {
+    if (args.includes('ps') && args.includes('-q') && args.at(-1) === 'celld') {
+      if (celldStopped && !args.includes('--all')) return ok;
+      selectedProject = args[args.indexOf('--project-name') + 1] ?? '';
+      return { ...ok, stdout: 'c'.repeat(64) };
+    }
+    if (args.at(-2) === 'stop') celldStopped = true;
+    if (args.at(-2) === 'start') celldStopped = false;
+    return ok;
+  }
+  if (command === 'docker' && args[0] === 'container' && args[1] === 'rm') return ok;
+  if (command === 'docker' && args[0] === 'inspect') {
+    mountInspections += 1;
+    const name =
+      cacheMount === 'wrong' || (cacheMount === 'changed' && mountInspections > 1)
+        ? 'overlay-other-cache'
+        : `${selectedProject}_celld-data`;
+    const mount = {
+      Destination: '/var/lib/celld',
+      Type: cacheMount === 'bind' ? 'bind' : 'volume',
+      Name: name,
+    };
+    return { ...ok, stdout: JSON.stringify(cacheMount === 'duplicate' ? [mount, mount] : [mount]) };
+  }
+  if (command === 'docker' && args[0] === 'ps')
+    return {
+      ...ok,
+      stdout:
+        !occupiedProject || args.includes(`label=com.docker.compose.project=${occupiedProject}`)
+          ? targetContainers
+          : '',
+    };
   if (command === 'docker' && args[0] === 'volume') {
     if (args[1] === 'rm') return ok;
     if (args[1] === 'inspect') {
@@ -75,6 +121,11 @@ function fakeRun(command: string, args: string[], env?: NodeJS.ProcessEnv): RunR
         cacheProof === 'foreign' || (cacheProof === 'changed' && cacheInspections > 1);
       const volume = {
         Name: name,
+        CreatedAt:
+          (cacheProof === 'replaced' && cacheInspections > 1) ||
+          (cacheProof === 'replaced-after-remove' && cacheInspections > 2)
+            ? '2026-11-19T02:00:00Z'
+            : '2026-11-19T01:00:00Z',
         Labels: {
           'com.docker.compose.project': foreign ? 'another-installation' : project,
           'com.docker.compose.volume': 'celld-data',
@@ -95,6 +146,15 @@ function fakeRun(command: string, args: string[], env?: NodeJS.ProcessEnv): RunR
       rmSync(to, { recursive: true, force: true });
     mkdirSync(to, { recursive: true });
     cpSync(from, to, { recursive: true });
+    if (replaceStateOnPush && dst.startsWith('gs://')) {
+      const state = join(root, 'state');
+      const previous = join(root, 'previous-state');
+      renameSync(state, previous);
+      mkdirSync(state);
+      cpSync(join(previous, 'platform-keys.json'), join(state, 'platform-keys.json'));
+      cpSync(join(previous, 'created-resources.json'), join(state, 'created-resources.json'));
+      writeFileSync(join(state, 'foreign-marker'), 'must-survive');
+    }
     return ok;
   }
 
@@ -168,7 +228,14 @@ beforeEach(() => {
   failDeltaCopy = 0;
   failLiveCopy = false;
   cacheProof = 'owned';
+  cacheMount = 'canonical';
+  mountInspections = 0;
+  selectedProject = '';
+  replaceStateOnPush = false;
+  celldStopped = false;
   cacheInspections = 0;
+  targetContainers = '';
+  occupiedProject = undefined;
   const fleet = join(root, 'store/fleet/celld');
   mkdirSync(join(fleet, 'd1'), { recursive: true });
   writeFileSync(join(fleet, 'd1/main.ltx'), 'rows');
@@ -194,6 +261,42 @@ function inspectBackup(dest: string, part: string): Record<string, string> {
 }
 
 describe('runBackup', () => {
+  it('backs up the real generated celld project while omitting its rebuildable source/migration symlinks', () => {
+    const apiDir = resolve(import.meta.dirname, '../../apps/api');
+    const source = TOML.parse(readFileSync(join(apiDir, 'wrangler.toml'), 'utf8')) as WranglerToml;
+    const plan = buildCelldConfig(source, { main: 'src/index.ts', baseDomain: 'test.example.com' });
+    const projectDir = join(root, 'state/project');
+    prepareCelldProject({ apiDir, projectDir, plan });
+    writeCelldConfig(projectDir, plan.config);
+    expect(lstatSync(join(projectDir, 'src')).isSymbolicLink()).toBe(true);
+    const migration = plan.migrationDirs[0]!;
+    const migrationDir = join(projectDir, migration.projectRelativeDir);
+    expect(lstatSync(join(migrationDir, readdirSync(migrationDir)[0]!)).isSymbolicLink()).toBe(
+      true
+    );
+    const snapshot = join(root, 'generated-project-backup');
+    runBackup(ctx('s3://fleet/celld', join(root, 'state')), snapshot);
+    const state = inspectBackup(snapshot, 'state');
+    expect(state['project/wrangler.json']).toBe(
+      readFileSync(join(projectDir, 'wrangler.json'), 'utf8')
+    );
+    expect(Object.keys(state).some((name) => name.startsWith('project/src/'))).toBe(false);
+    expect(Object.keys(state).some((name) => name.endsWith('.sql'))).toBe(false);
+    runRestore(ctx('s3://fresh/celld', join(root, 'restored-generated-state')), snapshot);
+    expect(readFileSync(join(root, 'restored-generated-state/project/wrangler.json'), 'utf8')).toBe(
+      state['project/wrangler.json']
+    );
+    expect(existsSync(join(root, 'restored-generated-state/project/src'))).toBe(false);
+  });
+
+  it('refuses arbitrary state symlinks and cleans incomplete backups', () => {
+    symlinkSync(join(root, 'box.env'), join(root, 'state/operator-secret-link'));
+    const snapshot = join(root, 'invalid-state-backup');
+    expect(() => runBackup(ctx('s3://fleet/celld', join(root, 'state')), snapshot)).toThrow();
+    expect(existsSync(snapshot)).toBe(false);
+    expect(calls.at(-1)?.args.slice(-2)).toEqual(['start', 'celld']);
+  });
+
   it('pre-copies live, stops celld only for the delta, restarts it, and records the downtime', () => {
     const dest = join(root, 'backups/b1');
     const manifest = runBackup(ctx('s3://fleet/celld', join(root, 'state')), dest, 'a'.repeat(40));
@@ -332,6 +435,40 @@ describe('runBackup', () => {
 });
 
 describe('runRestore', () => {
+  it('refuses containers under the final restored identity even when the pre-key project is empty', () => {
+    const snapshot = join(root, 'post-restore-project-backup');
+    runBackup(ctx('s3://fleet/celld', join(root, 'state')), snapshot);
+    const target = ctx('s3://fresh/celld', join(root, 'new-state'));
+    const preKey = composeProjectFor(target.box, target.stateDir);
+    const finalProject = expectedComposeProjectFor(target.box, target.stateDir, 'a'.repeat(32));
+    expect(finalProject).not.toBe(preKey);
+    occupiedProject = finalProject;
+    targetContainers = 'fixture-final-project-container\n';
+    calls = [];
+    expect(() => runRestore(target, snapshot)).toThrow(/already has containers/);
+    expect(calls.filter((call) => call.args[0] === 'ps').map((call) => call.args.at(-1))).toEqual([
+      `label=com.docker.compose.project=${preKey}`,
+      `label=com.docker.compose.project=${finalProject}`,
+    ]);
+    expect(calls.some((call) => call.args.includes('mirror'))).toBe(false);
+    expect(existsSync(target.stateDir)).toBe(false);
+    expect(existsSync(join(root, 'store/fresh/celld'))).toBe(false);
+  });
+
+  it('refuses any existing target project containers before bucket or state writes', () => {
+    const snapshot = join(root, 'occupied-target-backup');
+    runBackup(ctx('s3://fleet/celld', join(root, 'state')), snapshot);
+    targetContainers = 'fixture-existing-container\n';
+    calls = [];
+    expect(() => runRestore(ctx('s3://fresh/celld', join(root, 'new-state')), snapshot)).toThrow(
+      /container|empty install/i
+    );
+    expect(calls.some((call) => call.args.includes('mirror'))).toBe(false);
+    expect(calls.some((call) => call.args[0] === 'compose')).toBe(false);
+    expect(existsSync(join(root, 'new-state'))).toBe(false);
+    expect(existsSync(join(root, 'store/fresh/celld'))).toBe(false);
+  });
+
   it.each(['createdAt', 'samCommit', 'objectCount', 'downtimeMs'] as const)(
     'refuses authenticated invalid %s manifest metadata before cloud operations',
     (field) => {
@@ -426,7 +563,82 @@ describe('runRestore', () => {
 describe('runRollback', () => {
   beforeEach(() => {
     const context = ctx('gs://fleet/celld', join(root, 'state'));
-    recordInstall(context.stateDir, context.envFile, context.box, 'test-installation');
+    recordInstall(
+      context.stateDir,
+      context.envFile,
+      context.box,
+      'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    );
+  });
+
+  it.each(['wrong', 'duplicate', 'bind'] as const)(
+    'refuses a selected overlay with %s celld cache mount before rollback bucket writes',
+    (mount) => {
+      const context = ctx('gs://fleet/celld', join(root, 'state'));
+      const snapshot = join(root, 'overlay-cache-snapshot');
+      runBackup(context, snapshot);
+      calls = [];
+      cacheMount = mount;
+      expect(() => assertRollbackCacheReady(context)).toThrow(/canonical owned volume/);
+      expect(() => runRollback(context, snapshot)).toThrow(/canonical owned volume/);
+      expect(calls.some((call) => call.command === 'gcloud')).toBe(false);
+      expect(calls.some((call) => call.args[0] === 'volume' && call.args[1] === 'rm')).toBe(false);
+      expect(
+        calls.some((call) => call.args.includes('stop') || call.args.includes('--force'))
+      ).toBe(false);
+    }
+  );
+
+  it.each(['mount', 'creation-time'] as const)(
+    'refuses a changed cache %s between ownership checks',
+    (changed) => {
+      const context = ctx('gs://fleet/celld', join(root, 'state'));
+      const snapshot = join(root, 'replaced-cache-snapshot');
+      runBackup(context, snapshot);
+      calls = [];
+      if (changed === 'mount') cacheMount = 'changed';
+      else cacheProof = 'replaced';
+      expect(() => runRollback(context, snapshot)).toThrow(/cache mount|cache identity changed/);
+      expect(calls.some((call) => call.command === 'gcloud')).toBe(false);
+      expect(calls.some((call) => call.args[0] === 'volume' && call.args[1] === 'rm')).toBe(false);
+    }
+  );
+
+  it('refuses a same-label cache replaced after container removal, before deleting the new volume', () => {
+    const context = ctx('gs://fleet/celld', join(root, 'state'));
+    const snapshot = join(root, 'post-remove-cache-snapshot');
+    runBackup(context, snapshot);
+    cacheProof = 'replaced-after-remove';
+    calls = [];
+    expect(() => runRollback(context, snapshot)).toThrow(/cache identity changed/);
+    expect(cacheInspections).toBe(3);
+    expect(calls.some((call) => call.args.includes('--force'))).toBe(true);
+    expect(calls.some((call) => call.args[0] === 'volume' && call.args[1] === 'rm')).toBe(false);
+    expect(calls.some((call) => call.command === 'gcloud')).toBe(false);
+  });
+
+  it('rechecks the live state inode immediately before removal after the bucket copy', () => {
+    const context = ctx('gs://fleet/celld', join(root, 'state'));
+    const snapshot = join(root, 'state-race-snapshot');
+    runBackup(context, snapshot);
+    replaceStateOnPush = true;
+    expect(() => runRollback(context, snapshot)).toThrow(/state directory identity changed/);
+    expect(readFileSync(join(context.stateDir, 'foreign-marker'), 'utf8')).toBe('must-survive');
+  });
+
+  it('refuses a live state receipt whose directory inode changed before any rollback operation', () => {
+    const context = ctx('gs://fleet/celld', join(root, 'state'));
+    const snapshot = join(root, 'state-inode-snapshot');
+    runBackup(context, snapshot);
+    const path = join(context.stateDir, 'created-resources.json');
+    const receipt = JSON.parse(readFileSync(path, 'utf8')) as {
+      resources: Array<{ kind: string; attributes: Record<string, string> }>;
+    };
+    receipt.resources.find((resource) => resource.kind === 'state-dir')!.attributes.inode = '0';
+    writeFileSync(path, JSON.stringify(receipt));
+    calls = [];
+    expect(() => runRollback(context, snapshot)).toThrow(/state directory identity changed/);
+    expect(calls).toHaveLength(0);
   });
 
   it.each([
@@ -474,18 +686,25 @@ describe('runRollback', () => {
     'sanitizes malformed %s platform key JSON before any runner call',
     (location) => {
       const context = ctx('gs://fleet/celld', join(root, 'state'));
-      const snapshot = join(root, 'malformed-identity-snapshot');
+      let snapshot = join(root, 'malformed-identity-snapshot');
       const fragment = 'fixture-token-that-must-never-appear';
-      if (location === 'snapshot')
+      runBackup(context, snapshot);
+      if (location === 'snapshot') {
+        const plain = join(root, 'malformed-identity-plain');
+        decryptBackupTree(snapshot, plain, context.encryptionKeyFile!);
+        try {
+          writeFileSync(join(plain, 'state/platform-keys.json'), `{"ENCRYPTION_KEY":"${fragment}`);
+          snapshot = join(root, 'malformed-identity-altered');
+          encryptBackupTree(plain, snapshot, context.encryptionKeyFile!);
+        } finally {
+          rmSync(plain, { recursive: true, force: true });
+        }
+      } else {
         writeFileSync(
           join(context.stateDir, 'platform-keys.json'),
           `{"ENCRYPTION_KEY":"${fragment}`
         );
-      runBackup(context, snapshot);
-      writeFileSync(
-        join(context.stateDir, 'platform-keys.json'),
-        location === 'current' ? `{"ENCRYPTION_KEY":"${fragment}` : PLATFORM_KEYS
-      );
+      }
       calls = [];
       let error: unknown;
       try {
@@ -553,20 +772,28 @@ describe('runRollback', () => {
       'current.json': '{"v":3}',
       'd1/main.ltx': 'rows',
     });
-    expect(tree(join(root, 'state'))).toEqual(expectedState);
+    const actualState = tree(join(root, 'state'));
+    const restoredRecord = JSON.parse(actualState['created-resources.json']!) as {
+      resources: Array<{ kind: string; attributes: Record<string, string> }>;
+    };
+    const stateReceipt = restoredRecord.resources.find((resource) => resource.kind === 'state-dir');
+    expect(stateReceipt?.attributes.inode).toBe(String(statSync(join(root, 'state')).ino));
+    delete actualState['created-resources.json'];
+    delete expectedState['created-resources.json'];
+    expect(actualState).toEqual(expectedState);
     expect(readFileSync(join(root, 'box.env'), 'utf8')).toBe(`AWS_SECRET_ACCESS_KEY=${SECRET}\n`);
     expect(calls.find((c) => c.command === 'gcloud')?.args).toContain(
       '--delete-unmatched-destination-objects'
     );
     expect(calls.some((c) => c.args.includes('stop'))).toBe(true);
-    expect(cacheInspections).toBe(2);
+    expect(cacheInspections).toBe(3);
     const volumeDelete = calls.find(
       (c) => c.command === 'docker' && c.args[0] === 'volume' && c.args[1] === 'rm'
     );
     expect(volumeDelete?.args[2]).toMatch(/^sam-selfhost-[a-f0-9]{12}_celld-data$/);
     expect(
       calls.find((c) => c.command === 'docker' && c.args.includes('--force'))?.args.slice(-4)
-    ).toEqual(['rm', '--stop', '--force', 'celld']);
+    ).toEqual(['container', 'rm', '--force', 'c'.repeat(64)]);
   });
 });
 

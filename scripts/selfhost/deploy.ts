@@ -79,6 +79,7 @@ import {
   syncGatewayEnv,
 } from './deploy-steps.js';
 import { inboundMailWorkerVars } from './inbound-mail-settings.js';
+import { expectedComposeProjectFor, recordInstall } from './install-record.js';
 import {
   ensureMailCollectorPassword,
   MAIL_COLLECTOR_PASSWORD_FILE,
@@ -93,7 +94,6 @@ import {
   type PlatformKeysMode,
   type PlatformKeysResult,
 } from './platform-keys.js';
-import { composeProjectFor, recordInstall } from './install-record.js';
 import { assertPrivateFile, ensurePrivateDir, readSecretsFile } from './secret-files.js';
 import {
   buildVmAgentBinaries,
@@ -259,7 +259,7 @@ function prepareBoxState(inputs: DeployInputs): BoxState {
   }
   recordInstall(stateDir, inputs.envFile, box, keys.SAM_INSTALLATION_ID);
   log(
-    `Compose project: ${composeProjectFor(box, stateDir)} (set COMPOSE_PROJECT_NAME to this name before starting Docker Compose)`
+    `Compose project: ${expectedComposeProjectFor(box, stateDir, keys.SAM_INSTALLATION_ID)} (set COMPOSE_PROJECT_NAME to this name before starting Docker Compose)`
   );
   syncGatewayEnv(
     join(stateDir, 'gateway.env'),

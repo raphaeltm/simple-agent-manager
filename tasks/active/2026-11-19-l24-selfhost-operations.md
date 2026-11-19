@@ -17,15 +17,15 @@ Land backup, restore, upgrade checks and teardown from `sam/selfhost-pass-2` ont
 
 ## Implementation checklist
 
-- [ ] Port and trim operations paths only; keep all self-host code under deploy/selfhost or scripts/selfhost.
-- [ ] Encrypt all persisted backup payloads; external key, authentication, failure cleanup and secret-free diagnostics.
+- [x] Port and trim operations paths only; keep all self-host code under deploy/selfhost or scripts/selfhost.
+- [x] Encrypt all persisted backup payloads; external key, authentication, failure cleanup and secret-free diagnostics.
 - [ ] Restore only into empty target, validate all encrypted payloads before mutation; verify actual data round trip.
 - [ ] Reproduce backup failure on BOX, fix evidence-based cause and add regression.
 - [ ] Upgrade preflight rejects unknown/reordered DO tags, including H2; valid check passes.
 - [ ] Automatic upgrade rollback restores previous consistent state and reports rollback failure clearly.
-- [ ] Unique compose projects, exact ownership proof for destructive operations; no legacy adoption.
-- [ ] Keep-data retains data plus needed identity; permission errors remain visible, never treated as absence.
-- [ ] Documentation and CLI command wiring updated, including S3 region.
+- [x] Unique compose projects, exact ownership proof for destructive operations; no legacy adoption.
+- [x] Keep-data retains data plus needed identity; permission errors remain visible, never treated as absence.
+- [x] Documentation and CLI command wiring updated, including S3 region.
 - [ ] Relevant automated checks; independent security and task-completion reviews on current head.
 - [ ] BOX claimed after FREE; real backup, disposable restore with data verified, passing/refused upgrades.
 - [ ] Disposable owned teardown proven; all resources cleaned, BOX healthy, BOX FREE posted.
@@ -47,3 +47,9 @@ Idea 01M72M9AEB933ZY8269D376DKC LANDING PLAN part 6; policy 795e72a6; rule 56 de
 - finally restarted celld; verified all four original containers running, API health200, checkout unchanged. No config/bucket writes or candidate deploy.
 - Coordinator mistakenly gave L23 overlapping claim413 from frozen history; acknowledged L24 claim412 was first. L24 yielded, BOX FREE414. L24 explicitly next after L23 releases.
 - Own partial backup/code/log removed, metadata SSH key absence and own firewall404 verified, local token/private key removed. Existing saml24 OS account has no key.
+
+## Local validation and review update
+
+Root lint (23 packages), typecheck (38), build (19) pass. Root tests remain in flight. Encryption/operator focused68, scanner187 and realDocker2 pass (synthetic test data, disposable volumes cleaned). Final full self-host run:541pass/17fail, all upgrade-preflight setup affected by stricter CI guard; fixture repair under review. Security reviewer caught real stopped-container selection bug and service-reselection deletion; fixed with Compose --all/full IDs and exact container deletion, real stopped-container/overlay controls pass. Final candidate review and BOX gates still pending.
+
+Final local suite after upgrade preflight wiring/fixture repairs:560tests/30filesPASS, upgrade96PASS, tsc/eslintPASS. One remaining final review volume-label control being added; live criteria still unfulfilled. Root timeout retry12/12PASS; scanner0findings, type-boundary0blocking.

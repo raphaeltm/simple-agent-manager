@@ -102,7 +102,8 @@ The fleet bucket contains Worker secrets as well as application data. The backup
 It briefly stops celld for a consistent second bucket copy and restarts it even if that copy
 fails (`scripts/selfhost/backup-lib.ts:runBackup`, `runPlainBackup`). Temporary plaintext lives
 under the private `.tmp/selfhost-backups/` directory and is removed on success or failure.
-Backup, restore and upgrade are operator-box commands; they refuse GitHub Actions.
+Backup, restore, upgrade and teardown are operator-box commands. They refuse execution whenever
+`CI`, `GITHUB_ACTIONS` or any `RUNNER_*` variable is present, even with an empty or false value.
 
 Create a separate raw 32-byte key once. These commands write the key directly to a private file;
 they do not print it, and refuse to overwrite an existing key:
@@ -124,7 +125,7 @@ bucket deployment manifests when diagnosing a failure.
 
 Restore into a fresh disposable or replacement installation using the same SAM checkout/ref as
 the original backup. Prepare an existing mode-0600 target `.env` with its own domain, object-store
-settings, absolute state path and installation-specific Compose project. Its state directory
+settings and absolute state path. Its state directory
 must be empty or absent, and its bucket/prefix must contain no objects. For an `s3://` store,
 set `R2_S3_REGION` as well as `S3_ENDPOINT` and its credentials.
 
@@ -135,9 +136,13 @@ pnpm selfhost:restore --from /absolute/path/to/backup \
 ```
 
 Restore authenticates the complete encrypted inventory and every file before touching the target.
-It copies state and bucket data, keeps the target `.env`, strips the source installation's
-creation receipts, and leaves celld stopped. Follow the printed checkout and Compose commands
-to start the recovered install, then verify its data (`scripts/selfhost/backup-lib.ts:runRestore`).
+It refuses a target project with existing containers, copies state and bucket data, keeps the
+target `.env`, strips the source installation's creation receipts, and does not start celld. On the original SAM ref, run `selfhost:deploy --init`
+to retain the restored keys and establish new target ownership receipts. Set the target `.env`'s
+`COMPOSE_PROJECT_NAME` to the canonical project name init prints; the name incorporates the
+persisted installation id, domain and state directory. Repeat init with that setting, then start
+that target's Compose stack, deploy and verify its data (`scripts/selfhost/backup-lib.ts:runRestore`,
+`scripts/selfhost/install-record.ts:recordInstall`).
 This command refuses an occupied target; it does not overwrite an existing fleet.
 
 ## Upgrade
@@ -198,7 +203,9 @@ account and IAM grants. The retained data keeps the identity needed to use it ag
 
 `--remove-everything` also removes proven-owned local volumes/state and cloud resources recorded
 as created for this installation. It preserves backups unless `--delete-backups` is explicit,
-and preserves local platform key material unless `--destroy-key` is explicit. It does not adopt
+and preserves local platform key material unless `--destroy-key` is explicit. Images and custom networks remain manual cleanup steps because they may be shared. Docker cleanup
+checks live container ids, configuration paths and volume creation identities immediately before
+removing those exact resources; it does not run a broad Compose project sweep. It does not adopt
 resources because their names look familiar. Foreign, ambiguous, replaced and unrecorded resources
 are preserved; a refusal/failure returns a nonzero exit status. The summary lists retained data
 and manual cleanup steps (`scripts/selfhost/teardown.ts`, `teardown-model.ts:execute`).

@@ -30,6 +30,8 @@ let target: typeof HISTORY;
 let current: string;
 let failCommand: string | undefined;
 let generatedChange: boolean;
+let cacheProject: string;
+let invalidCacheMount: boolean;
 
 function run(command: string, args: string[]): RunResult {
   const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
@@ -46,6 +48,35 @@ function run(command: string, args: string[]): RunResult {
     if (args[0] === 'show') return ok('services:\n  celld:\n    image: celld:fixed\n');
     if (args[0] === 'diff') return ok(diff.join('\n'));
     if (args[0] === 'checkout') current = args[2] ?? FROM;
+  }
+  if (command === 'docker' && args.includes('ps')) {
+    cacheProject = args[args.indexOf('--project-name') + 1] ?? '';
+    return ok('c'.repeat(64));
+  }
+  if (command === 'docker' && args[0] === 'inspect') {
+    return ok(
+      JSON.stringify([
+        {
+          Type: invalidCacheMount ? 'bind' : 'volume',
+          Name: `${cacheProject}_celld-data`,
+          Destination: '/var/lib/celld',
+        },
+      ])
+    );
+  }
+  if (command === 'docker' && args[0] === 'volume' && args[1] === 'inspect') {
+    return ok(
+      JSON.stringify([
+        {
+          Name: `${cacheProject}_celld-data`,
+          CreatedAt: '2026-11-19T00:00:00Z',
+          Labels: {
+            'com.docker.compose.project': cacheProject,
+            'com.docker.compose.volume': 'celld-data',
+          },
+        },
+      ])
+    );
   }
   if (command === 'gcloud') {
     return ok(
@@ -105,6 +136,8 @@ beforeEach(() => {
   current = FROM;
   failCommand = undefined;
   generatedChange = false;
+  cacheProject = '';
+  invalidCacheMount = false;
   vi.mocked(runBackup)
     .mockReset()
     .mockImplementation(() => {
@@ -172,6 +205,22 @@ describe('runUpgrade', () => {
       docker.every((step) => step.startsWith('docker compose --project-name owned-upgrade '))
     ).toBe(true);
     expect(runRollback).toHaveBeenCalledOnce();
+  });
+
+  it('proves the real celld cache mount before snapshotting or changing the checkout', async () => {
+    await upgrade();
+    const proof = steps.findIndex((step) => step.startsWith('docker volume inspect '));
+    expect(proof).toBeGreaterThan(-1);
+    expect(proof).toBeLessThan(steps.indexOf('BACKUP'));
+    expect(steps.indexOf('BACKUP')).toBeLessThan(steps.indexOf(`git checkout --detach ${TO}`));
+  });
+
+  it('refuses an unowned bind-mounted cache before backup or checkout', async () => {
+    invalidCacheMount = true;
+    await expect(upgrade()).rejects.toThrow(/not the canonical owned volume/);
+    expect(runBackup).not.toHaveBeenCalled();
+    expect(steps.some((step) => step.startsWith('git checkout'))).toBe(false);
+    expect(steps).not.toContain('pnpm selfhost:deploy --init');
   });
 
   it('permits a new shared tag before the retained selfhost-only suffix', async () => {

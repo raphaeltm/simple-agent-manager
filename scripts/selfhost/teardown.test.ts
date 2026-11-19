@@ -9,16 +9,28 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { addResource } from '../../deploy/selfhost/created-resources.mjs';
-import { runTsx } from './deploy-harness';
-import { composeProjectFor, recordInstall, recordPath } from './install-record';
+import { CHILD_TEST_TIMEOUT_MS, runTsx } from './deploy-harness';
+import {
+  composeProjectFor,
+  expectedComposeProjectFor,
+  recordInstall,
+  recordPath,
+} from './install-record';
+
+vi.setConfig({ testTimeout: CHILD_TEST_TIMEOUT_MS });
 
 const CLI = resolve(import.meta.dirname, 'teardown.ts');
 const OWN = 'a'.repeat(32);
 const DOMAIN = 'sam.example.com';
 let dir: string, state: string, env: string, bin: string;
 beforeEach(() => {
+  for (const name of Object.keys(process.env))
+    if (name === 'CI' || name === 'GITHUB_ACTIONS' || name.startsWith('RUNNER_'))
+      vi.stubEnv(name, undefined);
   mkdirSync(resolve('.tmp'), { recursive: true });
   dir = mkdtempSync(resolve('.tmp/teardown-'));
   state = join(dir, '.state');
@@ -33,7 +45,26 @@ beforeEach(() => {
   recordInstall(state, env, { SAM_DOMAIN: DOMAIN }, OWN);
   executable(
     'docker',
-    `fs.appendFileSync(process.env.CALLS, 'docker '+process.argv.slice(2).join(' ')+'\\n');`
+    `
+    const args=process.argv.slice(2),cmd=args.join(' '),project=process.env.PROJECT;
+    fs.appendFileSync(process.env.CALLS,'docker '+cmd+'\\n');
+    const removed=process.env.CALLS+'.removed',gone=process.env.CALLS+'.volume-removed',live=process.env.LIVE_DOCKER==='yes' || !!process.env.DOCKER_CASE;
+    if(cmd.startsWith('container ls')) {
+      if(live && !fs.existsSync(removed)) console.log('f'.repeat(64));
+    } else if(cmd.startsWith('container inspect')) {
+      if(process.env.DOCKER_CASE==='malformed') console.log('{}');
+      else console.log(JSON.stringify({id:'f'.repeat(64),labels:{'com.docker.compose.project':process.env.DOCKER_CASE==='foreign'?'foreign':project,'com.docker.compose.service':'celld','com.docker.compose.project.config_files':process.env.CONFIG_FILES,'com.docker.compose.project.working_dir':process.env.CONFIG_DIR}}));
+    } else if(cmd.startsWith('volume ls')) {
+      if(live && !fs.existsSync(gone)) console.log(project+(process.env.DOCKER_CASE==='missing-volume-label'?'_undefined':'_celld-data'));
+    } else if(cmd.startsWith('volume inspect')) {
+      const counter=process.env.CALLS+'.volume-checks';
+      const count=fs.existsSync(counter)?Number(fs.readFileSync(counter,'utf8')):0;
+      fs.writeFileSync(counter,String(count+1));
+      console.log(JSON.stringify({name:project+(process.env.DOCKER_CASE==='missing-volume-label'?'_undefined':'_celld-data'),createdAt:process.env.DOCKER_CASE==='replaced' && count>0?'2026-11-02T00:00:00Z':'2026-11-01T00:00:00Z',labels:{'com.docker.compose.project':project,...(process.env.DOCKER_CASE==='missing-volume-label'?{}:{'com.docker.compose.volume':'celld-data'})}}));
+    } else if(cmd.startsWith('container rm')) fs.writeFileSync(removed,'yes');
+    else if(cmd.startsWith('volume rm')) fs.writeFileSync(gone,'yes');
+    else if(!cmd.startsWith('container stop')) {console.error('unexpected Docker command');process.exit(1);}
+  `
   );
   executable(
     'gcloud',
@@ -59,7 +90,10 @@ beforeEach(() => {
   `
   );
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => {
+  rmSync(dir, { recursive: true, force: true });
+  vi.unstubAllEnvs();
+});
 function executable(name: string, script: string) {
   const file = join(bin, name);
   writeFileSync(file, `#!/usr/bin/env node\nimport * as fs from 'node:fs';\n${script}\n`);
@@ -69,6 +103,9 @@ function run(args: string[], extra: Record<string, string> = {}) {
   return runTsx(CLI, ['--box-env', env, '--state-dir', state, ...args], {
     PATH: `${bin}:${process.env.PATH}`,
     CALLS: join(dir, 'calls'),
+    PROJECT: composeProjectFor({ SAM_DOMAIN: DOMAIN }, state),
+    CONFIG_FILES: resolve(import.meta.dirname, '../../deploy/selfhost/docker-compose.yml'),
+    CONFIG_DIR: resolve(import.meta.dirname, '../../deploy/selfhost'),
     ...extra,
   });
 }
@@ -87,6 +124,13 @@ function cloudReceipt(kind: string, name: string, extra: Record<string, string> 
       environment: 'selfhost',
       installation: OWN,
       identity: '123',
+      ...Object.fromEntries(
+        Object.keys(process.env)
+          .filter(
+            (name) => name === 'CI' || name === 'GITHUB_ACTIONS' || name.startsWith('RUNNER_')
+          )
+          .map((name) => [name, undefined])
+      ),
       ...extra,
     },
   });
@@ -109,14 +153,14 @@ describe('teardown ownership at the CLI boundary', () => {
       member: 'serviceAccount:acct',
       role: 'roles/compute.securityAdmin',
     });
-    const result = await run(['--keep-data', '--confirm', DOMAIN]);
+    const result = await run(['--keep-data', '--confirm', DOMAIN], { LIVE_DOCKER: 'yes' });
     expect(result.status, result.out).toBe(0);
     expect(calls()).not.toContain('gcloud iam');
     expect(calls()).not.toContain('remove-iam-policy-binding');
     expect(existsSync(env)).toBe(true);
     expect(existsSync(join(state, 'platform-keys.json'))).toBe(true);
     expect(calls()).toContain(composeProjectFor({ SAM_DOMAIN: DOMAIN }, state));
-    expect(calls()).toContain('stop');
+    expect(calls()).toContain('container stop');
   });
   it('deletes owned unused firewall rules with exact id and owner proof', async () => {
     cloudReceipt('firewall-rule', 'sam-allow-agent');
@@ -259,3 +303,93 @@ it.each(['changed-id', 'changed-owner', 'duplicate', 'malformed'])(
     expect(calls()).not.toContain('instances delete');
   }
 );
+
+it.each(['foreign', 'malformed', 'replaced', 'missing-volume-label'])(
+  'refuses %s live Docker ownership without touching state',
+  async (defect) => {
+    const result = await run(['--remove-everything', '--destroy-key', '--confirm', DOMAIN], {
+      DOCKER_CASE: defect,
+    });
+    expect(result.status, result.out).toBe(1);
+    expect(calls()).not.toContain('container rm');
+    expect(calls()).not.toContain('volume rm');
+    expect(existsSync(join(state, 'platform-keys.json'))).toBe(true);
+    expect(existsSync(env)).toBe(true);
+  }
+);
+it('a reinstall at the same domain and state path gets a different Compose namespace', () => {
+  const first = composeProjectFor({ SAM_DOMAIN: DOMAIN }, state);
+  writeFileSync(
+    join(state, 'platform-keys.json'),
+    JSON.stringify({ SAM_INSTALLATION_ID: 'b'.repeat(32) })
+  );
+  expect(composeProjectFor({ SAM_DOMAIN: DOMAIN }, state)).not.toBe(first);
+});
+
+it.each(['CI', 'GITHUB_ACTIONS', 'RUNNER_NAME'])(
+  'refuses %s presence before reading environment or Docker metadata',
+  async (marker) => {
+    writeFileSync(env, 'INVALID PRIVATE CONFIG', { mode: 0o600 });
+    const result = await run([], { [marker]: '' });
+    expect(result.status).toBe(1);
+    expect(result.out).toContain('forbidden in CI');
+    expect(result.out).not.toContain('expected NAME=value');
+    expect(calls()).toBe('');
+  }
+);
+
+it('removes only exact live owned container and volume identities, without a Compose sweep', async () => {
+  const result = await run(['--remove-everything', '--confirm', DOMAIN], { LIVE_DOCKER: 'yes' });
+  expect(result.status, result.out).toBe(0);
+  expect(calls()).toContain(`container rm --force ${'f'.repeat(64)}`);
+  expect(calls()).toContain(
+    `volume rm ${composeProjectFor({ SAM_DOMAIN: DOMAIN }, state)}_celld-data`
+  );
+  expect(calls()).not.toContain(' down ');
+  expect(existsSync(env)).toBe(false);
+});
+
+it('computes the final restore project from an authenticated id before copying keys', () => {
+  const final = expectedComposeProjectFor({ SAM_DOMAIN: DOMAIN }, state, OWN);
+  rmSync(join(state, 'platform-keys.json'));
+  expect(expectedComposeProjectFor({ SAM_DOMAIN: DOMAIN }, state, OWN)).toBe(final);
+  expect(() => expectedComposeProjectFor({ SAM_DOMAIN: DOMAIN }, state, 'invalid')).toThrow(
+    'Invalid persisted'
+  );
+  writeFileSync(
+    join(state, 'platform-keys.json'),
+    JSON.stringify({ SAM_INSTALLATION_ID: 'invalid' })
+  );
+  expect(() => expectedComposeProjectFor({ SAM_DOMAIN: DOMAIN }, state)).toThrow('Cannot resolve');
+});
+
+it('retains the scoped installation project after teardown removed platform keys', () => {
+  const previous = expectedComposeProjectFor({ SAM_DOMAIN: DOMAIN }, state);
+  rmSync(join(state, 'platform-keys.json'));
+  expect(expectedComposeProjectFor({ SAM_DOMAIN: DOMAIN }, state)).toBe(previous);
+});
+
+it('retries --destroy-key safely after a real CLI state-cache removal failure', async () => {
+  const cache = join(state, 'go-cache');
+  mkdirSync(cache);
+  writeFileSync(join(cache, 'fixture'), 'cache');
+  const hook = join(dir, 'fail-cache.mjs');
+  writeFileSync(
+    hook,
+    `import fs from 'node:fs'; import {syncBuiltinESMExports} from 'node:module';
+const original=fs.rmSync;fs.rmSync=function(path,...rest){if(process.env.FAIL_CACHE==='yes' && String(path)===process.env.PROTECTED_CACHE){const err=new Error('fixture removal denied');err.code='EPERM';throw err;}return original.call(this,path,...rest);};syncBuiltinESMExports();`
+  );
+  const first = await run(['--remove-everything', '--destroy-key', '--confirm', DOMAIN], {
+    NODE_OPTIONS: `--import=${hook}`,
+    FAIL_CACHE: 'yes',
+    PROTECTED_CACHE: cache,
+  });
+  expect(first.status, first.out).toBe(1);
+  expect(existsSync(join(state, 'platform-keys.json'))).toBe(false);
+  expect(existsSync(cache)).toBe(true);
+  expect(existsSync(env)).toBe(true);
+  const second = await run(['--remove-everything', '--destroy-key', '--confirm', DOMAIN]);
+  expect(second.status, second.out).toBe(0);
+  expect(existsSync(cache)).toBe(false);
+  expect(existsSync(env)).toBe(false);
+});

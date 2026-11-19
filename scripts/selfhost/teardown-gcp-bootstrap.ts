@@ -159,7 +159,9 @@ export function bootstrapItems(ctx: TeardownContext, project: string): Item[] {
           check(result, 'read recorded resource before deletion');
           let current: Record<string, unknown>;
           try {
-            current = JSON.parse(result.stdout) as Record<string, unknown>;
+            const parsed: unknown = JSON.parse(result.stdout);
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
+            current = parsed as Record<string, unknown>;
           } catch {
             throw new Error('refused: unreadable ownership metadata');
           }

@@ -1,4 +1,3 @@
-import { assertOperatorExecution } from './operator-only';
 /** Operator-only backup encryption. The 32-byte key must be stored separately from backups. */
 import {
   type CipherGCM,
@@ -25,6 +24,7 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
+import { assertOperatorExecution } from './operator-only';
 import { assertPrivateFile } from './secret-files.js';
 
 // Versioned wire format: magic | 12-byte nonce | ciphertext | 16-byte GCM tag.

@@ -1,7 +1,8 @@
 /** Validate backup/restore filesystem boundaries before any mutation. */
 import { existsSync, lstatSync, realpathSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { dirname, resolve } from 'node:path';
+
 import type { BoxContext } from './backup-lib';
 /** Refuse ambiguous paths before reading a bucket or changing any local/cloud state. */
 export function assertOperationPaths(ctx: BoxContext): void {

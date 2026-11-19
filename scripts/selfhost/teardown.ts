@@ -28,6 +28,7 @@ import { type CreatedResource, readRecord } from '../../deploy/selfhost/created-
 import { log, runCommand, SELFHOST_DIR } from './backup-cli';
 import { composeFilesFor } from './backup-lib';
 import { recordPath } from './install-record';
+import { assertOperatorExecution } from './operator-only';
 import { assertPrivateFile, parseDotenv } from './secret-files';
 import { boxItems, bucketItems, type TeardownContext } from './teardown-box';
 import { gcpItems } from './teardown-gcp';
@@ -151,6 +152,7 @@ async function confirm(expected: string, given: string | undefined): Promise<boo
 }
 
 async function main(): Promise<number> {
+  assertOperatorExecution();
   const { values, mode } = parse();
   const envFile = resolve(values['box-env'] ?? join(SELFHOST_DIR, '.env'));
   let box: Record<string, string> = {};

@@ -1,24 +1,24 @@
-import { assertOperatorExecution } from './operator-only';
 /** Encrypted operator backups with a stopped-writer consistency boundary. */
 import {
   cpSync,
-  lstatSync,
-  mkdtempSync,
-  realpathSync,
   existsSync,
+  lstatSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
-  readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join, relative, resolve, dirname } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 
-import { recordBackup, composeProjectFor } from './install-record';
-import { assertOperationPaths, assertBackupOutside } from './backup-paths';
 import { decryptBackupTree, encryptBackupTree, readBackupKey } from './backup-encryption';
-import { ensurePrivateDir } from './secret-files';
+import { readManifest } from './backup-manifest';
+import { assertBackupOutside, assertOperationPaths } from './backup-paths';
+import { composeProjectFor, expectedComposeProjectFor, recordBackup } from './install-record';
+import { assertOperatorExecution } from './operator-only';
+import { ensurePrivateDir, readPrivateJson } from './secret-files';
 
 /**
  * Rebuildable caches under the state dir, left out of every backup. `go-cache` is the vm-agent
@@ -219,8 +219,15 @@ export function composeArgs(
   ];
 }
 
+export function composeRunEnv(ctx: Pick<BoxContext, 'stateDir'>): NodeJS.ProcessEnv {
+  return { ...process.env, SAM_SELFHOST_STATE_DIR: resolve(ctx.stateDir) };
+}
+
 function compose(ctx: BoxContext, args: string[]): void {
-  check(ctx.run('docker', composeArgs(ctx, args)), `docker compose ${args.join(' ')}`);
+  check(
+    ctx.run('docker', composeArgs(ctx, args), composeRunEnv(ctx)),
+    `docker compose ${args.join(' ')}`
+  );
 }
 
 export interface BackupManifest {
@@ -282,10 +289,9 @@ function runPlainBackup(
   //
   // The pre-copy goes to its own directory. An aborted gcloud pass leaves state keyed by the
   // destination path it was writing (resumable-download tracker files, `_.gstmp` temporaries), and
-  // a second rsync into the SAME paths tripped over it on the box: `[Errno 2] No such file or
-  // directory: <backup>/bucket/nodes/node_<id>.json` for objects celld removed between the passes.
-  // Renaming the tree before the delta copy means gcloud has no state for any destination path it
-  // is about to write; only the bytes carry over.
+  // the historical box failure reported a missing local nodes/node_<id>.json path. Tracker
+  // reuse is a hypothesis requiring live confirmation, so isolate the second pass from the
+  // first pass's destination paths and retain a clean-copy fallback. Only bytes carry over.
   try {
     pullBucket(ctx, liveDir);
   } catch (err) {
@@ -362,39 +368,6 @@ function runPlainBackup(
   return manifest;
 }
 
-export function readManifest(dir: string): BackupManifest {
-  const path = join(dir, MANIFEST_NAME);
-  if (!existsSync(path)) throw new Error(`${dir} has no ${MANIFEST_NAME}; not a backup`);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(path, 'utf8'));
-  } catch {
-    throw new Error('Invalid backup manifest');
-  }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
-    throw new Error('Invalid backup manifest');
-  const item = parsed as Record<string, unknown>;
-  if (
-    item.version !== 1 ||
-    typeof item.createdAt !== 'string' ||
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(item.createdAt) ||
-    !Number.isFinite(Date.parse(item.createdAt)) ||
-    !(
-      item.samCommit === null ||
-      (typeof item.samCommit === 'string' && /^[0-9a-f]{40}$/.test(item.samCommit))
-    ) ||
-    typeof item.bucket !== 'string' ||
-    ['precopyMs', 'downtimeMs', 'deltaCopyMs', 'objectCount'].some(
-      (name) =>
-        typeof item[name] !== 'number' || !Number.isFinite(item[name]) || (item[name] as number) < 0
-    )
-  ) {
-    throw new Error('Invalid backup manifest');
-  }
-  parseBucketUrl(item.bucket);
-  return parsed as BackupManifest;
-}
-
 /**
  * Restore `from` into an empty install: the target bucket (the CELLD_BUCKET in ctx.box) must be
  * empty and the target `.state/` must have no platform keys. celld stays stopped; the caller
@@ -408,8 +381,25 @@ function runPlainRestore(ctx: BoxContext, from: string): BackupManifest {
   if (!bucketIsEmpty(ctx)) {
     throw new Error(`${ctx.box.CELLD_BUCKET} is not empty: restore only into an empty bucket`);
   }
-  // Harmless when the stack is not up; required so no celld writes while the bucket fills.
-  compose(ctx, ['stop', 'celld']);
+  // Fresh state has no gateway.env, so even 'compose stop' would fail config validation.
+  // Refuse any existing target runtime without parsing a not-yet-created Compose stack.
+  const sourceIdentity = readPrivateJson(
+    join(from, STATE_DIR, 'platform-keys.json')
+  ).SAM_INSTALLATION_ID;
+  if (typeof sourceIdentity !== 'string' || !/^[a-f0-9]{32}$/.test(sourceIdentity))
+    throw new Error('Invalid backup installation identity');
+  const projects = new Set([
+    composeProjectFor(ctx.box, ctx.stateDir),
+    expectedComposeProjectFor(ctx.box, ctx.stateDir, sourceIdentity),
+  ]);
+  for (const project of projects) {
+    const containers = check(
+      ctx.run('docker', ['ps', '-aq', '--filter', `label=com.docker.compose.project=${project}`]),
+      'check empty restore runtime'
+    );
+    if (containers.stdout.trim())
+      throw new Error('Restore target already has containers; use a fresh installation');
+  }
   ctx.log(`copying ${manifest.objectCount} objects into ${ctx.box.CELLD_BUCKET}`);
   pushBucket(ctx, join(from, BUCKET_DIR));
   ensurePrivateDir(ctx.stateDir);
@@ -487,6 +477,6 @@ export function runRestore(ctx: BoxContext, from: string): BackupManifest {
   }
 }
 
-export { runRollback } from './backup-recovery';
-
+export { readManifest } from './backup-manifest';
 export { assertBackupOutside } from './backup-paths';
+export { assertRollbackCacheReady, runRollback } from './backup-recovery';

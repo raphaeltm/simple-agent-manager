@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 import {
+  assertRollbackCacheReady,
   type BoxContext as BackupContext,
   composeArgs,
   runBackup,
@@ -427,6 +428,7 @@ export async function runUpgrade(ctx: BoxContext, opts: UpgradeOptions): Promise
     rmSync(join(ctx.stateDir, UPGRADE_PENDING_FILE), { force: true });
     return runUpgrade(ctx, opts);
   }
+  assertRollbackCacheReady(backupContext(ctx));
   const installed = installedMigrations(backupContext(ctx));
   runBackup(backupContext(ctx), backupDir, from);
 

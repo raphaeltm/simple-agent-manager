@@ -1,13 +1,14 @@
-import { assertOperatorExecution } from './operator-only';
 /**
  * Shared CLI plumbing for `pnpm selfhost:backup` and `pnpm selfhost:restore` (backup-lib.ts).
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 import { type BoxContext, composeFilesFor, type RunResult } from './backup-lib';
-import { assertPrivateFile, parseDotenv } from './secret-files';
+import { loadBoxEnv } from './box-settings';
+import { assertOperatorExecution } from './operator-only';
+import { assertPrivateFile } from './secret-files';
 
 export const REPO_ROOT = resolve(import.meta.dirname, '../..');
 export const SELFHOST_DIR = join(REPO_ROOT, 'deploy/selfhost');
@@ -42,7 +43,7 @@ export function loadBox(
   assertOperatorExecution();
   if (!existsSync(envFile)) throw new Error(`${envFile} does not exist`);
   assertPrivateFile(envFile);
-  const box = parseDotenv(readFileSync(envFile, 'utf8'), envFile);
+  const box = loadBoxEnv(envFile, SELFHOST_DIR);
   if (box.CELLD_BUCKET?.startsWith('s3://') && !box.R2_S3_REGION?.trim())
     throw new Error('R2_S3_REGION is required for an s3:// operator store');
   if (!box.CELLD_BUCKET) throw new Error(`${envFile}: CELLD_BUCKET is required`);

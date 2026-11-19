@@ -23,6 +23,10 @@ import {
 } from '../backup-lib';
 import { freePort, LIVE_TMP } from './harness';
 
+const PLATFORM_KEYS = JSON.stringify({
+  SAM_INSTALLATION_ID: 'a'.repeat(32),
+  ENCRYPTION_KEY: 'fixture-encryption-key',
+});
 const KEY = 'sam-live-backup';
 const SECRET = 'live-backup-secret-0123456789';
 const hasDocker = spawnSync('docker', ['version'], { stdio: 'ignore' }).status === 0;
@@ -151,7 +155,7 @@ describe.skipIf(!hasDocker && !process.env.CI)(
 
       const state = join(root, 'state');
       mkdirSync(state);
-      writeFileSync(join(state, 'platform-keys.json'), '{"k":1}');
+      writeFileSync(join(state, 'platform-keys.json'), PLATFORM_KEYS);
       writeFileSync(join(root, 'box.env'), 'CELLD_BUCKET=s3://fleet/celld\n', { mode: 0o600 });
 
       const dest = join(root, 'backup');
@@ -165,7 +169,7 @@ describe.skipIf(!hasDocker && !process.env.CI)(
       const check = join(root, 'check');
       pullBucket(ctx('s3://fresh/celld', newState), check);
       expect(tree(check)).toEqual(tree(seed));
-      expect(tree(newState)).toEqual({ 'platform-keys.json': '{"k":1}' });
+      expect(tree(newState)).toEqual({ 'platform-keys.json': PLATFORM_KEYS });
 
       // A second restore into the now non-empty bucket is refused.
       expect(() => runRestore(ctx('s3://fresh/celld', join(root, 'other-state')), dest)).toThrow(

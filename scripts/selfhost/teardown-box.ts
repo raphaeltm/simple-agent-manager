@@ -8,10 +8,9 @@ import { isAbsolute, join, resolve } from 'node:path';
 
 import type { CreatedResource } from '../../deploy/selfhost/created-resources.mjs';
 import { type BoxContext, composeArgs, MANIFEST_NAME, parseBucketUrl } from './backup-lib';
-
 import { composeProjectFor, expectedComposeProjectFor, usesBundledStore } from './install-record';
+import { readComposeInventory, removeContainers,stopContainers } from './teardown-compose';
 import { both, type Item, type Mode, STEPS } from './teardown-model';
-import { readComposeInventory, stopContainers, removeContainers } from './teardown-compose';
 import { isProtectedDir, stateItems } from './teardown-state-dir';
 
 export interface TeardownOptions {
@@ -53,8 +52,18 @@ export function boxItems(ctx: TeardownContext): Item[] {
   const everything = ctx.mode === 'remove-everything';
   let inventory: ReturnType<typeof readComposeInventory> | undefined;
   let inventoryError: Error | undefined;
-  if (owned) { try { inventory=readComposeInventory(ctx); } catch(error) { inventoryError=error instanceof Error ? error : new Error('Cannot verify Docker inventory'); } }
-  const proof = () => { if(inventoryError) throw inventoryError; if(!inventory) throw new Error('Missing Docker ownership inventory'); return inventory; };
+  if (owned) {
+    try {
+      inventory = readComposeInventory(ctx);
+    } catch (error) {
+      inventoryError = error instanceof Error ? error : new Error('Cannot verify Docker inventory');
+    }
+  }
+  const proof = () => {
+    if (inventoryError) throw inventoryError;
+    if (!inventory) throw new Error('Missing Docker ownership inventory');
+    return inventory;
+  };
 
   items.push({
     id: 'box:stop',
@@ -69,7 +78,7 @@ export function boxItems(ctx: TeardownContext): Item[] {
         : { act: 'refused', why: 'no creation record for this installation compose project' }
     ),
     removedAt: composeGone,
-    run: () => stopContainers(ctx,proof()),
+    run: () => stopContainers(ctx, proof()),
   });
   items.push({
     id: 'box:containers',
@@ -85,12 +94,11 @@ export function boxItems(ctx: TeardownContext): Item[] {
     ),
     removedAt: composeGone,
     runKey: 'compose-down',
-    run: () =>
-      removeContainers(ctx,proof(),everything),
+    run: () => removeContainers(ctx, proof(), everything),
     record: everything ? { cloud: 'box', kind: 'compose-project', name: projectName } : undefined,
   });
   const keepVolumes = { act: 'keep' as const, why: 'keep my data keeps volumes' };
-  for (const volume of inventory?.volumes.map(v=>v.name) ?? []) {
+  for (const volume of inventory?.volumes.map((v) => v.name) ?? []) {
     const store = volume.endsWith('objectstore-data');
     items.push({
       id: `box:volume:${volume}`,
@@ -122,7 +130,10 @@ export function boxItems(ctx: TeardownContext): Item[] {
     step: STEPS.box,
     plan: {
       'keep-data': { act: 'keep', why: 'rebuilt or reused on start' },
-      'remove-everything': { act: 'operator', why: 'images can be shared; remove unused images manually after inspecting their users' },
+      'remove-everything': {
+        act: 'operator',
+        why: 'images can be shared; remove unused images manually after inspecting their users',
+      },
     },
     removedAt: composeGone,
   });
@@ -134,7 +145,7 @@ export function boxItems(ctx: TeardownContext): Item[] {
     what: `${ctx.envFile} (settings and the bucket credential)`,
     provenance: env ? 'recorded' : 'discovered, not recorded',
     how: `rm ${ctx.envFile} (last, so a failed run can be resumed)`,
-    step: STEPS.box,
+    step: STEPS.cleanup,
     plan: {
       'keep-data': { act: 'keep', why: 'needed to start the install again' },
       'remove-everything':
@@ -191,7 +202,7 @@ function backupItems(ctx: TeardownContext): Item[] {
       what: `backup ${path}${backupBucket(path)}`,
       provenance: entry ? 'recorded' : 'discovered, not recorded',
       how: `rm -r ${path}`,
-      step: STEPS.box,
+      step: STEPS.cleanup,
       plan: gone
         ? both({ act: 'keep', why: 'no longer on disk' })
         : !isBackup

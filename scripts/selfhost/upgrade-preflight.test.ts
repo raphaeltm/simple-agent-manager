@@ -29,7 +29,12 @@ beforeEach(() => {
     run: runner,
     log: vi.fn(),
   };
-  recordInstall(stateDir, envFile, context.box, 'installation-identity');
+  writeFileSync(
+    join(stateDir, 'platform-keys.json'),
+    JSON.stringify({ SAM_INSTALLATION_ID: 'a'.repeat(32) }),
+    { mode: 0o600 }
+  );
+  recordInstall(stateDir, envFile, context.box, 'a'.repeat(32));
 });
 afterEach(() => {
   vi.unstubAllEnvs();

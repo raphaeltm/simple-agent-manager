@@ -26,6 +26,7 @@ import {
 vi.mock('./backup-lib.js', async (original) => ({
   ...(await original<typeof import('./backup-lib.js')>()),
   runBackup: vi.fn(),
+  assertRollbackCacheReady: vi.fn(),
   runRollback: vi.fn(),
 }));
 vi.mock('./upgrade-migrations.js', async (original) => ({

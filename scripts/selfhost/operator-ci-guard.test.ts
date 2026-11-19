@@ -6,7 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { loadBox } from './backup-cli';
 import { decryptBackupTree, encryptBackupTree, readBackupKey } from './backup-encryption';
-import { type BoxContext, runBackup, runRestore, runRollback } from './backup-lib';
+import {
+  assertRollbackCacheReady,
+  type BoxContext,
+  runBackup,
+  runRestore,
+  runRollback,
+} from './backup-lib';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const ABSENT = resolve(ROOT, '.tmp/nonexistent-operator-guard-sentinel');
@@ -42,6 +48,7 @@ describe('operator commands never read secret files in CI', () => {
         () => readBackupKey(ABSENT),
         () => encryptBackupTree(ABSENT, ABSENT, ABSENT),
         () => decryptBackupTree(ABSENT, ABSENT, ABSENT),
+        () => assertRollbackCacheReady(context),
         () => runBackup(context, ABSENT),
         () => runRestore(context, ABSENT),
         () => runRollback(context, ABSENT),

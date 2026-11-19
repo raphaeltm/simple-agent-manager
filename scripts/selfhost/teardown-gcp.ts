@@ -342,10 +342,18 @@ function firewallItems(
         r.attributes?.install === `https://api.${ctx.domain}`
     );
     const description = `SAM installation=${ctx.installationId} environment=selfhost issuer=https://api.${ctx.domain}`;
+    let metadata: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = JSON.parse(found.stdout);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+        metadata = parsed as Record<string, unknown>;
+    } catch {
+      /* malformed metadata never authorizes deletion */
+    }
     const safe =
       !!receipt?.attributes?.identity &&
-      JSON.parse(found.stdout).id === receipt.attributes.identity &&
-      JSON.parse(found.stdout).description === description &&
+      metadata.id === receipt.attributes.identity &&
+      metadata.description === description &&
       usage.startsWith('no existing VM');
     items.push({
       id: `gcp:${project}:firewall:${rule}`,
@@ -375,7 +383,14 @@ function firewallItems(
           '--format=json',
         ]);
         check(current, 'read firewall before deletion');
-        const raw = JSON.parse(current.stdout) as { id?: string; description?: string };
+        let raw: Record<string, unknown>;
+        try {
+          const parsed: unknown = JSON.parse(current.stdout);
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
+          raw = parsed as Record<string, unknown>;
+        } catch {
+          throw new Error('Refused: unreadable firewall identity');
+        }
         const users = firewallUsage(
           parseFirewallTargets(current.stdout),
           listAllInstances(ctx, project),

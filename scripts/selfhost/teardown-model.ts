@@ -42,7 +42,9 @@ export const STEPS = {
   identity: 3,
   bucket: 4,
   box: 5,
-  outside: 6,
+  state: 6,
+  cleanup: 7,
+  outside: 8,
 } as const;
 export const STEP_NAMES: Record<number, string> = {
   1: 'stop taking new work',
@@ -50,7 +52,9 @@ export const STEP_NAMES: Record<number, string> = {
   3: 'cloud identity and keys',
   4: 'bucket contents',
   5: 'the box',
-  6: 'outside SAM',
+  6: 'installation state',
+  7: 'local cleanup',
+  8: 'outside SAM',
 };
 
 export interface RecordRef {

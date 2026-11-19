@@ -10,6 +10,7 @@ import { parseArgs } from 'node:util';
 
 import { loadBox, log, SELFHOST_DIR } from './backup-cli';
 import { composeArgs, runRestore } from './backup-lib';
+import { expectedComposeProjectFor } from './install-record';
 
 const { values } = parseArgs({
   options: {
@@ -25,11 +26,26 @@ const envFile = resolve(values['box-env'] ?? join(SELFHOST_DIR, '.env'));
 const ctx = loadBox(envFile, values['state-dir'], values['encryption-key-file']);
 const manifest = runRestore(ctx, from);
 log(`restored backup of ${manifest.createdAt} (SAM ${manifest.samCommit ?? 'unknown commit'})`);
-log('start the stack with the SAME SAM checkout the backup was taken with:');
+log('Recover with the SAME SAM checkout the backup was taken with:');
 if (manifest.samCommit) log(`  git checkout ${manifest.samCommit}`);
 log(
-  `  docker ${composeArgs(ctx, ['up', '-d'])
+  `  pnpm selfhost:deploy --init --env-file '${envFile.replaceAll("'", "'\"'\"'")}' --state-dir '${ctx.stateDir.replaceAll("'", "'\"'\"'")}'`
+);
+log(
+  `  Set COMPOSE_PROJECT_NAME in the target .env to ${expectedComposeProjectFor(ctx.box, ctx.stateDir)}, then repeat --init to record the target identity`
+);
+log(
+  `  SAM_SELFHOST_STATE_DIR='${ctx.stateDir.replaceAll("'", "'\"'\"'")}' docker ${composeArgs(
+    {
+      ...ctx,
+      box: { ...ctx.box, COMPOSE_PROJECT_NAME: expectedComposeProjectFor(ctx.box, ctx.stateDir) },
+    },
+    ['up', '-d']
+  )
     .map((arg) => `'${arg.replaceAll("'", "'\"'\"'")}'`)
     .join(' ')}`
+);
+log(
+  `  pnpm selfhost:deploy --env-file '${envFile.replaceAll("'", "'\"'\"'")}' --state-dir '${ctx.stateDir.replaceAll("'", "'\"'\"'")}'`
 );
 log(`  curl -fsS https://api.$SAM_DOMAIN/health`);

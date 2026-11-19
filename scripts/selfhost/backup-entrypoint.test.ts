@@ -24,6 +24,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { decryptBackupTree } from './backup-encryption';
 
+const PLATFORM_KEYS = JSON.stringify({
+  SAM_INSTALLATION_ID: 'a'.repeat(32),
+  ENCRYPTION_KEY: 'fixture-encryption-key',
+});
 const REPO = resolve(import.meta.dirname, '../..');
 const TSX = join(REPO, 'node_modules/.bin/tsx');
 let root: string;
@@ -111,7 +115,7 @@ beforeEach(() => {
   );
 
   mkdirSync(join(root, 'state'));
-  writeFileSync(join(root, 'state/platform-keys.json'), '{"k":"v"}');
+  writeFileSync(join(root, 'state/platform-keys.json'), PLATFORM_KEYS);
   writeFileSync(join(root, 'box.env'), `CELLD_BUCKET=${FLEET}\n`, { mode: 0o600 });
 });
 
@@ -121,6 +125,47 @@ afterEach(() => {
 });
 
 describe('selfhost:backup and selfhost:restore (real entry points, fake gcloud)', () => {
+  it('uses shell bucket overrides and the explicit custom state directory through real child commands', () => {
+    env.CELLD_BUCKET = 'gs://override/celld';
+    env.SAM_SELFHOST_STATE_DIR = join(root, 'wrong-state');
+    put(join(root, 'gcs/override/celld'), { 'd1/main.ltx': 'shell-override-rows' });
+    const custom = join(root, 'custom-state');
+    mkdirSync(custom);
+    writeFileSync(
+      join(custom, 'platform-keys.json'),
+      JSON.stringify({ SAM_INSTALLATION_ID: 'a'.repeat(32) })
+    );
+    const dest = join(root, 'custom-backup');
+    const result = run('backup.ts', [
+      '--to',
+      dest,
+      '--box-env',
+      join(root, 'box.env'),
+      '--state-dir',
+      custom,
+      '--encryption-key-file',
+      join(root, 'backup-key'),
+    ]);
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+    const plain = join(root, 'custom-inspection');
+    decryptBackupTree(dest, plain, join(root, 'backup-key'));
+    try {
+      expect(tree(join(plain, 'bucket'))).toEqual({ 'd1/main.ltx': 'shell-override-rows' });
+      expect(readFileSync(join(plain, 'state/platform-keys.json'), 'utf8')).toBe(
+        readFileSync(join(custom, 'platform-keys.json'), 'utf8')
+      );
+      expect(JSON.parse(readFileSync(join(plain, 'backup-manifest.json'), 'utf8')).bucket).toBe(
+        env.CELLD_BUCKET
+      );
+    } finally {
+      rmSync(plain, { recursive: true, force: true });
+    }
+    expect(
+      readFileSync(join(root, 'fake/compose-state-dirs.log'), 'utf8').trim().split('\n')
+    ).toEqual([custom, custom]);
+  }, 60_000);
+
   // Runs the real backup and restore entry points as child processes: give them room under load.
   it(
     'backs up exactly the post-stop bucket when objects vanish between the passes, and restores it into an empty install',
@@ -182,7 +227,7 @@ describe('selfhost:backup and selfhost:restore (real entry points, fake gcloud)'
       expect(restore.stderr).toBe('');
       expect(restore.status).toBe(0);
       expect(tree(join(root, 'gcs/fresh/celld'))).toEqual(afterStop);
-      expect(tree(join(root, 'new-state'))).toEqual({ 'platform-keys.json': '{"k":"v"}' });
+      expect(tree(join(root, 'new-state'))).toEqual({ 'platform-keys.json': PLATFORM_KEYS });
     }
   );
 });
