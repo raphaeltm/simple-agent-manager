@@ -32,6 +32,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
+import { getCredentialEncryptionKey } from '../../src/lib/secrets';
 import { adminPlatformCredentialRoutes } from '../../src/routes/admin-platform-credentials';
 import { credentialsRoutes } from '../../src/routes/credentials';
 import { gcpRoutes } from '../../src/routes/gcp';
@@ -44,6 +45,7 @@ import {
 } from '../../src/services/capacity-placement-snapshot';
 import { updateDefaultCapacityPool } from '../../src/services/default-capacity-pool-updates';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../src/services/default-capacity-pools';
+import { encrypt } from '../../src/services/encryption';
 import { handOffEmptyWorkspaceNode } from '../../src/services/node-warm-handoff';
 import {
   resolveTaskStartCapacityPoolSelection,
@@ -54,6 +56,16 @@ import { deleteNodeResourcesStrict } from '../../src/services/strict-node-deleti
 import { seedInstallation, seedNode, seedProject, seedUser } from './helpers/seed-d1';
 
 const workerEnv = env as unknown as Env;
+
+/**
+ * Ciphertext for a credential row that exists only for its foreign keys. It must decrypt: the
+ * suite shares one D1, and an undecryptable GCP row of another owner rightly withholds new
+ * workload identity pool claims (gcp-wif-pool-ownership.ts).
+ */
+async function sealedPlaceholder(): Promise<[string, string]> {
+  const { ciphertext, iv } = await encrypt('placeholder', getCredentialEncryptionKey(workerEnv));
+  return [ciphertext, iv];
+}
 const db = drizzle(env.DATABASE, { schema });
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -665,9 +677,9 @@ describe('rows already damaged in the production shape', () => {
     await env.DATABASE.prepare(
       `INSERT INTO credentials (id, user_id, provider, credential_type, credential_kind,
          is_active, encrypted_token, iv, created_at, updated_at)
-       VALUES (?, ?, 'gcp', 'cloud-provider', 'api-key', 1, 'x', 'y', datetime('now'), datetime('now'))`
+       VALUES (?, ?, 'gcp', 'cloud-provider', 'api-key', 1, ?, ?, datetime('now'), datetime('now'))`
     )
-      .bind(`${prefix}-cred`, ownerId)
+      .bind(`${prefix}-cred`, ownerId, ...(await sealedPlaceholder()))
       .run();
     await env.DATABASE.prepare(
       `INSERT INTO capacity_sources (id, scope, owner_user_id, source_kind, provider,
@@ -738,9 +750,9 @@ describe('rows already damaged in the production shape', () => {
     await env.DATABASE.prepare(
       `INSERT INTO credentials (id, user_id, provider, credential_type, credential_kind,
          is_active, encrypted_token, iv, created_at, updated_at)
-       VALUES (?, ?, 'gcp', 'cloud-provider', 'api-key', 1, 'x', 'y', datetime('now'), datetime('now'))`
+       VALUES (?, ?, 'gcp', 'cloud-provider', 'api-key', 1, ?, ?, datetime('now'), datetime('now'))`
     )
-      .bind(`${prefix}-proven-cred`, ownerId)
+      .bind(`${prefix}-proven-cred`, ownerId, ...(await sealedPlaceholder()))
       .run();
     await env.DATABASE.prepare(
       `INSERT INTO capacity_sources (id, scope, owner_user_id, source_kind, provider,

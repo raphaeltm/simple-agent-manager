@@ -96,7 +96,10 @@ ON CONFLICT (source_table, source_id) DO UPDATE SET
   iv = excluded.iv, owner_kind = excluded.owner_kind, owner_user_id = excluded.owner_user_id,
   pool_key = excluded.pool_key, unreadable = excluded.unreadable, indexed_at = excluded.indexed_at`;
 
-// Live credentials of a different owner that could not be decrypted, at their indexed IV.
+// Live credentials of a different owner that could not be decrypted, at their indexed IV, and that
+// could be GCP credentials: legacy and platform rows are indexed only for provider 'gcp'; a
+// composable row counts only when a GCP compute configuration uses it, so a corrupt credential of
+// another provider never withholds GCP claims.
 const UNREADABLE_FOREIGN_ROWS = `
 SELECT u.source_table AS sourceTable, u.source_id AS sourceId
   FROM gcp_wif_pool_index u
@@ -108,7 +111,9 @@ SELECT u.source_table AS sourceTable, u.source_id AS sourceId
      OR (u.source_table = 'platform_credentials' AND EXISTS (
         SELECT 1 FROM platform_credentials p WHERE p.id = u.source_id AND p.iv = u.iv))
      OR (u.source_table = 'cc_credentials' AND EXISTS (
-        SELECT 1 FROM cc_credentials cc WHERE cc.id = u.source_id AND cc.iv = u.iv))
+        SELECT 1 FROM cc_credentials cc WHERE cc.id = u.source_id AND cc.iv = u.iv
+           AND EXISTS (SELECT 1 FROM cc_configurations g
+                        WHERE g.credential_id = cc.id AND g.consumer_target = 'gcp')))
    )`;
 
 // Index-time claim for a credential that is already stored: first owner wins. Stored rows predate

@@ -929,15 +929,26 @@ describe('review round 3: unresolved rows, budgets, deletes and deployments', ()
       .run(key, value, NOW);
   }
 
-  async function storeUnreadableCc(id: string, ownerId: string, pool = POOL_A) {
+  async function storeUnreadableCc(
+    id: string,
+    ownerId: string,
+    options: { gcpConfiguration: boolean } = { gcpConfiguration: true }
+  ) {
     const otherKey = Buffer.from('fedcba9876543210fedcba9876543210').toString('base64');
-    const foreign = await encrypt(JSON.stringify(wif(pool)), otherKey);
+    const foreign = await encrypt(JSON.stringify(wif(POOL_A)), otherKey);
     sqlite
       .prepare(
         `INSERT INTO cc_credentials (id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at)
          VALUES (?, ?, 'x', 'cloud-provider', ?, ?, 1, ?, ?)`
       )
       .run(id, ownerId, foreign.ciphertext, foreign.iv, NOW, NOW);
+    sqlite
+      .prepare(
+        `INSERT INTO cc_configurations (id, owner_id, name, consumer_kind, consumer_target, credential_id,
+           settings_json, is_active, created_at, updated_at)
+         VALUES (?, ?, 'c', 'compute', ?, ?, NULL, 1, ?, ?)`
+      )
+      .run(`cfg-${id}`, ownerId, options.gcpConfiguration ? 'gcp' : 'hetzner', id, NOW, NOW);
   }
 
   it('withholds a NEW first claim while another owner’s credential is unreadable', async () => {
@@ -954,6 +965,15 @@ describe('review round 3: unresolved rows, budgets, deletes and deployments', ()
     expect(sqlite.prepare('SELECT count(*) AS n FROM gcp_wif_pool_claims').get()).toEqual({
       n: 0,
     });
+    // Control: an unreadable credential of another provider does not withhold GCP claims.
+    sqlite.prepare('DELETE FROM cc_configurations').run();
+    sqlite.prepare('DELETE FROM cc_credentials').run();
+    await storeUnreadableCc('cc-a-hetzner', 'user-a', { gcpConfiguration: false });
+    await expect(exchange(user('user-b'), wif(POOL_A))).resolves.toBe('sa-token');
+    sqlite.prepare('DELETE FROM gcp_wif_pool_claims').run();
+    sqlite.prepare('DELETE FROM cc_configurations').run();
+    sqlite.prepare('DELETE FROM cc_credentials').run();
+    await storeUnreadableCc('cc-a-unreadable', 'user-a');
     // Owner control: the unreadable row's own owner is not blocked by it.
     await expect(exchange(user('user-a'), wif(POOL_B))).resolves.toBe('sa-token');
     await expect(exchange(user('user-a'), wif(POOL_B))).resolves.toBe('sa-token');

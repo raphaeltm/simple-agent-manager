@@ -12,6 +12,7 @@ import {
   replaceUserGcpCredential,
 } from '../../../src/services/gcp-credential-store';
 import { parseGcpCredential } from '../../../src/services/provider-credentials';
+import { applyGcpWifPoolOwnershipMigration } from '../../helpers/gcp-wif-pool-tables';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const ENCRYPTION_KEY = 'SK4ihJazAK3GIWUQcM6nZ1odR6KQHrqRAVSp6HdPxrg=';
@@ -89,6 +90,7 @@ function setupDatabase(): Database.Database {
       updated_at TEXT NOT NULL
     );
   `);
+  applyGcpWifPoolOwnershipMigration(sqlite);
   return sqlite;
 }
 

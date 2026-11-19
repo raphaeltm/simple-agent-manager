@@ -303,7 +303,10 @@ gcpRoutes.post('/verify', async (c) => {
     return c.json({
       success: false,
       verified: false,
-      error: sanitizeGcpError(err, 'gcp-verify'),
+      // An ownership refusal is the reason, not a Google failure: say so.
+      error: isGcpWifPoolOwnershipError(err)
+        ? (err as Error).message
+        : sanitizeGcpError(err, 'gcp-verify'),
       apiIssues: await listGcpApiIssuesSafely(c.env, credentialId, gcpCredential),
     });
   }
