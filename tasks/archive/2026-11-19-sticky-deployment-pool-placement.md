@@ -29,3 +29,9 @@ Rules 28, 62, 69, 74. Existing native-placement SQLite tests and scheduler pool 
 
 ## Workflow status at implementation archive
 Implementation and completion review passed. Remaining staging cleanup, CI, CodeRabbit and production gates are tracked in PR #2903 and local .do-state.md; this archive does not claim those operational gates have passed.
+
+### Automated review follow-up
+
+- Fixed stored-volume affinity when the new manifest omits volumes: submission always reads existing environment volume rows before resolving placement. Manifest declarations still control creating missing volumes.
+- Added a real SQLite submission regression with stored Hetzner/nbg1 data and an empty volume manifest. Confirmed it fails before the fix because provider/location overrides are absent, then passes after the fix (5/5 affinity tests).
+- Incremental completion reviewer: PASS; the extra read is environment-scoped and reuses the existing lookup.

@@ -227,9 +227,7 @@ async function prepareManifestVolumes(params: {
   requiresVolumes: boolean;
   reservation: ResolvedResourceReservation;
 }): Promise<VolumePreparationOutcome> {
-  const volumes = params.requiresVolumes
-    ? await listEnvironmentVolumes(params.db, params.envId)
-    : [];
+  const volumes = await listEnvironmentVolumes(params.db, params.envId);
   const volume = resolveVolumePlacementConstraint(volumes);
   const placement = await resolveDeploymentPlacement(params.userId, params.env, params.projectId, {
     reservation: params.reservation,

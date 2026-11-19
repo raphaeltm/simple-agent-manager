@@ -53,7 +53,7 @@ function fixture() {
       userId: 'user',
       env,
     });
-  return { sqlite, submit, env };
+  return { sqlite, submit, env, manifest };
 }
 afterEach(() => {
   for (const db of databases.splice(0)) db.close();
@@ -86,6 +86,20 @@ describe('release submission volume affinity', () => {
         manifest: expect.objectContaining({ volumes: { data: {}, logs: {} } }),
       })
     );
+  });
+  it('pins stored volumes even when the new manifest omits volumes', async () => {
+    const f = fixture();
+    f.manifest.volumes = {};
+    f.manifest.services.web!.volumes = [];
+    resolvePlacement.mockResolvedValue({ provider: 'hetzner', location: 'nbg1', vmSize: 'small' });
+    expect((await f.submit()).success).toBe(true);
+    expect(resolvePlacement).toHaveBeenCalledWith(
+      'user',
+      f.env,
+      'project',
+      expect.objectContaining({ providerOverride: 'hetzner', vmLocationOverride: 'nbg1' })
+    );
+    expect(createVolumes).not.toHaveBeenCalled();
   });
   it('reports unavailable pinned placement before creating volumes or a release', async () => {
     const f = fixture();
