@@ -20,6 +20,7 @@ export async function reserveExistingNodeForRelease(params: {
   await params.beforeExternalMutation();
   const nodeMode = params.release.requiresVolumes ? 'exclusive' : 'shared';
   let reason: DeploymentNodeAdmissionRejection = 'unavailable';
+  let rejectedPlacement: DeploymentPlacement | undefined;
   const currentNode = await findDeploymentNodeWithCapacity(
     params.release.env,
     params.release.userId,
@@ -29,12 +30,14 @@ export async function reserveExistingNodeForRelease(params: {
       nodeId: params.nodeId,
       excludeEnvironmentId: params.release.envId,
       nodeMode,
-      onRejection: (rejection) => {
+      onRejection: (rejection, placement) => {
         reason = rejection;
+        rejectedPlacement = placement;
       },
     }
   );
-  if (currentNode?.nodeId !== params.nodeId) return { admitted: false, placement: null, reason };
+  if (currentNode?.nodeId !== params.nodeId)
+    return { admitted: false, placement: rejectedPlacement ?? null, reason };
   const linked = await linkEnvironmentToNode({
     env: params.release.env,
     db: params.release.db,
@@ -49,7 +52,7 @@ export async function reserveExistingNodeForRelease(params: {
   });
   return {
     admitted: linked,
-    placement: linked ? currentNode.placement : null,
+    placement: currentNode.placement,
     reason: 'authority-changed',
   };
 }

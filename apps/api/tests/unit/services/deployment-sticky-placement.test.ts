@@ -356,6 +356,24 @@ describe('linked deployment node pool eligibility through release placement', ()
     expect(provision).not.toHaveBeenCalled();
     expect(teardown).not.toHaveBeenCalled();
   });
+  it('relocates a full lower-priority shared node while provisioning from the top candidate', async () => {
+    const f = fixture();
+    f.placement.reservation.memoryMb = 3500;
+    f.selection.candidates[0]!.providerInstanceMemoryMb = 8192;
+    await f.place();
+    expect(teardown).toHaveBeenCalled();
+    expect(provision).toHaveBeenCalledOnce();
+    expect(provision).toHaveBeenCalledWith(
+      'environment',
+      'project',
+      'user',
+      f.env,
+      expect.objectContaining({ providerOverride: 'gcp' })
+    );
+    expect(
+      f.sqlite.prepare("SELECT node_id FROM deployment_environments WHERE id = 'environment'").get()
+    ).toEqual({ node_id: null });
+  });
   it('does not admit a lower-priority provider for a fresh environment', async () => {
     const f = fixture();
     expect(await findDeploymentNodeWithCapacity(f.env, 'user', f.placement, false)).toBeNull();

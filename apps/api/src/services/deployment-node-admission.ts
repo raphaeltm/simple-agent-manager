@@ -87,7 +87,10 @@ export async function findDeploymentNodeWithCapacity(
     nodeId?: string;
     excludeEnvironmentId?: string;
     nodeMode?: 'shared' | 'exclusive';
-    onRejection?: (reason: DeploymentNodeAdmissionRejection) => void;
+    onRejection?: (
+      reason: DeploymentNodeAdmissionRejection,
+      placement?: DeploymentPlacement
+    ) => void;
   } = {}
 ): Promise<DeploymentNodeMatch | null> {
   const nodeMode = options.nodeMode ?? 'shared';
@@ -176,6 +179,7 @@ export async function findDeploymentNodeWithCapacity(
   let rejection: DeploymentNodeAdmissionRejection = placement.capacityPoolSelection
     ? 'pool-ineligible'
     : 'direct-placement';
+  let rejectedPlacement: DeploymentPlacement | undefined;
   const scored = candidates.flatMap((node) => {
     const capacityPlacementSnapshot = resolveReusableNodeCapacitySnapshot({
       selection: placement.capacityPoolSelection,
@@ -185,7 +189,9 @@ export async function findDeploymentNodeWithCapacity(
       requestedReservation: placement.reservation,
     });
     if (capacityPlacementSnapshot === undefined) {
-      rejection = classifyReusableNodeRejection(node, placement);
+      const failure = classifyReusableNodeRejection(node, placement);
+      rejection = failure.reason;
+      rejectedPlacement = failure.placement;
       return [];
     }
     if (
@@ -196,6 +202,7 @@ export async function findDeploymentNodeWithCapacity(
       return [];
     }
 
+    const currentPlacement = deploymentPlacementForNode(placement, node, capacityPlacementSnapshot);
     const usage = aggregateWorkspaceReservationRows(rowsByNode.get(node.id) ?? []);
     const maxEnvironments =
       nodeMode === 'exclusive'
@@ -206,6 +213,7 @@ export async function findDeploymentNodeWithCapacity(
           );
     if (usage.activeCount >= maxEnvironments) {
       rejection = 'capacity';
+      rejectedPlacement = currentPlacement;
       return [];
     }
     const decision = evaluateWorkspaceReservationCapacity(
@@ -216,6 +224,7 @@ export async function findDeploymentNodeWithCapacity(
     );
     if (!decision.admitted) {
       rejection = 'capacity';
+      rejectedPlacement = currentPlacement;
       return [];
     }
 
@@ -236,13 +245,13 @@ export async function findDeploymentNodeWithCapacity(
         nodeId: node.id,
         remainingCpu,
         remainingMemory,
-        placement: deploymentPlacementForNode(placement, node, capacityPlacementSnapshot),
+        placement: currentPlacement,
       },
     ];
   });
 
   if (scored.length === 0) {
-    options.onRejection?.(rejection);
+    options.onRejection?.(rejection, rejectedPlacement);
     return null;
   }
 
@@ -261,15 +270,16 @@ export async function findDeploymentNodeWithCapacity(
 function classifyReusableNodeRejection(
   node: DeploymentNodeCandidate,
   placement: DeploymentPlacement
-): DeploymentNodeAdmissionRejection {
+): { reason: DeploymentNodeAdmissionRejection; placement?: DeploymentPlacement } {
   const eligible = resolveReusableNodeCapacitySnapshot({
     selection: placement.capacityPoolSelection,
     node,
     projectId: placement.projectId,
     requestedVmSize: placement.vmSize,
   });
-  if (eligible !== undefined) return 'capacity';
-  return placement.capacityPoolSelection ? 'pool-ineligible' : 'direct-placement';
+  if (eligible !== undefined)
+    return { reason: 'capacity', placement: deploymentPlacementForNode(placement, node, eligible) };
+  return { reason: placement.capacityPoolSelection ? 'pool-ineligible' : 'direct-placement' };
 }
 
 function directDeploymentNodeMatchesPlacement(

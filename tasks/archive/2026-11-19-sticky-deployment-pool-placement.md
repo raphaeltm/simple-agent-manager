@@ -45,3 +45,8 @@ Implementation and completion review passed. Remaining staging cleanup, CI, Code
 - Added real SQLite release-path assertions for removed provider, exhausted capacity and credential revocation/final reservation refusal. 77 targeted tests PASS, incremental completion review PASS. Extracted existing-node reservation into a route helper to keep placement below800lines.
 
 - Classified direct-placement mismatch separately from pool ineligibility for environments with no effective pool (automated review4626434163). Added real SQLite exclusive release-path assertion for the specific direct-placement failure.
+
+### Capacity-refused sticky node relocation
+
+- Addressed automated P1 review4626549493: retain actual eligible lower-priority node placement on capacity refusal, use it only for the old-node relocation claim, and retain the top candidate for fresh provisioning. Final credential/pool authority remains enforced.
+- Real SQLite release-placement regression failed before the fix because teardown/provisioning never ran, then passed after it; asserts actual relocation and fresh GCP provisioning despite old Hetzner node. All79 targeted tests PASS; incremental completion reviewer PASS.

@@ -548,6 +548,7 @@ async function attachVolumesToExistingNode(params: {
 }
 
 async function relocateSharedNodeForRelease(params: {
+  nodePlacement?: ReleasePlacement | null;
   release: PlaceReleaseOnDeploymentNodeParams & { placement: ReleasePlacement };
   nodeId: string;
   expectedReservationJson: string | null;
@@ -559,7 +560,7 @@ async function relocateSharedNodeForRelease(params: {
     envId: release.envId,
     nodeId: params.nodeId,
     userId: release.userId,
-    placement: release.placement,
+    placement: params.nodePlacement ?? release.placement,
     expectedReservationJson: params.expectedReservationJson,
     reservation: release.reservation,
     releaseId: release.releaseId,
@@ -623,6 +624,7 @@ async function relocateSharedNodeForRelease(params: {
 }
 
 async function handleExistingNodeReservationFailure(params: {
+  nodePlacement?: ReleasePlacement | null;
   reason?: DeploymentNodeAdmissionRejection;
   release: PlaceReleaseOnDeploymentNodeParams;
   nodeId: string;
@@ -738,6 +740,7 @@ export async function placeReleaseOnDeploymentNode(
     if (!adoptedLegacyNode) {
       return handleExistingNodeReservationFailure({
         reason: reserved.reason,
+        nodePlacement: reserved.placement,
         release: params,
         nodeId,
         expectedReservationJson: runtime.resolvedReservationJson,
