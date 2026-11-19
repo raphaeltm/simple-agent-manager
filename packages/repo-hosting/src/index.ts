@@ -64,3 +64,6 @@ export {
   verifyGitLabProjectAccess,
 } from './gitlab';
 export { type RepoBrowser, resolveRepoBrowser } from './repo-browse';
+
+export { createFetchHttpClient } from './repo-browse/fetch-http-client';
+export { MemoryFS } from './repo-browse/memory-fs';

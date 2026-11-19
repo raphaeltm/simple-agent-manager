@@ -10,9 +10,10 @@ import { log } from '../../lib/logger';
 import { toProjectResponse } from '../../lib/mappers';
 import { ulid } from '../../lib/ulid';
 import { getUserId } from '../../middleware/auth';
-import { errors } from '../../middleware/error';
+import { AppError, errors } from '../../middleware/error';
 import { createOwnerProjectMembership } from '../../middleware/project-auth';
 import { CreateProjectSchema, jsonValidator } from '../../schemas';
+import { resolveArtifactsBackend } from '../../services/artifacts/backend';
 import { seedArtifactsReadme } from '../../services/artifacts/seed-readme';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
 import {
@@ -20,7 +21,6 @@ import {
   requireGitLabUserAccessToken,
   verifyGitLabProjectAccess,
 } from '../../services/gitlab';
-import { resolveArtifactsBackend } from '../../services/hosted-git/backend';
 import { getRuntimeLimits } from '../../services/limits';
 import {
   assertRepositoryAccess,
@@ -103,7 +103,17 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
         throw errors.badRequest(`Maximum ${maxRepos} Artifacts-backed projects allowed`);
       }
 
+      const importUrl = body.importUrl?.trim() || null;
+      const importer = artifacts.importSource;
+      if (importUrl && !importer) {
+        throw errors.badRequest('This repository backend does not support importUrl');
+      }
+      const importBranch = importUrl && importer ? await importer.defaultBranch(importUrl) : null;
+      if (importUrl && !importBranch) {
+        throw errors.badRequest('Could not read the default branch of the repository at importUrl');
+      }
       const defaultBranch =
+        importBranch ||
         body.defaultBranch?.trim() ||
         c.env.ARTIFACTS_DEFAULT_BRANCH ||
         ARTIFACTS_DEFAULTS.DEFAULT_BRANCH;
@@ -133,13 +143,23 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
       // also orients agents (project name, description, SAM MCP tools). If seeding
       // fails the repo is unusable, so we abort creation and log the orphan.
       try {
-        await seedArtifactsReadme({
-          remote: created.remote,
-          token: created.token,
-          branch: defaultBranch,
-          projectName: name,
-          description,
-        });
+        if (importUrl && importer) {
+          await importer.populate({
+            sourceUrl: importUrl,
+            branch: defaultBranch,
+            remote: created.remote,
+            token: created.token,
+          });
+        } else {
+          await seedArtifactsReadme({
+            remote: created.remote,
+            token: created.token,
+            branch: defaultBranch,
+            projectName: name,
+            description,
+            fetchImpl: artifacts.remoteFetch,
+          });
+        }
       } catch (seedError) {
         log.error('project_create.artifacts_seed_failed', {
           projectId,
@@ -159,6 +179,7 @@ export function registerProjectCreateRoute(crudRoutes: Hono<{ Bindings: Env }>):
             action: 'orphaned_artifacts_repo_cleanup_failed',
           });
         }
+        if (importUrl && seedError instanceof AppError) throw seedError;
         throw errors.internal('Failed to initialize Artifacts repository');
       }
 

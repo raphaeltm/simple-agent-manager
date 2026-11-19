@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 
 import type { Env } from '../env';
 import { applyCacheHeaders } from '../lib/cache-headers';
-import { isArtifactsAvailable } from '../services/hosted-git/backend';
+import { isArtifactsAvailable } from '../services/artifacts/backend';
 
 /**
  * Public config: whether this install can create SAM-native (Artifacts) repositories. True only

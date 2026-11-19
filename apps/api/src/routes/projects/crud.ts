@@ -17,7 +17,7 @@ import {
   deleteProjectLibraryObjects,
   getProjectDeleteCleanupBatchSize,
 } from '../../services/file-library';
-import { resolveArtifactsBackendForCleanup } from '../../services/hosted-git/backend';
+import { resolveArtifactsBackendForCleanup } from '../../services/artifacts/backend';
 import { getRuntimeLimits } from '../../services/limits';
 import { deleteWorkspaceResourceHistoryObjectsForProject } from '../../services/workspace-resource-history';
 import { registerProjectCreateRoute } from './project-create';
