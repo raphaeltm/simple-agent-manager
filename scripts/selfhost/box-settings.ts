@@ -2,6 +2,7 @@
  * Settings shared by more than one process on a celld box, resolved once by the deploy script
  * so the Worker, frps and Caddy cannot disagree.
  */
+import { readFileSync } from 'node:fs';
 
 // The Worker's own defaults and bounds (apps/api/src/selfhost/reverse-tunnel/config.ts re-exports
 // them): the deploy always passes the resolved range and heartbeat timeout to BOTH the Worker
@@ -21,6 +22,7 @@ import {
   DEFAULT_MAIL_COLLECTOR_SMTP_PORT,
   DEFAULT_MAIL_COLLECTOR_UI_PORT,
 } from './mail-settings.js';
+import { parseDotenv } from './secret-files.js';
 
 /**
  * Every other loopback/host listener on the box, with the default docker-compose.yml uses. A
@@ -39,7 +41,28 @@ export const BOX_RESERVED_PORTS: Readonly<Record<string, number>> = {
   // Reserved even with the collector off: a node holding its port would receive sign-in codes.
   MAIL_COLLECTOR_SMTP_PORT: DEFAULT_MAIL_COLLECTOR_SMTP_PORT,
   MAIL_COLLECTOR_UI_PORT: DEFAULT_MAIL_COLLECTOR_UI_PORT,
+  // sam-mx's public SMTP listener (profile mail-in), a listen address: see BOX_LISTEN_ADDRESSES.
+  // Reserved even with the profile off, like the collector.
+  SAM_MX_LISTEN: 25,
 };
+
+/**
+ * Settings in BOX_RESERVED_PORTS that hold a listen address (`[host]:port`, sam-mx's `:25`)
+ * rather than a bare port: the port is the part after the last ':'.
+ */
+export const BOX_LISTEN_ADDRESSES: readonly string[] = ['SAM_MX_LISTEN'];
+
+/**
+ * Listeners of services that run with no capability (docker-compose.yml cap_drop: [ALL]), so
+ * they cannot bind a privileged port.
+ */
+const UNPRIVILEGED_LISTENERS: readonly string[] = [
+  'CELLD_PORT',
+  'CELLD_INTERNAL_PORT',
+  'FRPS_BIND_PORT',
+  'MAIL_COLLECTOR_SMTP_PORT',
+  'MAIL_COLLECTOR_UI_PORT',
+];
 
 /**
  * The box settings with the port values docker compose will actually run with. Compose takes a
@@ -62,6 +85,26 @@ export function withComposePortOverrides(
     overridden.push(name);
   }
   return { box: effective, overridden };
+}
+
+/**
+ * The box .env as docker compose will run it (`withComposePortOverrides`; `onOverride` hears each
+ * shell override first), checked before anything starts: a box listener inside the lease range
+ * (resolveTunnelPortRange) fails here, so `selfhost:deploy` and `selfhost:upgrade` stop before
+ * they write state or run docker compose, not only later inside Caddy's start.sh.
+ */
+export function loadBoxEnv(
+  envFile: string,
+  hostEnv: NodeJS.ProcessEnv = process.env,
+  onOverride: (name: string) => void = () => {}
+): Record<string, string> {
+  const { box, overridden } = withComposePortOverrides(
+    parseDotenv(readFileSync(envFile, 'utf8'), envFile),
+    hostEnv
+  );
+  overridden.forEach(onOverride);
+  resolveTunnelPortRange(box);
+  return box;
 }
 
 export interface PortRange {
@@ -92,6 +135,18 @@ function integer(
 
 const PORT = { min: 1024, max: 65535 };
 
+/** A box listener's port (BOX_RESERVED_PORTS), from the setting or its compose default. */
+function boxPort(box: Readonly<Record<string, string>>, name: string, fallback: number): number {
+  const raw = box[name];
+  const bounds = UNPRIVILEGED_LISTENERS.includes(name) ? PORT : { min: 1, max: 65535 };
+  if (!BOX_LISTEN_ADDRESSES.includes(name) || raw === undefined || raw === '') {
+    return integer(raw, fallback, name, bounds);
+  }
+  const port = raw.slice(raw.lastIndexOf(':') + 1);
+  if (port === '') throw new Error(`${name} must end in :<port>, got ${raw}`);
+  return integer(port, fallback, name, bounds);
+}
+
 export function resolveTunnelPortRange(box: Readonly<Record<string, string>>): PortRange {
   const start = integer(
     box.REVERSE_TUNNEL_PORT_RANGE_START,
@@ -112,7 +167,7 @@ export function resolveTunnelPortRange(box: Readonly<Record<string, string>>): P
     );
   }
   for (const [name, fallback] of Object.entries(BOX_RESERVED_PORTS)) {
-    const port = integer(box[name], fallback, name, { min: 1, max: 65535 });
+    const port = boxPort(box, name, fallback);
     if (port >= start && port <= end) {
       throw new Error(
         `REVERSE_TUNNEL_PORT_RANGE ${start}-${end} contains ${name} (${port}); a node could bind it`

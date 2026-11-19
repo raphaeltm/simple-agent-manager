@@ -2,7 +2,7 @@
  * Small steps of `pnpm selfhost:deploy` (deploy.ts), kept apart so the orchestration stays short.
  */
 import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { BOX_RESERVED_PORTS, gatewayEnvAction } from './box-settings.js';
 import type { CelldWranglerConfig } from './celld-config.js';
@@ -10,6 +10,8 @@ import { replacePrivateFile } from './secret-files.js';
 
 /** The repository checkout the self-host scripts run from. */
 export const REPO_ROOT = resolve(import.meta.dirname, '../..');
+/** The box's compose project: docker-compose.yml, its .env, caddy/, frps/. */
+export const SELFHOST_DIR = join(REPO_ROOT, 'deploy/selfhost');
 
 /** Progress output of the self-host scripts. */
 export function log(message: string): void {

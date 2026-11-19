@@ -115,6 +115,8 @@ services:
       OBJECTSTORE_CONSOLE_PORT: ${OBJECTSTORE_CONSOLE_PORT:-9001}
       MAIL_COLLECTOR_SMTP_PORT: ${MAIL_COLLECTOR_SMTP_PORT:-1025}
       MAIL_COLLECTOR_UI_PORT: ${MAIL_COLLECTOR_UI_PORT:-8025}
+      # sam-mx's public listen address; start.sh checks the port after the last ':'.
+      SAM_MX_LISTEN: ${SAM_MX_LISTEN:-:25}
       # Keep-warm for celld's stateless Worker isolate (caddy/keep-warm/on.caddy): on unless set
       # to off; the interval (1s-6s) sets how long a cold window follows each 30 s celld pool tick.
       # start.sh validates both.

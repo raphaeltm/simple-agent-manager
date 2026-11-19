@@ -12,6 +12,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { SELFHOST_DIR } from './deploy-steps.js';
 import { imageRebuilds } from './image-rebuilds.js';
 import {
   type BoxContext,
@@ -19,7 +20,6 @@ import {
   loadBox,
   type RunResult,
   runUpgrade,
-  SELFHOST_DIR,
   UPGRADE_PENDING_FILE,
 } from './upgrade-lib.js';
 
@@ -292,6 +292,28 @@ describe('runUpgrade', () => {
 // Seen on a box, 2026-11-12: .env had COMPOSE_FILE listing an override file. The upgrade's
 // `docker compose -f docker-compose.yml up -d --build` replaced that list and recreated celld
 // without what the override added.
+// S4: the box's ports are checked against the lease range when the upgrade loads the box, before it
+// fetches, checks out or runs docker compose (not only inside Caddy's start.sh once it is up).
+describe('loadBox refuses a box port inside the lease range', () => {
+  const envWith = (line: string) => {
+    const envFile = join(root, 'ports.env');
+    writeFileSync(envFile, `CELLD_BUCKET=gs://fleet/celld\n${line}\n`, { mode: 0o600 });
+    return envFile;
+  };
+
+  it.each(['SAM_MX_LISTEN=:20025', 'CELLD_INTERNAL_PORT=20001'])('%s', (line) => {
+    expect(() => loadBox(envWith(line), join(root, 'state'))).toThrow(
+      /REVERSE_TUNNEL_PORT_RANGE 20000-29999 contains/
+    );
+  });
+
+  it('control: the default listeners load', () => {
+    expect(loadBox(envWith('SAM_MX_LISTEN=:25'), join(root, 'state')).box.SAM_MX_LISTEN).toBe(
+      ':25'
+    );
+  });
+});
+
 describe('runUpgrade with the box .env COMPOSE_FILE', () => {
   const boxFromEnv = (lines: string[]): BoxContext => {
     const envFile = join(root, 'real.env');

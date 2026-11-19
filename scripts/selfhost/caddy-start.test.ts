@@ -15,7 +15,7 @@ import { join, resolve } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { BOX_RESERVED_PORTS } from './box-settings.js';
+import { BOX_LISTEN_ADDRESSES, BOX_RESERVED_PORTS } from './box-settings.js';
 
 const START = resolve(import.meta.dirname, '../../deploy/selfhost/caddy/start.sh');
 let bin: string;
@@ -32,7 +32,10 @@ afterAll(() => rmSync(bin, { recursive: true, force: true }));
 function composeEnv(): Record<string, string> {
   return {
     ...Object.fromEntries(
-      Object.entries(BOX_RESERVED_PORTS).map(([name, port]) => [name, String(port)])
+      Object.entries(BOX_RESERVED_PORTS).map(([name, port]) => [
+        name,
+        BOX_LISTEN_ADDRESSES.includes(name) ? `:${port}` : String(port),
+      ])
     ),
     REVERSE_TUNNEL_PORT_RANGE_START: '20000',
     REVERSE_TUNNEL_PORT_RANGE_END: '29999',
@@ -67,6 +70,30 @@ describe('caddy/start.sh', () => {
       expect(run.out).not.toContain('caddy run');
     }
   );
+
+  // sam-mx's listen address: the port after the last ':' is checked, with or without a host.
+  it.each([':20001', '0.0.0.0:20001', '[::]:20001'])(
+    'refuses SAM_MX_LISTEN=%s inside the lease range',
+    (listen) => {
+      const run = startSh({ ...composeEnv(), SAM_MX_LISTEN: listen });
+      expect(run.status).toBe(64);
+      expect(run.out).toContain('SAM_MX_LISTEN (20001) lies inside the reverse-tunnel range');
+    }
+  );
+
+  // A malformed bound used to make `[ -ge ]` error, which `if` reads as false: the range check
+  // was skipped and Caddy started with a box port inside the real range.
+  it.each([
+    { REVERSE_TUNNEL_PORT_RANGE_START: '1:2' },
+    { REVERSE_TUNNEL_PORT_RANGE_END: '29999:1' },
+    { REVERSE_TUNNEL_PORT_RANGE_START: '20000x' },
+    { REVERSE_TUNNEL_PORT_RANGE_END: ' 29999' },
+  ])('refuses a malformed lease range %j instead of skipping the check', (bad) => {
+    const run = startSh({ ...composeEnv(), CELLD_INTERNAL_PORT: '20001', ...bad });
+    expect(run.status).toBe(64);
+    expect(run.out).toMatch(/RANGE_START\/END missing from gateway.env or not a number/);
+    expect(run.out).not.toContain('caddy run');
+  });
 
   it('accepts the range edges just outside a port (control)', () => {
     const run = startSh({

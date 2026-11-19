@@ -170,8 +170,19 @@ describe('selfhost:deploy', { timeout: CHILD_TEST_TIMEOUT_MS }, () => {
     expect(refused.out).toContain('CELLD_INTERNAL_PORT from the shell environment overrides');
     expect(refused.out).toMatch(/contains CELLD_INTERNAL_PORT \(20001\); a node could bind it/);
     expect(existsSync(join(state, 'gateway.env'))).toBe(false);
+    // Refused when the box is read, before anything is written (S4).
+    expect(existsSync(join(state, PLATFORM_KEYS_FILE))).toBe(false);
     // Control: the same box without the override initialises.
     const init = await runDeploy(envFile, ['--init']);
     expect(init.status, init.out).toBe(0);
+  });
+
+  // S4: sam-mx's public port (SAM_MX_LISTEN, a listen address) is a box listener too.
+  it('refuses SAM_MX_LISTEN inside the lease range before writing anything', async () => {
+    const refused = await runDeploy(writeBox(dir, ['SAM_MX_LISTEN=:20025']), ['--init']);
+    expect(refused.status).not.toBe(0);
+    expect(refused.out).toMatch(/contains SAM_MX_LISTEN \(20025\); a node could bind it/);
+    expect(existsSync(join(state, PLATFORM_KEYS_FILE))).toBe(false);
+    expect(existsSync(join(state, 'gateway.env'))).toBe(false);
   });
 });

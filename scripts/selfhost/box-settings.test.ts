@@ -15,9 +15,11 @@ import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 
 import {
+  BOX_LISTEN_ADDRESSES,
   BOX_RESERVED_PORTS,
   celldChildEnv,
   gatewayEnvAction,
+  loadBoxEnv,
   presignVars,
   redactSecrets,
   renderGatewayEnv,
@@ -228,7 +230,8 @@ const COMPOSE_TEXT = readFileSync(
 
 describe('BOX_RESERVED_PORTS', () => {
   it('matches the defaults docker-compose.yml actually uses', () => {
-    const defaults = [...COMPOSE_TEXT.matchAll(/\$\{([A-Z_]+):-(\d+)\}/g)].map(
+    // A listen address (SAM_MX_LISTEN) defaults to `:<port>`.
+    const defaults = [...COMPOSE_TEXT.matchAll(/\$\{([A-Z_]+):-:?(\d+)\}/g)].map(
       (m) => [m[1]!, Number(m[2])] as const
     );
     for (const [name, port] of Object.entries(BOX_RESERVED_PORTS)) {
@@ -249,7 +252,8 @@ describe('BOX_RESERVED_PORTS', () => {
       'utf8'
     );
     for (const [name, port] of Object.entries(BOX_RESERVED_PORTS)) {
-      expect(compose.services.caddy.environment[name], name).toBe(`\${${name}:-${port}}`);
+      const fallback = BOX_LISTEN_ADDRESSES.includes(name) ? `:${port}` : String(port);
+      expect(compose.services.caddy.environment[name], name).toBe(`\${${name}:-${fallback}}`);
       expect(startSh, name).toMatch(new RegExp(`\\b${name}\\b`));
     }
   });
@@ -276,6 +280,74 @@ describe('withComposePortOverrides (F21 L5)', () => {
   it('also catches a shell port for a name the .env never set', () => {
     const { box } = withComposePortOverrides({}, { FRPS_BIND_PORT: '25000' });
     expect(() => resolveTunnelPortRange(box)).toThrow(/contains FRPS_BIND_PORT \(25000\)/);
+  });
+});
+
+describe('sam-mx listen address and unprivileged listeners (S4)', () => {
+  it.each([':20500', '0.0.0.0:20500', '[::]:20500', '20500'])(
+    'fails the deploy when SAM_MX_LISTEN=%s lies in the range',
+    (listen) => {
+      expect(() => resolveTunnelPortRange({ SAM_MX_LISTEN: listen })).toThrow(
+        /contains SAM_MX_LISTEN \(20500\)/
+      );
+    }
+  );
+
+  it('control: the default :25 and a host-qualified :2525 are accepted', () => {
+    expect(resolveTunnelPortRange({ SAM_MX_LISTEN: ':25' })).toEqual({ start: 20000, end: 29999 });
+    expect(resolveTunnelPortRange({ SAM_MX_LISTEN: '0.0.0.0:2525' })).toEqual({
+      start: 20000,
+      end: 29999,
+    });
+  });
+
+  it.each(['0.0.0.0:', ':x', 'smtp'])('refuses a malformed SAM_MX_LISTEN %s', (listen) => {
+    expect(() => resolveTunnelPortRange({ SAM_MX_LISTEN: listen })).toThrow(/SAM_MX_LISTEN/);
+  });
+
+  // celld, frps and the collector run with no capability (docker-compose.yml cap_drop: [ALL]).
+  it.each(['CELLD_PORT', 'CELLD_INTERNAL_PORT', 'FRPS_BIND_PORT', 'MAIL_COLLECTOR_UI_PORT'])(
+    'refuses a privileged port for %s, whose service has no capability',
+    (name) => {
+      expect(() => resolveTunnelPortRange({ [name]: '80' })).toThrow(
+        new RegExp(`${name} must be an integer between 1024`)
+      );
+    }
+  );
+
+  it('control: Caddy and the object store may still sit below 1024', () => {
+    expect(resolveTunnelPortRange({ HTTPS_PORT: '8443', OBJECTSTORE_PORT: '900' })).toEqual({
+      start: 20000,
+      end: 29999,
+    });
+  });
+});
+
+describe('loadBoxEnv (S4: checked before anything starts)', () => {
+  const box = (lines: string[]) => {
+    const file = join(mkdtempSync(join(tmpdir(), 'sam-box-env-')), '.env');
+    writeFileSync(file, `${lines.join('\n')}\n`, { mode: 0o600 });
+    return file;
+  };
+
+  it('refuses a box listener inside the lease range, from the .env or the shell', () => {
+    expect(() => loadBoxEnv(box(['SAM_MX_LISTEN=:20025']), {})).toThrow(
+      /contains SAM_MX_LISTEN \(20025\)/
+    );
+    const reported: string[] = [];
+    expect(() =>
+      loadBoxEnv(box(['CELLD_INTERNAL_PORT=7001']), { CELLD_INTERNAL_PORT: '20001' }, (name) =>
+        reported.push(name)
+      )
+    ).toThrow(/contains CELLD_INTERNAL_PORT \(20001\)/);
+    // The override is reported before the refusal, so the operator sees where it came from.
+    expect(reported).toEqual(['CELLD_INTERNAL_PORT']);
+  });
+
+  it('control: returns the box with shell overrides applied', () => {
+    expect(
+      loadBoxEnv(box(['SAM_DOMAIN=box.example', 'CELLD_PORT=8080']), { CELLD_PORT: '8081' })
+    ).toEqual({ SAM_DOMAIN: 'box.example', CELLD_PORT: '8081' });
   });
 });
 

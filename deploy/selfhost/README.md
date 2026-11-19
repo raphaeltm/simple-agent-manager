@@ -131,9 +131,12 @@ celld does not qualify for production. It refuses to start unless `AWS_ACCESS_KE
 `REVERSE_TUNNEL_PORT_RANGE_START`..`_END` (default 20000-29999). The deploy writes the resolved
 range to both the Worker and `.state/gateway.env`, and refuses a range that contains a box port
 (`CELLD_PORT`, `CELLD_INTERNAL_PORT`, `FRPS_BIND_PORT`, `OBJECTSTORE_*`, `HTTP(S)_PORT`,
-`MAIL_COLLECTOR_*`): a node leased one of those would receive traffic meant for it. Docker Compose
-takes a port from the shell before `.env`, so the deploy checks shell overrides too, and Caddy's
-`start.sh` refuses to start when a port it is given lies in the range. Set ports in `.env`, not
+`MAIL_COLLECTOR_*`, and the port of sam-mx's `SAM_MX_LISTEN`): a node leased one of those would
+receive traffic meant for it. Docker Compose takes a port from the shell before `.env`, so
+`selfhost:deploy` and `selfhost:upgrade` check shell overrides too, as soon as they read `.env`
+and before anything starts, and Caddy's `start.sh` refuses to start when a port it is given lies
+in the range. celld, frps and the mail collector run without capabilities, so their ports must be
+1024 or above. Set ports in `.env`, not
 the shell. `gateway.env` also holds `REVERSE_TUNNEL_GATEWAY_SECRET`, the shared secret frps and
 Caddy present to the Worker's loopback-only gateway routes (`/api/self-host/gateway/*`, which
 Caddy answers with 404 from outside). When `gateway.env` changes, the deploy stops until the

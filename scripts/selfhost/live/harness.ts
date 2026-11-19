@@ -14,6 +14,7 @@ import {
   FRPC_DOWNLOAD_BASE_URL,
   FRPC_RELEASES,
 } from '../../../packages/cloud-init/src/reverse-tunnel';
+import { BOX_RESERVED_PORTS } from '../box-settings.js';
 
 export const REPO_ROOT = resolve(import.meta.dirname, '../../..');
 /** Gitignored scratch directory (see .tmp/README.md). */
@@ -109,24 +110,15 @@ export const LIVE_TUNNEL_RANGE = { start: 20000, end: 20099 };
 
 /**
  * Every setting caddy/start.sh checks, on free ports: each box port docker-compose.yml passes
- * and the lease range from gateway.env. Callers override what their test probes.
+ * (BOX_RESERVED_PORTS; a bare port is also a valid listen address for SAM_MX_LISTEN) and the lease
+ * range from gateway.env. Callers override what their test probes.
  */
 export async function caddyBoxEnv(): Promise<Record<string, string>> {
   const env: Record<string, string> = {
     REVERSE_TUNNEL_PORT_RANGE_START: String(LIVE_TUNNEL_RANGE.start),
     REVERSE_TUNNEL_PORT_RANGE_END: String(LIVE_TUNNEL_RANGE.end),
   };
-  for (const name of [
-    'HTTP_PORT',
-    'HTTPS_PORT',
-    'CELLD_PORT',
-    'CELLD_INTERNAL_PORT',
-    'FRPS_BIND_PORT',
-    'OBJECTSTORE_PORT',
-    'OBJECTSTORE_CONSOLE_PORT',
-    'MAIL_COLLECTOR_SMTP_PORT',
-    'MAIL_COLLECTOR_UI_PORT',
-  ]) {
+  for (const name of Object.keys(BOX_RESERVED_PORTS)) {
     env[name] = String(await freePort());
   }
   return env;

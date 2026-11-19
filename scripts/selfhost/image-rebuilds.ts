@@ -3,12 +3,14 @@
  * run `docker compose up -d --build` whenever any compose input changed; a build fetches base
  * images and modules from the network, so it now runs only for a service whose image would differ.
  */
-import { posix } from 'node:path';
+import { join, posix, relative } from 'node:path';
 
 import { parse as parseYaml } from 'yaml';
 
+import { REPO_ROOT, SELFHOST_DIR } from './deploy-steps.js';
+
 /** The compose file, relative to the repository root (what `git show <ref>:<path>` reads). */
-export const COMPOSE_PATH = 'deploy/selfhost/docker-compose.yml';
+export const COMPOSE_PATH = relative(REPO_ROOT, join(SELFHOST_DIR, 'docker-compose.yml'));
 
 interface ComposeBuildService {
   build?: string | { context?: string; dockerfile?: string; args?: unknown };

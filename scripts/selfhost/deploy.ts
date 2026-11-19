@@ -46,6 +46,7 @@ import type { WranglerToml } from '../deploy/types.js';
 import {
   assertPresignCredentialIsScoped,
   celldChildEnv,
+  loadBoxEnv,
   presignVars,
   redactSecrets,
   renderGatewayEnv,
@@ -53,7 +54,6 @@ import {
   STORAGE_SECRET_KEYS,
   type TunnelSettings,
   tunnelWorkerVars,
-  withComposePortOverrides,
 } from './box-settings.js';
 import { verifyNewVersionServes } from './celld-adopt.js';
 import { ensureCelldBinary, resolveEsbuild } from './celld-binary.js';
@@ -75,6 +75,7 @@ import {
   log,
   redact,
   REPO_ROOT,
+  SELFHOST_DIR,
   syncGatewayEnv,
 } from './deploy-steps.js';
 import { inboundMailWorkerVars } from './inbound-mail-settings.js';
@@ -92,12 +93,7 @@ import {
   type PlatformKeysMode,
   type PlatformKeysResult,
 } from './platform-keys.js';
-import {
-  assertPrivateFile,
-  ensurePrivateDir,
-  parseDotenv,
-  readSecretsFile,
-} from './secret-files.js';
+import { assertPrivateFile, ensurePrivateDir, readSecretsFile } from './secret-files.js';
 import {
   buildVmAgentBinaries,
   publishVmAgentArtifacts,
@@ -190,15 +186,14 @@ function readDeployInputs(): DeployInputs {
       'skip-vm-agent': { type: 'boolean', default: false },
     },
   });
-  const envFile = resolve(values['env-file'] ?? join(REPO_ROOT, 'deploy/selfhost/.env'));
+  const envFile = resolve(values['env-file'] ?? join(SELFHOST_DIR, '.env'));
   // The .env holds the bucket credential, which can read every deployed secret.
   assertPrivateFile(envFile);
-  // Box ports as docker compose will run them: a shell override beats the .env (F21 L5).
-  const { box, overridden } = withComposePortOverrides(
-    parseDotenv(readFileSync(envFile, 'utf8'), envFile),
-    process.env
+  // Box ports as docker compose will run them (a shell override beats the .env, F21 L5), checked
+  // against the lease range before anything is written.
+  const box = loadBoxEnv(envFile, process.env, (name) =>
+    log(`${name} from the shell environment overrides ${envFile}`)
   );
-  for (const name of overridden) log(`${name} from the shell environment overrides ${envFile}`);
   // Same default and base directory docker compose uses for SAM_SELFHOST_STATE_DIR.
   const stateDir = resolve(
     dirname(envFile),

@@ -59,17 +59,23 @@ esac
 # the shell before the .env, so this checks the values the stack really runs with. A port inside
 # the range could be leased to a node: the Worker and Caddy would then send that node's traffic,
 # with its credentials, to celld's unauthenticated operator API or another box service.
+# Each bound must be a plain number: a malformed one (`1:2`, `20000x`) would make the `-ge`/`-le`
+# tests below error, which `if` reads as false, silently skipping the check.
 start="${REVERSE_TUNNEL_PORT_RANGE_START:-}"
 end="${REVERSE_TUNNEL_PORT_RANGE_END:-}"
-case "$start:$end" in
-*[!0-9:]* | :* | *:)
-	echo "caddy: REVERSE_TUNNEL_PORT_RANGE_START/END missing from gateway.env; run pnpm selfhost:deploy --init" >&2
-	exit 64
-	;;
-esac
+for bound in "$start" "$end"; do
+	case "$bound" in
+	'' | *[!0-9]*)
+		echo "caddy: REVERSE_TUNNEL_PORT_RANGE_START/END missing from gateway.env or not a number; run pnpm selfhost:deploy --init" >&2
+		exit 64
+		;;
+	esac
+done
+# SAM_MX_LISTEN is a listen address ([host]:port): its port is the part after the last ':'.
 for name in HTTP_PORT HTTPS_PORT CELLD_PORT CELLD_INTERNAL_PORT FRPS_BIND_PORT OBJECTSTORE_PORT \
-	OBJECTSTORE_CONSOLE_PORT MAIL_COLLECTOR_SMTP_PORT MAIL_COLLECTOR_UI_PORT; do
+	OBJECTSTORE_CONSOLE_PORT MAIL_COLLECTOR_SMTP_PORT MAIL_COLLECTOR_UI_PORT SAM_MX_LISTEN; do
 	eval "port=\"\${$name:-}\""
+	port="${port##*:}"
 	case "$port" in
 	'' | *[!0-9]*)
 		echo "caddy: $name must be set to a port number (docker-compose.yml passes every box port)" >&2
@@ -81,5 +87,5 @@ for name in HTTP_PORT HTTPS_PORT CELLD_PORT CELLD_INTERNAL_PORT FRPS_BIND_PORT O
 		exit 64
 	fi
 done
-unset start end name port
+unset start end bound name port
 exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile

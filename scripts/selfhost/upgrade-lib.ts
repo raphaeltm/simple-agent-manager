@@ -35,12 +35,10 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
-import { withComposePortOverrides } from './box-settings.js';
-import { log, REPO_ROOT } from './deploy-steps.js';
+import { loadBoxEnv } from './box-settings.js';
+import { log, REPO_ROOT, SELFHOST_DIR } from './deploy-steps.js';
 import { COMPOSE_PATH, imageRebuilds } from './image-rebuilds.js';
-import { assertPrivateFile, parseDotenv, replacePrivateFile } from './secret-files.js';
-
-export const SELFHOST_DIR = join(REPO_ROOT, 'deploy/selfhost');
+import { assertPrivateFile, replacePrivateFile } from './secret-files.js';
 
 /** Suffix of the files under .state/ that docker compose services read (`env_file`). */
 const GENERATED_STATE_FILE_SUFFIX = '.env';
@@ -137,11 +135,9 @@ export function loadBox(
 ): BoxContext {
   if (!existsSync(envFile)) throw new Error(`${envFile} does not exist`);
   assertPrivateFile(envFile);
-  // Ports as docker compose runs them (a shell override beats the .env), as deploy.ts reads them.
-  const { box } = withComposePortOverrides(
-    parseDotenv(readFileSync(envFile, 'utf8'), envFile),
-    process.env
-  );
+  // Ports as docker compose runs them (a shell override beats the .env), as deploy.ts reads them,
+  // and checked against the lease range before the upgrade touches the checkout or the stack.
+  const box = loadBoxEnv(envFile);
   if (!box.CELLD_BUCKET) throw new Error(`${envFile}: CELLD_BUCKET is required`);
   return {
     box,
