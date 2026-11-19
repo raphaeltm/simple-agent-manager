@@ -253,7 +253,7 @@ describe('verify-fence and the mail collector', () => {
       localAddresses: [],
     });
     expect(targets).toContainEqual({
-      label: 'mail collector SMTP',
+      label: 'SMTP relay',
       host: '127.0.0.1',
       port: 1025,
       expect: 'reachable',
@@ -402,5 +402,20 @@ describe('configured attestation age', () => {
     expect(() =>
       boxAttestationProblem('ok 1000', 1000, { SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS: age })
     ).toThrow(/positive integer/);
+  });
+});
+
+it('checks a configured private SMTP relay as a positive control', async () => {
+  const targets = await verifyTargets({
+    box: { SMTP_HOST: '10.42.0.5', SMTP_TLS: 'tls', SMTP_FROM: 'sign-in@sam.example.com' },
+    range: { start: 20000, end: 29999 },
+    publicProbe: '1.1.1.1:443',
+    localAddresses: [],
+  });
+  expect(targets).toContainEqual({
+    label: 'SMTP relay',
+    host: '10.42.0.5',
+    port: 465,
+    expect: 'reachable',
   });
 });

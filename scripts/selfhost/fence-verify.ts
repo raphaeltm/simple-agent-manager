@@ -235,8 +235,8 @@ export async function verifyTargets(input: TargetInput): Promise<VerifyTarget[]>
   if (metadataProxyEnabled(box)) {
     targets.push(allow('metadata token proxy', '127.0.0.1', metadataProxyPort(box)));
   }
-  for (const endpoint of mailEgressEndpoints(box)) {
-    targets.push(allow('mail collector SMTP', endpoint.address, endpoint.port));
+  for (const endpoint of await mailEgressEndpoints(box)) {
+    targets.push(allow('SMTP relay', endpoint.address, endpoint.port));
   }
   return targets;
 }

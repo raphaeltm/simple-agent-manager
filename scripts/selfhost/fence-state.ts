@@ -79,7 +79,7 @@ export async function writeFenceFiles(input: {
     leaseRange,
     resolvConf: input.resolvConf ?? readFileSync('/etc/resolv.conf', 'utf8'),
     objectStore: await resolveObjectStoreEndpoints(box),
-    serviceEndpoints: mailEgressEndpoints(box),
+    serviceEndpoints: await mailEgressEndpoints(box),
     localAddresses: Object.values(networkInterfaces())
       .flat()
       .map((entry) => entry?.address ?? '')
