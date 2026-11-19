@@ -185,13 +185,7 @@ export async function findDeploymentNodeWithCapacity(
       requestedReservation: placement.reservation,
     });
     if (capacityPlacementSnapshot === undefined) {
-      const eligible = resolveReusableNodeCapacitySnapshot({
-        selection: placement.capacityPoolSelection,
-        node,
-        projectId: placement.projectId,
-        requestedVmSize: placement.vmSize,
-      });
-      if (eligible !== undefined) rejection = 'capacity';
+      rejection = classifyReusableNodeRejection(node, placement);
       return [];
     }
     if (
@@ -262,6 +256,20 @@ export async function findDeploymentNodeWithCapacity(
 
   const selected = scored[0];
   return selected ? { nodeId: selected.nodeId, placement: selected.placement } : null;
+}
+
+function classifyReusableNodeRejection(
+  node: DeploymentNodeCandidate,
+  placement: DeploymentPlacement
+): DeploymentNodeAdmissionRejection {
+  const eligible = resolveReusableNodeCapacitySnapshot({
+    selection: placement.capacityPoolSelection,
+    node,
+    projectId: placement.projectId,
+    requestedVmSize: placement.vmSize,
+  });
+  if (eligible !== undefined) return 'capacity';
+  return placement.capacityPoolSelection ? 'pool-ineligible' : 'direct-placement';
 }
 
 function directDeploymentNodeMatchesPlacement(
