@@ -2,6 +2,7 @@ import type { CapacityPlacementSnapshot } from '@simple-agent-manager/shared';
 
 import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import { buildPlacementAuthoritySqlPredicate } from './placement-authority';
+import { buildProvisionedNodeHoldSqlPredicate } from './provisioned-node-ownership';
 
 export interface ReusableNodeAuthoritySelection {
   nodeId: string;
@@ -17,6 +18,7 @@ export interface ReusableNodeAuthoritySelection {
 export async function filterReusableNodesByCurrentAuthority(
   database: D1Database,
   input: {
+    requestingTaskId?: string | null;
     userId: string;
     projectId: string;
     selections: readonly ReusableNodeAuthoritySelection[];
@@ -42,7 +44,8 @@ export async function filterReusableNodesByCurrentAuthority(
       capacityPlacementSnapshot: first.capacityPlacementSnapshot,
       authorityMode: 'existing-node',
     });
-    const chunkSize = D1_MAX_BOUND_PARAMETERS - predicate.binds.length;
+    const hold = buildProvisionedNodeHoldSqlPredicate('n', input.requestingTaskId);
+    const chunkSize = D1_MAX_BOUND_PARAMETERS - predicate.binds.length - hold.binds.length;
     if (chunkSize <= 0) throw new Error('Placement authority exceeds D1 parameter limit');
     for (let offset = 0; offset < selections.length; offset += chunkSize) {
       const ids = selections.slice(offset, offset + chunkSize).map((selection) => selection.nodeId);
@@ -51,9 +54,10 @@ export async function filterReusableNodesByCurrentAuthority(
           `SELECT n.id FROM nodes n
             WHERE n.id IN (${ids.map(() => '?').join(', ')})
               AND n.status = 'running'
-              ${predicate.sql}`
+              ${predicate.sql}
+              ${hold.sql}`
         )
-        .bind(...ids, ...predicate.binds)
+        .bind(...ids, ...predicate.binds, ...hold.binds)
         .all<{ id: string }>();
       for (const row of rows.results) eligible.add(row.id);
     }

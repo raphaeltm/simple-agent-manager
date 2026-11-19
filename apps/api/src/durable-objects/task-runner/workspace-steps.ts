@@ -23,6 +23,7 @@ import { persistPlacementDiagnostics, updatePlacementDiagnostics } from './place
 import { ensureSessionLinked } from './state-machine';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 import { ensureBranchExistsOnRemote } from './workspace-branch';
+import { resumeWorkspacePlacementFallback } from './workspace-placement-fallback';
 import {
   handleWorkspacePlacementRefused,
   resolveStartupBacklogGuard,
@@ -44,6 +45,7 @@ export async function handleWorkspaceCreation(
   state: TaskRunnerState,
   rc: TaskRunnerContext
 ): Promise<void> {
+  if (await resumeWorkspacePlacementFallback(state, rc)) return;
   await rc.updateD1ExecutionStep(state.taskId, 'workspace_creation');
 
   if (!state.stepResults.nodeId) {

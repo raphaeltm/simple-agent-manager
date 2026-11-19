@@ -1080,7 +1080,7 @@ Nodes created before this change still boot from the flavor's local disk and kee
 | Setting                                               | Default | Allowed range | Applies to                                                                                                                             |
 | ----------------------------------------------------- | ------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `operations.provisioningAttemptsPerProviderTier`      | 8       | 1–50          | Most offerings one task tries from one provider source under `fallback-chain` before moving to the pool's next-ranked provider         |
-| `operations.workspacePlacementMaxRejections`          | 3       | 1–20          | Consecutive times the node a task selected may refuse its final workspace reservation before the task fails                            |
+| `operations.workspacePlacementMaxRejections`          | 3       | 1–20          | Consecutive times the node a task selected may refuse its final workspace reservation per episode; an owned provisioned node gets one fallback before final failure                            |
 | `operations.workspacePlacementBacklogConflictRetries` | 3       | 1–20          | Times a task may pick again because its chosen node gained a queued workspace setup before the reservation, counted until one succeeds |
 | `operations.workspaceBuildQueueTimeoutMinutes`        | 60      | 5–1440        | Minutes a workspace may wait for its node's single build slot before it times out                                                      |
 
@@ -1089,9 +1089,11 @@ to the provider, so this bounds the work one task does before it reaches the nex
 
 A refused workspace reservation sends the task back through node selection, about 6 seconds per
 cycle, so `operations.workspacePlacementMaxRejections` bounds a node that can never admit the
-request to roughly 18 seconds at the default (about 2 minutes at the maximum). The failure names
-the refusal reasons, which are also recorded in the task's placement diagnostics, and a node the
-task provisioned goes to the warm pool. The count resets when a reservation succeeds.
+request to roughly 18 seconds per episode at the default (about 2 minutes at the maximum). An
+owned provisioned node gets one fallback to normal placement, for at most twice the configured
+refusal budget, plus ordinary provisioning and queue time. Empty rejected nodes enter warm
+retention; occupied nodes stay active. The final failure names the refusal reasons, also recorded
+in placement diagnostics. Success or a genuinely new wake resets the episode.
 
 A node busy setting up another workspace does not refuse a reservation; the new workspace waits in
 that node's setup queue. When a task chose a node over another one with a longer queue and that

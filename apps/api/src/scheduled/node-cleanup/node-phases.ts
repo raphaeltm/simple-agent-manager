@@ -15,6 +15,7 @@ import { eq } from 'drizzle-orm';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { taskProvisionedNodeConditionSql } from '../../services/node-teardown-provenance';
 import { preservedVmRetirementActivitySql } from '../../services/preserved-vm-retirement';
 import { prepareAbsoluteLifetimeRelease } from './absolute-lifetime-preservation';
 import { selectMaxLifetimeCandidates } from './max-lifetime-candidates';
@@ -57,10 +58,7 @@ export async function sweepStaleWarmNodes(
        AND n.status = 'running'
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
-       AND EXISTS (
-         SELECT 1 FROM tasks t
-         WHERE t.auto_provisioned_node_id = n.id
-       )
+       AND ${taskProvisionedNodeConditionSql('n')}
        AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
        ${boundedWarmPlacementClaimGuardSql('n.id')}
      GROUP BY n.id, n.user_id, n.status, n.warm_since, n.created_at
@@ -285,10 +283,7 @@ export async function sweepIncompatibleVmAgentNodes(
      WHERE n.status = 'running'
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
-       AND EXISTS (
-         SELECT 1 FROM tasks t
-         WHERE t.auto_provisioned_node_id = n.id
-       )
+       AND ${taskProvisionedNodeConditionSql('n')}
        AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
        ${boundedWarmPlacementClaimGuardSql('n.id')}
        AND (n.runtime IS NULL OR n.runtime = 'vm')
@@ -397,10 +392,7 @@ export async function sweepIdleOrphanNodes(
      WHERE n.status = 'running'
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
-       AND EXISTS (
-         SELECT 1 FROM tasks t
-         WHERE t.auto_provisioned_node_id = n.id
-       )
+       AND ${taskProvisionedNodeConditionSql('n')}
        AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
        ${boundedWarmPlacementClaimGuardSql('n.id')}
        AND n.warm_since IS NULL

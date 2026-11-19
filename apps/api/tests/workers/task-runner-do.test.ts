@@ -743,18 +743,26 @@ describe('stable TaskRunner reactivation', () => {
       const old = (await instance.ctx.storage.get<TaskRunnerState>('state'))!;
       old.completed = true;
       old.currentStep = 'running';
+      old.rejectedAutoProvisionedNodeId = 'old-rejected-node';
+      old.workspacePlacementRejections = 3;
+      old.startupBacklogConflicts = 3;
       await instance.ctx.storage.put('state', old);
       await instance.ctx.storage.deleteAlarm();
       expect(await instance.ensureStarted('wake-1')).toBe(false);
       await instance.reactivate(input);
       expect(await instance.ensureStarted('wake-1')).toBe(true);
       const waking = (await instance.ctx.storage.get<TaskRunnerState>('state'))!;
+      expect(waking.rejectedAutoProvisionedNodeId).toBeUndefined();
+      expect(waking.workspacePlacementRejections).toBe(0);
+      expect(waking.startupBacklogConflicts).toBe(0);
       waking.currentStep = 'workspace_creation';
       waking.stepResults.nodeId = 'already-selected';
+      waking.rejectedAutoProvisionedNodeId = 'this-attempt-rejected-node';
       await instance.ctx.storage.put('state', waking);
       await instance.reactivate(input);
       expect(await instance.getStatus()).toMatchObject({
         currentStep: 'workspace_creation',
+        rejectedAutoProvisionedNodeId: 'this-attempt-rejected-node',
         stepResults: { nodeId: 'already-selected' },
       });
       await instance.ctx.storage.deleteAlarm();
