@@ -75,8 +75,16 @@ pnpm selfhost:upgrade --to <git ref>
 ```
 
 It refuses a checkout with uncommitted changes, checks the ref out, runs `deploy --init`, rebuilds
-only the images whose build inputs changed, restarts the stack only when compose inputs changed,
-deploys, checks health and prints how to roll back.
+only the images whose build inputs changed (explicitly, with `docker compose build <service>`),
+restarts the stack (`up -d`, never `--build`) only when compose inputs changed, deploys, checks
+health and prints how to roll back. For a box other than the default, pass `--box-env`,
+`--state-dir` and `--secrets`; every deploy and compose command it runs or prints uses that box's
+`.env` and every compose file its `COMPOSE_FILE` selects.
+
+If an upgrade fails, `.state/upgrade-pending.json` records the ref it started from and the printed
+output gives both ways out: run the same `selfhost:upgrade --to <ref>` again to retry (it reruns
+every step, from the recorded ref, and its rollback still names that ref), or run the printed
+rollback commands. The file is removed once an upgrade passes its health check.
 
 **It takes no backup.** Copy the fleet bucket and `deploy/selfhost/.state` yourself first. An
 upgrade that carries a D1 migration cannot be rolled back by redeploying the old ref; only your
