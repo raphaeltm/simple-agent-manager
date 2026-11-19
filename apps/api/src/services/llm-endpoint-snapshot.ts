@@ -1,5 +1,5 @@
 /** Joint endpoint URL/key snapshot: independent caches can mix remote admin generations. */
-import { log } from '@simple-agent-manager/worker-core';
+import { log, settleSharedFlight } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
@@ -30,7 +30,13 @@ type Snapshot = {
   rows: v.InferOutput<typeof overrideSchema>[];
   credentials: v.InferOutput<typeof credentialSchema>[];
 };
-type Entry = { generation: number; expiresAt: number; promise: Promise<Snapshot> };
+type Entry = {
+  generation: number;
+  expiresAt: number;
+  /** When the load's own deadline fires; joiners wait until then (plus grace), never longer. */
+  deadlineAt: number;
+  promise: Promise<Snapshot>;
+};
 const snapshots = new WeakMap<D1Database, Entry>();
 
 async function load(env: Env, db: D1Database): Promise<Snapshot> {
@@ -86,12 +92,21 @@ export async function resolveLlmEndpointSettings(env: Env, names: AdminSettingNa
       entry = {
         generation,
         expiresAt: Date.now() + ADMIN_SETTINGS_CACHE_MAX_MS,
+        deadlineAt: Date.now() + DEFAULT_CONFIG_READ_TIMEOUT_MS,
         promise: withDeadline(() => load(env, db), DEFAULT_CONFIG_READ_TIMEOUT_MS),
       };
       snapshots.set(db, entry);
     }
     try {
-      const snapshot = await entry.promise;
+      // Another request may have started this load; on a runtime that drops a disconnected
+      // request's I/O it can never settle, so join it with a bound (packages/worker-core
+      // shared-flight.ts) and start a fresh load if it was abandoned.
+      const joined = await settleSharedFlight(entry.promise, entry.deadlineAt);
+      if (joined.abandoned) {
+        if (snapshots.get(db) === entry) snapshots.delete(db);
+        continue;
+      }
+      const snapshot = joined.value;
       const values = await Promise.all(
         names.map((name) =>
           resolved(env, requiredDefinition(name), snapshot.rows, true, snapshot.credentials)
