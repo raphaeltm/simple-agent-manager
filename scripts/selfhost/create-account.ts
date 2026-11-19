@@ -4,7 +4,11 @@
  *
  *   pnpm selfhost:create-account --email someone@example.com [--superadmin]
  *                                [--env-file deploy/selfhost/.env] [--state-dir <env dir>/.state]
- *                                [--dry-run]
+ *                                [--secrets <state-dir>/secrets.env] [--dry-run]
+ *
+ * `--secrets` is the file `pnpm selfhost:deploy --secrets` read (same default): it says whether
+ * the install has a bootstrap owner (BOOTSTRAP_OWNER_EMAIL), which `--superadmin` must know
+ * (`resolveBootstrapOwner`).
  *
  * For an install whose first-account path is already used (a seeded smoke-test superadmin, or an
  * owner who signed up): email sign-in sends codes only to existing accounts, so a new person needs
@@ -17,6 +21,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
+import { isEntrypoint } from '../deploy/entrypoint.js';
 import {
   type AccountPlan,
   type AccountReport,
@@ -26,7 +31,7 @@ import {
   parseAccountReport,
   superadminWaitsForOwner,
 } from './account-sql.js';
-import { celldChildEnv, redactSecrets } from './box-settings.js';
+import { celldChildEnv, redactSecrets, STORAGE_SECRET_KEYS } from './box-settings.js';
 import { ensureCelldBinary, resolveEsbuild } from './celld-binary.js';
 import { assertPrivateFile, parseDotenv, readSecretsFile } from './secret-files.js';
 
@@ -57,6 +62,42 @@ export function ownerLockoutRefusal(
   );
 }
 
+/**
+ * The installer's owner email from the deploy's secrets file, or undefined when the install has
+ * none. An install without BOOTSTRAP_OWNER_EMAIL is legitimate: the Worker then has no owner gate
+ * (`bootstrapOwnerEmail` in apps/api/src/services/bootstrap-owner.ts returns undefined), so a
+ * superadmin cannot lock anyone out and `--superadmin` proceeds.
+ *
+ * What must not happen is reading the wrong file and concluding "no owner": a missing secrets
+ * file is indistinguishable from a deploy that used another `--secrets` path, so with
+ * `--superadmin` it is refused rather than taken as "no owner". An unreadable or non-private file
+ * always throws (readSecretsFile).
+ */
+export function resolveBootstrapOwner(
+  secretsPath: string,
+  superadmin: boolean
+): string | undefined {
+  if (!existsSync(secretsPath)) {
+    if (!superadmin) return undefined;
+    throw new Error(
+      `--superadmin needs the secrets file the deploy read, to know whether ` +
+        `BOOTSTRAP_OWNER_EMAIL is set, and ${secretsPath} does not exist. Pass the deploy's ` +
+        '--secrets <path>. If the deploy ran without a secrets file (no bootstrap owner), ' +
+        `create an empty one first: install -m 600 /dev/null ${secretsPath}`
+    );
+  }
+  const owner = readSecretsFile(secretsPath).BOOTSTRAP_OWNER_EMAIL?.trim();
+  // The Worker treats a present but empty owner email as configured and admits no one
+  // (bootstrap-owner.ts); refuse rather than write accounts nobody can use.
+  if (owner === '') {
+    throw new Error(
+      `BOOTSTRAP_OWNER_EMAIL is set but empty in ${secretsPath}: SAM would admit no one. Set ` +
+        "the owner's address or remove the line, then deploy, before creating accounts."
+    );
+  }
+  return owner ? normalizeAccountEmail(owner) : undefined;
+}
+
 /** The D1 database bound as DATABASE in the deployed (secrets-free) celld config. */
 export function mainDatabaseName(wranglerJson: string): string {
   const config: unknown = JSON.parse(wranglerJson);
@@ -81,6 +122,7 @@ async function main(): Promise<void> {
       superadmin: { type: 'boolean', default: false },
       'env-file': { type: 'string' },
       'state-dir': { type: 'string' },
+      secrets: { type: 'string' },
       'dry-run': { type: 'boolean', default: false },
     },
   });
@@ -95,21 +137,17 @@ async function main(): Promise<void> {
     dirname(envFile),
     values['state-dir'] ?? box.SAM_SELFHOST_STATE_DIR ?? '.state'
   );
-  const owner = readSecretsFile(join(stateDir, 'secrets.env')).BOOTSTRAP_OWNER_EMAIL?.trim();
-  // The Worker treats a present but empty owner email as configured and admits no one
-  // (bootstrap-owner.ts); refuse rather than write accounts nobody can use.
-  if (owner === '') {
-    throw new Error(
-      'BOOTSTRAP_OWNER_EMAIL is set but empty in secrets.env: SAM would admit no one. Set the ' +
-        "owner's address or remove the line, then deploy, before creating accounts."
-    );
-  }
+  const superadmin = values.superadmin ?? false;
+  const owner = resolveBootstrapOwner(
+    resolve(values.secrets ?? join(stateDir, 'secrets.env')),
+    superadmin
+  );
   const plan = {
     email,
-    superadmin: values.superadmin ?? false,
+    superadmin,
     id: generateAccountId(),
     nowMs: Date.now(),
-    bootstrapOwnerEmail: owner ? normalizeAccountEmail(owner) : undefined,
+    bootstrapOwnerEmail: owner,
   };
   const sql = createAccountSql(plan);
   if (values['dry-run']) {
@@ -130,7 +168,7 @@ async function main(): Promise<void> {
     ['d1', 'execute', database, '--command', sql, projectDir, '--bucket', box.CELLD_BUCKET],
     { cwd: REPO_ROOT, env, encoding: 'utf8', maxBuffer: CHILD_OUTPUT_MAX_BYTES }
   );
-  const secrets = [box.AWS_SECRET_ACCESS_KEY ?? ''].filter(Boolean);
+  const secrets = STORAGE_SECRET_KEYS.map((name) => box[name] ?? '').filter(Boolean);
   process.stdout.write(redactSecrets(`${result.stdout ?? ''}${result.stderr ?? ''}`, secrets));
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`celld d1 execute failed (exit ${result.status})`);
@@ -144,12 +182,12 @@ async function main(): Promise<void> {
   }
   log(`done: ${email} can now request a sign-in code at https://app.${box.SAM_DOMAIN ?? ''}`);
   // Until the installer owner has signed in once, SAM admits no one else (bootstrap-owner.ts).
-  if (owner && owner.toLowerCase() !== email) {
+  if (owner && owner !== email) {
     log(`note: BOOTSTRAP_OWNER_EMAIL is set; if ${owner} has not signed in yet, only they can`);
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isEntrypoint(import.meta.url)) {
   main().catch((error: unknown) => {
     console.error(`[selfhost] ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
