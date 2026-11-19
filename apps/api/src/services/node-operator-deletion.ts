@@ -83,8 +83,9 @@ export interface OperatorNodeDeletionInput {
   /** The refusal the operator was shown (`cleanupBlockedReason` from the list). Must still match. */
   expectedBlockedReason: string | null;
   /**
-   * The request came from an agent sign-in session. Refused unless the superadmin setting
-   * `operations.operatorNodeDeletionAllowAgentSessions` allows it; always recorded in the audit.
+   * The request came from an agent sign-in session. Allowed while the superadmin setting
+   * `operations.operatorNodeDeletionAllowAgentSessions` is on (the default); always recorded in
+   * the audit.
    */
   agentSignIn: boolean;
 }
@@ -267,9 +268,10 @@ export async function recordOperatorNodeDeletion(
   env: Env,
   input: OperatorNodeDeletionInput
 ): Promise<OperatorNodeDeletionProof> {
-  // The attestation asserts that someone checked the provider console. By default only a
-  // person's own session may make it; an installation can opt in to agents relaying a person's
-  // check. Read on every call (cache 0 ms): turning it off applies to the next request.
+  // The attestation asserts that someone checked the provider console. Agents may relay a
+  // person's check by default (owner decision, ask 01M7RX9S6DG1NDNKPPHARGBT96), audited as
+  // `agentSignIn`; a superadmin can turn that off. Read on every call (cache 0 ms): turning it
+  // off applies to the next request.
   if (
     input.agentSignIn &&
     (await resolveAdminSetting(env, 'operations.operatorNodeDeletionAllowAgentSessions')) !== true

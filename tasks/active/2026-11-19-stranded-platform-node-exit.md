@@ -122,3 +122,15 @@ errors a day. The owner confirmed in the Hetzner console that no such server exi
   owner's Delete is audited as `owner_attested_manual_deletion` (still attested, never strict).
 - Docs updated: admin-settings (new section), session-troubleshooting, security.md, api.md. The
   task file was committed on the branch, not main.
+
+## Follow-up: agent sign-in default (owner decision)
+
+PR #2900 merged with agent sign-in sessions refused by default (safe default while the question
+was open). The owner answered ask `01M7RX9S6DG1NDNKPPHARGBT96` at 07:45Z: "Allow agents (audited)
+everywhere". Follow-up branch `sam/operator-node-deletion-allow-agents`:
+
+- [x] `operations.operatorNodeDeletionAllowAgentSessions` defaults to ON; a superadmin can turn it off.
+- [x] Workers test resolves the default through the real resolver (no stored value → admitted and
+      audited with `agentSignIn`), and the explicit OFF state refuses with 403 before any provider
+      call or audit write.
+- [x] Docs updated (admin-settings, configuration, api).

@@ -1,6 +1,4 @@
-import {
-  PROVIDER_LIMIT_POLICY,
-} from '@simple-agent-manager/scheduler-core';
+import { PROVIDER_LIMIT_POLICY } from '@simple-agent-manager/scheduler-core';
 
 import {
   type AdminSettingDefinition,
@@ -32,7 +30,9 @@ export const OPERATOR_SETTINGS: AdminSettingDefinition[] = [
   ),
   switchDefinition(
     'operations.operatorNodeDeletionAllowAgentSessions',
-    false,
+    // On by owner decision (2026-11-19, ask 01M7RX9S6DG1NDNKPPHARGBT96: "Allow agents (audited)
+    // everywhere"). The audit always records whether an agent made the request.
+    true,
     'Operations',
     "Let an agent sign-in session remove a stuck SAM-capacity node (Admin → Infrastructure → Stuck nodes) on a person's behalf. Off: only a person's own session can attest a server is gone. Either way the audit log records whether an agent did it.",
     {}
