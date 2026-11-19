@@ -3,7 +3,9 @@ import { Hono } from 'hono';
 import type { Env } from '../env';
 import { getAnalyticsDataset } from '../lib/analytics-config';
 import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
+import { errors } from '../middleware/error';
 import { getForwardStatus } from '../services/analytics-forward';
+import { resolvePlatformCapabilities } from '../services/platform-capabilities';
 import {
   DEFAULT_PERIOD_DAYS,
   DEFAULT_TOP_EVENTS_LIMIT,
@@ -18,6 +20,22 @@ const adminAnalyticsRoutes = new Hono<{ Bindings: Env }>();
 
 // All analytics routes require superadmin
 adminAnalyticsRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
+
+// Every query route reads Cloudflare's Analytics Engine SQL API, or a self-host local sink. With
+// neither there is nothing to query (and no dataset name is configured), so answer "not available"
+// before any route builds SQL. Forward status is local state and stays readable. Pure: no I/O.
+adminAnalyticsRoutes.use('/*', async (c, next) => {
+  if (
+    !resolvePlatformCapabilities(c.env).analyticsQuery &&
+    !c.req.path.endsWith('/forward-status')
+  ) {
+    throw errors.featureUnavailable(
+      'analyticsQuery',
+      'Analytics is not available on this installation'
+    );
+  }
+  await next();
+});
 /**
  * GET /api/admin/analytics/dau — Daily active users (last N days)
  */

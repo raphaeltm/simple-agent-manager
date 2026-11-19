@@ -6,6 +6,8 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
+import { errors } from '../middleware/error';
 import { resolveCapacityPoolPlacementSettings } from './capacity-pool-placement-settings';
 import {
   buildPlacementAuthoritySqlPredicate,
@@ -61,6 +63,34 @@ type NodeAllocationPlanGuardRow = {
 export interface NodeAllocationPlanRole {
   nodeRole: 'workspace' | 'deployment';
   workloadRole: CapacityWorkloadRole;
+}
+
+/**
+ * The node's stored allocation no longer has current authority (record gone, owner changed,
+ * source/pool/credential drift). A caller-fixable conflict, unlike an unavailable database.
+ */
+export class NodeAllocationAuthorityChangedError extends Error {
+  override name = 'NodeAllocationAuthorityChangedError';
+}
+
+/** A user's pinned request: authority drift is a 409 they can act on, not a server fault. */
+export async function assertPinnedNodeAllocationPlanCurrent(
+  ...args: Parameters<typeof assertNodeAllocationPlanCurrent>
+): Promise<void> {
+  try {
+    await assertNodeAllocationPlanCurrent(...args);
+  } catch (error) {
+    if (!(error instanceof NodeAllocationAuthorityChangedError)) throw error;
+    const [, nodeId, userId, projectId] = args;
+    log.warn('node_allocation.pinned_authority_refused', {
+      nodeId,
+      userId,
+      projectId,
+      reason: error.message,
+      action: 'rejected',
+    });
+    throw errors.conflict(`${error.message}. Choose another node or omit nodeId.`);
+  }
 }
 
 export async function assertNodeAllocationPlanCurrent(
@@ -122,10 +152,10 @@ export async function assertNodeAllocationPlanCurrent(
     .first<NodeAllocationPlanGuardRow>();
 
   if (!row) {
-    throw new Error('Node allocation record disappeared before provider allocation');
+    throw new NodeAllocationAuthorityChangedError('Node allocation record disappeared before provider allocation');
   }
   if (row.user_id !== userId) {
-    throw new Error('Node allocation user changed before provider allocation');
+    throw new NodeAllocationAuthorityChangedError('Node allocation user changed before provider allocation');
   }
   const { nodeRole, workloadRole } = expectedRole;
   const predicate = buildPlacementAuthoritySqlPredicate({
@@ -183,7 +213,7 @@ export async function assertNodeAllocationPlanCurrent(
     .bind(nodeId, userId, ...predicate.binds)
     .first<{ ok: number }>();
   if (!current) {
-    throw new Error('Node allocation plan is no longer current');
+    throw new NodeAllocationAuthorityChangedError('Node allocation plan is no longer current');
   }
   if (row.capacity_authority_generation !== null) {
     const settings = await resolveCapacityPoolPlacementSettings(
@@ -194,7 +224,7 @@ export async function assertNodeAllocationPlanCurrent(
       row.selection_settings_version !== null &&
       row.selection_settings_version !== settings.placementSettings.sourceGeneration
     ) {
-      throw new Error('Selected capacity placement settings changed after placement');
+      throw new NodeAllocationAuthorityChangedError('Selected capacity placement settings changed after placement');
     }
     const currentAuthority = capacityPlacementAuthorityGeneration({
       poolRevision: row.pool_revision,
@@ -203,7 +233,7 @@ export async function assertNodeAllocationPlanCurrent(
       candidateAuthorityGeneration: row.candidate_authority_generation,
     });
     if (row.capacity_authority_generation !== currentAuthority) {
-      throw new Error('Selected capacity authority changed after placement');
+      throw new NodeAllocationAuthorityChangedError('Selected capacity authority changed after placement');
     }
   }
 }

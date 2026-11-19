@@ -89,7 +89,7 @@ export const INBOX_SETTINGS = [
     name: 'inbox.noticeRetryMinutes',
     defaultValue: 60,
     description:
-      'Minutes the sweep keeps retrying an agent’s notice that an inbox item was answered, a task archived, or an item expired.',
+      'Minutes the sweep keeps retrying an agent’s notice that an inbox item was answered, done or expired.',
     range: { min: 5, max: 1_440 },
   },
   // Questions (`request_human_input`). Defaults are the old HUMAN_INPUT_* Worker defaults

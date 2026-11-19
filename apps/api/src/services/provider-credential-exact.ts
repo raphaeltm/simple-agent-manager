@@ -1,7 +1,5 @@
 import type { Provider } from '@simple-agent-manager/providers';
-import {
-  timestampVersion,
-} from '@simple-agent-manager/scheduler-core';
+import { timestampVersion } from '@simple-agent-manager/scheduler-core';
 import type { CredentialProvider, CredentialSource } from '@simple-agent-manager/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
@@ -47,10 +45,12 @@ type ProviderFactory<TEnv extends Env> = (
   credentialSource: CredentialSource,
   userId: string,
   projectId: string | null,
-  env: TEnv
+  env: TEnv,
+  /** The user who stored the credential, when a project member uses another member's row. */
+  credentialOwnerUserId?: string
 ) => Promise<ProviderResolutionResult>;
 
-function parseProviderCredentialReference(
+export function parseProviderCredentialReference(
   reference: string | null | undefined
 ): ParsedProviderCredentialReference | null {
   const trimmed = reference?.trim();
@@ -73,7 +73,9 @@ function parseProviderCredentialReference(
   return null;
 }
 
-export function isExactCredentialSource(value: string | null | undefined): value is CredentialSource {
+export function isExactCredentialSource(
+  value: string | null | undefined
+): value is CredentialSource {
   return value === 'user' || value === 'project' || value === 'platform';
 }
 
@@ -91,7 +93,7 @@ export async function fingerprintEncryptedProviderCredential(
   return `sha256:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 }
 
-async function exactCredentialGenerationMatches(
+export async function exactCredentialGenerationMatches(
   exactCredential: ExactProviderCredentialBinding,
   row: { encryptedToken: string; iv: string; createdAt?: string | null; updatedAt?: string | null }
 ): Promise<{ matches: boolean; fingerprint: string }> {
@@ -323,7 +325,8 @@ export async function createProviderForExactCredential<TEnv extends Env>(
       'project',
       userId,
       projectId,
-      env
+      env,
+      cred.userId
     );
     return {
       ...result,
@@ -363,6 +366,7 @@ async function createProviderForExactComposableCredential<TEnv extends Env>(
 
   const [row] = await db
     .select({
+      ownerId: schema.ccCredentials.ownerId,
       encryptedToken: schema.ccCredentials.encryptedToken,
       iv: schema.ccCredentials.iv,
       createdAt: schema.ccCredentials.createdAt,
@@ -401,7 +405,8 @@ async function createProviderForExactComposableCredential<TEnv extends Env>(
     credentialSource,
     userId,
     projectId,
-    env
+    env,
+    row.ownerId
   );
   return {
     ...result,

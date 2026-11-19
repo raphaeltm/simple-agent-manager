@@ -141,8 +141,9 @@ and the chat it came from. In the app today a task is read-only, so finishing it
    speech bubble at the top) and say so, for example _"done, the key is in the production
    environment"_. Otherwise tell the person who started that chat, or comment on the task through
    the [API](/docs/reference/api/#inbox): a comment from the assignee wakes the agent.
-3. Leave the task open until the agent has picked it up. **Archive** it only once the agent knows,
-   or if you won't do it: archiving tells the agent you will not act on it.
+3. Leave the task open until the agent has picked it up. **Archive** it once the agent knows, or
+   if you won't do it. Archiving tells the agent nothing, so if it should stop waiting, say so in
+   the chat or comment on the task first.
 
 Controls for ticking steps, commenting, marking it **done**, handing it on and **I'll take it** come
 with the task view in the next release; until then they are available through the
@@ -158,14 +159,14 @@ from then on it is theirs, and it no longer counts as waiting on the others. Mem
 cannot write tasks (viewers) can read a task and comment on it, nothing more.
 
 The agent that assigned the task is woken in its chat when you comment, take it, hand it on, mark it
-done, reopen it or archive it. Ticking steps is recorded and does not wake it unless it asked for
+done or reopen it. Archiving it wakes no one. Ticking steps is recorded and does not wake it unless it asked for
 that. A comment wakes it only when it comes from the assignee, the member who took the task, or
 someone who can write in the agent's chat; anyone else's comment is kept, and the agent reads it the
 next time it wakes.
 A comment from someone other than the chat's owner reaches the agent as a teammate's input, not as
 an instruction from the owner. Another chat of the same person can watch the task instead of
-assigning a duplicate (`attach`); it is woken when the task is taken, handed on, finished, reopened
-or archived, and reads the comments at those wakes.
+assigning a duplicate (`attach`); it is woken when the task is taken, handed on, finished or
+reopened, and reads the comments at those wakes.
 
 A teammate who cannot read the agent's chat still sees the task, its steps, links and discussion,
 never the chat transcript. Task discussion also appears on the project's Comments page for the
@@ -211,12 +212,18 @@ item closes by itself. An item you archived stays archived while the thing keeps
 
 ## Archive
 
-**Archive** (the box at the top) means you will not act on the item: it closes. Archiving a
-question, review or result does not tell the agent; it stays where it is until you answer something or
-write in its chat. SAM's automatic check-ins also stay off that chat until you write in it (for up
-to `inbox.archiveCheckinHoldHours`, a week by default), so nothing nudges the agent. A permission is denied, a secret declined and an approval denied, and the agent
-hears that. Archiving a task tells the chats watching it. A Problem has no agent, so archiving it
-tells no one. For a few seconds the
+**Archive** (the box at the top) means you will not act on the item: it leaves your inbox, and no
+agent is told. The agent stays where it is until you answer something or write in its chat.
+Archiving a question also keeps SAM's automatic check-ins off that chat until you write in it (for
+up to `inbox.archiveCheckinHoldHours`, a week by default), so nothing nudges the agent.
+
+- A question, review, result or task closes.
+- A secret request closes as declined and an approval as denied, without telling the agent.
+- A permission request leaves your inbox but is not answered: it stays pending in its chat, where
+  you can still answer it, and the agent keeps waiting until it gives up on it.
+- A Problem has no agent to tell.
+
+For a few seconds the
 receipt offers **Undo**; nothing is sent until that time is up. If you leave the page or close the
 tab first, the archive is sent then.
 

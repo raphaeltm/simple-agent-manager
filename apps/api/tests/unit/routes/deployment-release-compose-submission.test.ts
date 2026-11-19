@@ -31,6 +31,7 @@ vi.mock('../../../src/services/deployment-provisioning', () => ({
 }));
 
 vi.mock('../../../src/services/deployment-volumes', () => ({
+  listEnvironmentVolumes: vi.fn().mockResolvedValue([]),
   createMissingManifestVolumes: (...args: unknown[]) => mockCreateMissingManifestVolumes(...args),
   attachEnvironmentVolumesToLinkedNode: (...args: unknown[]) =>
     mockAttachEnvironmentVolumesToLinkedNode(...args),

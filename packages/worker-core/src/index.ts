@@ -104,4 +104,13 @@ export {
   type SearchQueryLimitEnv,
   type SearchQueryLimits,
 } from './search-query-limits';
+export {
+  __setSharedFlightResumeOnOwnTimerForTest,
+  DEFAULT_SHARED_FLIGHT_JOIN_GRACE_MS,
+  joinSharedFlight,
+  resumeSharedFlightJoinsOnOwnTimer,
+  settleSharedFlight,
+  SHARED_FLIGHT_POLL_MS,
+  SharedFlightAbandonedError,
+} from './shared-flight';
 export { ulid } from './ulid';

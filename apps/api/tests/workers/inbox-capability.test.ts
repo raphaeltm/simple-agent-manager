@@ -452,7 +452,7 @@ describe('inbox capability through the real entry points', () => {
     expect(await checkinGate(s.project, s.chatSessionId)).toMatchObject({ questionHold: true });
   });
 
-  it('a secret request archived through the inbox is declined and the agent notified', async () => {
+  it('a secret request archived through the inbox is declined and the agent is not told', async () => {
     const s = await seed();
     const created = await callTool(s.token, 'request_secret', {
       name: 'STRIPE_API_KEY',
@@ -471,14 +471,21 @@ describe('inbox capability through the real entry points', () => {
       s.ownerCookie
     );
     expect(archived.status).toBe(200);
-    expect(archived.body).toMatchObject({ outcome: 'declined', agentNotified: true });
+    expect(archived.body).toMatchObject({ outcome: 'declined', agentNotified: false });
     const row = await testEnv.DATABASE.prepare(
       'SELECT status, notified_at FROM runtime_secret_requests WHERE id = ?'
     )
       .bind(requestId)
       .first<{ status: string; notified_at: number | null }>();
     expect(row?.status).toBe('declined');
+    // Settled in the closing write, so the notice sweep never sends one.
     expect(row?.notified_at).not.toBeNull();
+    const snapshot = await s.project.getDurableExecutionSnapshot(s.chatSessionId);
+    expect(
+      snapshot.deliveries.filter(
+        (delivery: { sourceKind?: string }) => delivery.sourceKind === 'secret_request'
+      )
+    ).toEqual([]);
     const after = await get<ListBody>(`/api/projects/${s.projectId}/inbox`, s.ownerCookie);
     expect(after.body.items.map((item) => item.ref)).not.toContain(ref);
   });

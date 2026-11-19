@@ -476,6 +476,22 @@ sleep attempt was finishing. SAM left the replacement alone and kept the previou
 session keeps running. Check the current workspace before you put the session to sleep or restart
 it.
 
+## Download retained work
+
+If you created the session, open **Download saved work** above its conversation. Choose
+**Download manifest** for the saved capture record or **Download WIP bundle** for the exact
+saved Git work. This does not start the agent and works without its original workspace.
+
+These downloads may contain private code. Keep them private. The WIP bundle is a Git bundle,
+not a replacement workspace or a guarantee that every file was captured. Read the manifest
+for capture omissions. This control does not export the agent's home directory or credentials.
+
+Downloads require your approved account and continued access to the original project. Other
+project members, including project administrators, cannot download your saved work. If the
+capture expired, was deleted, failed integrity checks, or was never retained, the download is
+unavailable. Archiving or deleting a session can remove its saved artifacts; this control
+cannot recover deleted work or extend retention.
+
 ## Expired saved workspace
 
 A sleeping chat can be woken for seven days. After that its saved workspace is deleted and the chat
@@ -725,6 +741,8 @@ environment it hosts.
 
 **I already deleted this server** isn't offered for machines you enrolled yourself (use **Delete** for those). On a machine that runs on SAM's own cloud account, SAM refuses
 with **This server runs on SAM-managed capacity; contact an operator**, so ask your administrator.
+An administrator removes those from **Admin → Infrastructure → Stuck nodes**; see
+[Stuck nodes on SAM's capacity](/docs/guides/admin-settings/#stuck-nodes-on-sams-capacity).
 
 ## The session has ended
 

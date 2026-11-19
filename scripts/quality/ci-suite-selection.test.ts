@@ -640,7 +640,7 @@ describe('runner budget (jobs a ready PR starts)', () => {
   });
 
   // Realistic multi-area PRs, with their limits. The four-area shape of baseline run
-  // 43734352275 is the one case above 26: 23 before, 27 now. The seventh Workers shard
+  // 43734352275 is above 26: 23 before, 27 now. The seventh Workers shard
   // is what brings an API PR to about 10 min, since the Workers shards run alongside the
   // 8.4 min Test api shards.
   it.each([
@@ -659,10 +659,13 @@ describe('runner budget (jobs a ready PR starts)', () => {
       ['packages/shared/src/index.ts', 'packages/vm-agent/main.go'],
       25,
     ],
+    // 27: packages/vm-agent/go.mod also starts Validate Deploy Scripts, whose
+    // vm-agent-artifacts.test.ts pins the Go build image to the go directive (a real Go
+    // modules PR already did through go.sum).
     [
       'lockfile, VM agent and Go modules',
       ['pnpm-lock.yaml', 'packages/vm-agent/main.go', 'packages/vm-agent/go.mod'],
-      26,
+      27,
     ],
   ])('a ready %s PR starts at most the recorded number of jobs', (_, paths, limit) => {
     expect(count(paths)).toBeLessThanOrEqual(limit);

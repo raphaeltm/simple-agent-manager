@@ -6,7 +6,7 @@
  *
  * A task never blocks and never expires; the agent keeps working after assigning. The filing chat
  * is subscribed to the task's `sam.inbox` events, so it is woken when the person comments, takes
- * it, hands it on, finishes, reopens or archives it.
+ * it, hands it on, finishes or reopens it (archiving it wakes no one).
  */
 import type { InboxAgentItem, InboxTaskDetail } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
@@ -290,7 +290,8 @@ export const AgentAttachInputSchema = v.object({
 
 /**
  * Watch an open task another chat of the same person assigned: this chat is woken when the task
- * is taken, handed on, finished, reopened or archived (comments wake the assigning chat only). An
+ * is taken, handed on, finished or reopened (comments wake the assigning chat only; archiving
+ * wakes no one). An
  * event subscription on the item, so there is no watcher table; at most
  * `inbox.watchersPerItemMax` chats watch one task.
  */

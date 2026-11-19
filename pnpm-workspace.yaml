@@ -14,7 +14,7 @@ catalog:
   '@astrojs/check': 0.9.10
   eslint: 9.39.5
   eslint-plugin-astro: 1.7.0
-  globals: 17.9.0
+  globals: 17.14.0
   oxlint: 1.77.0
   jsdom: 29.1.1
 

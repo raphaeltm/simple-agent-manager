@@ -13,7 +13,7 @@ import {
   createProviderForUser,
   exactProviderCredentialBindingFromPlacementSnapshot,
 } from './provider-credentials';
-import { recordOwnerAttestedRuntimeTermination } from './strict-node-deletion';
+import { recordOwnerAttestedRuntimeTermination } from './strict-node-termination-proof';
 
 type NodeDb = ReturnType<typeof drizzle<typeof schema>>;
 type NodeRow = typeof schema.nodes.$inferSelect;
@@ -32,7 +32,12 @@ export interface ManualNodeDeletionProof {
  * (`services/instant-session.ts`), capacity placement sets
  * `placementCredentialSource`, older nodes set `credentialSource`.
  */
-function isOnSamCapacity(node: NodeRow): boolean {
+export function isOnSamCapacity(
+  node: Pick<
+    NodeRow,
+    'credentialSource' | 'placementCredentialSource' | 'credentialAttributionSource'
+  >
+): boolean {
   return (
     node.credentialSource === 'platform' ||
     node.placementCredentialSource === 'platform' ||

@@ -514,7 +514,7 @@ Also changed this week:
 - **Agents can take over a pull request they didn't open** and record that they're responsible for
   it, which other agents can look up.
   → [Pull requests an agent takes over](/docs/guides/agents/#pull-requests-an-agent-takes-over)
-- **Agents waiting on CI use exact event names** (`check_run.completed`, with the full commit SHA);
+- **Agents waiting on CI use exact event names** (`check_suite.completed` + `workflow_run.completed` by default, with the full commit SHA; `check_run.completed` is opt-in for early per-job failure);
   bare names like `check_run` never matched.
 
 ### For self-hosters & admins

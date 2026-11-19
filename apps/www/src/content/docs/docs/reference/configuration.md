@@ -40,10 +40,11 @@ Sources: `apps/api/src/services/operator-settings.ts`, `admin-settings-registry.
 
 ## Operations debugger tools
 
-| Admin setting key               | Default | Permitted range and meaning                                                                                                                                              |
-| ------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `operations.debuggerTools`      | `off`   | `off`, `read`, `read_ask` or `read_auto_safe`; which debugger tools Operations-project agents may use. Read with no cache.                                               |
-| `operations.auditRetentionDays` | `90`    | Integer `1`–`3650`; days an `operations_audit_log` row is kept before the daily `0 3 * * *` cron deletes it. If the setting cannot be read, that day's purge is skipped. |
+| Admin setting key                                   | Default | Permitted range and meaning                                                                                                                                              |
+| --------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `operations.debuggerTools`                          | `off`   | `off`, `read`, `read_ask` or `read_auto_safe`; which debugger tools Operations-project agents may use. Read with no cache.                                               |
+| `operations.auditRetentionDays`                     | `90`    | Integer `1`–`3650`; days an `operations_audit_log` row is kept before the daily `0 3 * * *` cron deletes it. If the setting cannot be read, that day's purge is skipped. |
+| `operations.operatorNodeDeletionAllowAgentSessions` | `true`  | Boolean; whether an agent sign-in session may use `POST /api/admin/nodes/:id/operator-deletion` (Admin → Infrastructure → Stuck nodes). Read with no cache.              |
 
 Read-tool limits (thresholds, caps and debug-package retention) are the `operations.debugPackage*` and `operations.ops*` admin settings defined in `apps/api/src/services/fleet-ops/settings-definitions.ts`; the daily `0 3 * * *` cron deletes debug packages older than `operations.debugPackageRetentionDays` (default `7`) from the Operations project library (`purgeExpiredDebugPackages` in `apps/api/src/services/fleet-ops/debug-packages.ts`). See [Admin Settings](/docs/guides/admin-settings/#read-tool-limits).
 
@@ -737,18 +738,17 @@ retain the KV procedure in `.claude/rules/55-runaway-cost-emergency-ops.md`.
 
 The five `orchestrator.cancellation*` controls are typed runtime settings editable in Admin Settings under Operations, rather than environment variables. The residence limit is captured as a durable deadline when cancellation starts or is explicitly retried; changing the setting does not extend an existing episode. Expired episodes block locally before any settings or D1 lookup.
 
-| Runtime setting | Default | Description |
-| --- | --- | --- |
-| `orchestrator.cancellationPageSize` | `25` | Maximum tasks visited in one mission cancellation turn. |
-| `orchestrator.cancellationTurnMs` | `5000` | Elapsed turn budget checked between task operations. |
-| `orchestrator.cancellationRetryPasses` | `3` | Maximum passes before failed cancellation is blocked for explicit retry. |
-| `orchestrator.cancellationResidenceMs` | `900000` | Maximum cancellation episode residence before blocking. |
-| `orchestrator.cancellationIntervalMs` | `1000` | Alarm delay between pending cancellation turns. |
+| Runtime setting                        | Default  | Description                                                              |
+| -------------------------------------- | -------- | ------------------------------------------------------------------------ |
+| `orchestrator.cancellationPageSize`    | `25`     | Maximum tasks visited in one mission cancellation turn.                  |
+| `orchestrator.cancellationTurnMs`      | `5000`   | Elapsed turn budget checked between task operations.                     |
+| `orchestrator.cancellationRetryPasses` | `3`      | Maximum passes before failed cancellation is blocked for explicit retry. |
+| `orchestrator.cancellationResidenceMs` | `900000` | Maximum cancellation episode residence before blocking.                  |
+| `orchestrator.cancellationIntervalMs`  | `1000`   | Alarm delay between pending cancellation turns.                          |
 
 Mission cancellation uses the existing orchestrator tracking and alarm (`project-orchestrator/cancel-mission.ts`, `cancellation-config.ts`). The mission stays paused while its tasks are being cancelled; completion is recorded only after no nonterminal task remains. A blocked cancellation stops rearming and requires an explicit cancellation retry. Completed task cancellations remain complete across retries.
 
 These bounds limit work rather than guarantee completion within one episode. At the defaults, 10,000 tasks require at least 400 turns. If every turn uses its full five-second work budget plus the one-second alarm delay, that is approximately 40 minutes before scheduler and RPC overhead, exceeding the fifteen-minute residence limit. Such a mission will require explicit retries; raise the bounds deliberately for larger workloads. The turn budget is checked between operations and does not interrupt an RPC already in progress.
-
 
 The scheduled Durable Object billing monitor reads these non-secret variables
 from the selected GitHub Environment, not from the API Worker runtime:
@@ -1860,6 +1860,18 @@ them doesn't; the upload-link lifetime isn't checked in the browser. Set them in
 | `ATTACHMENT_MAX_FILES`              | `20`                 | Max files per message        |
 | `ATTACHMENT_PRESIGN_EXPIRY_SECONDS` | `900` (15 min)       | Lifetime of each upload link |
 
+Upload links (attachments, session snapshots, compose image artifacts and build contexts) are all
+signed by one client, `getR2PresignTarget()` in `apps/api/src/services/r2-s3-client.ts`. On
+Cloudflare it addresses `https://<CF_ACCOUNT_ID>.r2.cloudflarestorage.com` with `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY` and `R2_BUCKET_NAME`. A runtime whose R2 binding keeps objects in its own S3
+store sets `R2_S3_ENDPOINT`, `R2_S3_BUCKET`, `R2_S3_KEY_PREFIX` and `R2_S3_REGION` (its SigV4
+signing region, for example `auto` for Google Cloud Storage or `us-west-2` for AWS S3; there is no
+default, because a wrong region makes every signed URL fail), plus optional
+`R2_S3_FORCE_PATH_STYLE` (default path style); links then target
+`<R2_S3_BUCKET>/<R2_S3_KEY_PREFIX><key>` (`resolveR2PresignConfig()` in
+`apps/api/src/services/r2-presign-config.ts`). A partially configured store disables presigning
+rather than falling back to Cloudflare, and attachment requests then answer `403`.
+
 ### Workspace uploads and downloads
 
 These apply to files uploaded straight into a workspace from its own page, and to files downloaded
@@ -2048,6 +2060,25 @@ Client page/referrer fields follow a privacy normalization contract before enque
 | `MAX_ANALYTICS_INGEST_BATCH_SIZE`           | `25`                                            | Max browser events accepted per ingest request                                     |
 | `MAX_ANALYTICS_INGEST_BODY_BYTES`           | `65536`                                         | Max ingest request body size in bytes                                              |
 | `MAX_ANALYTICS_DURATION_MS`                 | `3600000`                                       | Max accepted page-duration value; larger values are clamped                        |
+
+Cloudflare installations write analytics to Workers Analytics Engine and read them through the
+Analytics Engine SQL API (`queryAnalyticsEngine()` in `apps/api/src/routes/admin-analytics-query.ts`),
+which needs `CF_ACCOUNT_ID` and `CF_API_TOKEN`. Without them the admin analytics routes answer
+`404 FEATURE_UNAVAILABLE` (`analyticsQuery`) instead of a server error. A self-hosted build can
+instead install a local sink (`installAnalyticsD1Sink()` in `apps/api/src/selfhost/analytics/`):
+with `ANALYTICS_SINK="d1"` it records and reads the same events in the `analytics_events` table of
+`OBSERVABILITY_DATABASE`. That table is created by a self-host-only migration
+(`apps/api/src/selfhost/observability-migrations.ts`), never on Cloudflare, and its retention is
+bounded by the self-host admin settings `analytics.d1.retentionDays` (default 90) and
+`analytics.d1.maxRows` (default 500,000), applied by the 5-minute observability purge in batches
+of `analytics.d1.purgeBatchRows` (default 5,000) for at most `analytics.d1.purgeTickBudgetMs`
+(default 10,000) per run; unfinished deletes continue on the next run. The
+Cloudflare Worker does not install the sink, so `ANALYTICS_SINK` has no effect there.
+
+Admin → Logs search reads Workers Observability with the same account API (`queryWorkerLogs()`),
+and Admin → Stream is fed by the tail worker. A deployment without a tail worker declares
+`LOG_TAIL_AVAILABLE="false"`; both pages then show where to read logs on the server instead
+(`publicPlatformCapabilities()` reports `logSearch` and `liveLogStream`).
 
 ## Analytics Forwarding
 

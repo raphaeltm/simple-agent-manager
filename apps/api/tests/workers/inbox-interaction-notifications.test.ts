@@ -13,14 +13,18 @@ import { projectInteractionAttention } from '../../src/durable-objects/interacti
 import type { NotificationService } from '../../src/durable-objects/notification';
 import type { Env } from '../../src/env';
 import { handleAppError } from '../../src/middleware/app-error-handler';
+import { requireApproved, requireAuth } from '../../src/middleware/auth';
+import { chatRoutes } from '../../src/routes/chat';
 import { acpInteractionCallbackRoute } from '../../src/routes/projects/acp-interaction-callback';
 import { signCallbackToken } from '../../src/services/jwt';
 import * as projectDataService from '../../src/services/project-data';
+import { get, post } from './helpers/inbox-harness';
 import {
   seedAgentSession,
   seedInstallation,
   seedNode,
   seedProject,
+  seedSignedInUser,
   seedUser,
   seedWorkspace,
 } from './helpers/seed-d1';
@@ -151,6 +155,137 @@ describe('ACP interaction notifications and undelivered answers (slice E)', () =
     });
     // The tool call the agent asked about never reaches the notification.
     expect(JSON.stringify(needsInput)).not.toContain('CANARY');
+
+    await runInDurableObject(store, async (_instance, state) => {
+      state.storage.sql.exec(`DELETE FROM outbox`);
+      await state.storage.deleteAlarm();
+    });
+  });
+
+  it('archiving a permission from the inbox answers nothing: it leaves the inbox and stays pending in the chat', async () => {
+    const { userId, projectId, chatSessionId, interactionId, store } = await setup();
+    await drain(store);
+    const readInteraction = () =>
+      runInDurableObject(store, async (_instance, state) => {
+        return state.storage.sql
+          .exec(
+            'SELECT state, attention_marker_id FROM interactions WHERE interaction_id = ?',
+            interactionId
+          )
+          .one() as { state: string; attention_marker_id: string | null };
+      });
+    const before = await readInteraction();
+    const markerId = before.attention_marker_id!;
+    expect(markerId).toBeTruthy();
+    const ref = `attention:${chatSessionId}:${markerId}`;
+    const project = testEnv.PROJECT_DATA.get(testEnv.PROJECT_DATA.idFromName(projectId));
+    const syncSummaries = () =>
+      runInDurableObject(project, async (instance) => {
+        await (
+          instance as unknown as { runSummarySyncLocked(): Promise<void> }
+        ).runSummarySyncLocked();
+      });
+    await syncSummaries();
+    const cookie = await seedSignedInUser(userId);
+    type List = { items: { ref: string }[] };
+    // Liveness: the permission is in the person's inbox before the archive.
+    expect((await get<List>('/api/inbox', cookie)).body.items.map((i) => i.ref)).toContain(ref);
+
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockClear();
+    const archived = await post(
+      `/api/projects/${projectId}/inbox/items/${encodeURIComponent(ref)}/archive`,
+      cookie
+    );
+    expect(archived.status).toBe(200);
+    expect(archived.body).toEqual({ ref, outcome: 'archived', agentNotified: false });
+    // Nothing went to the runtime, and the interaction is exactly as pending as it was.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await readInteraction()).toEqual(before);
+    const { marker } = await projectDataService.getAttentionRequest(
+      testEnv,
+      projectId,
+      chatSessionId,
+      markerId,
+      userId
+    );
+    // Out of the inbox but not resolved: the chat still reads as waiting on the person, so SAM's
+    // silent-agent check does not cancel the prompt behind it.
+    expect(marker).toMatchObject({ resolvedAt: null });
+    expect(marker?.inboxArchivedAt).toEqual(expect.any(Number));
+    // It leaves the inbox and a re-run of the projection job does not bring it back.
+    await drain(store);
+    await syncSummaries();
+    expect((await get<List>('/api/inbox', cookie)).body.items.map((i) => i.ref)).not.toContain(ref);
+    // A second archive is a conflict, not a second write.
+    const again = await post(
+      `/api/projects/${projectId}/inbox/items/${encodeURIComponent(ref)}/archive`,
+      cookie
+    );
+    expect([404, 409]).toContain(again.status);
+
+    await runInDurableObject(store, async (_instance, state) => {
+      state.storage.sql.exec(`DELETE FROM outbox`);
+      await state.storage.deleteAlarm();
+    });
+  });
+
+  it('a teammate the chat is shared with can archive a permission, and the archive is audited', async () => {
+    const { userId, projectId, chatSessionId, interactionId, store } = await setup();
+    await drain(store);
+    const markerId = await runInDurableObject(store, async (_instance, state) => {
+      const row = state.storage.sql
+        .exec(
+          'SELECT attention_marker_id FROM interactions WHERE interaction_id = ?',
+          interactionId
+        )
+        .one() as { attention_marker_id: string };
+      return row.attention_marker_id;
+    });
+    const granteeId = `inbox-e-grantee-${crypto.randomUUID()}`;
+    await seedUser(granteeId);
+    await testEnv.DATABASE.prepare(
+      `INSERT INTO project_members (project_id, user_id, role, status) VALUES (?, ?, 'maintainer', 'active')`
+    )
+      .bind(projectId, granteeId)
+      .run();
+    const ownerCookie = await seedSignedInUser(userId);
+    const granteeCookie = await seedSignedInUser(granteeId);
+    const shareApp = new Hono<{ Bindings: Env }>();
+    shareApp.onError(handleAppError);
+    shareApp.use('/api/projects/*', requireAuth(), requireApproved());
+    shareApp.route('/api/projects/:projectId/sessions', chatRoutes);
+    const shared = await shareApp.request(
+      `/api/projects/${projectId}/sessions/${chatSessionId}/access/grants`,
+      {
+        method: 'POST',
+        headers: { Cookie: ownerCookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: granteeId,
+          durationMinutes: 30,
+          acknowledgeSharedCredentials: true,
+        }),
+      },
+      testEnv
+    );
+    expect(shared.status).toBeLessThan(300);
+
+    const ref = `attention:${chatSessionId}:${markerId}`;
+    const archived = await post(
+      `/api/projects/${projectId}/inbox/items/${encodeURIComponent(ref)}/archive`,
+      granteeCookie
+    );
+    expect(archived.status).toBe(200);
+    const { events } = await projectDataService.listActivityEvents(
+      testEnv,
+      projectId,
+      'session.shared_answer',
+      10,
+      null,
+      chatSessionId
+    );
+    expect(JSON.stringify(events)).toContain(markerId);
+    expect(JSON.stringify(events)).toContain('"archived":true');
 
     await runInDurableObject(store, async (_instance, state) => {
       state.storage.sql.exec(`DELETE FROM outbox`);

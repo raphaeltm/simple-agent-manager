@@ -20,7 +20,7 @@ import {
 } from '../../services/node-stranded-tasks';
 import { deleteNodeResources, retireDeletedDeploymentNodeRecord } from '../../services/nodes';
 import { recordOwnerNodeDeletionAudit } from '../../services/owner-node-deletion-audit';
-import { isOwnerAttestedTermination } from '../../services/strict-node-deletion';
+import { isOwnerAttestedTermination } from '../../services/strict-node-termination-proof';
 
 type NodesDb = ReturnType<typeof drizzle<typeof schema>>;
 

@@ -413,6 +413,45 @@ describe('owner-confirmed removal of a node SAM cannot delete', () => {
     ).toEqual({ status: 'cleanup_pending', cleanup_reason: 'owner_attested_termination' });
   });
 
+  it.each([
+    ['fully absent', null, null],
+    ['weak proof only', 1, null],
+    ['strong proof present', 1, 'sha256:recorded'],
+    ['strong proof mismatched', 1, 'sha256:rotated'],
+  ] as const)(
+    'keeps owner-attested provenance for providerless GCP binding: %s',
+    async (state, version, fingerprint) => {
+      const seeded = await seedStuckDeploymentNode(`binding-${state.replaceAll(' ', '-')}`);
+      await env.DATABASE.prepare(
+        `UPDATE nodes SET provider_instance_id=NULL, cloud_provider='gcp',
+         placement_credential_source=?, placement_credential_reference=?,
+         placement_credential_version=?, placement_credential_fingerprint=? WHERE id=?`
+      )
+        .bind(
+          version === null ? null : 'user',
+          version === null ? null : 'credentials:old',
+          version,
+          fingerprint,
+          seeded.nodeId
+        )
+        .run();
+      const fetchSpy = vi.fn(async () => {
+        throw new Error('token exchange must not be attempted');
+      });
+      vi.stubGlobal('fetch', fetchSpy);
+      const response = await confirmManualDeletion(seeded.userId, seeded.nodeId);
+      expect(response.status).toBe(200);
+      const node = await readNode(seeded.nodeId);
+      expect(node).toMatchObject({
+        status: 'deleted',
+        runtime_termination_confirmed_at: expect.any(String),
+      });
+      expect(node?.runtime_termination_attested_at).toBe(node?.runtime_termination_confirmed_at);
+      expect(await ownerRemovalReason(seeded.nodeId)).toBe('owner_attested_manual_deletion');
+      expect(fetchSpy).not.toHaveBeenCalled();
+    }
+  );
+
   it('sends a machine the owner enrolled to Delete instead, and changes nothing', async () => {
     const seeded = await seedStuckDeploymentNode('user-owned');
     await env.DATABASE.prepare(`UPDATE nodes SET node_class = 'user-owned' WHERE id = ?`)
