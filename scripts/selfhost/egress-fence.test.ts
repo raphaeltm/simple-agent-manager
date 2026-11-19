@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { join } from 'node:path';
 
@@ -22,6 +22,8 @@ import { resolverNeedsDenialProbe } from './fence-addresses.js';
 import { startCheckProbes } from './fence-probes.js';
 import { assertComposeProfiles, writeFenceFiles } from './fence-state.js';
 import { parseDotenv } from './secret-files.js';
+
+mkdirSync(resolve('.tmp'), { recursive: true });
 
 const RANGE = { start: 20000, end: 29999 };
 const RESOLV = 'nameserver 127.0.0.53\nnameserver 169.254.169.254\noptions edns0\n';
@@ -55,6 +57,14 @@ describe('egress fence ruleset', () => {
     for (const port of ['7001', '8080', '7000', '9001', '2019']) {
       expect(rules).not.toMatch(new RegExp(`127\\.0\\.0\\.1 tcp dport[^\\n]*\\b${port}\\b`));
     }
+  });
+
+  it('deduplicates loopback allowances already covered by the lease interval', () => {
+    const configured = plan({ SAM_EGRESS_ALLOW: '127.0.0.1:25000' });
+    expect(configured.loopbackPorts).not.toContain(25000);
+    const rules = renderFenceRuleset(configured);
+    expect(rules).toContain('ip daddr 127.0.0.1 tcp dport 20000-29999 accept');
+    expect(rules).not.toContain('25000');
   });
 
   it('allows DNS only to the nameservers, in chain dns, jumped to before any refusal', () => {
@@ -389,6 +399,16 @@ describe('celld.env and the metadata token proxy', () => {
     expect(() =>
       assertComposeProfiles({ CELLD_BUCKET: 's3://b', COMPOSE_PROFILES: 'gce' })
     ).toThrow(/remove/);
+  });
+
+  it.each<Record<string, string>>([
+    { CELLD_BUCKET: 'gs://fleet-bucket' },
+    { CELLD_BUCKET: 'gs://fleet-bucket', GCE_METADATA_PROXY: 'off' },
+    { CELLD_BUCKET: 's3://fleet-bucket' },
+  ])('rejects wildcard Compose profiles for $CELLD_BUCKET', (box) => {
+    for (const profiles of ['*', 'tunnel,*', '*,gce']) {
+      expect(() => assertComposeProfiles({ ...box, COMPOSE_PROFILES: profiles })).toThrow();
+    }
   });
 
   it('writes the ruleset world-readable, celld.env private, and keeps the proxy secret stable', async () => {

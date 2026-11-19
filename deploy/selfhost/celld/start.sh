@@ -84,7 +84,16 @@ until [[ -z "$result" ]]; do
   fence_problem
 done
 
-"$celld" "$@" &
+# Native object_store errors can include the metadata URI. Redact its credential before
+# stdout/stderr reaches Docker; the filter uses builtins and never puts it in process argv.
+redact_logs() {
+  local line secret="${GCE_METADATA_PROXY_SECRET:-}"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ -n "$secret" ]]; then line="${line//"$secret"/[REDACTED]}"; fi
+    printf '%s\n' "$line"
+  done
+}
+"$celld" "$@" > >(redact_logs) 2> >(redact_logs >&2) &
 pid=$!
 trap 'kill -TERM "$pid" 2>/dev/null || true' TERM INT
 

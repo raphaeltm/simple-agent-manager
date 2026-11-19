@@ -44,6 +44,11 @@ export function assertComposeProfiles(box: Readonly<Record<string, string>>): vo
   const profiles = new Set(
     (box.COMPOSE_PROFILES ?? '').split(',').map((profile) => profile.trim())
   );
+  if (profiles.has('*')) {
+    throw new Error(
+      'COMPOSE_PROFILES=* cannot safely select the optional metadata proxy; list profiles explicitly'
+    );
+  }
   const wanted = metadataProxyEnabled(box);
   if (wanted && !profiles.has(GCE_PROFILE)) {
     throw new Error(

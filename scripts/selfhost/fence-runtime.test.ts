@@ -6,7 +6,7 @@
  * rendered ruleset in a network namespace and runs start.sh and fence.sh against it.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { join, resolve } from 'node:path';
 
@@ -15,6 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildFencePlan, renderFenceRuleset } from './egress-fence.js';
 
 const START_SH = resolve(import.meta.dirname, '../../deploy/selfhost/celld/start.sh');
+mkdirSync(resolve('.tmp'), { recursive: true });
 const dir = mkdtempSync(resolve('.tmp/fence-runtime-'));
 
 /** How to run `nft -c -f <file>` here, or null when nothing can. */

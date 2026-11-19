@@ -30,6 +30,7 @@ import { FENCED_PUBLIC_ADDRESS, labUnavailableReason, NetnsLab } from './netns-l
 const REPO = resolve(import.meta.dirname, '../../..');
 const FENCED_UID = 7103;
 const CONTROL_UID = 65534;
+const LOG_SECRET = 'bc'.repeat(32);
 /** Same as verify-fence: a refused TCP connect is reported ~1 s in (first SYN retransmit). */
 const PROBE_TIMEOUT_SECONDS = 4;
 const unavailable = labUnavailableReason();
@@ -38,7 +39,7 @@ if (unavailable && process.env.CI)
   throw new Error(`fence netns lab unavailable in CI: ${unavailable}`);
 
 const plan = buildFencePlan({
-  box: { SAM_EGRESS_ALLOW: '192.168.255.1:8000' },
+  box: { SAM_EGRESS_ALLOW: '192.168.255.1:8000,127.0.0.1:20005' },
   leaseRange: { start: 20000, end: 20009 },
   resolvConf: 'nameserver 10.99.0.2\n',
   objectStore: [],
@@ -200,7 +201,11 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
       chmodSync(pidDir, 0o777);
       const pidFile = join(pidDir, 'pid');
       const fake = join(pidDir, 'fake-celld.sh');
-      writeFileSync(fake, '#!/bin/bash\necho $$ > "$1"\nexec sleep 300\n', { mode: 0o755 });
+      writeFileSync(
+        fake,
+        '#!/bin/bash\necho $$ > "$1"\nprintf \'native stdout %s\\n\' "$GCE_METADATA_PROXY_SECRET"\nprintf \'native stderr %s\\n\' "$GCE_METADATA_PROXY_SECRET" >&2\nexec sleep 300\n',
+        { mode: 0o755 }
+      );
       const child = lab.spawn(
         lab.fenced,
         [
@@ -215,6 +220,7 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
         {
           PATH: '/usr/sbin:/usr/bin:/sbin:/bin',
           SAM_CELLD_BIN: fake,
+          GCE_METADATA_PROXY_SECRET: LOG_SECRET,
           SAM_EGRESS_FENCE_PROBES: formatProbes(startCheckProbes(plan)),
           SAM_EGRESS_FENCE_ATTESTATION: attestation,
           SAM_EGRESS_FENCE_CHECK_SECONDS: '0.1',
@@ -223,6 +229,9 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
       );
       let output = '';
       child.stderr?.on('data', (b) => {
+        output += b.toString();
+      });
+      child.stdout?.on('data', (b) => {
         output += b.toString();
       });
       const exited = new Promise<number | null>((done) => child.once('exit', (code) => done(code)));
@@ -237,6 +246,12 @@ describe.skipIf(unavailable !== null)('egress fence in a network namespace', () 
       const pair = await startPair();
       const run = startCelld(pair.attestation);
       await waitFor(() => existsSync(run.pidFile));
+      await waitFor(
+        () =>
+          run.output().includes('native stdout [REDACTED]') &&
+          run.output().includes('native stderr [REDACTED]')
+      );
+      expect(run.output()).not.toContain(LOG_SECRET);
       const pid = Number(readFileSync(run.pidFile, 'utf8'));
       const removedAt = Date.now();
       lab.nft(lab.fenced, ['flush', 'ruleset']);

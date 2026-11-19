@@ -1289,7 +1289,7 @@ jobs:
 
       - name: Run isolated egress fence kernel tests
         run: |
-          docker build -f deploy/selfhost/egress-fence/Lab.Dockerfile -t sam-fence-lab deploy/selfhost/egress-fence
+          docker build -f deploy/selfhost/egress-fence/Dockerfile.lab -t sam-fence-lab deploy/selfhost/egress-fence
           docker run --rm --privileged --network none -e SAM_FENCE_LAB=1 -e CI=true -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" sam-fence-lab pnpm exec vitest run --config scripts/selfhost/live/vitest.config.ts fence-netns.live.test.ts
 
   cli-test:

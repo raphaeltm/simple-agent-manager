@@ -63,6 +63,9 @@ case "${1:-run}" in
         echo "ok $(date +%s)" >"$ATTESTATION.tmp"
         chmod 0644 "$ATTESTATION.tmp"
         mv -f "$ATTESTATION.tmp" "$ATTESTATION"
+      else
+        # The reader can latch between the check above and mv. Converge any stale ok.
+        echo lost >"$ATTESTATION"
       fi
       sleep "$RECHECK"
     done

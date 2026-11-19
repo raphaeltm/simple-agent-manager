@@ -19,7 +19,7 @@ import {
   parseNameservers,
   resolveObjectStoreEndpoints,
 } from './egress-fence.js';
-import { resolverNeedsDenialProbe } from './fence-addresses.js';
+import { ipv6Groups, resolverNeedsDenialProbe } from './fence-addresses.js';
 import { hostAddresses, type ProbeOutcome, type ProbeSpec, REMOTE_PROBES } from './fence-probes.js';
 import { mailEgressEndpoints } from './mail-settings.js';
 
@@ -81,6 +81,11 @@ export function judgeTargets(
   localAddresses: ReadonlySet<string> = new Set()
 ): Verdict {
   const verdict: Verdict = { failures: [], notes: [] };
+  const specs = probeSpecs(targets);
+  if (specs.some((_, index) => !control.has(index))) {
+    verdict.failures.push('control probe results are incomplete');
+    return verdict;
+  }
   let index = 0;
   for (const target of targets) {
     const seen: Outcomes = { tcp: results.get(index), controlTcp: control.get(index) };
@@ -241,8 +246,10 @@ export function missingNameservers(
   celldResolvConf: readonly string[],
   applied: readonly string[]
 ): string[] {
-  const open = new Set(applied);
-  return celldResolvConf.filter((server) => !open.has(server));
+  const key = (address: string) =>
+    isIP(address) === 6 ? (ipv6Groups(address)?.join(':') ?? address) : address;
+  const open = new Set(applied.map(key));
+  return celldResolvConf.filter((server) => !open.has(key(server)));
 }
 
 /** Why the fence service's attestation (`ok <epoch>`) is not current, or null. */

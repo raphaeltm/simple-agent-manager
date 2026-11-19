@@ -64,8 +64,10 @@ export function tokenSource(config: TokenConfig, endpoints = DEFAULT_ENDPOINTS) 
   const boundary = accessBoundary(config);
   const transporter = new Gaxios({
     timeout: config.timeoutMs,
-    maxRedirects: 0,
-    maxContentLength: config.maxResponseBytes,
+    // Gaxios maps maxRedirects/maxContentLength only from per-request options. These
+    // fetch-native defaults survive merging for both metadata and SDK-owned STS requests.
+    redirect: 'error',
+    size: config.maxResponseBytes,
     retry: false,
   });
   // The pinned official SDK's public STS class supports transporter limits. DownscopedClient

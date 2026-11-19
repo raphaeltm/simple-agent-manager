@@ -99,8 +99,15 @@ function probe(
   targets: readonly VerifyTarget[],
   user?: number
 ): Map<number, ProbeOutcome> {
-  const script = buildProbeScript(probeSpecs(targets), DEFAULT_PROBE_TIMEOUT_SECONDS);
-  return parseProbeOutput(inContainer(name, ['bash', '-c', script], user).output);
+  const specs = probeSpecs(targets);
+  const script = buildProbeScript(specs, DEFAULT_PROBE_TIMEOUT_SECONDS);
+  const run = inContainer(name, ['bash', '-c', script], user);
+  if (run.status !== 0) throw new Error('fence probe execution failed');
+  const results = parseProbeOutput(run.output);
+  if (results.size !== specs.length || specs.some((_, index) => !results.has(index))) {
+    throw new Error('fence probe results are incomplete');
+  }
+  return results;
 }
 
 /** The nameservers chain `dns` of the applied fence opens, from the fence service; null if unreadable. */
@@ -122,14 +129,34 @@ function appliedNameservers(envFile: string): string[] | null {
 /** celld's resolv.conf: the running celld container's, else the probe container's. */
 function celldNameservers(envFile: string, probeContainer: string): string[] {
   const running = compose(envFile, ['exec', '-T', 'celld', 'cat', '/etc/resolv.conf']);
-  const text =
-    running.status === 0
-      ? running.output
-      : inContainer(probeContainer, ['cat', '/etc/resolv.conf']).output;
-  return parseNameservers(text);
+  let text = running.output;
+  if (running.status !== 0) {
+    const state = compose(envFile, ['ps', '--status', 'running', '--quiet', 'celld']);
+    if (state.status !== 0 || state.output.trim()) {
+      throw new Error('cannot read resolver configuration from running celld');
+    }
+    const fallback = inContainer(probeContainer, ['cat', '/etc/resolv.conf']);
+    if (fallback.status !== 0) throw new Error('cannot read probe resolver configuration');
+    text = fallback.output;
+  }
+  const servers = parseNameservers(text);
+  if (servers.length === 0) throw new Error('resolver configuration contains no nameservers');
+  return servers;
 }
 
 function checkService(envFile: string, probeContainer: string, failures: string[]): void {
+  const checked = compose(envFile, [
+    'exec',
+    '-T',
+    'egress-fence',
+    '/bin/sh',
+    '/usr/local/bin/sam-egress-fence',
+    'check',
+  ]);
+  if (checked.status !== 0) {
+    failures.push('the fence service check failed: rules changed or fence loss is latched');
+    return;
+  }
   const applied = appliedNameservers(envFile);
   if (applied === null) {
     failures.push(
@@ -142,7 +169,7 @@ function checkService(envFile: string, probeContainer: string, failures: string[
   if (missing.length > 0) {
     failures.push(
       `resolver drift: celld uses ${missing.join(', ')}, which the fence's DNS sets do not ` +
-        'open; the egress-fence service syncs them from resolv.conf within its recheck interval'
+        'open; run pnpm selfhost:deploy --init to regenerate and reconcile the fence, then rerun verification'
     );
   }
   const attestation = compose(envFile, ['exec', '-T', 'egress-fence', 'cat', ATTESTATION_PATH]);

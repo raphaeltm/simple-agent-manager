@@ -288,3 +288,8 @@ private retry intent and aborts; repair Compose and rerun deploy. Each Compose c
 by `SELFHOST_COMPOSE_TIMEOUT_MS` (default `60000` milliseconds); captured output is suppressed
 because Compose can interpolate credentials. Verification honors the same
 `SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS` setting as celld (default `2` seconds).
+
+List Compose profiles explicitly: `COMPOSE_PROFILES=*` is refused, since it would select the
+optional GCE broker even for an S3 installation. The broker accepts only its fixed native
+client audience query; it never uses caller queries to select a token audience, scope or bucket.
+Celld stdout/stderr redact the broker path credential before Docker records logs.

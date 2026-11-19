@@ -234,7 +234,9 @@ export function buildFencePlan({
   const plan: EgressFencePlan = {
     celldUid: celldUid(box),
     leaseRange,
-    loopbackPorts: [...new Set(loopbackPorts)].sort((a, b) => a - b),
+    loopbackPorts: [...new Set(loopbackPorts)]
+      .filter((port) => !inRange(port, leaseRange))
+      .sort((a, b) => a - b),
     endpoints,
     dnsServers,
     localPublicPorts: [composePort(box, 'HTTP_PORT'), composePort(box, 'HTTPS_PORT')],

@@ -40,6 +40,24 @@ const results = (...outcomes: ProbeOutcome[]): Map<number, ProbeOutcome> =>
   new Map(outcomes.map((outcome, index) => [index, outcome]));
 
 describe('verify-fence judging', () => {
+  it('rejects missing control output even when every workload denial is correct', () => {
+    expect(judgeTargets([LOCAL], results('blocked', 'blocked'), results()).failures).toEqual([
+      'control probe results are incomplete',
+    ]);
+  });
+
+  it('compares IPv6 resolver spellings by address value and keeps IPv4 matching unchanged', () => {
+    expect(
+      missingNameservers(
+        ['2001:4860:4860:0:0:0:0:8888', '8.8.8.8'],
+        ['2001:4860:4860::8888', '8.8.8.8']
+      )
+    ).toEqual([]);
+    expect(
+      missingNameservers(['2001:4860:4860::8844', '1.1.1.1'], ['2001:4860:4860::8888', '8.8.8.8'])
+    ).toEqual(['2001:4860:4860::8844', '1.1.1.1']);
+  });
+
   it('probes every forbidden target over TCP and UDP, an allowed one over TCP', () => {
     expect(probeSpecs([LOCAL, LEASE])).toEqual([
       { host: '127.0.0.1', port: 7001, protocol: 'tcp' },
@@ -114,7 +132,7 @@ describe('verify-fence judging', () => {
     expect(judgeTargets([LEASE], results('blocked'), results('open')).failures).toEqual([
       'node tunnel lease port (127.0.0.1:20000) should be reachable: blocked',
     ]);
-    expect(judgeTargets([LOCAL], new Map(), new Map()).failures).toEqual([
+    expect(judgeTargets([LOCAL], new Map(), results('open', 'refused')).failures).toEqual([
       'celld operator listener (127.0.0.1:7001) is NOT fenced: UDP no result',
     ]);
   });

@@ -6,6 +6,11 @@ import { pathToFileURL } from 'node:url';
 import { loopbackPeerUid } from './peer.ts';
 import { METADATA_TOKEN_PATH, STORAGE_SCOPE_PREFIX, tokenSource } from './token.ts';
 
+// Rust object_store sends this fixed compatibility audience on its metadata access-token GET.
+// It never chooses the STS exchange audience, bucket or permission boundary.
+export const NATIVE_TOKEN_QUERY =
+  '?audience=https%3A%2F%2Fwww.googleapis.com%2Foauth2%2Fv4%2Ftoken';
+
 export function metadataServer(
   secret: string,
   issue: ReturnType<typeof tokenSource>,
@@ -17,7 +22,10 @@ export function metadataServer(
   return createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Metadata-Flavor', 'Google');
-    const actual = Buffer.from(req.url ?? '');
+    const raw = req.url ?? '';
+    const actual = Buffer.from(
+      raw.endsWith(NATIVE_TOKEN_QUERY) ? raw.slice(0, -NATIVE_TOKEN_QUERY.length) : raw
+    );
     if (
       req.method !== 'GET' ||
       req.headers['metadata-flavor'] !== 'Google' ||
