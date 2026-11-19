@@ -52,6 +52,18 @@ describe('self-host-only code stays out of the Cloudflare Worker', () => {
     expect(selfhostOnlyFindings(graph, CLOUDFLARE_ENTRY_FORBIDDEN_PATHS)).toEqual([]);
   });
 
+  it('control: the Cloudflare list forbids scripts/, which the self-host list allows', () => {
+    // No real Worker file imports scripts/, so prove the prefix itself is live on a graph that does.
+    const graph = {
+      files: ['apps/api/src/index.ts', 'scripts/selfhost/secret-files.ts'],
+      packages: new Map<string, string>(),
+    };
+    expect(selfhostOnlyFindings(graph, CLOUDFLARE_ENTRY_FORBIDDEN_PATHS)).toEqual([
+      'scripts/selfhost/secret-files.ts',
+    ]);
+    expect(selfhostOnlyFindings(graph)).toEqual([]);
+  });
+
   it('positive control: the celld entry reaches the self-host build and its modules', () => {
     const imports = celldEntryImports();
     expect(imports).toContain(resolve(REPO_ROOT, SELFHOST_BUILD));
