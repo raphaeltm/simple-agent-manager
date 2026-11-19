@@ -74,6 +74,12 @@ describe('mail collector profile', () => {
     expect(mailCollectorEnabled({})).toBe(false);
   });
 
+  // docker compose reads `*` as every profile, so the collector runs and the deploy must know.
+  it('is on for COMPOSE_PROFILES=*', () => {
+    expect(mailCollectorEnabled({ COMPOSE_PROFILES: '*' })).toBe(true);
+    expect(mailCollectorEnabled({ COMPOSE_PROFILES: 'tunnel, *' })).toBe(true);
+  });
+
   it('keeps node lease ranges off the collector ports even with the collector off', () => {
     expect(() =>
       resolveTunnelPortRange({

@@ -1,0 +1,3 @@
+# The build needs nothing from this directory: the Dockerfile fetches pinned modules only. An
+# empty context keeps Caddyfile edits (mounted at run time) from touching the image build.
+*

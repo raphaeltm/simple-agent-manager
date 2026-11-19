@@ -10,6 +10,10 @@ describe('inbound agent email settings', () => {
     expect(inboundMailWorkerVars(box, {})).toEqual({});
   });
 
+  it('is on for COMPOSE_PROFILES=*, which compose reads as every profile', () => {
+    expect(inboundMailEnabled({ COMPOSE_PROFILES: '*' })).toBe(true);
+  });
+
   it('turns agent email on with the mail collector as the reply transport', () => {
     const box = { COMPOSE_PROFILES: 'tunnel, mail-in ,mail-collector' };
     const smtp = smtpWorkerVars(box, {}, 'box.example');

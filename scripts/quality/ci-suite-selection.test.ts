@@ -672,10 +672,66 @@ describe('runner budget (jobs a ready PR starts)', () => {
   });
 
   // 32: the Self-host Email job (landing plan F12) runs only on self-host email paths.
-  it('a PR that matches every filter starts at most 32 jobs (27 before: four more Workers shards, then Self-host Email)', () => {
+  // 33: the Self-host Live job (landing plan D9) runs only on self-host paths.
+  it('a PR that matches every filter starts at most 33 jobs (27 before: four more Workers shards, Self-host Email, Self-host Live)', () => {
     expect(
       jobCount(simulate({ eventName: 'pull_request', filters: allFilters() }))
-    ).toBeLessThanOrEqual(32);
+    ).toBeLessThanOrEqual(33);
+  });
+
+  it('the Self-host Live job starts only for self-host paths (D9)', () => {
+    const live = (paths: string[]) =>
+      simulate({ eventName: 'pull_request', filters: filtersFor(paths) }).get('selfhost-live');
+    for (const path of [
+      'deploy/selfhost/caddy/Caddyfile',
+      'scripts/selfhost/deploy.ts',
+      'apps/api/src/selfhost/build.ts',
+    ]) {
+      expect(live([path]), path).toBe('success');
+    }
+    for (const path of [
+      'packages/cloud-init/src/reverse-tunnel.ts',
+      'apps/api/src/index.ts',
+      'packages/worker-core/src/shared-flight.ts',
+    ]) {
+      expect(live([path]), path).not.toBe('success');
+    }
+  });
+
+  it('a box file alone starts Validate Deploy Scripts, whose static tests read deploy/selfhost', () => {
+    const jobs = (paths: string[]) =>
+      simulate({ eventName: 'pull_request', filters: filtersFor(paths) });
+    for (const path of [
+      'deploy/selfhost/caddy/start.sh',
+      'deploy/selfhost/docker-compose.yml',
+      'deploy/selfhost/gcp-bootstrap.sh',
+    ]) {
+      expect(jobs([path]).get('deploy-scripts'), path).toBe('success');
+    }
+    // Control: a change outside the deploy inputs does not start it.
+    expect(jobs(['apps/web/src/main.tsx']).get('deploy-scripts')).not.toBe('success');
+  });
+
+  // Its tests import no workspace package, so it builds none (a full API-dependency build was
+  // most of its runtime); the tests that need one run in the API unit suite and Self-host Live.
+  it('Validate Deploy Scripts builds no workspace package; Self-host Live builds before its type check', () => {
+    const steps = (job: string) => loadWorkflow().jobs[job]!.steps!.map((step) => step.run ?? '');
+    expect(steps('deploy-scripts').filter((run) => run.includes('turbo run build'))).toEqual([]);
+    const live = steps('selfhost-live');
+    const build = live.findIndex((run) => run.includes('turbo run build'));
+    const typecheck = live.findIndex((run) => run.includes('scripts/selfhost/live/tsconfig.json'));
+    expect(build).toBeGreaterThanOrEqual(0);
+    expect(typecheck).toBeGreaterThan(build);
+  });
+
+  // The access-log redaction guards: the API one runs with the API unit suite, the App.tsx one
+  // with the web suite, and either runs when the redaction filter itself changes.
+  it('a credential route or the redaction filter selects the suite holding its guard', () => {
+    expect(suitesFor(['apps/api/src/routes/bootstrap.ts'])).toContain('test-api');
+    expect(suitesFor(['apps/web/src/App.tsx'])).toContain('test-web');
+    expect(suitesFor(['deploy/selfhost/caddy/log-redaction.caddy'])).toEqual(
+      expect.arrayContaining(['test-api', 'test-web'])
+    );
   });
 
   it('a draft PR starts 6 jobs', () => {

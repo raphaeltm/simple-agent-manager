@@ -1,0 +1,164 @@
+/**
+ * deploy/selfhost/caddy/start.sh, the Caddy entrypoint docker-compose.yml runs, under /bin/sh with
+ * a stand-in `caddy` on PATH that records how it was started. Real Caddy and its busybox shell run
+ * the same script in live/access-log-keep-warm.live.test.ts.
+ *
+ * F21 L5: compose takes each port from the shell before the .env, so the deploy's range check can
+ * be sidestepped by `CELLD_INTERNAL_PORT=20001 docker compose up`. start.sh sees the ports the
+ * stack really runs with and refuses to start Caddy (the only way in for a node) when one lies
+ * inside the lease range from gateway.env.
+ */
+import { spawnSync } from 'node:child_process';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import { BOX_LISTEN_ADDRESSES, BOX_RESERVED_PORTS } from './box-settings.js';
+
+const START = resolve(import.meta.dirname, '../../deploy/selfhost/caddy/start.sh');
+let bin: string;
+
+beforeAll(() => {
+  bin = mkdtempSync(join(tmpdir(), 'sam-caddy-start-'));
+  const fake = join(bin, 'caddy');
+  writeFileSync(fake, '#!/bin/sh\necho "caddy $*"\n');
+  chmodSync(fake, 0o755);
+});
+afterAll(() => rmSync(bin, { recursive: true, force: true }));
+
+/** The environment compose gives Caddy by default, plus gateway.env's range. */
+function composeEnv(): Record<string, string> {
+  return {
+    ...Object.fromEntries(
+      Object.entries(BOX_RESERVED_PORTS).map(([name, port]) => [
+        name,
+        BOX_LISTEN_ADDRESSES.includes(name) ? `:${port}` : String(port),
+      ])
+    ),
+    REVERSE_TUNNEL_PORT_RANGE_START: '20000',
+    REVERSE_TUNNEL_PORT_RANGE_END: '29999',
+    SAM_KEEP_WARM: 'on',
+    SAM_KEEP_WARM_INTERVAL: '5s',
+    SAM_FRP_LOGIN_RATE_LIMIT_EVENTS: '60',
+    SAM_FRP_LOGIN_RATE_LIMIT_WINDOW: '1m',
+  };
+}
+
+function startSh(env: Record<string, string>): { status: number | null; out: string } {
+  const run = spawnSync('/bin/sh', [START], {
+    env: { PATH: `${bin}:/usr/bin:/bin`, ...env },
+    encoding: 'utf8',
+  });
+  return { status: run.status, out: `${run.stdout}${run.stderr}` };
+}
+
+describe('caddy/start.sh', () => {
+  it('starts Caddy with the box defaults', () => {
+    const run = startSh(composeEnv());
+    expect(run.status, run.out).toBe(0);
+    expect(run.out).toContain('caddy run --config /etc/caddy/Caddyfile --adapter caddyfile');
+  });
+
+  it.each(Object.keys(BOX_RESERVED_PORTS))(
+    'refuses to start when %s lies inside the lease range',
+    (name) => {
+      const value = BOX_LISTEN_ADDRESSES.includes(name) ? ':20001' : '20001';
+      const run = startSh({ ...composeEnv(), [name]: value });
+      expect(run.status).toBe(64);
+      expect(run.out).toContain(`${name} (20001) lies inside the reverse-tunnel range 20000-29999`);
+      expect(run.out).not.toContain('caddy run');
+    }
+  );
+
+  // sam-mx's listen address: the port after the last ':' is checked, with or without a host.
+  it.each([':20001', '0.0.0.0:20001', '[::]:20001'])(
+    'refuses SAM_MX_LISTEN=%s inside the lease range',
+    (listen) => {
+      const run = startSh({ ...composeEnv(), SAM_MX_LISTEN: listen });
+      expect(run.status).toBe(64);
+      expect(run.out).toContain('SAM_MX_LISTEN (20001) lies inside the reverse-tunnel range');
+    }
+  );
+
+  // sam-mx hands SAM_MX_LISTEN to Go's net.Listen, which refuses a bare port ("missing port in
+  // address"): accepting `2525` here let the inbound-mail service restart-loop.
+  it.each(['2525', '25', ''])(
+    'refuses SAM_MX_LISTEN=%j, which is not a listen address',
+    (listen) => {
+      const run = startSh({ ...composeEnv(), SAM_MX_LISTEN: listen });
+      expect(run.status).toBe(64);
+      expect(run.out).toContain('SAM_MX_LISTEN must be a listen address [host]:port');
+      expect(run.out).not.toContain('caddy run');
+    }
+  );
+
+  // A compose run from another shell can override a port the deploy never checked.
+  it.each([
+    ['CELLD_PORT', '70000'],
+    ['HTTPS_PORT', '0'],
+    ['CELLD_INTERNAL_PORT', '80'],
+    ['FRPS_BIND_PORT', '123456789012345678901'],
+  ])('refuses %s=%s outside its port bounds', (name, value) => {
+    const run = startSh({ ...composeEnv(), [name]: value });
+    expect(run.status).toBe(64);
+    expect(run.out).toContain(`${name} (${value}) must be a port between`);
+    expect(run.out).not.toContain('caddy run');
+  });
+
+  // Go's net.Listen refuses an unbracketed IPv6 host ("too many colons in address").
+  it.each(['::2525', 'foo::2525', '[::]2525', '[::1]:[25]'])(
+    'refuses SAM_MX_LISTEN=%s, an IPv6 host without brackets or a malformed bracket',
+    (listen) => {
+      const run = startSh({ ...composeEnv(), SAM_MX_LISTEN: listen });
+      expect(run.status).toBe(64);
+      expect(run.out).toMatch(/SAM_MX_LISTEN (must be a listen address|must be set to a port)/);
+      expect(run.out).not.toContain('caddy run');
+    }
+  );
+
+  it.each([':2525', '0.0.0.0:2525', '[::]:2525', '[::1]:2525'])(
+    'control: accepts the listen address SAM_MX_LISTEN=%s',
+    (listen) => {
+      const run = startSh({ ...composeEnv(), SAM_MX_LISTEN: listen });
+      expect(run.status, run.out).toBe(0);
+    }
+  );
+
+  // A malformed bound used to make `[ -ge ]` error, which `if` reads as false: the range check
+  // was skipped and Caddy started with a box port inside the real range.
+  it.each<Record<string, string>>([
+    { REVERSE_TUNNEL_PORT_RANGE_START: '1:2' },
+    { REVERSE_TUNNEL_PORT_RANGE_END: '29999:1' },
+    { REVERSE_TUNNEL_PORT_RANGE_START: '20000x' },
+    { REVERSE_TUNNEL_PORT_RANGE_END: ' 29999' },
+  ])('refuses a malformed lease range %j instead of skipping the check', (bad) => {
+    const run = startSh({ ...composeEnv(), CELLD_INTERNAL_PORT: '20001', ...bad });
+    expect(run.status).toBe(64);
+    expect(run.out).toMatch(/RANGE_START\/END missing from gateway.env or not a number/);
+    expect(run.out).not.toContain('caddy run');
+  });
+
+  it('accepts the range edges just outside a port (control)', () => {
+    const run = startSh({
+      ...composeEnv(),
+      REVERSE_TUNNEL_PORT_RANGE_START: '7002',
+      REVERSE_TUNNEL_PORT_RANGE_END: '7999',
+    });
+    expect(run.status, run.out).toBe(0);
+  });
+
+  it.each([
+    [{ REVERSE_TUNNEL_PORT_RANGE_START: '' }, /RANGE_START\/END missing from gateway.env/],
+    [{ CELLD_INTERNAL_PORT: '' }, /CELLD_INTERNAL_PORT must be set to a port number/],
+    [{ SAM_FRP_LOGIN_RATE_LIMIT_EVENTS: '0' }, /SAM_FRP_LOGIN_RATE_LIMIT_EVENTS must be/],
+    [{ SAM_FRP_LOGIN_RATE_LIMIT_EVENTS: '6x' }, /SAM_FRP_LOGIN_RATE_LIMIT_EVENTS must be/],
+    [{ SAM_FRP_LOGIN_RATE_LIMIT_WINDOW: '2d' }, /SAM_FRP_LOGIN_RATE_LIMIT_WINDOW must be/],
+    [{ SAM_KEEP_WARM_INTERVAL: '9s' }, /SAM_KEEP_WARM_INTERVAL must be 1s to 6s/],
+  ])('refuses %j', (override, message) => {
+    const run = startSh({ ...composeEnv(), ...override });
+    expect(run.status).toBe(64);
+    expect(run.out).toMatch(message);
+  });
+});

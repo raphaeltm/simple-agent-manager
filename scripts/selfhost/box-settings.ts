@@ -2,6 +2,7 @@
  * Settings shared by more than one process on a celld box, resolved once by the deploy script
  * so the Worker, frps and Caddy cannot disagree.
  */
+import { readFileSync } from 'node:fs';
 
 // The Worker's own defaults and bounds (apps/api/src/selfhost/reverse-tunnel/config.ts re-exports
 // them): the deploy always passes the resolved range and heartbeat timeout to BOTH the Worker
@@ -17,10 +18,12 @@ import {
   MIN_REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS,
   REVERSE_TUNNEL_PORT_REUSE_HEARTBEAT_MULTIPLE,
 } from '../../apps/api/src/selfhost/reverse-tunnel/limits.js';
+import { composeFileVariables } from './compose-env.js';
 import {
   DEFAULT_MAIL_COLLECTOR_SMTP_PORT,
   DEFAULT_MAIL_COLLECTOR_UI_PORT,
 } from './mail-settings.js';
+import { parseDotenv } from './secret-files.js';
 
 /**
  * Every other loopback/host listener on the box, with the default docker-compose.yml uses. A
@@ -39,7 +42,100 @@ export const BOX_RESERVED_PORTS: Readonly<Record<string, number>> = {
   // Reserved even with the collector off: a node holding its port would receive sign-in codes.
   MAIL_COLLECTOR_SMTP_PORT: DEFAULT_MAIL_COLLECTOR_SMTP_PORT,
   MAIL_COLLECTOR_UI_PORT: DEFAULT_MAIL_COLLECTOR_UI_PORT,
+  // sam-mx's public SMTP listener (profile mail-in), a listen address: see BOX_LISTEN_ADDRESSES.
+  // Reserved even with the profile off, like the collector.
+  SAM_MX_LISTEN: 25,
 };
+
+/**
+ * Settings in BOX_RESERVED_PORTS that hold a listen address (`[host]:port`, sam-mx's `:25`)
+ * rather than a bare port: the port is the part after the last ':', and a value without one is
+ * refused (caddy/start.sh refuses it too).
+ */
+export const BOX_LISTEN_ADDRESSES: readonly string[] = ['SAM_MX_LISTEN'];
+
+/**
+ * Listeners of services that run with no capability (docker-compose.yml cap_drop: [ALL]), so
+ * they cannot bind a privileged port.
+ */
+const UNPRIVILEGED_LISTENERS: ReadonlySet<string> = new Set([
+  'CELLD_PORT',
+  'CELLD_INTERNAL_PORT',
+  'FRPS_BIND_PORT',
+  'MAIL_COLLECTOR_SMTP_PORT',
+  'MAIL_COLLECTOR_UI_PORT',
+]);
+
+/**
+ * Compose's own control variables that the box .env may set and the scripts read: which files
+ * (COMPOSE_FILE, COMPOSE_PATH_SEPARATOR) and which profiles (COMPOSE_PROFILES: the mail collector,
+ * inbound mail) the stack runs with. Compose takes them from the shell before the .env, like an
+ * interpolated variable, but no compose file references them, so they are named here.
+ */
+export const COMPOSE_CONTROL_VARIABLES: readonly string[] = [
+  'COMPOSE_FILE',
+  'COMPOSE_PATH_SEPARATOR',
+  'COMPOSE_PROFILES',
+];
+
+/**
+ * The box settings with the values docker compose will actually run with. Compose takes every
+ * variable it interpolates from the shell before the .env file, so `CELLD_BUCKET=... docker
+ * compose up` runs celld on that bucket and `CELLD_INTERNAL_PORT=20001 docker compose up` runs
+ * celld's operator API on 20001, whatever the .env says. The deploy and upgrade run in the
+ * operator's shell, so they apply the same precedence to every name in `composeVariables` (what
+ * the box's compose files interpolate, composeFileVariables), to compose's control variables
+ * (COMPOSE_CONTROL_VARIABLES) and to every box port, and report each override by name. Other shell variables (PATH, ...) are not compose's and are ignored.
+ * (caddy/start.sh repeats the port check inside the running stack, for a compose command run
+ * from another shell.)
+ */
+export function withComposeShellOverrides(
+  box: Readonly<Record<string, string>>,
+  hostEnv: NodeJS.ProcessEnv,
+  composeVariables: Iterable<string>
+): { box: Record<string, string>; overridden: string[] } {
+  const effective: Record<string, string> = { ...box };
+  const overridden: string[] = [];
+  // Box ports stay covered even if a compose file stops referencing one.
+  const names = new Set([
+    ...composeVariables,
+    ...COMPOSE_CONTROL_VARIABLES,
+    ...Object.keys(BOX_RESERVED_PORTS),
+  ]);
+  for (const name of [...names].sort((a, b) => a.localeCompare(b))) {
+    const value = hostEnv[name];
+    if (value === undefined || value === box[name]) continue;
+    effective[name] = value;
+    overridden.push(name);
+  }
+  return { box: effective, overridden };
+}
+
+/**
+ * The box .env as docker compose will run it (`withComposeShellOverrides` over the variables of
+ * every compose file the .env selects from `composeDir`; `onOverride` hears each shell override,
+ * by name, first), checked before anything starts: a box listener inside the lease range
+ * (resolveTunnelPortRange) fails here, so `selfhost:deploy` and `selfhost:upgrade` stop before
+ * they write state or run docker compose, not only later inside Caddy's start.sh.
+ */
+export function loadBoxEnv(
+  envFile: string,
+  composeDir: string,
+  hostEnv: NodeJS.ProcessEnv = process.env,
+  onOverride: (name: string) => void = () => {}
+): Record<string, string> {
+  const fromFile = parseDotenv(readFileSync(envFile, 'utf8'), envFile);
+  // A shell COMPOSE_FILE selects the files, so resolve the control variables before reading them.
+  const selecting = withComposeShellOverrides(fromFile, hostEnv, []).box;
+  const { box, overridden } = withComposeShellOverrides(
+    fromFile,
+    hostEnv,
+    composeFileVariables(selecting, composeDir)
+  );
+  overridden.forEach(onOverride);
+  resolveTunnelPortRange(box);
+  return box;
+}
 
 export interface PortRange {
   start: number;
@@ -69,6 +165,33 @@ function integer(
 
 const PORT = { min: 1024, max: 65535 };
 
+/** A box listener's port (BOX_RESERVED_PORTS), from the setting or its compose default. */
+function boxPort(box: Readonly<Record<string, string>>, name: string, fallback: number): number {
+  const raw = box[name];
+  const bounds = UNPRIVILEGED_LISTENERS.has(name) ? PORT : { min: 1, max: 65535 };
+  if (!BOX_LISTEN_ADDRESSES.includes(name) || raw === undefined || raw === '') {
+    return integer(raw, fallback, name, bounds);
+  }
+  // sam-mx passes it to Go's net.Listen, which refuses a bare port ("missing port in address").
+  const separator = raw.lastIndexOf(':');
+  if (separator < 0) {
+    throw new Error(
+      `${name} must be a listen address [host]:port (e.g. :${raw}), not a bare port: got ${raw}`
+    );
+  }
+  // Go's net.Listen takes host:port with a host free of ':' or a bracketed IPv6 host, and refuses
+  // `::2525` ("too many colons in address"): the inbound-mail service would restart-loop.
+  const host = raw.slice(0, separator);
+  if (/^\[.*\]$/.test(host) ? /[[\]]/.test(host.slice(1, -1)) : /[:[\]]/.test(host)) {
+    throw new Error(
+      `${name} must be a listen address [host]:port, with an IPv6 host in brackets (e.g. [::]:2525): got ${raw}`
+    );
+  }
+  const port = raw.slice(separator + 1);
+  if (port === '') throw new Error(`${name} must end in :<port>, got ${raw}`);
+  return integer(port, fallback, name, bounds);
+}
+
 export function resolveTunnelPortRange(box: Readonly<Record<string, string>>): PortRange {
   const start = integer(
     box.REVERSE_TUNNEL_PORT_RANGE_START,
@@ -89,7 +212,7 @@ export function resolveTunnelPortRange(box: Readonly<Record<string, string>>): P
     );
   }
   for (const [name, fallback] of Object.entries(BOX_RESERVED_PORTS)) {
-    const port = integer(box[name], fallback, name, { min: 1, max: 65535 });
+    const port = boxPort(box, name, fallback);
     if (port >= start && port <= end) {
       throw new Error(
         `REVERSE_TUNNEL_PORT_RANGE ${start}-${end} contains ${name} (${port}); a node could bind it`

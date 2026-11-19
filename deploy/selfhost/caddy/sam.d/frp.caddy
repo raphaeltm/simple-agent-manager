@@ -1,0 +1,66 @@
+# Reverse-tunnel transport: nodes' frpc dial wss://api.{SAM_DOMAIN}/~!frp (frp's fixed
+# WebSocket path). Caddy terminates TLS with the box's public certificate (frpc verifies it,
+# useSystemCa) and hands the socket to frps on loopback.
+#
+# Each new connection is one frp Login that frps asks the Worker to check, so anonymous probes
+# are rate limited per client address (caddy-ratelimit, built into the image by caddy/Dockerfile):
+# SAM_FRP_LOGIN_RATE_LIMIT_EVENTS connections per SAM_FRP_LOGIN_RATE_LIMIT_WINDOW, validated by
+# start.sh. A node keeps one connection (work connections are multiplexed over it), so only
+# reconnects count. Over the limit Caddy answers 429 and frpc retries later.
+@sam_frp {
+	host api.{$SAM_DOMAIN}
+	path /~!frp
+}
+handle @sam_frp {
+	route {
+		rate_limit {
+			zone sam_frp_login {
+				key {remote_host}
+				events {$SAM_FRP_LOGIN_RATE_LIMIT_EVENTS:60}
+				window {$SAM_FRP_LOGIN_RATE_LIMIT_WINDOW:1m}
+			}
+		}
+		reverse_proxy 127.0.0.1:{$FRPS_BIND_PORT:7000} {
+			import sam_client_ip
+		}
+	}
+}
+
+# Internal gateway endpoints (frps plugin, forward_auth, inbound email) live under
+# /api/self-host/gateway (apps/api/src/selfhost/reverse-tunnel/gateway.ts) and are reached by
+# frps, Caddy and sam-mx on loopback only, straight to celld. They are never served on the
+# public listener, on any host. The path matcher compares the cleaned, decoded path, case-
+# insensitively: doubled slashes, dot segments and single percent-encoding all land here.
+@sam_gateway_internal path /api/self-host /api/self-host/*
+handle @sam_gateway_internal {
+	respond "Not found" 404
+}
+
+# Other spellings that a URL parser behind Caddy could still turn into that prefix, on a
+# non-workspace host. Matched on the RAW request target (scheme and authority of an absolute-form
+# target allowed), so every encoding depth is seen: each character of "api" and "self-host" may be
+# literal or percent-encoded any number of times (%73, %2573, %252573 ...), separators may be /, \
+# or their encodings, and dot segments and ;params may sit between the two segments. Only an
+# "api" first segment followed by a "self-host" segment matches, never a path that merely contains
+# the words (/docs/self-hosting, /api/projects/<id>/files/self-host/...).
+# Workspace hosts (ws-*) are exempt: the Worker sends every ws-* request to the workspace proxy
+# before any route, and a preview app may legitimately serve such paths.
+@sam_gateway_internal_spelling {
+	not expression `{host}.matches("(?i)^ws-[a-z0-9]+(--[0-9]+)?[.]")`
+	expression `{http.request.uri}.matches("(?i)^([a-z][a-z0-9+.-]*://[^/?#]*)?((/|[\\\\]|%(25)*(2f|5c))|([.]|%(25)*2e))*(a|%(25)*[46]1)(p|%(25)*[57]0)(i|%(25)*[46]9)(;[^/?#]*)?((/|[\\\\]|%(25)*(2f|5c))|([.]|%(25)*2e)|;[^/?#]*)*(s|%(25)*[57]3)(e|%(25)*[46]5)(l|%(25)*[46]c)(f|%(25)*[46]6)(-|%(25)*2d)(h|%(25)*[46]8)(o|%(25)*[46]f)(s|%(25)*[57]3)(t|%(25)*[57]4)([/;?#%]|[\\\\]|$)")`
+}
+handle @sam_gateway_internal_spelling {
+	respond "Not found" 404
+}
+
+# Dot segments (., .., %2e in any depth, with / or \ separators) reorder segments, so the "api"
+# segment need not come first: a raw target with a dot segment that names "self-host" anywhere in
+# any encoding is refused too. Browsers and HTTP clients resolve dot segments before sending, so
+# no legitimate request carries one.
+@sam_gateway_internal_dot_segments {
+	not expression `{host}.matches("(?i)^ws-[a-z0-9]+(--[0-9]+)?[.]")`
+	expression `{http.request.uri}.matches("(?i)^([a-z][a-z0-9+.-]*://[^/?#]*)?[^?#]*(/|[\\\\]|%(25)*(2f|5c))([.]|%(25)*2e)([.]|%(25)*2e)?((/|[\\\\]|%(25)*(2f|5c))|[?#]|$)") && {http.request.uri}.matches("(?i)^[^?#]*(s|%(25)*[57]3)(e|%(25)*[46]5)(l|%(25)*[46]c)(f|%(25)*[46]6)(-|%(25)*2d)(h|%(25)*[46]8)(o|%(25)*[46]f)(s|%(25)*[57]3)(t|%(25)*[57]4)")`
+}
+handle @sam_gateway_internal_dot_segments {
+	respond "Not found" 404
+}

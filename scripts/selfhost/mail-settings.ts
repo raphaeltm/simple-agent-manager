@@ -63,8 +63,14 @@ export function composeProfiles(box: Box): string[] {
     .filter(Boolean);
 }
 
+/** Whether compose starts `profile`'s services: `COMPOSE_PROFILES=*` enables every profile. */
+export function composeProfileEnabled(box: Box, profile: string): boolean {
+  const profiles = composeProfiles(box);
+  return profiles.includes(profile) || profiles.includes('*');
+}
+
 export function mailCollectorEnabled(box: Box): boolean {
-  return composeProfiles(box).includes(MAIL_COLLECTOR_PROFILE);
+  return composeProfileEnabled(box, MAIL_COLLECTOR_PROFILE);
 }
 
 export function mailCollectorPorts(box: Box): { smtp: number; ui: number } {
