@@ -7,6 +7,7 @@
 import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import {
+  chmodSync,
   cpSync,
   existsSync,
   lstatSync,
@@ -642,6 +643,19 @@ describe('runRollback', () => {
       context.box,
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     );
+  });
+
+  it('restores after a real Go module cache made read-only directories in the old state', () => {
+    const context = ctx('gs://fleet/celld', join(root, 'state'));
+    const cache = join(context.stateDir, 'go-cache/module/pkg');
+    mkdirSync(cache, { recursive: true });
+    writeFileSync(join(cache, 'module.go'), 'rebuildable cache', { mode: 0o444 });
+    chmodSync(cache, 0o555);
+    const snapshot = join(root, 'readonly-go-cache');
+    runBackup(context, snapshot);
+    expect(() => runRollback(context, snapshot)).not.toThrow();
+    expect(existsSync(join(context.stateDir, 'go-cache'))).toBe(false);
+    expect(readdirSync(root).some((name) => name.startsWith('.rollback-state-'))).toBe(false);
   });
 
   it('keeps completed cache progress until recovered code is healthy and refreshes a recreated cache', () => {

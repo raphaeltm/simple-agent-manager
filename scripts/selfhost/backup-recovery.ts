@@ -1,9 +1,11 @@
 /** Restore an upgrade's authenticated snapshot to the same owned installation. */
 import {
+  chmodSync,
   cpSync,
   existsSync,
   lstatSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -261,6 +263,21 @@ export function finishRollbackCache(ctx: BoxContext): void {
   assertPrivateFile(path);
   rmSync(path);
 }
+/** Go module caches contain read-only directories. Only chmod directories in our private,
+ * just-created stage; never follow a symlink or change a directory owned by another uid. */
+function removeRollbackStage(path: string): void {
+  const writable = (directory: string): void => {
+    const stat = lstatSync(directory);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return;
+    if (process.getuid && stat.uid !== process.getuid())
+      throw new Error('Rollback cleanup directory belongs to another user');
+    if ((stat.mode & 0o700) !== 0o700) chmodSync(directory, stat.mode | 0o700);
+    for (const entry of readdirSync(directory)) writable(join(directory, entry));
+  };
+  writable(path);
+  rmSync(path, { recursive: true, force: true });
+}
+
 /** Stage the full replacement before swapping directories; failed copying retains live state. */
 function restoreState(
   ctx: BoxContext,
@@ -299,7 +316,7 @@ function restoreState(
       throw error;
     }
   } finally {
-    rmSync(stage, { recursive: true, force: true });
+    removeRollbackStage(stage);
   }
 }
 
