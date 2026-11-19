@@ -12,11 +12,17 @@
  * limited to that prefix, never the fleet credential: the fleet bucket also holds deploy
  * manifests with plaintext secrets.
  */
-import type { Env } from '../env';
-import { isAcceptableOperatorEndpoint } from '../lib/network-hosts';
+import { classifyHost } from '@simple-agent-manager/worker-core';
 
-/** Cloudflare R2's S3 API ignores the region; SigV4 still needs one. */
-const DEFAULT_R2_S3_REGION = 'auto';
+import type { Env } from '../env';
+
+/**
+ * Cloudflare R2's S3 API ignores the region; SigV4 still needs one. Operator stores get no
+ * default: a wrong region signs every URL with the wrong credential scope (AWS S3 rejects it),
+ * so an operator store without R2_S3_REGION is not configured. GCS and R2-compatible stores take
+ * "auto".
+ */
+const CLOUDFLARE_R2_S3_REGION = 'auto';
 
 export interface R2PresignConfig {
   endpoint: string;
@@ -47,12 +53,21 @@ function text(value: string | undefined): string {
   return value?.trim() ?? '';
 }
 
+/**
+ * An operator store URL: HTTPS to any host except a forbidden one (link-local, metadata), or
+ * plain HTTP only to a private-network host on the box. Never userinfo, query or fragment.
+ */
 function validEndpoint(value: string): boolean {
+  let url: URL;
   try {
-    return isAcceptableOperatorEndpoint(new URL(value));
+    url = new URL(value);
   } catch {
     return false;
   }
+  if (url.username || url.password || url.search || url.hash) return false;
+  const hostClass = classifyHost(url.hostname);
+  if (url.protocol === 'https:') return hostClass !== 'forbidden';
+  return url.protocol === 'http:' && hostClass === 'private';
 }
 
 /** True when any path segment could resolve outside its parent or confuse a gateway. */
@@ -71,7 +86,10 @@ function validKeyPrefix(value: string): boolean {
   return (
     value.endsWith('/') &&
     !hasUnsafeKeySegment(value) &&
-    !value.slice(0, -1).split('/').some((segment) => segment === '')
+    !value
+      .slice(0, -1)
+      .split('/')
+      .some((segment) => segment === '')
   );
 }
 
@@ -100,12 +118,13 @@ export function resolveR2PresignConfig(env: R2PresignEnv): R2PresignConfig | nul
   if (endpoint) {
     const bucket = text(env.R2_S3_BUCKET);
     const keyPrefix = text(env.R2_S3_KEY_PREFIX);
-    if (!validEndpoint(endpoint) || !bucket || !validKeyPrefix(keyPrefix)) return null;
+    const region = text(env.R2_S3_REGION);
+    if (!validEndpoint(endpoint) || !bucket || !validKeyPrefix(keyPrefix) || !region) return null;
     return {
       endpoint: endpoint.replace(/\/+$/, ''),
       bucket,
       keyPrefix,
-      region: text(env.R2_S3_REGION) || DEFAULT_R2_S3_REGION,
+      region,
       // Self-hosted stores (MinIO, SeaweedFS) are addressed by path; opt out with "false".
       forcePathStyle: text(env.R2_S3_FORCE_PATH_STYLE).toLowerCase() !== 'false',
       accessKeyId,
@@ -120,7 +139,7 @@ export function resolveR2PresignConfig(env: R2PresignEnv): R2PresignConfig | nul
     endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
     bucket,
     keyPrefix: '',
-    region: DEFAULT_R2_S3_REGION,
+    region: CLOUDFLARE_R2_S3_REGION,
     forcePathStyle: undefined,
     accessKeyId,
     secretAccessKey,

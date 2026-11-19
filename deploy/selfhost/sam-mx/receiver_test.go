@@ -34,6 +34,8 @@ type fakeDNS struct {
 	txt map[string][]string
 	// tempFail names that answer with a temporary DNS error.
 	tempFail map[string]bool
+	// fail names that answer with a DNS error that is neither temporary nor "not found".
+	fail map[string]bool
 }
 
 func notFound(name string) error {
@@ -44,6 +46,9 @@ func (f *fakeDNS) LookupTXT(_ context.Context, name string) ([]string, error) {
 	name = strings.TrimSuffix(strings.ToLower(name), ".")
 	if f.tempFail[name] {
 		return nil, &net.DNSError{Err: "server misbehaving", Name: name, IsTemporary: true}
+	}
+	if f.fail[name] {
+		return nil, &net.DNSError{Err: "query refused", Name: name}
 	}
 	if v, ok := f.txt[name]; ok {
 		return v, nil
@@ -72,14 +77,19 @@ type fakeGateway struct {
 	calls   []gatewayCall
 	status  int
 	verdict string
+	// block, when set, runs before the answer (a slow Worker).
+	block func(*http.Request)
 }
 
 func (g *fakeGateway) handler(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	g.mu.Lock()
 	g.calls = append(g.calls, gatewayCall{header: r.Header.Clone(), host: r.Host, body: body})
-	status, verdict := g.status, g.verdict
+	status, verdict, block := g.status, g.verdict, g.block
 	g.mu.Unlock()
+	if block != nil {
+		block(r)
+	}
 	if r.Header.Get(headerGatewaySecret) != testSecret {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
@@ -105,7 +115,14 @@ type harness struct {
 	gateway *fakeGateway
 	cfg     *Config
 	key     ed25519.PrivateKey
+	server  *smtp.Server
+	// stop is the shutdown signal serveUntil waits on; served receives its result.
+	stop     chan struct{}
+	stopOnce sync.Once
+	served   chan error
 }
+
+func (h *harness) shutdown() { h.stopOnce.Do(func() { close(h.stop) }) }
 
 // newHarness runs the real receiver (config, listener limits, go-smtp server, session, gateway
 // client) on a loopback port against a fake gateway HTTP server.
@@ -123,7 +140,9 @@ func newHarness(t *testing.T, mutate func(map[string]string)) *harness {
 		txt: map[string][]string{
 			"sel._domainkey.sender.example": {"v=DKIM1; k=ed25519; p=" + base64.StdEncoding.EncodeToString(pub)},
 			"sel._domainkey.evil.example":   {"v=DKIM1; k=ed25519; p=" + base64.StdEncoding.EncodeToString(pub)},
-			"_dmarc.sender.example":         {"v=DMARC1; p=reject"},
+			// A sibling subdomain of the allowed sender's organizational domain (relaxed alignment).
+			"sel._domainkey.tenant.sender.example": {"v=DKIM1; k=ed25519; p=" + base64.StdEncoding.EncodeToString(pub)},
+			"_dmarc.sender.example":                {"v=DMARC1; p=reject"},
 			// 127.0.0.1 is the test client; spf.example authorises it.
 			"spf.example": {"v=spf1 ip4:127.0.0.1 -all"},
 		},
@@ -151,9 +170,14 @@ func newHarness(t *testing.T, mutate func(map[string]string)) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() { _ = server.Serve(newLimitedListener(ln, cfg)) }()
-	t.Cleanup(func() { _ = server.Close() })
-	return &harness{t: t, addr: ln.Addr().String(), dns: dns, gateway: gw, cfg: cfg, key: priv}
+	h := &harness{t: t, addr: ln.Addr().String(), dns: dns, gateway: gw, cfg: cfg, key: priv, server: server,
+		stop: make(chan struct{}), served: make(chan error, 1)}
+	go func() { h.served <- serveUntil(server, newLimitedListener(ln, cfg), h.stop, cfg.ShutdownGrace) }()
+	t.Cleanup(func() {
+		h.shutdown()
+		_ = server.Close()
+	})
+	return h
 }
 
 func message(from, subject string) []byte {
@@ -162,7 +186,7 @@ func message(from, subject string) []byte {
 		"To: " + agentRcpt,
 		"Subject: " + subject,
 		"Message-ID: <m-" + subject + "@sender.example>",
-		"Date: Thu, 12 Nov 2026 01:00:00 +0000",
+		"Date: " + time.Now().UTC().Format(time.RFC1123Z),
 		"",
 		"Please fix the login bug.",
 		"",
@@ -372,10 +396,243 @@ func TestGatewayFailureIsTemporary(t *testing.T) {
 
 func TestDNSTempFailureIsTemporary(t *testing.T) {
 	h := newHarness(t, nil)
+	// The DKIM key cannot be read and SPF does not pass: retry later, never bounce.
+	h.dns.tempFail["sel._domainkey.sender.example"] = true
+	err := h.send("x@nospf.example", []string{agentRcpt}, h.sign("sender.example", message(allowedFrom, "temp")))
+	if smtpCode(t, err) != 451 {
+		t.Fatalf("want 451, got %v", err)
+	}
+}
+
+func TestRelaxedModeDMARCTempFailureIsTemporary(t *testing.T) {
+	h := newHarness(t, func(env map[string]string) { env["SAM_MX_RELAXED_ALIGNMENT"] = "true" })
 	h.dns.tempFail["_dmarc.sender.example"] = true
 	err := h.send(allowedFrom, []string{agentRcpt}, h.sign("sender.example", message(allowedFrom, "temp")))
 	if smtpCode(t, err) != 451 {
 		t.Fatalf("want 451, got %v", err)
+	}
+}
+
+func TestRelaxedModeDMARCLookupFailureIsNotTreatedAsNoRecord(t *testing.T) {
+	h := newHarness(t, func(env map[string]string) { env["SAM_MX_RELAXED_ALIGNMENT"] = "true" })
+	// A DNS failure that is neither "not found" nor marked temporary (for example REFUSED) must
+	// not read as "no record", which would apply relaxed alignment to a domain that asks for strict.
+	h.dns.fail = map[string]bool{"_dmarc.sender.example": true}
+	raw := h.sign("tenant.sender.example", message(allowedFrom, "refused-dns"))
+	if smtpCode(t, h.send("x@nospf.example", []string{agentRcpt}, raw)) != 451 {
+		t.Fatal("want 451 when the DMARC record cannot be read")
+	}
+}
+
+func TestSiblingSubdomainIsNotAlignedByDefault(t *testing.T) {
+	h := newHarness(t, nil)
+	// Someone who controls tenant.sender.example signs mail From alice@sender.example.
+	raw := h.sign("tenant.sender.example", message(allowedFrom, "sibling"))
+	err := h.send("x@nospf.example", []string{agentRcpt}, raw)
+	if smtpCode(t, err) != 550 {
+		t.Fatalf("want 550 for a sibling-subdomain signature under strict alignment, got %v", err)
+	}
+	if h.gateway.count() != 0 {
+		t.Fatal("unaligned mail must not reach the Worker")
+	}
+}
+
+func TestRelaxedAlignmentIsAnOperatorChoice(t *testing.T) {
+	h := newHarness(t, func(env map[string]string) { env["SAM_MX_RELAXED_ALIGNMENT"] = "true" })
+	raw := h.sign("tenant.sender.example", message(allowedFrom, "relaxed"))
+	if err := h.send("x@nospf.example", []string{agentRcpt}, raw); err != nil {
+		t.Fatalf("relaxed alignment should accept the organizational domain: %v", err)
+	}
+	// ...unless the sender's DMARC record asks for strict DKIM alignment.
+	h.dns.txt["_dmarc.sender.example"] = []string{"v=DMARC1; p=reject; adkim=s"}
+	raw = h.sign("tenant.sender.example", message(allowedFrom, "relaxed-strict"))
+	if smtpCode(t, h.send("x@nospf.example", []string{agentRcpt}, raw)) != 550 {
+		t.Fatal("a DMARC adkim=s record must keep strict alignment in relaxed mode")
+	}
+}
+
+func TestReplayedDKIMMessageForAnotherRecipientIsRefused(t *testing.T) {
+	h := newHarness(t, nil)
+	// Alice's genuine signed mail to Bob, re-sent to the agent address by someone else.
+	raw := []byte(strings.Replace(string(message(allowedFrom, "replay")), "To: "+agentRcpt, "To: bob@elsewhere.example", 1))
+	err := h.send("x@nospf.example", []string{agentRcpt}, h.sign("sender.example", raw))
+	if smtpCode(t, err) != 550 || !strings.Contains(err.Error(), "signed To or Cc") {
+		t.Fatalf("want 550 naming the signed To/Cc, got %v", err)
+	}
+	if h.gateway.count() != 0 {
+		t.Fatal("a replayed message must not reach the Worker")
+	}
+}
+
+func TestOldDKIMMessageIsRefused(t *testing.T) {
+	h := newHarness(t, nil)
+	raw := []byte(strings.Replace(string(message(allowedFrom, "old")),
+		"Date: "+time.Now().UTC().Format(time.RFC1123Z),
+		"Date: "+time.Now().Add(-8*24*time.Hour).UTC().Format(time.RFC1123Z), 1))
+	err := h.send("x@nospf.example", []string{agentRcpt}, h.sign("sender.example", raw))
+	if smtpCode(t, err) != 550 || !strings.Contains(err.Error(), "too old") {
+		t.Fatalf("want 550 for a message older than SAM_MX_DKIM_MAX_AGE, got %v", err)
+	}
+}
+
+func TestPrependedUnsignedToOrDateCannotRebindAReplay(t *testing.T) {
+	h := newHarness(t, nil)
+	signed := func(subject string) []byte {
+		raw := []byte(strings.Replace(string(message(allowedFrom, subject)), "To: "+agentRcpt, "To: bob@elsewhere.example", 1))
+		return h.sign("sender.example", raw)
+	}
+	// An unsigned To naming the agent address, prepended above the signed one.
+	if smtpCode(t, h.send("x@nospf.example", []string{agentRcpt}, append([]byte("To: "+agentRcpt+"\r\n"), signed("dup-to")...))) != 550 {
+		t.Fatal("want 550 for a prepended To")
+	}
+	old := []byte(strings.Replace(string(message(allowedFrom, "dup-date")),
+		"Date: "+time.Now().UTC().Format(time.RFC1123Z),
+		"Date: "+time.Now().Add(-30*24*time.Hour).UTC().Format(time.RFC1123Z), 1))
+	fresh := "Date: " + time.Now().UTC().Format(time.RFC1123Z) + "\r\n"
+	if smtpCode(t, h.send("x@nospf.example", []string{agentRcpt}, append([]byte(fresh), h.sign("sender.example", old)...))) != 550 {
+		t.Fatal("want 550 for a prepended fresh Date")
+	}
+	if h.gateway.count() != 0 {
+		t.Fatal("neither replay may reach the Worker")
+	}
+}
+
+func TestFarFutureDKIMDateIsRefused(t *testing.T) {
+	h := newHarness(t, nil)
+	raw := []byte(strings.Replace(string(message(allowedFrom, "future")),
+		"Date: "+time.Now().UTC().Format(time.RFC1123Z),
+		"Date: "+time.Now().Add(2*time.Hour).UTC().Format(time.RFC1123Z), 1))
+	if smtpCode(t, h.send("x@nospf.example", []string{agentRcpt}, h.sign("sender.example", raw))) != 550 {
+		t.Fatal("want 550 for a Date two hours ahead")
+	}
+}
+
+func TestAlignedSPFPassNeedsNoSignedRecipientOrDate(t *testing.T) {
+	h := newHarness(t, nil)
+	// An SPF pass is bound to the sending server, so the replay checks do not apply to it.
+	raw := []byte(strings.Replace(string(message("bob@spf.example", "spf-bcc")), "To: "+agentRcpt, "To: team@spf.example", 1))
+	if err := h.send("bob@spf.example", []string{agentRcpt}, raw); err != nil {
+		t.Fatalf("aligned SPF pass refused: %v", err)
+	}
+}
+
+func TestDKIMSignatureMustCoverToAndDate(t *testing.T) {
+	h := newHarness(t, nil)
+	for _, keys := range [][]string{
+		{"From", "Subject", "Message-ID", "Date"},
+		{"From", "To", "Subject", "Message-ID"},
+	} {
+		var out bytes.Buffer
+		if err := dkim.Sign(&out, bytes.NewReader(message(allowedFrom, "partial-"+keys[1])), &dkim.SignOptions{
+			Domain: "sender.example", Selector: "sel", Signer: h.key, HeaderKeys: keys,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if smtpCode(t, h.send("x@nospf.example", []string{agentRcpt}, out.Bytes())) != 550 {
+			t.Fatalf("want 550 for a signature over %v", keys)
+		}
+	}
+}
+
+func TestShutdownWaitsForAnInFlightDelivery(t *testing.T) {
+	h := newHarness(t, nil)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseGateway := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseGateway) // a failing run must not leave the fake gateway blocked forever
+	h.gateway.block = func(r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}
+	delivered := make(chan error, 1)
+	go func() {
+		delivered <- h.send("x@nospf.example", []string{agentRcpt}, h.sign("sender.example", message(allowedFrom, "drain")))
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for h.gateway.count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if h.gateway.count() != 1 {
+		t.Fatal("the delivery never reached the gateway")
+	}
+	h.shutdown() // SIGTERM while the Worker is still answering
+	select {
+	case <-h.served:
+		t.Fatal("serveUntil returned while a delivery was still in flight")
+	case <-time.After(300 * time.Millisecond):
+	}
+	releaseGateway()
+	if err := <-delivered; err != nil {
+		t.Fatalf("the in-flight delivery was cut off: %v", err)
+	}
+	select {
+	case err := <-h.served:
+		if err != nil {
+			t.Fatalf("serveUntil: %v", err)
+		}
+	case <-time.After(h.cfg.ShutdownGrace + 2*time.Second):
+		t.Fatal("serveUntil did not return after the drain")
+	}
+}
+
+func TestConfigRequiresSessionToOutlastADelivery(t *testing.T) {
+	env := map[string]string{
+		"SAM_DOMAIN":                    testDomain,
+		"REVERSE_TUNNEL_GATEWAY_SECRET": testSecret,
+		"SAM_MX_GATEWAY_URL":            "http://127.0.0.1:8080/api/self-host/gateway/inbound-email",
+		"SAM_MX_MAX_SESSION":            "10m",
+	}
+	if _, err := LoadConfig(func(k string) string { return env[k] }); err == nil || !strings.Contains(err.Error(), "SAM_MX_MAX_SESSION") {
+		t.Fatalf("want a refusal for a session shorter than read+DNS+gateway, got %v", err)
+	}
+	env["SAM_MX_MAX_SESSION"] = "11m"
+	if _, err := LoadConfig(func(k string) string { return env[k] }); err != nil {
+		t.Fatalf("control: 11m outlasts the defaults (10m20s): %v", err)
+	}
+}
+
+// The gateway call follows the connection: when the session lifetime or a shutdown closes it, the
+// call stops instead of running to its own timeout. (A client that hangs up mid-DATA is not
+// noticed until then: go-smtp does not read the socket while Data runs.)
+func TestGatewayCallStopsWhenTheConnectionCloses(t *testing.T) {
+	h := newHarness(t, nil)
+	cancelled := make(chan bool, 1)
+	h.gateway.block = func(r *http.Request) {
+		select {
+		case <-r.Context().Done():
+			cancelled <- true
+		case <-time.After(5 * time.Second):
+			cancelled <- false
+		}
+	}
+	conn, err := net.Dial("tcp", h.addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := h.sign("sender.example", message(allowedFrom, "hangup"))
+	script := "EHLO client.sender.example\r\nMAIL FROM:<x@nospf.example>\r\nRCPT TO:<" + agentRcpt + ">\r\nDATA\r\n"
+	if _, err := conn.Write([]byte(script)); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond) // let the 354 arrive before the message
+	if _, err := conn.Write(append(raw, []byte("\r\n.\r\n")...)); err != nil {
+		t.Fatal(err)
+	}
+	// Wait until the delivery is in the gateway, then close every connection (what the lifetime
+	// timer and the shutdown grace do).
+	deadline := time.Now().Add(3 * time.Second)
+	for h.gateway.count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if h.gateway.count() != 1 {
+		t.Fatal("the delivery never reached the gateway")
+	}
+	defer conn.Close()
+	_ = h.server.Close()
+	if !<-cancelled {
+		t.Fatal("the gateway call kept running after its connection closed")
 	}
 }
 
@@ -523,7 +780,12 @@ func TestPerAddressConcurrencyCap(t *testing.T) {
 }
 
 func TestSessionLifetimeClosesIdleConnections(t *testing.T) {
-	h := newHarness(t, func(env map[string]string) { env["SAM_MX_MAX_SESSION"] = "200ms" })
+	h := newHarness(t, func(env map[string]string) {
+		env["SAM_MX_MAX_SESSION"] = "200ms"
+		env["SAM_MX_READ_TIMEOUT"] = "50ms"
+		env["SAM_MX_DNS_TIMEOUT"] = "50ms"
+		env["SAM_MX_GATEWAY_TIMEOUT"] = "50ms"
+	})
 	c, err := smtp.Dial(h.addr)
 	if err != nil {
 		t.Fatal(err)

@@ -21,7 +21,7 @@ import { INBOX_NOT_FOUND, resolveInboxItem } from './inbox-item-core';
 import { TERMINAL_TASK_STATUSES } from './inbox-rows';
 import { getInboxLimits } from './inbox-settings';
 import { archiveTask, completeTask } from './inbox-task-core';
-import type { InboxAskNoticeOutcome, InboxAskNoticeRow } from './ports';
+import type { ArchiveCheckinHold, InboxAskNoticeOutcome, InboxAskNoticeRow } from './ports';
 import type { OperationContext } from './types';
 
 export interface InboxAnswerInput {
@@ -401,7 +401,20 @@ export async function answerInboxItem(
   }
 }
 
-/** Archive means closed: the agent is told the person will not act (spec section 3.3). */
+/**
+ * SAM's check-in hold for a question being archived (`inbox.archiveCheckinHoldHours`). Call it
+ * before the closing write: `archivedAt` must precede any chat message that ends the hold.
+ */
+async function archiveCheckinHold(ctx: OperationContext): Promise<ArchiveCheckinHold> {
+  const holdHours = (await getInboxLimits(ctx)).archiveCheckinHoldHours;
+  const archivedAt = Date.now();
+  return { archivedAt, holdCheckinsUntil: archivedAt + holdHours * 3_600_000 };
+}
+
+/**
+ * Archive means closed. A question or review closes without telling the agent; a permission,
+ * approval or secret request is denied or declined through its own answer path.
+ */
 export async function archiveInboxItem(
   ctx: OperationContext,
   input: { projectId: string; ref: string }
@@ -415,14 +428,21 @@ export async function archiveInboxItem(
         return { ref: item.ref, outcome: result.status, agentNotified: result.agentNotified };
       }
       if (item.kind === 'error') return archiveErrorItem(ctx, item, ref.id);
-      // The notice wakes the filing agent, so the agent-wake policy decides, as for an answer.
-      if (item.sessionId)
-        await ctx.ports.inbox.authorizeAnswerWake(item.projectId, item.sessionId, me);
-      if (!(await closeAsk(ctx, item.projectId, ref.id, 'archived', null)))
+      // Archive tells no one: the agent is left where it is, and a person who wants it to act
+      // answers or writes in the chat (Raphaël, 2026-11-17, revising spec decision 4 of idea
+      // 01M7G03ZCQ6TM6CMEYDRKQ8ST9). `notified_at` is set in the closing write, so the
+      // ask-notice sweep never sends one later.
+      const hold = await archiveCheckinHold(ctx);
+      if (!(await closeAsk(ctx, item.projectId, ref.id, 'archived', null, { silent: true })))
         throw new OperationError('conflict', 'This inbox item was already answered or closed');
-      const row = await loadAskNoticeRow(ctx, item.projectId, ref.id);
-      const agentNotified = row ? await notifyClosedAsk(ctx, row, 'archived') : false;
-      return { ref: item.ref, outcome: 'archived', agentNotified };
+      if (item.kind === 'question' && item.sessionId)
+        await ctx.ports.inbox.questionArchived({
+          projectId: item.projectId,
+          sessionId: item.sessionId,
+          askId: ref.id,
+          ...hold,
+        });
+      return { ref: item.ref, outcome: 'archived', agentNotified: false };
     }
     case 'attention': {
       if (item.answerSpec.type === 'interaction') {
@@ -433,7 +453,8 @@ export async function archiveInboxItem(
         me,
         item.projectId,
         ref.sessionId,
-        ref.markerId
+        ref.markerId,
+        await archiveCheckinHold(ctx)
       );
       return { ref: item.ref, outcome: 'archived', agentNotified: result.agentNotified };
     }

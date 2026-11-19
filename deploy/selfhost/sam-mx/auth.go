@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/mail"
 	"strings"
+	"time"
 
 	"blitiri.com.ar/go/spf"
 	"github.com/emersion/go-msgauth/dkim"
@@ -49,6 +50,10 @@ var singleHeaders = map[string]bool{
 	"from": true, "sender": true, "reply-to": true, "subject": true, "message-id": true,
 	"in-reply-to": true, "references": true, "auto-submitted": true, "precedence": true,
 	"list-id": true,
+	// The DKIM replay checks read these (dkimBindsRecipient, dkimFresh). DKIM signs one instance
+	// per name from the bottom, so an unsigned copy prepended above a signed one could otherwise
+	// name the agent address or carry a fresh date.
+	"to": true, "cc": true, "date": true,
 }
 
 // checkHeaderBlock refuses header blocks two parsers could read differently: a field name that
@@ -152,18 +157,30 @@ func aligned(authDomain, fromDomain string, mode dmarc.AlignmentMode) bool {
 }
 
 // lookupDMARC returns the record for the From domain, falling back to its organizational domain
-// (RFC 7489 6.6.3). A missing record is (nil, nil): alignment is still required, in relaxed mode.
+// (RFC 7489 6.6.3). Only relaxed alignment consults it, for a domain that asks for strict
+// alignment. A domain with no record is (nil, nil). Any other DNS failure is an error, so a
+// record that could not be read never silently loosens alignment.
 func lookupDMARC(ctx context.Context, r Resolver, fromDomain string) (*dmarc.Record, error) {
-	opts := &dmarc.LookupOptions{LookupTXT: func(name string) ([]string, error) {
-		return r.LookupTXT(ctx, name)
-	}}
 	for _, domain := range []string{fromDomain, orgDomain(fromDomain)} {
-		record, err := dmarc.LookupWithOptions(domain, opts)
-		if err == nil {
-			return record, nil
-		}
-		if dmarc.IsTempFail(err) {
+		txts, err := r.LookupTXT(ctx, "_dmarc."+domain)
+		if err != nil {
+			var dnsErr *net.DNSError
+			if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
+				if domain == orgDomain(fromDomain) {
+					break
+				}
+				continue
+			}
 			return nil, err
+		}
+		for _, txt := range txts {
+			if !strings.HasPrefix(txt, "v=") {
+				continue
+			}
+			// An unparseable record is treated as no record (RFC 7489 6.6.3).
+			if record, err := dmarc.Parse(txt); err == nil {
+				return record, nil
+			}
 		}
 		if domain == orgDomain(fromDomain) {
 			break
@@ -172,13 +189,30 @@ func lookupDMARC(ctx context.Context, r Resolver, fromDomain string) (*dmarc.Rec
 	return nil, nil
 }
 
+// AuthPolicy is the per-message input to Authenticate besides the message itself.
+type AuthPolicy struct {
+	// RelaxedAlignment: see Config.RelaxedAlignment. False means strict alignment.
+	RelaxedAlignment bool
+	// DKIMMaxAge bounds the Date of a message authenticated by DKIM alone.
+	DKIMMaxAge time.Duration
+	// Recipient is the envelope recipient (the agent address).
+	Recipient string
+	Now       func() time.Time
+}
+
+// Headers a DKIM signature must cover for DKIM alone to authenticate the message. From is
+// required by the library already. To and Date bind the signature to its original recipient and
+// time, so a signed message from an allowed sender cannot be replayed to an agent address
+// (dkimBindsRecipient, dkimFresh); Subject and Message-ID carry the prompt and the dedupe key.
+var dkimRequiredHeaders = []string{"from", "to", "subject", "message-id", "date"}
+
 // Authenticate decides whether the message's From domain is authenticated: SPF (for the
 // envelope sender) or DKIM pass, aligned with the From domain. This is DMARC's pass condition,
 // required whatever policy the domain publishes: the trigger's sender allowlist compares From
 // addresses, so an unaligned pass would let anyone with their own SPF record send as an allowed
 // sender. Cloudflare Email Routing, which the Worker relied on before, enforces published DMARC
 // policies; this is stricter on purpose.
-func Authenticate(ctx context.Context, r Resolver, ip net.IP, helo, envelopeFrom string, raw []byte, trusted bool) (*AuthVerdict, error) {
+func Authenticate(ctx context.Context, r Resolver, ip net.IP, helo, envelopeFrom string, raw []byte, trusted bool, policy AuthPolicy) (*AuthVerdict, error) {
 	fromAddress, fromDomain, err := ParseFrom(raw)
 	if err != nil {
 		return nil, err
@@ -202,7 +236,7 @@ func Authenticate(ctx context.Context, r Resolver, ip net.IP, helo, envelopeFrom
 		temporary = true
 	}
 
-	var dkimPassDomains []string
+	var dkimPasses []*dkim.Verification
 	verifications, dkimErr := dkim.VerifyWithOptions(bytes.NewReader(raw), &dkim.VerifyOptions{
 		LookupTXT:        func(name string) ([]string, error) { return r.LookupTXT(ctx, name) },
 		MaxVerifications: 5,
@@ -212,10 +246,8 @@ func Authenticate(ctx context.Context, r Resolver, ip net.IP, helo, envelopeFrom
 	}
 	for _, v := range verifications {
 		switch {
-		case v.Err == nil && signsHeaders(v.HeaderKeys, "subject", "message-id"):
-			// A signature that leaves Subject or Message-ID unsigned would let a replayed
-			// message carry an attacker's subject (the prompt) or dedupe key.
-			dkimPassDomains = append(dkimPassDomains, v.Domain)
+		case v.Err == nil && signsHeaders(v.HeaderKeys, dkimRequiredHeaders...):
+			dkimPasses = append(dkimPasses, v)
 			verdict.DKIM = "pass"
 		case dkim.IsTempFail(v.Err):
 			temporary = true
@@ -229,17 +261,20 @@ func Authenticate(ctx context.Context, r Resolver, ip net.IP, helo, envelopeFrom
 		}
 	}
 
-	record, dmarcErr := lookupDMARC(ctx, r, fromDomain)
-	if dmarcErr != nil {
-		return nil, tempFail("the sender's DMARC policy could not be read; try again later")
-	}
-	var spfMode, dkimMode dmarc.AlignmentMode = dmarc.AlignmentRelaxed, dmarc.AlignmentRelaxed
-	if record != nil {
-		if record.SPFAlignment != "" {
-			spfMode = record.SPFAlignment
+	// Strict unless the operator opted into relaxed alignment; even then a domain whose DMARC
+	// record asks for strict alignment gets it. A record never loosens alignment.
+	var spfMode, dkimMode dmarc.AlignmentMode = dmarc.AlignmentStrict, dmarc.AlignmentStrict
+	if policy.RelaxedAlignment {
+		record, dmarcErr := lookupDMARC(ctx, r, fromDomain)
+		if dmarcErr != nil {
+			return nil, tempFail("the sender's DMARC policy could not be read; try again later")
 		}
-		if record.DKIMAlignment != "" {
-			dkimMode = record.DKIMAlignment
+		spfMode, dkimMode = dmarc.AlignmentRelaxed, dmarc.AlignmentRelaxed
+		if record != nil && record.SPFAlignment == dmarc.AlignmentStrict {
+			spfMode = dmarc.AlignmentStrict
+		}
+		if record != nil && record.DKIMAlignment == dmarc.AlignmentStrict {
+			dkimMode = dmarc.AlignmentStrict
 		}
 	}
 
@@ -247,11 +282,20 @@ func Authenticate(ctx context.Context, r Resolver, ip net.IP, helo, envelopeFrom
 		verdict.Result = "pass"
 		return verdict, nil
 	}
-	for _, d := range dkimPassDomains {
-		if aligned(d, fromDomain, dkimMode) {
-			verdict.Result = "pass"
-			return verdict, nil
+	var dkimRefusal string
+	for _, v := range dkimPasses {
+		if !aligned(v.Domain, fromDomain, dkimMode) {
+			continue
 		}
+		if reason := dkimReplayRefusal(raw, v, policy); reason != "" {
+			dkimRefusal = reason
+			continue
+		}
+		verdict.Result = "pass"
+		return verdict, nil
+	}
+	if dkimRefusal != "" {
+		return nil, permFail(dkimRefusal)
 	}
 	if temporary {
 		return nil, tempFail("sender authentication could not be completed; try again later")
@@ -289,3 +333,58 @@ func plainMailbox(addr string) bool {
 	}
 	return true
 }
+
+// dkimReplayRefusal says why an aligned DKIM pass cannot authenticate this delivery on its own,
+// or "". An SPF pass is bound to the sending server and needs none of this; a DKIM signature
+// travels with the message, so it must also name this recipient and be recent.
+func dkimReplayRefusal(raw []byte, v *dkim.Verification, policy AuthPolicy) string {
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		return "the message header could not be read"
+	}
+	if !dkimBindsRecipient(msg.Header, v.HeaderKeys, policy.Recipient) {
+		return "the DKIM signature does not name this agent address in a signed To or Cc"
+	}
+	if !dkimFresh(msg.Header, policy) {
+		return "the DKIM-signed message is too old or has no valid Date"
+	}
+	return ""
+}
+
+func dkimBindsRecipient(h mail.Header, signed []string, recipient string) bool {
+	recipient = strings.ToLower(strings.TrimSpace(recipient))
+	for _, field := range []string{"To", "Cc"} {
+		if !signsHeaders(signed, strings.ToLower(field)) {
+			continue
+		}
+		for _, value := range h[field] {
+			addrs, err := mail.ParseAddressList(value)
+			if err != nil {
+				continue
+			}
+			for _, a := range addrs {
+				if strings.ToLower(a.Address) == recipient {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func dkimFresh(h mail.Header, policy AuthPolicy) bool {
+	date, err := h.Date()
+	if err != nil {
+		return false
+	}
+	now := time.Now
+	if policy.Now != nil {
+		now = policy.Now
+	}
+	age := now().Sub(date)
+	// A date far in the future would make any age check pass forever.
+	return age <= policy.DKIMMaxAge && age >= -dkimMaxClockSkew
+}
+
+// dkimMaxClockSkew is how far ahead of this server's clock a sender's Date may be.
+const dkimMaxClockSkew = 15 * time.Minute

@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 )
 
@@ -65,7 +64,6 @@ func (g *Gateway) Deliver(ctx context.Context, d Delivery) (*GatewayVerdict, err
 	req.Header.Set("X-Forwarded-Host", g.cfg.APIHost)
 	req.Header.Set("X-Forwarded-Proto", "https")
 	req.Header.Set("Content-Type", "message/rfc822")
-	req.Header.Set("Content-Length", strconv.Itoa(len(d.Raw)))
 	req.ContentLength = int64(len(d.Raw))
 	req.Header.Set(headerGatewaySecret, g.cfg.GatewaySecret)
 	req.Header.Set(headerMailFrom, d.MailFrom)

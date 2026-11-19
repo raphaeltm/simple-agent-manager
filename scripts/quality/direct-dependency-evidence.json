@@ -55,6 +55,11 @@
       "registryUrl": "https://www.npmjs.com/package/@playwright/test",
       "necessity": "Executes browser evidence and screenshot checks."
     },
+    "@remix-run/multipart-parser": {
+      "registryUrl": "https://www.npmjs.com/package/@remix-run/multipart-parser",
+      "homepageUrl": "https://github.com/remix-run/remix/tree/main/packages/multipart-parser",
+      "necessity": "Stable incremental multipart parsing bounds Library request bytes, parts and headers without Hono's full-body cache; preserves existing whole-file encryption and storage. Native formData materializes the full multipart body before application limits can run."
+    },
     "@storybook/addon-a11y": {
       "registryUrl": "https://www.npmjs.com/package/@storybook/addon-a11y",
       "necessity": "Adds Storybook accessibility testing integration."
@@ -248,6 +253,10 @@
       "homepageUrl": "https://go.googlesource.com/sys",
       "necessity": "Uses unix.Openat and unix.Mkdirat for pinned-directory workspace ownership initialization without symlink traversal on Linux and Darwin. Promotes the existing pinned v0.48.0 indirect module to direct use; no version or resolved module change."
     },
+    "golang.org/x/vuln/cmd/govulncheck": {
+      "registryUrl": "https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck",
+      "necessity": "Pins the official govulncheck CLI used by the diff-local Go vulnerability gate."
+    },
     "blitiri.com.ar/go/spf": {
       "registryUrl": "https://pkg.go.dev/blitiri.com.ar/go/spf",
       "homepageUrl": "https://blitiri.com.ar/git/r/spf",
@@ -256,7 +265,7 @@
     "github.com/emersion/go-msgauth": {
       "registryUrl": "https://pkg.go.dev/github.com/emersion/go-msgauth",
       "homepageUrl": "https://github.com/emersion/go-msgauth",
-      "necessity": "sam-mx verifies DKIM signatures and evaluates the sender DMARC policy before relaying inbound agent email to the Worker (auth.go)."
+      "necessity": "sam-mx verifies DKIM signatures before relaying inbound agent email to the Worker, and parses DMARC records when relaxed alignment is enabled (auth.go)."
     },
     "github.com/emersion/go-smtp": {
       "registryUrl": "https://pkg.go.dev/github.com/emersion/go-smtp",
@@ -266,11 +275,7 @@
     "golang.org/x/net": {
       "registryUrl": "https://pkg.go.dev/golang.org/x/net",
       "homepageUrl": "https://go.googlesource.com/net",
-      "necessity": "sam-mx uses publicsuffix.EffectiveTLDPlusOne to find the organizational domain for DMARC alignment (auth.go)."
-    },
-    "golang.org/x/vuln/cmd/govulncheck": {
-      "registryUrl": "https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck",
-      "necessity": "Pins the official govulncheck CLI used by the diff-local Go vulnerability gate."
+      "necessity": "sam-mx uses publicsuffix.EffectiveTLDPlusOne to find the organizational domain for relaxed DMARC alignment and the DMARC record fallback (auth.go)."
     }
   }
 }

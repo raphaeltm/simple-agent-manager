@@ -119,7 +119,10 @@ import {
 } from './provider-limit-attention';
 import * as questionAsks from './question-asks';
 import * as reconciliation from './reconciliation';
-import { releaseQuestionHold } from './reconciliation-candidate-state';
+import {
+  holdReconciliationAfterArchive,
+  releaseQuestionHold,
+} from './reconciliation-candidate-state';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import { instrumentRowUsage, RowUsage } from './row-usage';
 import { countRunNudges } from './run-nudges';
@@ -135,6 +138,9 @@ import { countLegacyToolSockets } from './session-sockets';
 import {
   admitBrowserSocket,
   broadcastToBrowserSockets,
+  BROWSER_SOCKET_ACTOR_HEADER,
+  closeBrowserSocketsForActor as closeActorSockets,
+  closeIfAccessRevoked,
   closeQuietly,
   countLegacySockets,
 } from './session-sockets';
@@ -1087,7 +1093,9 @@ export class ProjectData extends DurableObject<Env> {
         sessionId,
       }),
     ]);
-    if (closed > 0 && releaseQuestionHold(this.sql, sessionId)) await this.recalculateAlarm();
+    // Any person's message releases a question hold, including the one an archive leaves when
+    // no question is open any more (`holdReconciliationAfterArchive`).
+    if (releaseQuestionHold(this.sql, sessionId)) await this.recalculateAlarm();
     return closed;
   }
 
@@ -3011,6 +3019,36 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   /**
+   * The person archived a question in this chat: open chat views stop showing it, and SAM's
+   * check-ins stay off the chat until `holdCheckinsUntil` or until the person writes in it
+   * (`holdReconciliationAfterArchive`), so archiving does not nudge the agent (archive tells the
+   * agent nothing; Raphaël, 2026-11-17).
+   *
+   * The archive closed its record before this call, so a person's message can land in between;
+   * its persistence released a hold that did not exist yet. A message newer than `archivedAt`
+   * therefore means no hold. `archivedAt` is absent only from an earlier build's call.
+   */
+  async recordQuestionArchived(input: {
+    sessionId: string;
+    askId: string;
+    holdCheckinsUntil: number;
+    archivedAt?: number;
+  }): Promise<void> {
+    const wroteSince =
+      input.archivedAt !== undefined &&
+      questionAsks.humanMessageSince(this.sql, input.sessionId, input.archivedAt);
+    if (!wroteSince) {
+      holdReconciliationAfterArchive(this.sql, input.sessionId, input.holdCheckinsUntil);
+      await this.recalculateAlarm();
+    }
+    this.broadcastEvent(
+      'attention.resolved',
+      { sessionId: input.sessionId, markerId: input.askId, reason: 'archived' },
+      input.sessionId
+    );
+  }
+
+  /**
    * The agent cancelled its blocking question in D1 `asks` (`inbox_write` method `cancel`, inbox
    * slice D): the chat stops showing it as paused, as when a question is answered. Nothing is
    * stored here; the row is already closed.
@@ -3867,11 +3905,26 @@ export class ProjectData extends DurableObject<Env> {
       const upgradeHeader = request.headers.get('Upgrade');
       if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket')
         return new Response('Expected WebSocket upgrade', { status: 426 });
-      return admitBrowserSocket(this.ctx, this.sql, url, () => {
-        const metrics = emptyMessageIngestMetrics();
-        metrics.toolSealedSessions = 1;
-        this.rowUsage.recordMessageIngest(metrics);
-      });
+      const actorId = request.headers.get(BROWSER_SOCKET_ACTOR_HEADER);
+      const projectId = this.getProjectId();
+      return admitBrowserSocket(
+        this.ctx,
+        this.sql,
+        url,
+        actorId,
+        () => {
+          const metrics = emptyMessageIngestMetrics();
+          metrics.toolSealedSessions = 1;
+          this.rowUsage.recordMessageIngest(metrics);
+        },
+        (ws, admittedActor) => {
+          if (!projectId) {
+            log.warn('websocket.admission_recheck_skipped_no_project', { action: 'kept_open' });
+            return;
+          }
+          this.ctx.waitUntil(closeIfAccessRevoked(this.env.DATABASE, projectId, admittedActor, ws));
+        }
+      );
     }
     return new Response('Not found', { status: 404 });
   }
@@ -3904,6 +3957,11 @@ export class ProjectData extends DurableObject<Env> {
     } catch {
       /* Ignore non-JSON messages */
     }
+  }
+
+  /** Close a user's browser sockets after their access to this project was revoked. */
+  closeBrowserSocketsForActor(actorId: string): number {
+    return closeActorSockets(this.ctx, actorId);
   }
 
   async webSocketClose(

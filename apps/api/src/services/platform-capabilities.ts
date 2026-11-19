@@ -1,21 +1,5 @@
-/**
- * Which platform services this installation actually has.
- *
- * SAM runs on Cloudflare, where every binding below exists, and on Workers-compatible
- * runtimes such as celld, where Cloudflare-only services are absent. Every caller that
- * depends on one of these services asks this module rather than reading `env.X` directly,
- * so "is it there?" has exactly one answer per service (rules 24 and 74).
- *
- * Each capability is derived from the condition itself:
- * - a binding is present and has the method SAM calls, or
- * - every credential the service needs is configured.
- * A Cloudflare deployment with all bindings and settings present resolves every
- * capability to true, so its behaviour does not change.
- */
 import {
-  aiGatewayOnlyHeaders,
   hasCloudflareAccountApi,
-  hasLocalAiCostMetering,
   isMonthlyCostCapAvailable,
   LlmUnavailableError,
   resolveAiGatewayId,
@@ -27,11 +11,31 @@ import { errors } from '../middleware/error';
 import { cache } from './admin-settings-resolution';
 import { emailTransportKind } from './agent-email/provider';
 import { hasInboundAgentEmail } from './agent-email/self-host-inbound';
-import { isAnalyticsD1SinkEnabled } from './analytics-d1-sink';
+import { activeLocalAnalyticsSink } from './analytics-sink';
 import { isArtifactsAvailable } from './hosted-git/backend';
 import { validLlmBaseUrl } from './llm-endpoint-settings';
 import { resolveR2PresignConfig } from './r2-presign-config';
 import { getTTSConfig } from './tts-config';
+export {
+  aiGatewayOnlyHeaders,
+  hasCloudflareAccountApi,
+  hasLocalAiCostMetering,
+  isMonthlyCostCapAvailable,
+  resolveAiGatewayId,
+} from '@simple-agent-manager/ai-proxy';
+/**
+ * Which platform services this installation actually has.
+ *
+ * SAM runs on Cloudflare, where every binding below exists, and on Workers-compatible runtimes
+ * where some Cloudflare-only services are absent. A caller that depends on one of these services
+ * asks this module rather than reading `env.X` directly, so "is it there?" has exactly one answer
+ * per service (rules 24 and 74).
+ *
+ * Each capability is derived from the condition itself: the binding is present and has the
+ * method SAM calls, every credential the service needs is configured, or the operator switch for
+ * the service is not off. A Cloudflare deployment with its bindings present resolves every
+ * capability to true, so its behaviour does not change.
+ */
 
 /** One platform service. The name is also the `feature` field of a FEATURE_UNAVAILABLE error. */
 export type PlatformCapability =
@@ -39,7 +43,6 @@ export type PlatformCapability =
   | 'aiGateway'
   | 'monthlyCostCap'
   | 'cloudflareAccountApi'
-  | 'analyticsIngest'
   | 'analyticsQuery'
   | 'artifacts'
   | 'containerRuntime'
@@ -57,20 +60,11 @@ export type PlatformCapability =
 export type PlatformCapabilities = Readonly<Record<PlatformCapability, boolean>>;
 
 /**
- * The Worker environment. Artifacts availability (`hosted-git/backend.ts`) can consult a backend
- * the self-host build registers, which reads its own bindings, so this takes the whole Env.
+ * The Worker environment. Analytics availability can consult a local sink the self-host build
+ * installs (services/analytics-sink.ts), and Artifacts availability (`hosted-git/backend.ts`) a
+ * backend it registers; both read their own bindings, so this takes the whole Env.
  */
 type CapabilityEnv = Env;
-
-// The AI Gateway helpers are pure functions of the environment and live in the AI proxy
-// package, which needs them too. Re-exported so this module stays the one place to ask.
-export {
-  aiGatewayOnlyHeaders,
-  hasCloudflareAccountApi,
-  hasLocalAiCostMetering,
-  isMonthlyCostCapAvailable,
-  resolveAiGatewayId,
-};
 
 function present(value: string | undefined): boolean {
   return typeof value === 'string' && value.trim().length > 0;
@@ -162,9 +156,10 @@ export function resolvePlatformCapabilities(env: CapabilityEnv): PlatformCapabil
     aiGateway: resolveAiGatewayId(env) !== null,
     monthlyCostCap: isMonthlyCostCapAvailable(env),
     cloudflareAccountApi,
-    // Self-host: ANALYTICS_SINK="d1" records and reads analytics in D1 (analytics-d1-sink.ts).
-    analyticsIngest: !!env.ANALYTICS || isAnalyticsD1SinkEnabled(env),
-    analyticsQuery: cloudflareAccountApi || isAnalyticsD1SinkEnabled(env),
+    // Admin analytics reads Cloudflare's Analytics Engine SQL API (CF_ACCOUNT_ID + CF_API_TOKEN),
+    // or a local sink the self-host build installed and enabled (selfhost/analytics/). Writes
+    // decide for themselves through resolveAnalyticsSink (services/analytics-sink.ts).
+    analyticsQuery: cloudflareAccountApi || activeLocalAnalyticsSink(env) !== undefined,
     artifacts: isArtifactsAvailable(env),
     containerRuntime: hasContainerRuntime(env),
     guidedCredentialSetup: isGuidedCredentialSetupAvailable(env),
@@ -197,7 +192,10 @@ export function resolvePlatformCapabilities(env: CapabilityEnv): PlatformCapabil
 export interface PublicPlatformCapabilities {
   speechToText: boolean;
   textToSpeech: boolean;
-  /** Whether a monthly AI dollar cap can be set (onboarding's SAM-managed AI step reads it). */
+  /**
+   * Whether a monthly AI dollar cap can be set. No web page reads it yet: onboarding and the
+   * budget settings read the budget API's `monthlyCostCap.available` (L13).
+   */
   monthlyCostCap: boolean;
   /** Admin → Logs search (Workers Observability). Off on self-host: logs are read on the box. */
   logSearch: boolean;

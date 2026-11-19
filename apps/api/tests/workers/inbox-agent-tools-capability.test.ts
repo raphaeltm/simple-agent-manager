@@ -214,7 +214,7 @@ describe('agent inbox tools through the real entry points', () => {
     expect(notices[0]!.content).toContain('Do production next week.');
   });
 
-  it('archive: the agent is told the person will not act, once', async () => {
+  it('archive: the item closes and the agent is not told', async () => {
     const s = await seed();
     const filed = await callTool(s.token, 'inbox_write', {
       method: 'ask',
@@ -227,8 +227,10 @@ describe('agent inbox tools through the real entry points', () => {
       `/api/projects/${s.projectId}/inbox/items/${encodeURIComponent(item.ref)}/archive`,
       s.ownerCookie
     );
-    expect(archived.body).toMatchObject({ outcome: 'archived', agentNotified: true });
-    expect(await agentMessages(s, 'will not act on it')).toHaveLength(1);
+    expect(archived.body).toMatchObject({ outcome: 'archived', agentNotified: false });
+    expect(await agentMessages(s, 'archived')).toHaveLength(0);
+    expect(await deliveriesFor(s, item.id)).toEqual([]);
+    // Liveness: the agent can still read its item, and sees it was archived.
     const read = await callTool(s.token, 'inbox_read', { method: 'get', ref: item.ref });
     expect(read.item).toMatchObject({ status: 'archived' });
   });

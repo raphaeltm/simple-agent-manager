@@ -69,6 +69,7 @@ describe('resolveR2PresignConfig', () => {
   it.each([
     ['no bucket', { R2_S3_BUCKET: '' }],
     ['no key prefix', { R2_S3_KEY_PREFIX: '' }],
+    ['no signing region', { R2_S3_REGION: '' }],
     ['absolute key prefix', { R2_S3_KEY_PREFIX: '/r2/sam-assets/' }],
     ['escaping key prefix', { R2_S3_KEY_PREFIX: 'r2/../deploy/' }],
     ['non-HTTP endpoint', { R2_S3_ENDPOINT: 'ftp://store' }],
@@ -141,25 +142,28 @@ describe('presigned URLs address the object the R2 binding reads', () => {
       contentType: 'application/pdf',
     });
     expect(result.r2Key).not.toMatch(/^r2\//);
-    expect(new URL(result.uploadUrl).pathname).toBe(
-      `/celld-fleet/r2/sam-assets/${result.r2Key}`
-    );
+    expect(new URL(result.uploadUrl).pathname).toBe(`/celld-fleet/r2/sam-assets/${result.r2Key}`);
   });
 });
 
 describe('object keys under an operator prefix', () => {
-  it.each(['../deploy/workspaces-api/manifest.json', 'a/../../x', 'a/./b', '/abs', 'a\\b', 'a\u0000b'])(
-    'refuses %j so a signed URL cannot leave the prefix',
-    (key) => {
-      const target = getR2PresignTarget(operatorStoreEnv());
-      expect(() => target.objectKey(key)).toThrow('unsafe path segment');
-    }
-  );
+  it.each([
+    '../deploy/workspaces-api/manifest.json',
+    'a/../../x',
+    'a/./b',
+    '/abs',
+    'a\\b',
+    'a\u0000b',
+  ])('refuses %j so a signed URL cannot leave the prefix', (key) => {
+    const target = getR2PresignTarget(operatorStoreEnv());
+    expect(() => target.objectKey(key)).toThrow('unsafe path segment');
+  });
 
   it('keeps ordinary keys, and leaves Cloudflare keys untouched', () => {
-    expect(getR2PresignTarget(operatorStoreEnv()).objectKey('a/b.c/d')).toBe('r2/sam-assets/a/b.c/d');
+    expect(getR2PresignTarget(operatorStoreEnv()).objectKey('a/b.c/d')).toBe(
+      'r2/sam-assets/a/b.c/d'
+    );
     // On Cloudflare there is no prefix to escape; object names stay opaque as before.
     expect(getR2PresignTarget(cloudflareEnv()).objectKey('a/../b')).toBe('a/../b');
   });
 });
-

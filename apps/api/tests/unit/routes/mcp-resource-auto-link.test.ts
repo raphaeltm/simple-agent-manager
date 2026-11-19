@@ -148,7 +148,10 @@ describe('automatic links from real workspace MCP triggers', () => {
       });
       fileMocks.fromWorkspace
         .mockReset()
-        .mockResolvedValue({ data: new ArrayBuffer(4), contentType: 'text/markdown' });
+        .mockImplementation(async () => ({
+          data: new ArrayBuffer(4),
+          contentType: 'text/markdown',
+        }));
       fileMocks.toWorkspace.mockReset().mockResolvedValue(undefined);
       const app = await createMcpApp();
       const pending: Promise<unknown>[] = [];

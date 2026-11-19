@@ -189,10 +189,7 @@ export function createSelfHostGatewayRoutes(
   routes.onError(handleAppError);
   routes.notFound(notFound);
 
-  // The celld entry passes the full Worker env; the inbound handler reads agent email settings.
-  routes.post('/inbound-email', (c) =>
-    handleInboundEmailGateway(c as unknown as Context<{ Bindings: Env }>, options.inboundEmailDeps)
-  );
+  routes.post('/inbound-email', (c) => handleInboundEmailGateway(c, options.inboundEmailDeps));
 
   routes.post('/frps-plugin', async (c) => {
     if (!getReverseTunnelGatewaySecret(c.env)) return notFound();

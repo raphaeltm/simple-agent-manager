@@ -8,7 +8,7 @@ import { bucketUserAgent } from '../middleware/analytics';
 import { optionalAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { getRateLimit, rateLimit } from '../middleware/rate-limit';
-import { resolveAnalyticsSink } from '../services/analytics-d1-sink';
+import { resolveAnalyticsSink } from '../services/analytics-sink';
 
 /** Default max body size: 64 KB (configurable via MAX_ANALYTICS_INGEST_BODY_BYTES) */
 const DEFAULT_MAX_BODY_BYTES = 65_536;
@@ -123,7 +123,7 @@ analyticsIngestRoutes.post('/', async (c) => {
     return c.body(null, 204);
   }
 
-  // Analytics Engine, or the D1 sink on self-host (graceful degradation)
+  // Analytics Engine, or a self-host local sink (graceful degradation)
   const analytics = resolveAnalyticsSink(c.env);
   if (!analytics) {
     return c.body(null, 204);
@@ -203,7 +203,7 @@ analyticsIngestRoutes.post('/', async (c) => {
     /* malformed origin — ignore */
   }
 
-  // Write each valid event to Analytics Engine (fire-and-forget via waitUntil)
+  // Write every valid event to the sink in one call (fire-and-forget via waitUntil)
   const writeAll = async () => {
     try {
       const points: AnalyticsEngineDataPoint[] = [];

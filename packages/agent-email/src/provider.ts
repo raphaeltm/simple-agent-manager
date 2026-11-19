@@ -14,7 +14,7 @@ import { log } from '@simple-agent-manager/worker-core';
 
 import { agentEmailDomain } from './address';
 import type { AgentEmailEnv } from './env';
-import { sendSmtpMessage, type SmtpConnect } from './smtp-client';
+import { probeSmtpRelay, sendSmtpMessage, type SmtpConnect } from './smtp-client';
 import { resolveSmtpConfig, type SmtpConfig, type SmtpEnv } from './smtp-config';
 import { buildSmtpMessage } from './smtp-message';
 
@@ -99,6 +99,12 @@ export interface EmailTransport {
   sender: AgentEmailSender;
   /** The address SAM's own email to `localPart` comes from on this transport. */
   systemFrom(localPart: string): string;
+  /**
+   * SMTP only: checks, without sending, that the relay would accept a message from SMTP_FROM
+   * to `recipient` (`probeSmtpRelay`). Throws `SmtpError` if not. Cloudflare has no
+   * equivalent: its sending domain state is read from its own API.
+   */
+  probe?(recipient: string): Promise<void>;
 }
 
 /** The sender for SAM's own email, chosen by `emailTransportKind`. */
@@ -117,14 +123,21 @@ export function systemEmailTransportFor(
   }
   const smtp = resolveSmtpConfig(env);
   if (kind !== 'smtp' || smtp.status !== 'ok') return null;
+  const clientOptions = {
+    timeoutMs: options.smtpTimeoutMs,
+    heloName: `api.${env.BASE_DOMAIN.trim()}`,
+    connectSocket: options.connectSocket,
+  };
   return {
     kind,
-    sender: createSmtpAgentEmailSender(smtp.config, {
-      timeoutMs: options.smtpTimeoutMs,
-      heloName: `api.${env.BASE_DOMAIN.trim()}`,
-      connectSocket: options.connectSocket,
-    }),
+    sender: createSmtpAgentEmailSender(smtp.config, clientOptions),
     // The relay decides which senders it accepts, so every SMTP message uses SMTP_FROM.
     systemFrom: () => smtp.config.from,
+    probe: (recipient) =>
+      probeSmtpRelay(
+        smtp.config,
+        { envelopeFrom: smtp.config.from, envelopeTo: recipient },
+        clientOptions
+      ),
   };
 }

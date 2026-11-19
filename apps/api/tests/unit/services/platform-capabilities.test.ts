@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
+import {
+  installLocalAnalyticsSinkExtension,
+  type LocalAnalyticsSinkExtension,
+  resetLocalAnalyticsSinkExtensionForTests,
+} from '../../../src/services/analytics-sink';
 import {
   hasContainerRuntime,
   hasSandboxContainerRuntime,
@@ -78,11 +83,22 @@ describe('resolvePlatformCapabilities', () => {
     expect(resolvePlatformCapabilities(cloudflareEnv({ AI: {} as never })).workersAi).toBe(false);
   });
 
-  it('separates analytics ingest (binding) from analytics query (account API)', () => {
-    const ingestOnly = resolvePlatformCapabilities(cloudflareEnv({ CF_API_TOKEN: '' }));
-    expect(ingestOnly.analyticsIngest).toBe(true);
-    expect(ingestOnly.analyticsQuery).toBe(false);
-    expect(ingestOnly.workersObservability).toBe(false);
+  it('needs the account API for analytics query and log search', () => {
+    const noAccountApi = resolvePlatformCapabilities(cloudflareEnv({ CF_API_TOKEN: '' }));
+    expect(noAccountApi.analyticsQuery).toBe(false);
+    expect(noAccountApi.workersObservability).toBe(false);
+  });
+
+  // Main's L20 pin, kept when this file replaced main's at the M5 merge.
+  it('treats only LOG_TAIL_AVAILABLE="false" as no live stream', () => {
+    for (const value of ['true', '', 'TRUE']) {
+      expect(
+        resolvePlatformCapabilities(cloudflareEnv({ LOG_TAIL_AVAILABLE: value })).liveLogStream
+      ).toBe(true);
+    }
+    expect(
+      resolvePlatformCapabilities(cloudflareEnv({ LOG_TAIL_AVAILABLE: ' False ' })).liveLogStream
+    ).toBe(false);
   });
 
   it('needs both the flag and the binding for Artifacts', () => {
@@ -197,20 +213,26 @@ describe('publicPlatformCapabilities', () => {
 
 /**
  * Main's L11 pin (#2820): the capability inputs exactly as the production API Worker
- * (`sam-api-prod`) had them when read from the Cloudflare script-settings API on 2026-11-16: an
- * `ai` binding (`run` and `models`), and TTS_ENABLED and LOG_TAIL_AVAILABLE not bound at all.
- * The branch's additional capabilities read inputs that capture did not record (ARTIFACTS,
- * SANDBOX, AGENT_EMAIL, R2_*, ANALYTICS); they are pinned by `cloudflareEnv()` above and must be
- * re-verified against production's deployed values before they land on main (rule 70).
+ * (`sam-api-prod`) had them when read from the Cloudflare script-settings API on 2026-11-16 and
+ * again on 2026-11-18 (main's L20 capture): an `ai` binding (`run` and `models`), an
+ * `analytics_engine` binding `ANALYTICS` with `ANALYTICS_DATASET`, CF_ACCOUNT_ID and CF_API_TOKEN
+ * as secrets, a `tail_consumers` attachment, and TTS_ENABLED, LOG_TAIL_AVAILABLE and
+ * ANALYTICS_SINK not bound at all. The branch's additional capabilities read inputs those
+ * captures did not record (ARTIFACTS, SANDBOX, AGENT_EMAIL, R2_*); they are pinned by
+ * `cloudflareEnv()` above and must be re-verified against production's deployed values before
+ * they land on main (rule 70).
  */
 function cloudflareProductionEnv(overrides: Partial<Env> = {}): Env {
   return {
     AI: { run: async () => ({}), models: async () => [] },
     AI_GATEWAY_ID: 'sam',
+    ANALYTICS: { writeDataPoint: () => undefined },
+    ANALYTICS_DATASET: 'sam_analytics',
     CF_ACCOUNT_ID: 'account-1',
     CF_API_TOKEN: 'token-1',
     CF_ZONE_ID: 'zone-1',
     BASE_DOMAIN: 'example.com',
+    OBSERVABILITY_DATABASE: {},
     ...overrides,
   } as unknown as Env;
 }
@@ -243,5 +265,89 @@ describe('production Cloudflare configuration (L11 pin)', () => {
     expect(
       resolvePlatformCapabilities(cloudflareProductionEnv({ TTS_ENABLED: 'false' })).textToSpeech
     ).toBe(false);
+  });
+});
+
+/** A local sink that is active whenever ANALYTICS_SINK is "d1", as the self-host one is (L20). */
+const localSink: LocalAnalyticsSinkExtension = {
+  table: 'analytics_events',
+  active: (env) => env.ANALYTICS_SINK === 'd1',
+  sink: () => ({ write: vi.fn(async () => undefined) }),
+  query: vi.fn(async () => []),
+  purge: vi.fn(async () => undefined),
+};
+
+describe('analytics through a local sink (L20 seam)', () => {
+  afterEach(() => {
+    resetLocalAnalyticsSinkExtensionForTests();
+  });
+
+  it('keeps analytics, log search and the stream on for production even with a sink installed', () => {
+    // Divergence (rule 74): the self-host sink being installed in the isolate is not the condition;
+    // only ANALYTICS_SINK="d1" activates it, and production does not set it.
+    installLocalAnalyticsSinkExtension(localSink);
+    const capabilities = resolvePlatformCapabilities(cloudflareProductionEnv());
+    expect(capabilities.analyticsQuery).toBe(true);
+    expect(capabilities.workersObservability).toBe(true);
+    expect(capabilities.liveLogStream).toBe(true);
+  });
+
+  it('reports analytics, log search and the stream absent on a box with nothing installed', () => {
+    const capabilities = resolvePlatformCapabilities(selfHostEnv());
+    expect(capabilities.analyticsQuery).toBe(false);
+    expect(capabilities.workersObservability).toBe(false);
+    expect(capabilities.liveLogStream).toBe(false);
+  });
+
+  it('reports analytics available on a box whose installed local sink is active', () => {
+    installLocalAnalyticsSinkExtension(localSink);
+    const on = resolvePlatformCapabilities(selfHostEnv({ ANALYTICS_SINK: 'd1' }));
+    expect(on.analyticsQuery).toBe(true);
+    // Control: the same box without the switch has no analytics.
+    const off = resolvePlatformCapabilities(selfHostEnv());
+    expect(off.analyticsQuery).toBe(false);
+  });
+});
+
+describe('email capabilities over SMTP (self-hosted box, moved from the L21 integration tests)', () => {
+  const gatewaySecret = 'g'.repeat(32);
+  const smtp = {
+    SMTP_HOST: 'smtp.example.com',
+    SMTP_USERNAME: 'relay-user',
+    SMTP_PASSWORD: 'relay-pass',
+    SMTP_FROM: 'sign-in@example.com',
+  } as const;
+
+  it('reports email sending with an SMTP relay and none without one', () => {
+    expect(resolvePlatformCapabilities(selfHostEnv(smtp)).emailSending).toBe(true);
+    for (const overrides of [
+      { SMTP_HOST: undefined },
+      { SMTP_TLS: 'none' }, // plaintext to a non-loopback host is refused
+      { SMTP_FROM: undefined },
+    ]) {
+      expect(resolvePlatformCapabilities(selfHostEnv({ ...smtp, ...overrides })).emailSending).toBe(
+        false
+      );
+    }
+  });
+
+  it('reports inbound agent email only when the sam-mx receiver is fully configured', () => {
+    const configured = {
+      ...smtp,
+      AGENT_EMAIL_INBOUND_SMTP: 'true',
+      REVERSE_TUNNEL_GATEWAY_SECRET: gatewaySecret,
+    };
+    expect(resolvePlatformCapabilities(selfHostEnv(configured)).inboundAgentEmail).toBe(true);
+    for (const overrides of [
+      { AGENT_EMAIL_INBOUND_SMTP: undefined },
+      { AGENT_EMAIL_INBOUND_SMTP: 'false' },
+      { REVERSE_TUNNEL_GATEWAY_SECRET: 'too-short' },
+      { SMTP_HOST: undefined },
+    ]) {
+      expect(
+        resolvePlatformCapabilities(selfHostEnv({ ...configured, ...overrides } as Partial<Env>))
+          .inboundAgentEmail
+      ).toBe(false);
+    }
   });
 });

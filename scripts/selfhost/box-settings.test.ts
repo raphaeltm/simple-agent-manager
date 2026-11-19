@@ -153,7 +153,31 @@ describe('presignVars', () => {
       R2_S3_BUCKET: 'my-bucket',
       R2_S3_KEY_PREFIX: 'celld/r2/assets/',
       R2_S3_ENDPOINT: 'https://storage.googleapis.com',
+      // The Worker refuses an operator store without a region; GCS signs with "auto".
+      R2_S3_REGION: 'auto',
     });
+  });
+
+  // The Worker side (main's resolveR2PresignConfig) is exercised against these vars in
+  // apps/api/tests/unit/selfhost/presign-vars-resolver.test.ts; importing the Worker's env types
+  // here would pull the whole API into this package's typecheck.
+  it('passes an explicit region through and requires one for an s3:// store', () => {
+    expect(
+      presignVars(
+        {
+          CELLD_BUCKET: 's3://celld-fleet',
+          R2_S3_ENDPOINT: 'https://s3.example.com',
+          R2_S3_REGION: 'us-east-1',
+        },
+        'assets'
+      ).R2_S3_REGION
+    ).toBe('us-east-1');
+    expect(() =>
+      presignVars(
+        { CELLD_BUCKET: 's3://celld-fleet', R2_S3_ENDPOINT: 'https://s3.example.com' },
+        'assets'
+      )
+    ).toThrow(/R2_S3_REGION is required/);
   });
 
   it('gives Azure buckets no presign vars', () => {

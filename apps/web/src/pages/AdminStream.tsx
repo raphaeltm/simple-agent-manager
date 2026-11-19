@@ -1,9 +1,11 @@
 import { BoxLogsNotice } from '../components/admin/BoxLogsNotice';
 import { LogStream } from '../components/admin/LogStream';
-import { usePlatformCapabilities } from '../hooks/usePlatformCapabilities';
+import { usePlatformCapabilitiesStatus } from '../hooks/usePlatformCapabilities';
 
 export function AdminStream() {
-  const { liveLogStream } = usePlatformCapabilities();
-  // Not mounting LogStream also means no WebSocket is opened to a stream nothing feeds.
-  return liveLogStream ? <LogStream /> : <BoxLogsNotice surface="stream" />;
+  const { capabilities, known } = usePlatformCapabilitiesStatus();
+  // Wait for the answer: LogStream opens a WebSocket as soon as it mounts, and nothing feeds the
+  // stream on an installation without a tail worker.
+  if (!known) return null;
+  return capabilities.liveLogStream ? <LogStream /> : <BoxLogsNotice surface="stream" />;
 }

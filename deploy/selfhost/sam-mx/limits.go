@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"net"
 	"sync"
 	"time"
@@ -99,7 +100,7 @@ func (l *limitedListener) Accept() (net.Conn, error) {
 			_ = conn.Close()
 			continue
 		}
-		tc := &trackedConn{Conn: conn, release: func() { l.release(key) }}
+		tc := &trackedConn{Conn: conn, release: func() { l.release(key) }, done: make(chan struct{})}
 		// go-smtp resets the read deadline on every command, so a client sending one command a
 		// minute could hold a slot forever. The lifetime bound covers DATA, DNS and the gateway.
 		tc.mu.Lock()
@@ -115,6 +116,9 @@ type trackedConn struct {
 	mu      sync.Mutex // guards timer: the timer's own callback can call Close
 	timer   *time.Timer
 	release func()
+	// done is closed when the connection closes (client gone, lifetime reached, shutdown), so
+	// work done on the connection's behalf, such as the gateway call, stops with it.
+	done chan struct{}
 }
 
 func (c *trackedConn) Close() error {
@@ -125,6 +129,19 @@ func (c *trackedConn) Close() error {
 		}
 		c.mu.Unlock()
 		c.release()
+		close(c.done)
 	})
 	return c.Conn.Close()
+}
+
+// connDone is the close signal of the tracked connection under conn (after STARTTLS, conn is the
+// TLS wrapper), or nil when there is none.
+func connDone(conn net.Conn) <-chan struct{} {
+	switch c := conn.(type) {
+	case *trackedConn:
+		return c.done
+	case *tls.Conn:
+		return connDone(c.NetConn())
+	}
+	return nil
 }

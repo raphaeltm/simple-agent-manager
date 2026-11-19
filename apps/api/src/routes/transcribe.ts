@@ -1,6 +1,7 @@
 import { Hono, type MiddlewareHandler } from 'hono';
 
 import type { Env } from '../env';
+import { requireTrustedWriteOrigin } from '../lib/browser-write-origin';
 import { createModuleLogger, serializeError } from '../lib/logger';
 import { requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
@@ -36,6 +37,10 @@ const transcribeRoutes = new Hono<{ Bindings: Env }>();
 // Apply auth middleware to all routes
 transcribeRoutes.use('*', requireAuth(), requireApproved());
 
+// Multipart audio is a CORS-simple request, so a same-site workspace page could post it with the
+// session cookie and no preflight. See lib/browser-write-origin.ts.
+const transcriptionOrigin = requireTrustedWriteOrigin('transcription');
+
 const limitTranscription: MiddlewareHandler<{ Bindings: Env }> = (c, next) =>
   rateLimitTranscribe(c.env)(c, next);
 
@@ -47,7 +52,7 @@ const limitTranscription: MiddlewareHandler<{ Bindings: Env }> = (c, next) =>
  *
  * Response: { text: string }
  */
-transcribeRoutes.post('/', limitTranscription, async (c) => {
+transcribeRoutes.post('/', transcriptionOrigin, limitTranscription, async (c) => {
   const startTime = Date.now();
   // Whisper runs on Workers AI. Without the binding, a backend the self-host build installed
   // (services/speech-backend.ts) serves instead; with neither, refuse before reading the upload

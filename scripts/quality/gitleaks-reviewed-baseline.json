@@ -4,6 +4,20 @@
   "baseCommit": "8c689a6a7923f76a33d96d6272797090598d6c2d",
   "groups": [
     {
+      "classification": "code-identifier",
+      "reason": "Fresh pinned current-tree review: analytics-forward.ts reads an environment-variable identifier (same bytes at line 339, and at line 343 after PR #2889 added four lines above it); github-app-tokens.ts findings span PEM delimiter comments and parser/encoder code, with no embedded key body. Exact current rule/path/line/bytes only.",
+      "owner": "security",
+      "reviewedAt": "2026-11-06T12:30:14.413Z",
+      "expiresAt": "2026-12-06T12:30:14.413Z",
+      "digests": [
+        "43311ab05444a3deed84ddf803f7d4a523e4ab4a97d044200e84fedc73661f5f",
+        "ecc456aef877ed66b358ddeca553c9a7ae1f9cf5aa429fb514335a9b0942de31",
+        "81f3369b6025e96d9c0e14739af278a7174b8ea9387c1e8a307e7ee1b50ad36e",
+        "b0eb549c5588a1c5a61aec95eca31cc8d4008a6f86f9f78845482246d19a19fb",
+        "b1dcd2817cc876421ba0377a672cd178370f310251e33ea7936f5e25436359c6"
+      ]
+    },
+    {
       "classification": "documented-example",
       "reason": "Fresh pinned current-tree review: local mock quickstart uses a bearer placeholder; browser-terminal quickstart shows PEM wrappers with explicit placeholder bodies. Public documentation examples contain no usable credential. Exact current findings only.",
       "owner": "security",
@@ -58,9 +72,7 @@
       "owner": "security",
       "reviewedAt": "2026-11-06T12:30:14.413Z",
       "expiresAt": "2026-12-06T12:30:14.413Z",
-      "digests": [
-        "eb95f7cd4b658cb44cbce7fbf945705166d8af057ddf8f65475f8f7f69bdc028"
-      ]
+      "digests": ["eb95f7cd4b658cb44cbce7fbf945705166d8af057ddf8f65475f8f7f69bdc028"]
     },
     {
       "classification": "synthetic-test-fixture",
@@ -93,9 +105,7 @@
       "owner": "security",
       "reviewedAt": "2026-08-29T00:00:00.000Z",
       "expiresAt": "2026-11-27T00:00:00.000Z",
-      "digests": [
-        "1c07295d3aedeb8f1aaa6f5e33e7d9150bdd0171741d258ee02cc59809aae0c9"
-      ]
+      "digests": ["1c07295d3aedeb8f1aaa6f5e33e7d9150bdd0171741d258ee02cc59809aae0c9"]
     },
     {
       "classification": "documented-example",
@@ -103,9 +113,7 @@
       "owner": "security",
       "reviewedAt": "2026-11-06T12:30:14.413Z",
       "expiresAt": "2026-12-06T12:30:14.413Z",
-      "digests": [
-        "9677b1effbe286eaf5f4a5217b92e8956d54f96d8550b6956ebda0446285d24b"
-      ]
+      "digests": ["9677b1effbe286eaf5f4a5217b92e8956d54f96d8550b6956ebda0446285d24b"]
     },
     {
       "classification": "code-identifier",
@@ -113,9 +121,7 @@
       "owner": "security",
       "reviewedAt": "2026-11-12T08:20:00.000Z",
       "expiresAt": "2026-12-12T08:20:00.000Z",
-      "digests": [
-        "15613fa56910bf18e53abb4161fda7fda6689b25010a23bd1e30d254ccc8ade5"
-      ]
+      "digests": ["15613fa56910bf18e53abb4161fda7fda6689b25010a23bd1e30d254ccc8ade5"]
     },
     {
       "classification": "synthetic-test-fixture",
@@ -123,9 +129,7 @@
       "owner": "security",
       "reviewedAt": "2026-09-27T00:00:00.000Z",
       "expiresAt": "2026-12-26T00:00:00.000Z",
-      "digests": [
-        "6e7d007b454a727e2d53a1ccfb0b9b3bf6b38081674abc35260efe50410cbc21"
-      ]
+      "digests": ["6e7d007b454a727e2d53a1ccfb0b9b3bf6b38081674abc35260efe50410cbc21"]
     },
     {
       "classification": "synthetic-test-fixture",
@@ -148,9 +152,7 @@
       "owner": "security",
       "reviewedAt": "2026-09-29T00:00:00.000Z",
       "expiresAt": "2026-12-28T00:00:00.000Z",
-      "digests": [
-        "662cc0d541ef21f3ab25c0d51d96e5959d225d317f9930c4b151d449dce64376"
-      ]
+      "digests": ["662cc0d541ef21f3ab25c0d51d96e5959d225d317f9930c4b151d449dce64376"]
     },
     {
       "classification": "synthetic-test-fixture",
@@ -158,9 +160,7 @@
       "owner": "security",
       "reviewedAt": "2026-11-09T01:00:00.000Z",
       "expiresAt": "2026-12-09T01:00:00.000Z",
-      "digests": [
-        "c76d36e487bee10de3b2aa6bb76a1a7aea74c8ecea171f2be31ae244a366cd50"
-      ]
+      "digests": ["c76d36e487bee10de3b2aa6bb76a1a7aea74c8ecea171f2be31ae244a366cd50"]
     },
     {
       "classification": "synthetic-test-fixture",
@@ -168,9 +168,7 @@
       "owner": "security",
       "reviewedAt": "2026-11-10T09:21:52.185Z",
       "expiresAt": "2026-12-10T09:21:52.185Z",
-      "digests": [
-        "753cf5e5f0b0593379205af9e29a8f277d5e70a4cb78aec374dc3b006eec7de2"
-      ]
+      "digests": ["753cf5e5f0b0593379205af9e29a8f277d5e70a4cb78aec374dc3b006eec7de2"]
     },
     {
       "classification": "synthetic-test-fixture",
@@ -198,38 +196,54 @@
       ]
     },
     {
-      "classification": "code-identifier",
-      "reason": "Fresh pinned current-tree review: analytics-forward.ts reads an environment-variable identifier; github-app-tokens.ts findings span PEM delimiter comments and parser/encoder code, with no embedded key body. Exact current rule/path/line/bytes only.",
+      "classification": "synthetic-test-fixture",
+      "reason": "PR #2718 history: commit 538817fbb's worker test fixture held a placement_credential_reference of the form credentials:<ULID> (a credentials row id, not secret material). Replaced by a fake id in 6c39434d; only the exact historical rule/path/line/bytes are accepted.",
       "owner": "security",
-      "reviewedAt": "2026-11-06T12:30:14.413Z",
+      "reviewedAt": "2026-11-14T01:20:00.000Z",
+      "expiresAt": "2026-12-14T01:20:00.000Z",
+      "digests": ["3baab23fcd18d079d16ea924fd23f9846a7353b819614beeaf9fa2698251b2ee"]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "PR 2760 registers the pre-migration message fixture Durable Object, shifting three previously reviewed test-only signing/encryption fixtures in apps/api/vitest.workers.config.ts by four lines. Verified full matched spans byte-identical to origin/main and each prior line-specific digest already reviewed; only the exact shifted digests are added.",
+      "owner": "security",
+      "reviewedAt": "2026-11-15T16:12:25.640Z",
       "expiresAt": "2026-12-06T12:30:14.413Z",
       "digests": [
-        "b6bceca8be9f40c0330d6dbb705f92473f913d88d84c07673d536392d11c114b",
-        "81f3369b6025e96d9c0e14739af278a7174b8ea9387c1e8a307e7ee1b50ad36e",
-        "b0eb549c5588a1c5a61aec95eca31cc8d4008a6f86f9f78845482246d19a19fb",
-        "b1dcd2817cc876421ba0377a672cd178370f310251e33ea7936f5e25436359c6"
+        "caec4310082d0b8549cf4445c9030ecdb8a23e98613f581e9050228cfe5582dc",
+        "e80c7e20e86a0c09d48491a9ad0f681a161185399834abf689c491cc58404d18",
+        "751da363c1e618b01b169097dbbc341d6dd0e3e2cceef8beaa5092403a04a45d"
       ]
     },
     {
       "classification": "code-identifier",
-      "reason": "Self-host inbound email (#2668): sam-mx config.go agentAddressKeyChars is the public address-key alphabet (Crockford-style base32 characters), not key material. Exact current finding only.",
+      "reason": "Self-host inbound email (L21, #2887): deploy/selfhost/sam-mx config.go agentAddressKeyChars is the public agent-address alphabet (Crockford-style base32 characters), not key material. Exact findings only: the current line and the same line at its earlier position in the port commit 1c023420a.",
       "owner": "security",
-      "reviewedAt": "2026-11-12T03:00:00.000Z",
-      "expiresAt": "2026-12-12T03:00:00.000Z",
+      "reviewedAt": "2026-11-18T15:45:00.000Z",
+      "expiresAt": "2026-12-18T15:45:00.000Z",
       "digests": [
+        "9129fd74cffbdc8442feed3af75699051839080524f42afdafdcbaedc227ef56",
         "eab7bddde682c4104f263aefb4b6004bff8ce1ba7a01c73787b347142fa7241d"
       ]
     },
     {
       "classification": "synthetic-test-fixture",
-      "reason": "Self-host inbound email (#2668) tests: a fixed agent address key (a routing identifier embedded in a public email address) in the API integration test, and a literal gateway shared secret ending in -test used only by the sam-mx receiver test against an httptest server. Exact current findings only.",
+      "reason": "Self-host inbound email (L21, #2887) tests: a fixed agent address key (a routing identifier inside a public email address) in selfhost-inbound-email.test.ts, and a literal gateway shared secret ending in -test used only by the sam-mx receiver test against an httptest server. Exact current findings only.",
       "owner": "security",
-      "reviewedAt": "2026-11-12T03:00:00.000Z",
-      "expiresAt": "2026-12-12T03:00:00.000Z",
+      "reviewedAt": "2026-11-18T15:45:00.000Z",
+      "expiresAt": "2026-12-18T15:45:00.000Z",
       "digests": [
         "3ea24e85ceb78d673fcb02e42f5d44dfabe7a97fa680f090d0fcf1e79c0eff74",
         "e2345bc2c8f9744b9067ec77eebb1d7baa52999404834bfb429fb63579062263"
       ]
+    },
+    {
+      "classification": "code-identifier",
+      "reason": "Fresh pinned current-tree review: analytics-forward.ts reads an environment-variable identifier; github-app-tokens.ts findings span PEM delimiter comments and parser/encoder code, with no embedded key body. Exact current rule/path/line/bytes only.",
+      "owner": "security",
+      "reviewedAt": "2026-11-06T12:30:14.413Z",
+      "expiresAt": "2026-12-06T12:30:14.413Z",
+      "digests": ["b6bceca8be9f40c0330d6dbb705f92473f913d88d84c07673d536392d11c114b"]
     },
     {
       "classification": "documented-example",
@@ -253,26 +267,6 @@
         "06fd4fe297f12a45113f00a61e8874af712602cd924bf83de8e08de3dd221544",
         "2a6ca68208db99987af7a2c24e9958b1cca104e1585580d87ba0bc3722f7784a",
         "c44802cc0c13d6fe3ed9675276e563633f113943dc740cf65c5059bdbeee7644"
-      ]
-    },
-    {
-      "classification": "synthetic-test-fixture",
-      "reason": "PR #2718 history: commit 538817fbb's worker test fixture held a placement_credential_reference of the form credentials:<ULID> (a credentials row id, not secret material). Replaced by a fake id in 6c39434d; only the exact historical rule/path/line/bytes are accepted.",
-      "owner": "security",
-      "reviewedAt": "2026-11-14T01:20:00.000Z",
-      "expiresAt": "2026-12-14T01:20:00.000Z",
-      "digests": ["3baab23fcd18d079d16ea924fd23f9846a7353b819614beeaf9fa2698251b2ee"]
-    },
-    {
-      "classification": "synthetic-test-fixture",
-      "reason": "PR 2760 registers the pre-migration message fixture Durable Object, shifting three previously reviewed test-only signing/encryption fixtures in apps/api/vitest.workers.config.ts by four lines. Verified full matched spans byte-identical to origin/main and each prior line-specific digest already reviewed; only the exact shifted digests are added.",
-      "owner": "security",
-      "reviewedAt": "2026-11-15T16:12:25.640Z",
-      "expiresAt": "2026-12-06T12:30:14.413Z",
-      "digests": [
-        "caec4310082d0b8549cf4445c9030ecdb8a23e98613f581e9050228cfe5582dc",
-        "e80c7e20e86a0c09d48491a9ad0f681a161185399834abf689c491cc58404d18",
-        "751da363c1e618b01b169097dbbc341d6dd0e3e2cceef8beaa5092403a04a45d"
       ]
     }
   ]

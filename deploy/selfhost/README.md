@@ -220,7 +220,9 @@ of the `docker` group unless they are trusted with all of it.
 Presigned browser uploads go straight to the fleet bucket. Set `R2_S3_ENDPOINT` in `.env` and a
 credential scoped to `<bucket>/<prefix>/r2/<R2 bucket>/*` as `R2_ACCESS_KEY_ID` /
 `R2_SECRET_ACCESS_KEY` in `secrets.env`, never the fleet credential. The deploy derives the
-bucket and key prefix. The bundled store has no public `s3.` route yet, so leave it unset there.
+bucket and key prefix. The Worker needs the store's signing region too: a `gs://` bucket gets
+`R2_S3_REGION=auto` by default, and an `s3://` bucket must set `R2_S3_REGION` in `.env` (the
+deploy refuses to continue without it). The bundled store has no public `s3.` route yet, so leave `R2_S3_ENDPOINT` unset there.
 
 Plain Worker var overrides (for example turning one of the self-host switches back on) also go in
 `secrets.env`; it is merged last. `--dry-run` prints the rendered config with those values

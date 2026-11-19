@@ -24,7 +24,6 @@ export const DEFAULT_COMPOSE_IMAGE_ARTIFACT_MAX_BYTES = 2 * 1024 * 1024 * 1024;
 export const COMPOSE_IMAGE_ARTIFACT_ARCHIVE_TYPE = 'docker-save';
 export const COMPOSE_IMAGE_ARTIFACT_MEDIA_TYPE = 'application/vnd.docker.image.rootfs.diff.tar';
 
-
 export interface ComposeImageArtifactRequest {
   serviceName: string;
   sourceRef: string;
@@ -88,7 +87,6 @@ function getDownloadExpiry(env: AppDeploymentEnv): number {
     DEFAULT_DOWNLOAD_EXPIRY_SECONDS
   );
 }
-
 
 export function buildComposeImageArtifactKey(
   projectId: string,

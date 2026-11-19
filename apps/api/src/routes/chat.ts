@@ -124,7 +124,9 @@ chatRoutes.get('/ws', async (c) => {
     throw errors.badRequest('Expected WebSocket upgrade');
   }
 
-  return projectDataService.forwardWebSocket(c.env, projectId, c.req.raw);
+  // The socket is tagged with this user so revoking their access can close it
+  // (`closeBrowserSocketsForActor`).
+  return projectDataService.forwardWebSocket(c.env, projectId, c.req.raw, userId);
 });
 
 /**

@@ -70,19 +70,18 @@ export interface Env
   ASSETS?: Fetcher;
   // Agent email (preview): AGENT_EMAIL and AGENT_EMAIL_WORKER_NAME are declared in
   // @simple-agent-manager/agent-email's AgentEmailEnv.
-  // SMTP relay for SAM's own email (sign-in codes) where AGENT_EMAIL is absent, e.g. a
-  // self-hosted celld box (scripts/selfhost/mail-settings.ts). Ignored when AGENT_EMAIL exists.
-  // Parsed and validated by @simple-agent-manager/agent-email's smtp-config.ts; invalid settings
-  // disable it.
+  // SMTP relay for SAM's own email (sign-in codes, owner security alerts) where AGENT_EMAIL is
+  // absent, e.g. a self-hosted celld box. Ignored when AGENT_EMAIL exists. Parsed and validated by
+  // @simple-agent-manager/agent-email's smtp-config.ts; invalid settings disable it.
   SMTP_HOST?: string;
   SMTP_PORT?: string; // default by SMTP_TLS: 587 (starttls), 465 (tls); required for none
   SMTP_TLS?: string; // 'starttls' (default) | 'tls' | 'none' (loopback hosts only)
   SMTP_USERNAME?: string;
   SMTP_PASSWORD?: string; // secret
-  SMTP_FROM?: string; // address sign-in codes come from, e.g. sign-in@<BASE_DOMAIN>
-  // 'true' when the self-host deploy installed the sam-mx SMTP receiver (compose profile mail-in):
-  // agent email then runs without AGENT_EMAIL, inbound through the loopback gateway route and
-  // replies over SMTP (services/agent-email/self-host-inbound.ts). Ignored when AGENT_EMAIL exists.
+  SMTP_FROM?: string; // address SAM's own email comes from, e.g. sign-in@<BASE_DOMAIN>
+  // 'true' when the self-host deploy installed the sam-mx SMTP receiver: agent email then runs
+  // without AGENT_EMAIL, inbound through the loopback gateway route and replies over SMTP
+  // (services/agent-email/self-host-inbound.ts). Ignored when AGENT_EMAIL exists.
   AGENT_EMAIL_INBOUND_SMTP?: string;
   // Cloudflare Artifacts for SAM-native Git repos (optional — absent when ARTIFACTS_ENABLED is falsy)
   ARTIFACTS?: ArtifactsBinding;
@@ -1288,7 +1287,7 @@ export interface Env
   ANALYTICS_WEBSITE_TRAFFIC_TOP_PAGES_LIMIT?: string; // Max top pages per section in website traffic (default: 20)
   // Analytics ingest endpoint (Phase 2 — client-side events)
   ANALYTICS_INGEST_ENABLED?: string; // "true" (default) or "false"
-  /** "d1" records and reads product analytics in OBSERVABILITY_DATABASE (self-host; services/analytics-d1-sink.ts). Unset: Analytics Engine. */
+  /** "d1" records and reads product analytics in OBSERVABILITY_DATABASE when the self-host build installed the D1 sink (selfhost/analytics/). Unset: Analytics Engine. */
   ANALYTICS_SINK?: string;
   RATE_LIMIT_ANALYTICS_INGEST?: string; // Rate limit per IP per hour (default: 500)
   MAX_ANALYTICS_INGEST_BATCH_SIZE?: string; // Max events per batch (default: 25)
@@ -1328,11 +1327,11 @@ export interface Env
   R2_BUCKET_NAME?: string;
   // Operator-run S3 store that holds the R2 binding's objects (non-Cloudflare runtimes such as
   // celld). When R2_S3_ENDPOINT is set, presigned URLs target R2_S3_BUCKET at
-  // `${R2_S3_KEY_PREFIX}${key}` instead of Cloudflare R2. See services/r2-s3-client.ts.
+  // `${R2_S3_KEY_PREFIX}${key}` instead of Cloudflare R2. See services/r2-presign-config.ts.
   R2_S3_ENDPOINT?: string;
   R2_S3_BUCKET?: string;
   R2_S3_KEY_PREFIX?: string;
-  R2_S3_REGION?: string; // Signing region (default: "auto"; MinIO-style stores usually "us-east-1")
+  R2_S3_REGION?: string; // Signing region of that store; required with R2_S3_ENDPOINT ("auto" for GCS/R2, e.g. "us-east-1" for MinIO or AWS)
   R2_S3_FORCE_PATH_STYLE?: string; // "false" for virtual-host addressing (default with R2_S3_ENDPOINT: path style)
   // Task attachment upload limits (all configurable per constitution Principle XI)
   ATTACHMENT_UPLOAD_MAX_BYTES?: string;

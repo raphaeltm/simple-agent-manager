@@ -140,11 +140,15 @@ export function tunnelWorkerVars(settings: TunnelSettings): Record<string, strin
  * Worker vars that point presigned uploads (attachments, snapshots, compose artifacts) at the
  * box's own object store. celld keeps an R2 binding's objects at
  * `<fleet prefix>/r2/<bucket_name>/<key>` inside the fleet bucket, so the bucket and key prefix
- * follow from CELLD_BUCKET and the R2 binding. The public endpoint (R2_S3_ENDPOINT, optional
- * R2_S3_REGION) comes from the compose .env and the prefix-scoped R2_ACCESS_KEY_ID /
+ * follow from CELLD_BUCKET and the R2 binding. The public endpoint (R2_S3_ENDPOINT) and its
+ * signing region (R2_S3_REGION; "auto" by default for a gs:// bucket, required for s3://) come
+ * from the compose .env and the prefix-scoped R2_ACCESS_KEY_ID /
  * R2_SECRET_ACCESS_KEY from secrets.env. Without an endpoint the Worker leaves presigning off.
  * Azure (az://) buckets have no S3 interface, so they get no presign vars.
  */
+/** GCS's S3-compatible XML API signs with any region; "auto" is what its docs use. */
+const GCS_SIGNING_REGION = 'auto';
+
 export function presignVars(
   box: Readonly<Record<string, string>>,
   r2BucketName: string
@@ -158,8 +162,18 @@ export function presignVars(
     R2_S3_BUCKET: bucket,
     R2_S3_KEY_PREFIX: `${prefix ? `${prefix}/` : ''}r2/${r2BucketName}/`,
   };
-  if (box.R2_S3_ENDPOINT) vars.R2_S3_ENDPOINT = box.R2_S3_ENDPOINT;
-  if (box.R2_S3_REGION) vars.R2_S3_REGION = box.R2_S3_REGION;
+  if (box.R2_S3_ENDPOINT) {
+    vars.R2_S3_ENDPOINT = box.R2_S3_ENDPOINT;
+    // The Worker refuses an operator store without a signing region (r2-presign-config.ts). GCS
+    // accepts "auto"; an S3 store's region is the operator's to name (MinIO usually us-east-1).
+    const region = box.R2_S3_REGION?.trim() || (scheme === 'gs' ? GCS_SIGNING_REGION : '');
+    if (!region) {
+      throw new Error(
+        "R2_S3_REGION is required with R2_S3_ENDPOINT for an s3:// CELLD_BUCKET (the store's SigV4 signing region)"
+      );
+    }
+    vars.R2_S3_REGION = region;
+  }
   return vars;
 }
 
