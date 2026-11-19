@@ -12,7 +12,7 @@ const TSX = resolve(import.meta.dirname, '../../node_modules/.bin/tsx');
 /** Per-test timeout for files that start these child processes. */
 export const CHILD_TEST_TIMEOUT_MS = 120_000;
 
-export const BASE_BOX_ENV = [
+const BASE_BOX_ENV = [
   'SAM_DOMAIN=sam.example.com',
   'SAM_TLS_MODE=internal',
   'COMPOSE_PROFILES=tunnel,local-store',

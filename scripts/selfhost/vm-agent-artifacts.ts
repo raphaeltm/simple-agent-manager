@@ -31,7 +31,7 @@ import { sha256Hex } from './celld-binary.js';
 export const VM_AGENT_BUILD_IMAGE =
   'golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0';
 
-export const VM_AGENT_ARCHITECTURES = ['amd64', 'arm64'] as const;
+const VM_AGENT_ARCHITECTURES = ['amd64', 'arm64'] as const;
 export type VmAgentArchitecture = (typeof VM_AGENT_ARCHITECTURES)[number];
 
 export interface VmAgentRelease {

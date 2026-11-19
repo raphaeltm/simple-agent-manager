@@ -62,10 +62,13 @@ import { ASSETS_DIR, CELLD_MAIN, prepareCelldProject, writeCelldConfig } from '.
 import {
   applyAllMigrations,
   bucketOf,
+  celldPort,
   DEFAULT_MIGRATION_ATTEMPTS,
   DEFAULT_PREDEPLOY_MIGRATION_ATTEMPTS,
   intEnv,
+  log,
   redact,
+  REPO_ROOT,
   syncGatewayEnv,
 } from './deploy-steps.js';
 import { inboundMailWorkerVars } from './inbound-mail-settings.js';
@@ -95,17 +98,11 @@ import {
   resolveVmAgentRelease,
 } from './vm-agent-artifacts.js';
 
-const REPO_ROOT = resolve(import.meta.dirname, '../..');
 const API_DIR = join(REPO_ROOT, 'apps/api');
 const WEB_DIR = join(REPO_ROOT, 'apps/web');
 
 /** Upper bound on captured celld output (bundle reports are a few KiB). */
 const CHILD_OUTPUT_MAX_BYTES = 64 * 1024 * 1024;
-const DEFAULT_CELLD_PORT = '8080';
-
-function log(message: string): void {
-  console.log(`[selfhost] ${message}`);
-}
 
 interface RunResult {
   status: number;
@@ -359,11 +356,11 @@ async function main(): Promise<void> {
   }
 
   // celld reads deploy/current.json only every CELLD_DEPLOY_POLL_S (30 s); without this the
-  // health check below passed on the previous version (box round R15, G3). celld-adopt.ts.
+  // health check below would pass on the previous version (celld-adopt.ts).
   await verifyNewVersionServes(
     box,
     {
-      celldPort: box.CELLD_PORT || DEFAULT_CELLD_PORT,
+      celldPort: celldPort(box),
       baseDomain,
       agentSignInConfigured: Boolean(secrets.AGENT_SIGN_IN_TRUST?.trim()),
     },

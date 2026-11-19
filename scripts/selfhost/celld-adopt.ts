@@ -7,21 +7,20 @@
  * `internal_reload` in `crates/celld/main.rs`: 200 `adopted`/`unchanged`, 422 `failed` when the
  * version does not build, in which case the previous version keeps serving).
  *
- * Box round R15 (G3): `pnpm selfhost:deploy` did not ask, so its health check passed on the
- * PREVIOUS version and "deployed" was printed while that version served for up to one poll
- * interval. A deploy that added `AGENT_SIGN_IN_TRUST` answered 404 on the agent sign-in route for
- * about 20 s. The deploy now asks celld to adopt before its health check (`adoptNewDeployment`)
+ * Without asking, `pnpm selfhost:deploy`'s health check passed on the PREVIOUS version and
+ * "deployed" was printed while that version served for up to one poll interval: a deploy that
+ * added `AGENT_SIGN_IN_TRUST` answered 404 on the agent sign-in route for about 20 s. The deploy now asks celld to adopt before its health check (`adoptNewDeployment`)
  * and checks the agent sign-in route when the trust is configured (`checkAgentSignInRoute`).
  */
-import { intEnv, sleep, waitForHealth } from './deploy-steps.js';
+import { celldPort, intEnv, sleep, waitForHealth } from './deploy-steps.js';
 
 /**
  * How long a check after a deploy keeps trying. celld can stall for seconds while it adopts a
- * version (6.5 s on sam-box in box round R11), and one refused fetch must not fail a deploy that
+ * version (6.5 s observed on a one-box install), and one refused fetch must not fail a deploy that
  * would have succeeded a moment later. A version that is really broken still fails, after this
  * window. Override with SELFHOST_ADOPT_CHECK_WINDOW_MS.
  */
-export const DEFAULT_ADOPT_CHECK_WINDOW_MS = 30_000;
+const DEFAULT_ADOPT_CHECK_WINDOW_MS = 30_000;
 const DEFAULT_ADOPT_POLL_INTERVAL_MS = 2000;
 const DEFAULT_RELOAD_REQUEST_TIMEOUT_MS = 60_000;
 const DEFAULT_ROUTE_REQUEST_TIMEOUT_MS = 10_000;
@@ -52,7 +51,7 @@ function apiHeaders(box: Box): Record<string, string> {
 }
 
 /** One `POST /reload` on celld's internal listener. Never throws. */
-export async function requestAdoption(box: Box): Promise<AdoptionResult> {
+async function requestAdoption(box: Box): Promise<AdoptionResult> {
   const internal = box.CELLD_INTERNAL_PORT || '7001';
   const reload = await fetch(`http://127.0.0.1:${internal}/reload`, {
     method: 'POST',
@@ -130,7 +129,7 @@ export async function adoptNewDeployment(box: Box): Promise<string> {
 
 /** One POST of an empty body to the agent sign-in route: present, or what answered instead. */
 async function probeAgentSignInRoute(box: Box): Promise<{ present: boolean; answer: string }> {
-  const url = `http://127.0.0.1:${box.CELLD_PORT || '8080'}${AGENT_SIGN_IN_PATH}`;
+  const url = `http://127.0.0.1:${celldPort(box)}${AGENT_SIGN_IN_PATH}`;
   const response = await fetch(url, {
     method: 'POST',
     headers: { ...apiHeaders(box), 'content-type': 'application/json' },
@@ -168,7 +167,7 @@ export async function checkAgentSignInRoute(box: Box): Promise<void> {
 /**
  * What `pnpm selfhost:deploy` runs after `celld deploy`: celld adopts the new version, then the
  * API answers `/health`, then (with `AGENT_SIGN_IN_TRUST` among the Worker's secrets) the agent
- * sign-in route answers. In this order, so the checks reach the new version (box round R15, G3).
+ * sign-in route answers. In this order, so the checks reach the new version.
  */
 export async function verifyNewVersionServes(
   box: Box,

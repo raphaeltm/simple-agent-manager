@@ -7,7 +7,7 @@
  * internal listener, as celld does. (Node's fetch does not send a custom Host header, so the
  * box's single Worker answers by path, which is what this fake models.)
  *
- * Box round R15 (G3): the deploy checked only /health, which the previous version also answers,
+ * Why: a deploy that checks only /health, which the previous version also answers,
  * so the agent sign-in route the new version added answered 404 for ~20 s after "deployed".
  */
 import { createServer, type Server } from 'node:http';
@@ -135,7 +135,7 @@ afterEach(async () => {
   }
 });
 
-describe('after celld deploy (verifyNewVersionServes, G3)', () => {
+describe('after celld deploy (verifyNewVersionServes)', () => {
   it('adopts first, so health and the agent sign-in route are checked on the new version', async () => {
     celldDeploy({ id: 'v2', builds: true, agentSignIn: true });
     const log: string[] = [];
@@ -169,7 +169,7 @@ describe('after celld deploy (verifyNewVersionServes, G3)', () => {
     expect(serving.id).toBe('v1');
   });
 
-  it('without the adoption step (the R15 deploy), health passes on the old version and the route 404s', async () => {
+  it('without the adoption step, health passes on the old version and the route 404s', async () => {
     // Control for the ordering above: the checks alone cannot tell the versions apart.
     celldDeploy({ id: 'v2', builds: true, agentSignIn: true });
     await waitForHealth(box.CELLD_PORT!, DOMAIN);

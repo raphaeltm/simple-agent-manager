@@ -90,7 +90,7 @@ describe('prepareCelldProject', () => {
     expect(readlinkSync(join(mainDir!, leases))).toBe(
       join(API_DIR, 'src/selfhost/migrations', leases)
     );
-    // OBSERVABILITY_DATABASE likewise carries the self-host-only D1 analytics sink table (L20),
+    // OBSERVABILITY_DATABASE likewise carries the self-host-only D1 analytics sink table,
     // which the shared observability directory (wrangler.toml) no longer holds.
     const analytics = '0002_analytics_events.sql';
     expect(observability).not.toContain(analytics);

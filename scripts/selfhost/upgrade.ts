@@ -10,6 +10,7 @@
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
+import { celldPort } from './deploy-steps.js';
 import { loadBox, runUpgrade, SELFHOST_DIR } from './upgrade-lib.js';
 
 const { values } = parseArgs({
@@ -32,7 +33,7 @@ const ctx = loadBox(
   values['state-dir'],
   values.secrets
 );
-const port = ctx.box.CELLD_PORT ?? '8080';
+const port = celldPort(ctx.box);
 
 await runUpgrade(ctx, {
   to: values.to,

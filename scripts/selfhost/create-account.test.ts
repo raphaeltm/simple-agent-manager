@@ -81,7 +81,7 @@ describe('parseAccountReport', () => {
   });
 });
 
-describe('--superadmin before the bootstrap owner is established (plan finding F13)', () => {
+describe('--superadmin before the bootstrap owner is established', () => {
   // A real SQL engine: the guard is a predicate in the statements create-account runs.
   async function database() {
     const { DatabaseSync } = await import('node:sqlite');
