@@ -267,29 +267,32 @@ function aliasInitializer(declaration: Node): Node | undefined {
   return undefined;
 }
 
-/** An identifier's module-scope root: the variable itself, or what its local alias reads. */
-function identifierRoot(identifier: Node, depth: number): Node | undefined {
+/** An identifier's module-scope roots: the variable itself, or what its local alias reads. */
+function identifierRoots(identifier: Node, depth: number): Node[] {
   const declaration = identifier.getSymbol()?.getDeclarations()[0];
-  if (!declaration) return undefined;
-  if (isModuleScopeVariable(declaration)) return declaration;
+  if (!declaration) return [];
+  if (isModuleScopeVariable(declaration)) return [declaration];
   const initializer = aliasInitializer(declaration);
-  return initializer ? moduleRoot(initializer, depth + 1) : undefined;
+  return initializer ? moduleRoots(initializer, depth + 1) : [];
 }
 
 /**
- * The module-scope variable a value is read from, or undefined when it is local, a parameter,
+ * Every module-scope variable a value may be read from, in the order to try them. A value can
+ * have several: `enabled && pending.get(key)` may be either operand, so a boolean on the left
+ * must not hide the shared promise on the right. Empty when the value is local, a parameter,
  * `this` state, or a fresh call result.
  */
-export function moduleRoot(expression: Node, depth = 0): Node | undefined {
-  if (depth > 12) return undefined;
-  if (expression.isKind(SyntaxKind.Identifier)) return identifierRoot(expression, depth);
+export function moduleRoots(expression: Node, depth = 0): Node[] {
+  if (depth > 12) return [];
+  if (expression.isKind(SyntaxKind.Identifier)) return identifierRoots(expression, depth);
   const field = sharedThisField(expression);
-  if (field) return field;
-  for (const operand of tracedOperands(expression)) {
-    const root = moduleRoot(operand, depth + 1);
-    if (root) return root;
-  }
-  return undefined;
+  if (field) return [field];
+  return tracedOperands(expression).flatMap((operand) => moduleRoots(operand, depth + 1));
+}
+
+/** The first module-scope variable a value may be read from (see moduleRoots). */
+export function moduleRoot(expression: Node, depth = 0): Node | undefined {
+  return moduleRoots(expression, depth)[0];
 }
 
 function isAllowed(node: Node): boolean {
@@ -394,8 +397,10 @@ function fileFindings(
   // One finding per line and root: `await X.then(...)` both awaits and continues.
   const seen = new Set<string>();
   for (const { node: expression, kind } of resumptions(sourceFile)) {
-    const rootDeclaration = moduleRoot(expression);
-    if (!rootDeclaration || !rootHoldsPromise(holderCache, rootDeclaration)) continue;
+    const rootDeclaration = moduleRoots(expression).find((candidate) =>
+      rootHoldsPromise(holderCache, candidate)
+    );
+    if (!rootDeclaration) continue;
     if (!mayBePromise(expression)) continue;
     const key = `${expression.getStartLineNumber()}:${rootName(rootDeclaration)}`;
     if (seen.has(key)) continue;

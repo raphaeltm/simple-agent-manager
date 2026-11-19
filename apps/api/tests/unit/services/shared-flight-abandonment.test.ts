@@ -35,6 +35,7 @@ import {
   credentialRows,
 } from '../../../src/services/admin-settings-resolution';
 import { DEFAULT_CONFIG_READ_TIMEOUT_MS } from '../../../src/services/config-read-deadline';
+import { IoTimeoutError } from '../../../src/services/fetch-timeout';
 import { resolveLlmEndpointSettings } from '../../../src/services/llm-endpoint-snapshot';
 import {
   __resetPlatformConfigCacheForTest,
@@ -336,6 +337,32 @@ describe.each([
       // The fallback read was not published, so the next caller reads again.
       await untilSettled(resolvePlatformConfig(env));
       expect(legacyStatements).toBe(5 * perRead);
+    });
+
+    it('refuses the fallback read when a write also lands while it is pending', async () => {
+      const { env, counter } = createEnv();
+      await untilSettled(resolvePlatformConfig(env));
+      __resetPlatformConfigCacheForTest();
+      counter.reset();
+      await untilSettled(resolvePlatformConfig(env));
+      const isLegacy = (sql: string) => /WHERE key = \?|AS encryptedToken/.test(sql);
+      const perRead = counter.executed.filter(isLegacy).length;
+      __resetPlatformConfigCacheForTest();
+      counter.reset();
+
+      // A write lands during all four reads, the fallback included.
+      let legacyStatements = 0;
+      const realPrepare = env.DATABASE.prepare.bind(env.DATABASE);
+      env.DATABASE.prepare = ((sql: string) => {
+        if (isLegacy(sql)) {
+          if (legacyStatements % perRead === 0) __resetPlatformConfigCacheForTest();
+          legacyStatements += 1;
+        }
+        return realPrepare(sql);
+      }) as typeof env.DATABASE.prepare;
+
+      await expect(untilSettled(resolvePlatformConfig(env))).rejects.toBeInstanceOf(IoTimeoutError);
+      expect(legacyStatements).toBe(4 * perRead);
     });
   });
 });
