@@ -47,18 +47,26 @@ and trimmed. Nothing in L22 may change Cloudflare behaviour.
       task-completion-validator ADDRESSED
 - [x] Deferred MEDIUM (rule 42): compact-r2 does not evict an abandoned R2 operation on celld,
       tracked in tasks/backlog/2026-11-19-compact-r2-celld-abandoned-op-eviction.md
-- [ ] Staging smoke on primary (settings, platform config, agent credential path)
-- [ ] Merge, Deploy Production success
+- [x] Staging smoke on staging2 (primary held; no VM needed): settings, platform config, agent
+      credential path, 24-request parallel join burst, all 200; no new error groups
+- [x] Merged #2901 as c44ec1576 (Deploy Production: see PR 2 body)
 
 ### PR 2 (L22b): celld build and deploy core (self-host only)
 
-- [ ] celld-binary, celld-config (trimmed), celld-project (plain entry only), celld-adopt
-- [ ] deploy, deploy-steps, deploy-harness, box-settings, mail/inbound-mail settings,
-      install-record, secret-files, versions, vm-agent-artifacts, platform-probe
-- [ ] create-account (with the #2888 F13c owner guard) + account-sql
-- [ ] upgrade + upgrade-lib without the L24 backup step
-- [ ] `apps/api/src/selfhost/build.ts` (celld entry only) + import-graph test
-- [ ] `selfhost:*` scripts, scripts/selfhost tsconfig and vitest config, unit tests in CI
+- [x] celld-binary, celld-config (trimmed: no containers), celld-project (plain entry only), celld-adopt
+- [x] deploy (plaintext only), deploy-steps, deploy-harness, box-settings, mail/inbound-mail settings,
+      secret-files, versions, vm-agent-artifacts. Dropped: install-record (only teardown/backup read
+      it), platform-probe (only key-choice used it)
+- [x] create-account (with the #2888 F13c owner guard, `--secrets`, fail-closed `--superadmin`) + account-sql
+- [x] upgrade + upgrade-lib without the L24 backup step; forwards env file, state dir and secrets
+- [x] `apps/api/src/selfhost/build.ts` (celld entry only) + import-graph test (Cloudflare entry
+      must not reach apps/api/src/selfhost/ or scripts/)
+- [x] `selfhost:*` scripts (deploy, create-account, test, upgrade), scripts/selfhost tsconfig and
+      vitest config, unit tests + tsc in CI "Validate Deploy Scripts"
+- [x] Review fixes: security H1 (upgrade forwarding + no key minting over a prior deploy), M1 atomic
+      platform-keys write, M2 deploy/selfhost/.gitignore, M3 create-account --secrets; architecture
+      MEDIUMs (go.mod filter, scripts/ in boundary test, reverse-tunnel limits shared from the Worker)
+- [ ] task-completion-validator, CI, CodeRabbit, merge, Deploy Production
 
 ### PR 3 (L22c): box runtime (self-host only)
 
