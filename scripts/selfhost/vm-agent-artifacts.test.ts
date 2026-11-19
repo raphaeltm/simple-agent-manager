@@ -11,6 +11,7 @@ import {
   isR2NoObjectError,
   parseVmAgentRelease,
   VM_AGENT_BUILD_IMAGE,
+  vmAgentBuildRunArgs,
   vmAgentLegacyKey,
   vmAgentReleaseKey,
 } from './vm-agent-artifacts.js';
@@ -99,6 +100,25 @@ describe('build pins', () => {
     expect(VM_AGENT_BUILD_IMAGE).toMatch(
       new RegExp(`^golang:${toolchain!.replaceAll('.', '\\.')}-bookworm@sha256:[0-9a-f]{64}$`)
     );
+  });
+
+  // Go enables cgo only for a native build: without this the amd64 bytes depend on the
+  // builder's architecture, and the immutable release key refuses the second builder.
+  it('builds with cgo disabled for every target, whatever the builder architecture', () => {
+    const args = vmAgentBuildRunArgs('/src-dir', '/cache-dir', 1000, 1000);
+    const env = args.flatMap((arg, i) => (args[i - 1] === '-e' ? [arg] : []));
+    expect(env).toContain('CGO_ENABLED=0');
+    expect(env).toContain('GOTOOLCHAIN=local');
+    // The Makefile's targets must not set CGO_ENABLED themselves, or the container env is moot.
+    const makefile = readFileSync(
+      resolve(import.meta.dirname, '../../packages/vm-agent/Makefile'),
+      'utf8'
+    );
+    for (const target of ['build-linux-amd64', 'build-linux-arm64']) {
+      const recipe = new RegExp(`^${target}:\\n\\t(.*)$`, 'm').exec(makefile)?.[1];
+      expect(recipe).toContain('$(GO) build');
+      expect(recipe).not.toContain('CGO_ENABLED');
+    }
   });
 
   it("treats only celld's missing-object error for this exact key and bucket as absent", () => {

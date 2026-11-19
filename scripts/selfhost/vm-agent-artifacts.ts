@@ -16,8 +16,9 @@
  * release key names a commit, so a local edit must not be published under it, and the build
  * container never sees the rest of the checkout (`.state/` holds the platform keys). Modules
  * are fetched in one container; the compile runs in another with no network and no
- * capabilities. `-trimpath -buildvcs=false` (packages/vm-agent/Makefile) plus the pinned image
- * make the bytes reproducible per image, which the immutable-key check depends on.
+ * capabilities. `-trimpath -buildvcs=false` (packages/vm-agent/Makefile), `CGO_ENABLED=0` and
+ * the pinned image make the bytes reproducible per image on any builder architecture, which the
+ * immutable-key check depends on.
  */
 
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
@@ -176,11 +177,23 @@ export function bindMount(src: string, dst: string): string {
   return `type=bind,src=${src},dst=${dst}`;
 }
 
-// GOFLAGS is not passed: the Makefile defines its own, and make exports it to `go`.
-function runVmAgentBuild(src: string, cacheDir: string, { release, buildDate }: VmAgentRelease) {
-  const uid = process.getuid?.() ?? 0;
-  const gid = process.getgid?.() ?? 0;
-  const common = [
+/**
+ * The `docker run` arguments both build containers share, up to the image.
+ * GOFLAGS is not passed: the Makefile defines its own, and make exports it to `go`.
+ * CGO_ENABLED=0 is: Go enables cgo only for a native build, so without it the amd64 binary is
+ * cgo-enabled (dynamically linked, and Go records CGO_ENABLED in it) on an amd64 builder and not
+ * on an arm64 one. The same release would then have different bytes depending on where the
+ * operator deploys from, and the immutable release key refuses the second. The Cloudflare
+ * pipeline avoids this by always building on one pinned runner (deploy-reusable.yml); its arm64
+ * binary is already a CGO_ENABLED=0 cross build.
+ */
+export function vmAgentBuildRunArgs(
+  src: string,
+  cacheDir: string,
+  uid = process.getuid?.() ?? 0,
+  gid = process.getgid?.() ?? 0
+): string[] {
+  return [
     'run',
     '--rm',
     '--user',
@@ -201,9 +214,15 @@ function runVmAgentBuild(src: string, cacheDir: string, { release, buildDate }: 
     'GOMODCACHE=/cache/mod',
     '-e',
     'GOTOOLCHAIN=local',
+    '-e',
+    'CGO_ENABLED=0',
     '-w',
     '/src',
   ];
+}
+
+function runVmAgentBuild(src: string, cacheDir: string, { release, buildDate }: VmAgentRelease) {
+  const common = vmAgentBuildRunArgs(src, cacheDir);
   docker([...common, VM_AGENT_BUILD_IMAGE, 'go', 'mod', 'download'], 'vm-agent module download');
   docker(
     [
