@@ -17,7 +17,7 @@ Complete existing PRs #2891, #2892, #2893 and #2896 sequentially, preserving bra
 
 ## Checklist and acceptance criteria
 
-For each PR, independently:
+Release acceptance (the first three PRs have completed these gates; #2896 release gates below remain pending):
 - [ ] Reconcile fresh GitHub and SAM ownership/evidence.
 - [ ] Validate compatibility and diagnose all failures; implement smallest complete fix or supported documented closure.
 - [ ] Run applicable tests/build/race/vet and actual runtime verification; record totals and limitations.
@@ -28,8 +28,8 @@ For each PR, independently:
 
 PR completion:
 - [x] #2891
-- [ ] #2892
-- [ ] #2893
+- [x] #2892
+- [x] #2893
 - [ ] #2896
 
 References: `.agents/skills/do/SKILL.md`, rules 02/05/09/13/14/25, constitution principles II/X/XI/XII/XIII; `tasks/archive/2026-11-18-l21-smtp-sign-in-selfhost-inbound-email.md` for receiver flow and prior box evidence. Every checkbox requires concrete test/runtime/GitHub evidence before completion.
@@ -42,7 +42,7 @@ References: `.agents/skills/do/SKILL.md`, rules 02/05/09/13/14/25, constitution 
 - Merged at12:48:43Z as efe96eb12ab74ae467f9ce8349f361aa2913ef31. Original branch unexpectedly disappeared after merge; restored with ordinary non-force push and independently verified at reviewed afa800bac. Main CI44527364370 passed attempt2 after one Ubuntu package timeout retry; production44532642501 succeeded with container rollouts/health. Independent API health200 healthy and app200 at13:37Z. No active lease or BOX resources remain.
 - No public docs reference the old pin; no user-facing SAM interface/configuration changed. Task remains active for remaining PRs.
 
-## #2892 evidence (in progress)
+## #2892 evidence (complete)
 
 - Fresh original head 3e80b0aa96013dc0dbb22f6528419af6239c9d08 on original Dependabot branch. No review threads/reviews/closing issues or competing owners; all association pages empty before own claim. Search found own assigned task only as relevant owner, no matching SAM idea. Main merged normally, retaining history and #2891 receiver controls.
 - Sonar API reported exactly two docker:S8431 maintainability issues AaHwH2bn54NAEkiABVQ_ and AaHwH2bn54NAEkiABVQ-: FROM tag plus digest. Both references now use the same immutable digest as sole authority, with version comments. Runtime changes to original Alpine3.24 digest; builder remains exact Go1.26.11 digest. No suppression or gate waiver.
@@ -52,4 +52,21 @@ References: `.agents/skills/do/SKILL.md`, rules 02/05/09/13/14/25, constitution 
 - Independent domain/security/task-completion reviews passed implementation/local validation; A/B/C/F pass, D/E N/A. CodeRabbit label workflow44536122386 skipped; trusted main workflow44536259494 requested once, explicit Review skipped reply at13:43:35Z ended wait. Auto-review also reported no bot seat; no paid change requested. Sonar fresh analysis passed with zero new/accepted issues and zero hotspots.
 - Actual Alpine candidate ran on BOX at unchanged clean checkout e7ac643b18f4ca864e403d33f7fbcf7a1a5e8fe8. Enabled inbound through original deploy exit0; two consecutive trusted loopback messages received real SAM gateway550 Unknown address, unsigned mail550 before gateway. Postmaster550 and valid agent RCPT250; UID7102/read-only/no-new-privileges/capability/memory restrictions confirmed. No configured trigger was available for accepted live task/reply; existing automated vertical tests cover that path.
 - Restored original .env and actual deploy exit0; .env/secrets.env/gateway.env fingerprints all byte-identical, checkout unchanged/clean, four original containers up, API health200 healthy. Candidate image/container, private configuration snapshot/log directory and remote scripts removed. Script cleanup initially hit ownership mismatch after successful restore; root-scoped unlink resolved it and absence was verified. Own temporary SSH metadata key absent and firewall404 verified, local key removed. Empty metadata-created OS account sam2892 has no authorized key. BOX released after these checks.
-- CI44536121964 initial run had PR Evidence formatting failure (PASS LOCALLY instead of allowed PASS); PR table corrected with local scope in outcome. This final task-evidence-only commit supersedes that candidate; current-head CI/Sonar must pass before merge. Task remains active for #2893/#2896; no archive claimed.
+- Final head a48737d13f6e94ef267c545784fdbb6a5f0ea5cb passed CI44538336721 and Sonar. Merged2026-11-19T14:08:51Z as512fc11bcbce6694bed11780a1a4d4643a21da71. Original branch restored by ordinary non-force push after bot cleanup and independently verified. Main CI44540614441 and production44542854669 passed; independent API health200 healthy/app200 at14:42:07Z. No resources remain held.
+
+
+## #2893 evidence (documented closure complete)
+
+- Fresh head217b3fb1680cb3b01f37d99cc1173c18db66e950 reconciled against all comments/reviews/threads/closing issues, exact branch/URL owners, all association pages and linked-task search. No competing owner or held artifact. Dependabot had already closed it unmerged at2026-11-19T14:11:09Z after the digest-only FROM change; its up-to-date message is not evidence that Go1.27 shipped.
+- Original diff changed only the receiver builder from1.26.11 to1.27.3. Current builder digest, receiver module directive and CI GO_VERSION remain1.26.11. Chosen authorized disposition: keep isolated upgrade closed and evaluate a coordinated toolchain migration. No compiler incompatibility is claimed; the official Go toolchain documentation distinguishes minimum language version and selected compiler.
+- Exact historical Sonar findings were two docker:S8431 tag-plus-digest issues, not compiler failures; equivalent fixes passed in #2892. No failed historical check was waived to merge a closed PR.
+- SAM idea01M7T479B8HS7D7MEN2RZG127Z preserves migration and digest-update tracking follow-up, linked to PR/chat and re-read. All three independent domain/security/completion closure reviews passed. Evidence comment: https://github.com/raphaeltm/simple-agent-manager/pull/2893#issuecomment-7012478845.
+- Original branch had been deleted by bot closure; restored exact217b3fb with ordinary non-force push, independently verified. Final state closed/unmerged; no runtime change, deployment or new CI needed for closure.
+
+## #2896 evidence (implementation complete; release gates pending)
+
+- Fresh original b0d6dcaadac08d7d49b66ab4f75f1881525e161d on original Dependabot branch; all threads/reviews/closing issues empty, no competing owner/association, own task is only relevant active owner. Claimed after full reconciliation. Current main merged normally; no history rewrite.
+- Reproduced strict TS2345 with the original dependency split in the app-deployment build: client3.1169.0/Smithy types4.20 versus presigner3.1141.0/Smithy types4.19. Four real getSignedUrl call sites failed, matching the reported failure. Actual package is packages/app-deployment; original task used a plural path.
+- Aligned s3-request-presigner to client3.1169.0 in the catalog and regenerated the lockfile. Registry metadata confirms matching Smithy types^4.20 requirements; pnpm why now reaches only Smithy types4.20.0 from app-deployment. No overrides, casts/suppressions at SDK boundaries, compiler changes or production application logic changes.
+- App-deployment strict build and typecheck pass; package14files/192tests pass. Existing real TCP upload/HMAC verifier covers nonempty context body, signed length/SHA metadata and tamper controls. Two added real-SDK tests independently verify build-context GET and per-service artifact PUT/GET signatures, prefix/bucket/key/TTL binding, and wrong-key/method/query controls. Operator path-style fixtures and Cloudflare virtual-host fixture are both exercised. These signature fixtures do not claim actual S3 object persistence.
+- API dependency build13tasks passes. Focused API presign/config/attachment/artifact-boundary suites: 5 files / 84 tests passed; final ESLint passed. All three independent domain/security/task-completion reviews PASS; completion A/B/C/E/F pass locally, D N/A. Actual staging upload/download, current CI/Sonar/CodeRabbit and final merge/release verification remain pending. Implementation task archived after the Phase4 validator as required by /do; this does not mark #2896 or the overall SAM task complete. Pending release gates remain tracked in the PR and .do-state.md.
