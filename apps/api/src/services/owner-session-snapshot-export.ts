@@ -1,8 +1,8 @@
+import type { ProjectData } from '@simple-agent-manager/project-data/durable-object';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
-import type { ProjectData } from '../durable-objects/project-data';
 import type { Env } from '../env';
 import { resolveD1BindingIdentity } from '../lib/d1-session';
 import { maybeJsonRecord } from '../lib/runtime-validation';
