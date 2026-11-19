@@ -112,6 +112,7 @@ and trimmed. Nothing in L22 may change Cloudflare behaviour.
 - [ ] CI green, merge after #2905 deploys plus a security re-review, Deploy Production
 
 Not fixed here (accepted as tracked by the coordinator):
+
 - F21 L4 `port_range_cooling_down` is fail-fast in `apps/api/src/selfhost/reverse-tunnel/leases.ts`
   and in the shared Worker failure path; idea 01M7MK0PCF032CT45Z45HRSDEQ.
 - Security LOWs: access-log redaction matches literal path spellings only, and the frp Login limit
