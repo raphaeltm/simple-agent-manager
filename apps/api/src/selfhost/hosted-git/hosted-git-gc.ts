@@ -15,6 +15,35 @@ const GC_MAX_OBJECTS = 300_000;
 /** The Durable Object SQLite ceiling a migration must not cross while duplicating objects. */
 const DO_STORAGE_CAP = 10 * 1024 * 1024 * 1024;
 
+/** Delay before the GC alarm runs after a push queues work, coalescing bursts of pushes. */
+export const GC_DELAY_MS = 5 * 60 * 1000;
+
+type AlarmStorage = {
+  getAlarm(): Promise<number | null>;
+  setAlarm(scheduledTime: number): Promise<void>;
+};
+
+/**
+ * Arm the GC alarm GC_DELAY_MS from now unless one is already due sooner. Keeping an earlier
+ * alarm means a steady trickle of pushes cannot postpone cleanup indefinitely.
+ */
+export async function armHostedGitGcAlarm(storage: AlarmStorage): Promise<void> {
+  const due = Date.now() + GC_DELAY_MS;
+  const armed = await storage.getAlarm();
+  if (armed !== null && armed <= due) return;
+  await storage.setAlarm(due);
+}
+
+/**
+ * Queue a GC episode for what a push left behind: history stranded by a force push or delete,
+ * or an ingested pack whose refs were rejected or never decided. Resets the retry budget.
+ */
+export async function queueHostedGitGc(store: GitStore, storage: AlarmStorage): Promise<void> {
+  store.setMeta('gc-pending', '1');
+  store.setMeta('gc-attempts', '0');
+  await armHostedGitGcAlarm(storage).catch(() => undefined);
+}
+
 export interface HostedGitGcResult {
   removed: number;
   kept: number;

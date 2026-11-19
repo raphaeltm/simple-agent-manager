@@ -42,6 +42,19 @@ export class HostedGitRepoTest extends HostedGitRepo {
       try { await this.alarm(); } finally { store.get = get; }
       return new Response('ok');
     }
+    if (new URL(req.url).pathname.startsWith('/__test/fail-read/')) {
+      // One-shot: the next read of this object throws, as a storage fault or an exhausted work
+      // budget would, so a push fails after its pack was ingested but before any ref decision.
+      const oid = new URL(req.url).pathname.slice('/__test/fail-read/'.length);
+      const store = (this as unknown as { store: { get: (oid: string, ...rest: unknown[]) => Promise<unknown> } }).store;
+      const get = store.get;
+      store.get = async (target: string, ...rest: unknown[]) => {
+        if (target !== oid) return get.call(store, target, ...rest);
+        store.get = get;
+        throw new Error('injected read failure during push validation');
+      };
+      return new Response('ok');
+    }
     if (new URL(req.url).pathname === '/__test/gc-state') {
       return Response.json({ pending: this.ctx.storage.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key='gc-pending'").toArray()[0]?.value, alarm: await this.ctx.storage.getAlarm() });
     }
@@ -112,6 +125,11 @@ app.get('/__test/gc-state/:repo', async (c) => {
 app.delete('/__test/repository/:repo', async (c) => {
   const ns = c.env.HOSTED_GIT!;
   return ns.get(ns.idFromName(c.req.param('repo'))).fetch('https://hosted-git/', { method: 'DELETE' });
+});
+
+app.post('/__test/fail-read/:repo/:oid', (c) => {
+  const ns = c.env.HOSTED_GIT!;
+  return ns.get(ns.idFromName(c.req.param('repo'))).fetch(`https://hosted-git/__test/fail-read/${c.req.param('oid')}`);
 });
 
 app.post('/__test/alarm/:repo/:mode', (c) => {

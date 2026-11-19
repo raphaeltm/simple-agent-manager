@@ -17,9 +17,18 @@ const invalid = [
   ...Array.from({ length: 33 }, (_, i) => `refs/heads/x${String.fromCharCode(i === 32 ? 127 : i)}y`),
 ];
 const valid = ['refs/heads/normal', 'refs/heads/feature/x', 'refs/tags/v1.0', 'refs/heads/x.lockish/y', 'refs/heads/a.b/c', 'refs/heads/café'];
+// The pushed tip is a commit with an empty tree, so valid names reach a `set` decision.
+const tip = 'a'.repeat(40);
+const tree = 'b'.repeat(40);
+const objects: Record<string, { type: string; data: Uint8Array }> = {
+  [tip]: { type: 'commit', data: new TextEncoder().encode(`tree ${tree}\n\nmsg\n`) },
+  [tree]: { type: 'tree', data: new Uint8Array(0) },
+};
 const store = {
   getMeta: () => null, reachableVersion: () => '0', refs: () => [], resolveHead: () => null,
-  getRef: () => null, typeAndSize: () => ({ type: 'blob', size: 1 }),
+  getRef: () => null, getPeeled: () => null,
+  typeAndSize: (oid: string) => (objects[oid] ? { type: objects[oid].type, size: 1 } : null),
+  get: async (oid: string) => objects[oid] ?? null,
 } as unknown as GitStore;
 async function decision(ref: string) {
   return withGitWorkBudget(DEFAULT_HOSTED_GIT_LIMITS, async () => {

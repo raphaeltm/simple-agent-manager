@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   attempts: '0',
   gc: vi.fn(async () => ({ removed: 1, kept: 2 })),
   setAlarm: vi.fn(async () => undefined),
+  getAlarm: vi.fn(async () => null),
 }));
 vi.mock('cloudflare:workers', () => ({
   DurableObject: class {
@@ -31,7 +32,10 @@ vi.mock('../../../src/vendor/dgit/git/store', () => ({
     }
   },
 }));
-vi.mock('../../../src/selfhost/hosted-git/hosted-git-gc', () => ({ runHostedGitGc: mocks.gc }));
+vi.mock('../../../src/selfhost/hosted-git/hosted-git-gc', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/selfhost/hosted-git/hosted-git-gc')>()),
+  runHostedGitGc: mocks.gc,
+}));
 beforeEach(() => {
   mocks.pending = '1';
   mocks.attempts = '0';
@@ -41,7 +45,7 @@ beforeEach(() => {
 describe('hosted git GC admission', () => {
   it('rechecks uploads after waiting behind a push, and runs once after the upload leaves', async () => {
     const ctx = {
-      storage: { setAlarm: mocks.setAlarm },
+      storage: { setAlarm: mocks.setAlarm, getAlarm: mocks.getAlarm },
       blockConcurrencyWhile: async (action: () => Promise<void>) => action(),
     };
     const repo = new HostedGitRepo(ctx as unknown as DurableObjectState, {});
@@ -68,7 +72,7 @@ describe('hosted git GC admission', () => {
     expect(mocks.gc).toHaveBeenCalledOnce();
   });
   it('retries a transient failed sweep and resets its attempt budget after success', async () => {
-    const ctx = { storage: { setAlarm: mocks.setAlarm }, blockConcurrencyWhile: async (fn: () => Promise<void>) => fn() };
+    const ctx = { storage: { setAlarm: mocks.setAlarm, getAlarm: mocks.getAlarm }, blockConcurrencyWhile: async (fn: () => Promise<void>) => fn() };
     const repo = new HostedGitRepo(ctx as unknown as DurableObjectState, {});
     for (let cycle = 0; cycle < 4; cycle++) {
       mocks.pending = '1';
@@ -83,7 +87,7 @@ describe('hosted git GC admission', () => {
     await repo.alarm(); expect(mocks.gc).toHaveBeenCalledTimes(calls);
   });
   it('stops automatic retries after the configured consecutive failure budget', async () => {
-    const repo = new HostedGitRepo({ storage: { setAlarm: mocks.setAlarm }, blockConcurrencyWhile: async (fn: () => Promise<void>) => fn() } as unknown as DurableObjectState, {});
+    const repo = new HostedGitRepo({ storage: { setAlarm: mocks.setAlarm, getAlarm: mocks.getAlarm }, blockConcurrencyWhile: async (fn: () => Promise<void>) => fn() } as unknown as DurableObjectState, {});
     mocks.gc.mockRejectedValue(new Error('permanent failure'));
     for (let tick = 0; tick < 5; tick++) await repo.alarm();
     expect(mocks.gc).toHaveBeenCalledTimes(3);

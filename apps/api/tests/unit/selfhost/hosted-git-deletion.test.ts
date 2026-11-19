@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({
   events: [] as string[],
   validate: vi.fn(),
   setAlarm: vi.fn(async () => undefined),
+  getAlarm: vi.fn(async () => null),
   cancel: vi.fn(),
   deleteAlarm: vi.fn(async () => undefined),
 }));
@@ -72,6 +73,7 @@ function repo() {
         sql: {},
         deleteAlarm: state.deleteAlarm,
         setAlarm: state.setAlarm,
+        getAlarm: state.getAlarm,
         transactionSync: (fn: () => unknown) => fn(),
       },
       blockConcurrencyWhile: async (fn: () => Promise<void>) => fn(),

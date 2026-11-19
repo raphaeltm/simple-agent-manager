@@ -27,10 +27,17 @@ import {
   validatePush,
 } from '../../vendor/dgit/git/protocol';
 import { GitStore } from '../../vendor/dgit/git/store';
-import { concat, td, te } from '../../vendor/dgit/git/util';
+import { concat, te } from '../../vendor/dgit/git/util';
 import { gunzipLimited } from '../../vendor/dgit/git/zlib';
 import type { HostedGitEnv } from './env';
-import { type HostedGitGcResult, runHostedGitGc } from './hosted-git-gc';
+import { drainBounded, pktLength, readBodyBounded, RequestTooLargeError } from './hosted-git-body';
+import {
+  armHostedGitGcAlarm,
+  GC_DELAY_MS,
+  type HostedGitGcResult,
+  queueHostedGitGc,
+  runHostedGitGc,
+} from './hosted-git-gc';
 import { filterLsRefsResponse, lsRefsPrefixes } from './hosted-git-ls-refs';
 import {
   type HostedGitLimits,
@@ -48,68 +55,9 @@ const MAX_UPLOAD_PACK_BYTES = 16 * 1024 * 1024;
 const MAX_ACTIVE_UPLOADS = 4;
 /** Decompressed objects held for delta-base resolution during one push. */
 const INGEST_CACHE_BYTES = 32 * 1024 * 1024;
-const GC_DELAY_MS = 5 * 60 * 1000;
 const PACK_HEADER_BYTES = 12;
 /** The pkt-line command section of a push (ref updates + capabilities) before the pack. */
 const MAX_COMMAND_SECTION_BYTES = 1024 * 1024;
-const PKT_LENGTH = /^[0-9a-f]{4}$/i;
-
-class RequestTooLargeError extends Error {
-  constructor() {
-    super('request body exceeds maximum size');
-  }
-}
-
-/**
- * A pkt-line length: exactly four hex digits. 0 is a flush packet; 1-3 are invalid. `parseInt`
- * alone would accept "-004" and walk the parser backwards forever (security review, HIGH).
- */
-function pktLength(bytes: Uint8Array): number {
-  const text = td.decode(bytes);
-  if (!PKT_LENGTH.test(text)) throw new Error('bad pkt-line in push request');
-  const len = parseInt(text, 16);
-  if (len !== 0 && len < 4) throw new Error('bad pkt-line in push request');
-  return len;
-}
-
-/** Read a whole request body, refusing (without buffering further) past `maxBytes`. */
-async function readBodyBounded(req: Request, maxBytes: number): Promise<Uint8Array> {
-  if (!req.body) return new Uint8Array(0);
-  const reader = req.body.getReader();
-  const parts: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await readGitChunk(reader);
-    if (done) break;
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel().catch(() => undefined);
-      throw new RequestTooLargeError();
-    }
-    parts.push(value);
-  }
-  return concat(parts);
-}
-
-/** Discard up to `maxBytes` of a request body, then cancel whatever is left. */
-async function drainBounded(
-  reader: ReadableStreamDefaultReader<Uint8Array> | null,
-  maxBytes: number
-): Promise<void> {
-  if (!reader) return;
-  let drained = 0;
-  try {
-    while (drained <= maxBytes) {
-      const { done, value } = await readGitChunk(reader);
-      if (done) return;
-      drained += value?.byteLength ?? 0;
-    }
-    await reader.cancel();
-  } catch {
-    // The client may already be gone.
-  }
-}
-
 export class HostedGitRepo extends DurableObject {
   private store: GitStore;
   private readonly settingsEnv: HostedGitEnv;
@@ -463,7 +411,7 @@ export class HostedGitRepo extends DurableObject {
               error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
             });
           });
-          await this.ctx.storage.setAlarm(Date.now() + GC_DELAY_MS);
+          await armHostedGitGcAlarm(this.ctx.storage);
           const msg = err instanceof Error ? err.message : String(err);
           unpackError = msg.includes('exceeds maximum push size')
             ? hostedGitPushTooLargeMessage(maxBytes)
@@ -480,19 +428,21 @@ export class HostedGitRepo extends DurableObject {
       }
     }
 
-    const plan = await validatePush(this.store, commands, unpackError);
-    const { results, changed, needsGc } = this.ctx.storage.transactionSync(() =>
-      commitPush(this.store, plan)
-    );
+    let outcome: ReturnType<typeof commitPush>;
+    try {
+      const plan = await validatePush(this.store, commands, unpackError);
+      outcome = this.ctx.storage.transactionSync(() => commitPush(this.store, plan));
+    } catch (err) {
+      // Reclaim a pack that never reached a ref decision, or it holds quota with no cleanup queued.
+      if (packId !== null) await queueHostedGitGc(this.store, this.ctx.storage);
+      throw err;
+    }
+    const { results, changed, needsGc } = outcome;
     if (changed) {
       this.store.setMeta('created', '1');
       this.store.setMeta('last-push', String(Date.now()));
     }
-    if (needsGc || packId !== null) {
-      this.store.setMeta('gc-pending', '1');
-      this.store.setMeta('gc-attempts', '0');
-      await this.ctx.storage.setAlarm(Date.now() + GC_DELAY_MS).catch(() => undefined);
-    }
+    if (needsGc || packId !== null) await queueHostedGitGc(this.store, this.ctx.storage);
     if (caps.includes('report-status')) emit(renderStatus(results, unpackError, sideband));
   }
 }

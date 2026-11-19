@@ -943,6 +943,23 @@ describe('push connectivity admission (closure must be complete per command)', (
     return res.text();
   }
 
+  async function info(project: CreatedProject): Promise<{ objects: number }> {
+    return (await (await runtime.fetch(`/__test/info/${project.artifactsRepoId}`)).json()) as { objects: number };
+  }
+
+  async function gcState(project: CreatedProject): Promise<{ pending: string; alarm: number | null }> {
+    const res = await runtime.fetch(`/__test/gc-state/${project.artifactsRepoId}`);
+    return (await res.json()) as { pending: string; alarm: number | null };
+  }
+
+  /** Every blob and subtree under a commit's root tree. */
+  async function treeObjects(cwd: string, commit: string): Promise<string[]> {
+    return (await gitOk(['ls-tree', '-r', '-t', commit], cwd)).stdout
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => line.split(/\s+/)[2]!);
+  }
+
   async function reachableCache(project: CreatedProject): Promise<boolean> {
     const info = (await (await runtime.fetch(`/__test/info/${project.artifactsRepoId}`)).json()) as {
       reachableCache: boolean;
@@ -968,18 +985,19 @@ describe('push connectivity admission (closure must be complete per command)', (
 
     const { commit, tree } = await commitFile(work, 'attack.txt');
     // The pack carries the commit but not its tree. The first command's walk reaches the
-    // missing tree and fails; the second command names that same tree directly.
+    // missing tree and fails; the second command names that same tree directly. It is a tag,
+    // since branches refuse non-commits before any walk, so only the walk decides it.
     const out = await receive(
       project,
       token,
       [
         [ZERO, commit, 'refs/heads/attack-commit'],
-        [ZERO, tree, 'refs/heads/attack-tree'],
+        [ZERO, tree, 'refs/tags/attack-tree'],
       ],
       packOf(work, [commit])
     );
     expect(out).toContain('ng refs/heads/attack-commit missing necessary objects');
-    expect(out).toContain('ng refs/heads/attack-tree missing necessary objects');
+    expect(out).toContain('ng refs/tags/attack-tree missing necessary objects');
     const refs = (await gitOk(['ls-remote', remote])).stdout;
     expect(refs).toContain('refs/heads/main');
     expect(refs).not.toContain('attack-commit');
@@ -1046,6 +1064,198 @@ describe('push connectivity admission (closure must be complete per command)', (
     expect(refs).toContain('refs/heads/main');
     expect(refs).not.toMatch(/stale|reuse-orphan|child-of-orphan|ref-only/);
     expect(await reachableCache(project)).toBe(false);
+    await assertCleanClone(remote);
+  });
+
+  it('with a reachable cache, one failing command does not block or pollute a valid sibling', async () => {
+    const project = await createHostedProject(await createEmailOnlyUser(), 'Closure mixed push');
+    const token = await mintToken(project, 'write');
+    const remote = localRemote(project.repository, token);
+    const work = await freshDir('closure-mixed');
+    await gitOk(['clone', remote, work]);
+    expect(await reachableCache(project)).toBe(true);
+    const base = await rev(work, 'HEAD');
+    const valid = await commitFile(work, 'valid.txt');
+    await gitOk(['checkout', '-q', '--detach', base], work);
+    const broken = await commitFile(work, 'broken.txt');
+    const validObjects = (await gitOk(['rev-list', '--objects', valid.commit, `^${base}`], work)).stdout
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => line.split(' ')[0]!);
+    const out = await receive(
+      project,
+      token,
+      [
+        [ZERO, broken.commit, 'refs/heads/broken'],
+        [ZERO, valid.commit, 'refs/heads/valid'],
+      ],
+      packOf(work, [broken.commit, ...validObjects])
+    );
+    expect(out).toContain('ng refs/heads/broken missing necessary objects');
+    expect(out).toContain('ok refs/heads/valid');
+    expect(await reachableCache(project)).toBe(true);
+    const check = await assertCleanClone(remote);
+    expect(await rev(check, 'origin/valid')).toBe(valid.commit);
+    expect((await gitOk(['ls-remote', remote])).stdout).not.toContain('refs/heads/broken');
+  });
+
+  it('refuses a commit that does not parse for that command only, and queues its pack for GC', async () => {
+    const project = await createHostedProject(await createEmailOnlyUser(), 'Closure malformed');
+    const token = await mintToken(project, 'write');
+    const remote = localRemote(project.repository, token);
+    await runtime.fetch(`/__test/gc/${project.artifactsRepoId}`, { method: 'POST' });
+    expect(await gcState(project)).toMatchObject({ pending: '0', alarm: null });
+    const work = await freshDir('closure-malformed');
+    await gitOk(['init', '-q', '-b', 'main', work]);
+    const made = spawnSync('git', ['hash-object', '-t', 'commit', '--literally', '-w', '--stdin'], {
+      cwd: work,
+      env: gitEnv(),
+      input: `author ${'Test <test@example.com> 0 +0000'}\ncommitter Test <test@example.com> 0 +0000\n\nno tree header\n`,
+    });
+    expect(made.status).toBe(0);
+    const malformed = made.stdout.toString().trim();
+    const ordinary = await commitFile(work, 'ordinary.txt');
+    const out = await receive(
+      project,
+      token,
+      [
+        [ZERO, malformed, 'refs/heads/malformed'],
+        [ZERO, ordinary.commit, 'refs/heads/ordinary'],
+      ],
+      packOf(work, [malformed, ordinary.commit, ordinary.tree, ...(await treeObjects(work, ordinary.commit))])
+    );
+    expect(out).toContain('ng refs/heads/malformed missing necessary objects');
+    expect(out).toContain('ok refs/heads/ordinary');
+    expect((await gcState(project)).pending).toBe('1');
+    await assertCleanClone(remote);
+  });
+
+  it('queues GC for an ingested pack when validation fails before any ref decision', async () => {
+    const project = await createHostedProject(await createEmailOnlyUser(), 'Closure validate fault');
+    const token = await mintToken(project, 'write');
+    const remote = localRemote(project.repository, token);
+    await runtime.fetch(`/__test/gc/${project.artifactsRepoId}`, { method: 'POST' });
+    expect(await gcState(project)).toMatchObject({ pending: '0', alarm: null });
+    const before = await info(project);
+    const work = await freshDir('closure-fault');
+    await gitOk(['init', '-q', '-b', 'main', work]);
+    const root = await commitFile(work, 'fault.txt');
+    // The next read of this commit throws: ingest has stored the pack, the walk then faults.
+    await runtime.fetch(`/__test/fail-read/${project.artifactsRepoId}/${root.commit}`, { method: 'POST' });
+    const res = await runtime.fetch(`/git/${project.artifactsRepoId}.git/git-receive-pack`, {
+      method: 'POST',
+      headers: {
+        authorization: `Basic ${Buffer.from(`x:${token}`).toString('base64')}`,
+        'content-type': 'application/x-git-receive-pack-request',
+      },
+      body: buildReceivePackRequest(
+        root.commit,
+        'fault',
+        packOf(work, [root.commit, root.tree, ...(await treeObjects(work, root.commit))])
+      ) as BodyInit,
+    });
+    const text = await res.text();
+    // The fault surfaced from validation, not from ingest (which would answer "unpack ...").
+    expect(res.status).toBe(500);
+    expect(text).not.toContain('unpack');
+    expect((await info(project)).objects).toBeGreaterThan(before.objects);
+    const queued = await gcState(project);
+    expect(queued.pending).toBe('1');
+    expect(queued.alarm).not.toBeNull();
+    expect((await gitOk(['ls-remote', remote])).stdout).not.toContain('refs/heads/fault');
+    await runtime.fetch(`/__test/gc/${project.artifactsRepoId}`, { method: 'POST' });
+    expect((await info(project)).objects).toBe(before.objects);
+  });
+
+  it('keeps pushes and deletions working however large the existing ref tips are', async () => {
+    const project = await createHostedProject(await createEmailOnlyUser(), 'Large tips');
+    const token = await mintToken(project, 'write');
+    const remote = localRemote(project.repository, token);
+    const work = await freshDir('large-tips');
+    await gitOk(['clone', remote, work]);
+    const base = await rev(work, 'HEAD');
+    // Each tip is a commit with a 5 MiB message (a few KB compressed). Objects over a quarter of
+    // the 16 MiB serving cache are never cached, so every read inflates it again. A push costs
+    // about 10 MiB of a 14 MiB decompression budget; reading the existing tips on each push
+    // would exceed it from the second tip on.
+    const message = join(work, '..', `msg-${randomBytes(4).toString('hex')}`);
+    await writeFile(message, 'a'.repeat(5 * 1024 * 1024));
+    const setting = "INSERT INTO platform_settings (key,value,updated_at) VALUES ('repositories.maxInflatedBytes',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value";
+    await runtime.DATABASE.prepare(setting).bind(JSON.stringify(14 * 1024 * 1024), Date.now()).run();
+    await runtime.fetch('/__test/invalidate-settings', { method: 'POST' });
+    try {
+      for (let i = 0; i < 4; i++) {
+        await gitOk(['checkout', '-q', '--detach', base], work);
+        await writeFile(join(work, `big-${i}.txt`), `${i}\n`);
+        await gitOk(['add', '.'], work);
+        await gitOk(['commit', '-q', '-F', message], work);
+        await gitOk(['push', 'origin', `HEAD:refs/heads/big-${i}`], work);
+      }
+      const small = await commitFile(work, 'small.txt');
+      await gitOk(['push', 'origin', 'HEAD:refs/heads/small'], work);
+      await gitOk(['push', 'origin', '--delete', 'big-0'], work);
+      const refs = (await gitOk(['ls-remote', remote])).stdout;
+      expect(refs).toContain(`${small.commit}\trefs/heads/small`);
+      expect(refs).toContain('refs/heads/big-3');
+      expect(refs).not.toContain('refs/heads/big-0\n');
+    } finally {
+      await runtime.DATABASE.prepare("DELETE FROM platform_settings WHERE key='repositories.maxInflatedBytes'").run();
+      await runtime.fetch('/__test/invalidate-settings', { method: 'POST' });
+    }
+  });
+
+  it('refuses objects of the wrong type at an edge or on a branch, and keeps clones working', async () => {
+    const project = await createHostedProject(await createEmailOnlyUser(), 'Edge types');
+    const token = await mintToken(project, 'write');
+    const remote = localRemote(project.repository, token);
+    const work = await freshDir('edge-types');
+    await gitOk(['init', '-q', '-b', 'main', work]);
+    const plain = await commitFile(work, 'plain.txt');
+    const blob = (await gitOk(['rev-parse', `${plain.commit}:plain.txt`], work)).stdout.trim();
+    const made = spawnSync('git', ['hash-object', '-t', 'commit', '--literally', '-w', '--stdin'], {
+      cwd: work,
+      env: gitEnv(),
+      input: `tree ${blob}\nauthor Test <test@example.com> 0 +0000\ncommitter Test <test@example.com> 0 +0000\n\nblob as tree\n`,
+    });
+    expect(made.status).toBe(0);
+    const evil = made.stdout.toString().trim();
+    const out = await receive(
+      project,
+      token,
+      [
+        [ZERO, evil, 'refs/heads/evil'],
+        [ZERO, plain.tree, 'refs/heads/tree-branch'],
+        [ZERO, plain.tree, 'refs/tags/tree-tag'],
+      ],
+      packOf(work, [evil, blob, plain.tree])
+    );
+    expect(out).toContain('ng refs/heads/evil missing necessary objects');
+    expect(out).toContain('ng refs/heads/tree-branch trying to write non-commit object to branch');
+    expect(out).toContain('ok refs/tags/tree-tag');
+    await assertCleanClone(remote);
+  });
+
+  it('treats deleting a missing ref as a no-op that queues no GC, and refuses D/F ref conflicts', async () => {
+    const project = await createHostedProject(await createEmailOnlyUser(), 'Ref no-ops');
+    const token = await mintToken(project, 'write');
+    const remote = localRemote(project.repository, token);
+    await runtime.fetch(`/__test/gc/${project.artifactsRepoId}`, { method: 'POST' });
+    expect(await gcState(project)).toMatchObject({ pending: '0', alarm: null });
+    const missing = await receive(project, token, [[ZERO, ZERO, 'refs/heads/never-existed']]);
+    expect(missing).toContain('ok refs/heads/never-existed');
+    expect(await gcState(project)).toMatchObject({ pending: '0', alarm: null });
+
+    const main = (await gitOk(['ls-remote', remote, 'refs/heads/main'])).stdout.split(/\s+/)[0]!;
+    expect(await receive(project, token, [[ZERO, main, 'refs/heads/df']])).toContain('ok refs/heads/df');
+    const nested = await receive(project, token, [
+      [ZERO, main, 'refs/heads/df/x'],
+      [ZERO, main, 'refs/heads/dfx'],
+    ]);
+    expect(nested).toContain('ng refs/heads/df/x ref name conflicts with an existing ref');
+    expect(nested).toContain('ok refs/heads/dfx');
+    // A real deletion is the control: it changes refs and queues GC.
+    expect(await receive(project, token, [[main, ZERO, 'refs/heads/df']])).toContain('ok refs/heads/df');
+    expect((await gcState(project)).pending).toBe('1');
     await assertCleanClone(remote);
   });
 

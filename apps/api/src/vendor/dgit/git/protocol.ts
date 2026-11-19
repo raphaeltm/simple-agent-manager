@@ -7,7 +7,7 @@ import { GitStore } from "./store";
 import { PackWriter } from "./pack";
 import { OidSet } from "./oidset";
 import { MultipartCapture, MultipartPackUpload } from "./multipart";
-import { parseCommit, parseTag, parseTree, isGitlinkMode, isTreeMode, TYPE_NUM, NUM_TYPE, ObjType } from "./objects";
+import { GitParseError, parseCommit, parseTag, parseTree, isGitlinkMode, isTreeMode, TYPE_NUM, NUM_TYPE, ObjType } from "./objects";
 
 const AGENT = "agent=dgit/0.3";
 const INFINITE_DEPTH = 0x7fffffff;
@@ -1126,20 +1126,68 @@ const BAD_REF = /[\s~^:?*\[\\'"<>&`\x00-\x1f\x7f]/;
  * exist (Codex r4633317762). `known` therefore only ever holds validated
  * closures, which is also what commitPush folds into the reachable cache.
  */
-async function reachableComplete(store: GitStore, tip: string, known: OidSet): Promise<boolean> {
+async function reachableComplete(
+  store: GitStore,
+  tip: string,
+  known: OidSet,
+  failed: OidSet
+): Promise<boolean> {
   if (known.hasHex(tip)) return true; // tip already in a validated closure
-  // Cursor BFS over the scratch set itself: newly reached oids append past
-  // the cursor, so no separate hex-oid stack is needed to walk it.
+  if (failed.hasHex(tip)) return false; // an earlier command in this push proved it incomplete
+  // Cursor BFS over the scratch set itself: newly reached oids append past the
+  // cursor, so no separate hex-oid stack is needed to walk it. Parallel arrays
+  // hold each entry's BFS parent and the type its referencing edge requires.
   const fresh = new OidSet(1024);
+  let parent = new Uint32Array(1024);
+  let expect: (ObjType | null)[] = [null]; // the tip may be any type
   fresh.addHex(tip);
+  // SAM: every oid on the BFS path from the tip to a failing entry has that
+  // entry in its closure, so it is incomplete for the rest of this push.
+  // Recording the path means repeated or overlapping failing commands stop
+  // at the first known-bad oid instead of re-walking the same objects.
+  const fail = (i: number): false => {
+    for (let j = i; ; j = parent[j]) {
+      failed.addHex(fresh.atHex(j));
+      if (j === 0) return false;
+    }
+  };
   for (let i = 0; i < fresh.size; i++) {
     const oid = fresh.atHex(i);
+    if (i > 0 && failed.hasHex(oid)) return fail(i);
     const meta = store.typeAndSize(oid);
-    if (!meta) return false;
+    if (!meta) return fail(i);
+    // A type mismatch is the referencing object's fault, not this object's: blame the
+    // parent (and its ancestors) so a valid object shared elsewhere stays usable.
+    if (expect[i] !== null && meta.type !== expect[i]) return fail(parent[i]);
     if (meta.type === "blob") continue;
     const obj = await store.get(oid);
-    if (!obj) return false;
-    for (const child of childOids(obj)) if (!known.hasHex(child)) fresh.addHex(child);
+    if (!obj) return fail(i);
+    let children: ChildRef[];
+    try {
+      children = childRefs(obj);
+    } catch (err) {
+      // SAM: a commit, tag or tree that does not parse cannot have a proven
+      // closure; reject this command rather than failing the whole push.
+      if (err instanceof GitParseError) return fail(i);
+      throw err;
+    }
+    for (const child of children) {
+      if (known.hasHex(child.oid) || fresh.hasHex(child.oid)) {
+        // Already validated or queued under another edge: this edge still has to name
+        // an object of the type it requires (absent ones fail when their entry is walked).
+        const type = store.typeAndSize(child.oid)?.type;
+        if (type !== undefined && type !== child.type) return fail(i);
+        continue;
+      }
+      fresh.addHex(child.oid);
+      if (fresh.size > parent.length) {
+        const bigger = new Uint32Array(parent.length * 2);
+        bigger.set(parent);
+        parent = bigger;
+      }
+      parent[fresh.size - 1] = i;
+      expect[fresh.size - 1] = child.type;
+    }
   }
   for (let i = 0; i < fresh.size; i++) known.addHex(fresh.atHex(i));
   return true;
@@ -1190,6 +1238,41 @@ function childOids(obj: { type: ObjType; data: Uint8Array }): string[] {
   return [];
 }
 
+/** An object a parent references, with the type the reference requires. */
+interface ChildRef {
+  oid: string;
+  type: ObjType;
+}
+
+const TAG_TARGET_TYPES: ReadonlySet<string> = new Set(["commit", "tree", "blob", "tag"]);
+
+/**
+ * The objects a non-blob object references (blobs are leaves), each with the type
+ * git requires at that edge. SAM: upstream returned bare oids, so a commit whose
+ * "tree" was a blob, or whose parent was a tree, passed the presence-only walk and
+ * then broke every clone ("bad tree pointer"); the walk now checks each edge's type.
+ */
+function childRefs(obj: { type: ObjType; data: Uint8Array }): ChildRef[] {
+  if (obj.type === "commit") {
+    const c = parseCommit(obj.data);
+    return [{ oid: c.tree, type: "tree" }, ...c.parents.map((oid) => ({ oid, type: "commit" as ObjType }))];
+  }
+  if (obj.type === "tag") {
+    const t = parseTag(obj.data);
+    if (!TAG_TARGET_TYPES.has(t.type)) throw new GitParseError("tag has invalid type header");
+    return [{ oid: t.object, type: t.type as ObjType }];
+  }
+  if (obj.type === "tree") {
+    const out: ChildRef[] = [];
+    for (const e of parseTree(obj.data)) {
+      if (isGitlinkMode(e.mode)) continue;
+      out.push({ oid: e.oid, type: isTreeMode(e.mode) ? "tree" : "blob" });
+    }
+    return out;
+  }
+  return [];
+}
+
 export async function validatePush(
   store: GitStore,
   commands: PushCommand[],
@@ -1207,14 +1290,48 @@ export async function validatePush(
   // could vouch for a later command. Repository caps bound the walk.
   // pre-existing ref tips bound the connectivity walk: their closure is
   // already validated, so a normal fast-forward only re-checks new objects
+  // SAM: seeding reads no objects. Upstream peeled every ref tip here, which
+  // inflated each tip under the push's decompression budget on every push, so
+  // a handful of large tips made every later push, including the deletion
+  // that would remove them, exceed the budget. Only cached peel targets count.
   const known = new OidSet(4096);
-  for (const r of store.refs()) {
+  const existing = store.refs();
+  for (const r of existing) {
     known.addHex(r.target);
-    const c = await peelToCommitOid(store, r.target);
-    if (c) known.addHex(c);
+    const peeled = store.getPeeled(r.target);
+    if (peeled) known.addHex(peeled);
   }
   const knownHead = store.resolveHead();
   if (knownHead) known.addHex(knownHead);
+  // oids proven to have an incomplete closure earlier in this push
+  const failed = new OidSet(1024);
+  // SAM: directory/file conflicts. Git cannot store both refs/heads/a and
+  // refs/heads/a/b (clients fail to fetch them), so a new ref must not be a path
+  // prefix of a ref, nor have one as a prefix. Deletions in this push with a
+  // matching old value apply first, as in git's ref transaction.
+  const refNames = new Set<string>();
+  const dirCounts = new Map<string, number>();
+  const trackRef = (name: string, delta: 1 | -1) => {
+    if (delta === 1) refNames.add(name);
+    else refNames.delete(name);
+    for (let k = name.indexOf("/"); k !== -1; k = name.indexOf("/", k + 1)) {
+      const dir = name.slice(0, k);
+      dirCounts.set(dir, (dirCounts.get(dir) ?? 0) + delta);
+    }
+  };
+  const refConflict = (name: string) => {
+    if ((dirCounts.get(name) ?? 0) > 0) return true;
+    for (let k = name.indexOf("/"); k !== -1; k = name.indexOf("/", k + 1)) {
+      if (refNames.has(name.slice(0, k))) return true;
+    }
+    return false;
+  };
+  for (const r of existing) trackRef(r.name, 1);
+  for (const cmd of commands) {
+    if (cmd.next === ZERO_OID && refNames.has(cmd.ref) && store.getRef(cmd.ref) === cmd.old) {
+      trackRef(cmd.ref, -1);
+    }
+  }
 
   const decisions: PushDecision[] = [];
   for (const cmd of commands) {
@@ -1239,13 +1356,24 @@ export async function validatePush(
       decisions.push({ ref: cmd.ref, expectedOld: cmd.old, del: true });
       continue;
     }
-    const connected = await reachableComplete(store, cmd.next, known);
+    if (current === ZERO_OID && refConflict(cmd.ref)) {
+      decisions.push({ ref: cmd.ref, expectedOld: cmd.old, reject: "ref name conflicts with an existing ref" });
+      continue;
+    }
+    // SAM: git refuses to write a non-commit to a branch; a clone of such a
+    // repository fails while updating HEAD.
+    if (cmd.ref.startsWith("refs/heads/") && store.typeAndSize(cmd.next)?.type !== "commit") {
+      decisions.push({ ref: cmd.ref, expectedOld: cmd.old, reject: "trying to write non-commit object to branch" });
+      continue;
+    }
+    const connected = await reachableComplete(store, cmd.next, known, failed);
     if (!connected) {
       decisions.push({ ref: cmd.ref, expectedOld: cmd.old, reject: "missing necessary objects" });
       continue;
     }
     const forced = cmd.old !== ZERO_OID && !(await isAncestor(store, cmd.old, cmd.next));
     decisions.push({ ref: cmd.ref, expectedOld: cmd.old, set: cmd.next, forced });
+    if (current === ZERO_OID) trackRef(cmd.ref, 1);
   }
   return { decisions, known, hadCache };
 }
@@ -1275,6 +1403,12 @@ export function commitPush(store: GitStore, plan: PushPlan): { results: CommandR
       continue;
     }
     if (d.del) {
+      // SAM: deleting a ref that does not exist succeeds without changing
+      // anything (as in git), so it must not queue a GC episode either.
+      if (current === ZERO_OID) {
+        results.push({ ref: d.ref, ok: true });
+        continue;
+      }
       store.delRef(d.ref);
       needsGc = true;
     } else {

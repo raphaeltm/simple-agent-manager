@@ -1,0 +1,38 @@
+# Hosted git: GC without inflation, delta depth at ingest, GC scheduling
+
+## Problem
+
+The adversarial review of the push admission path in PR #2907 (H2, SAM-hosted git, self-host only) left these findings open. Each needs a design change rather than a guard, so they were deferred with justification in the PR. The HIGH finding and the other MEDIUM and LOW items in that review were fixed in #2907.
+
+1. **GC needs to inflate every migrated pack object** (review M3). `runHostedGitGc` (`apps/api/src/selfhost/hosted-git/hosted-git-gc.ts`) moves each reachable pack object to loose storage through `store.get`, which inflates it under the GC alarm's single `repositories.maxInflatedBytes` budget (128 MiB). Two cases exceed that budget:
+   - highly compressible blobs (14 blobs of 15 MiB stored in about 0.4 MiB);
+   - more than 128 MiB of inflated pack content accumulated between collections.
+
+   GC then fails on every attempt, garbage packs are never reclaimed, and the repository drifts towards `maxRepoBytes`, where every push is refused. The reviewer reproduced this at 268 MB of a 268.4 MB cap. Raising the budget only moves the bound, since a compression bomb can exceed any inflation or deadline cap.
+2. **Delta depth is enforced on read but not at ingest** (review M4). `packstore.ts` resolves deltas eagerly at ingest without checking `maxDeltaDepth`, so a pack built with `--depth=250` is accepted. Cold reads then throw `delta chain exceeds depth`, and a shallow clone aborts with `early EOF` until GC rewrites the objects loose. The exception is thrown inside the upload response stream and is not caught.
+3. **GC holds the input gate for the whole sweep** (review M5, the part not fixed in #2907). `gc()` runs under `blockConcurrencyWhile` for up to `workTimeoutMs` (120 s), blocking every other request to that repository, reads included.
+4. **Lower-severity items** (review L7 to L10):
+   - **No rate limit.** There is no per-token or per-repository request rate limit, and a queued push is authorized before it waits on `receiveChain`.
+   - **Command lines dropped silently.** Unmatched command pkt-lines are skipped with no `ng`, and invalid UTF-8 ref bytes alias to U+FFFD.
+   - **Gzip buffering.** The gzip push path buffers about 3× `maxPushBytes`.
+   - **Quadratic copying.** `need()` concatenates repeatedly while reading the command section.
+
+## Context
+
+Found by the security-auditor adversarial pass on 2026-11-19 (task 01M7TY7Z3HBTSDSSV85FPRHE1B). The reproductions ran against the Durable Object in Miniflare/workerd.
+
+Who can trigger them:
+- Every item needs a token with write access to the repository: a project member, or that project's agent workspace.
+- The blast radius is that one repository.
+- Item 1 is also reachable without malice, when several large pushes land between collections.
+- An operator can recover by deleting and recreating the project's repository.
+
+## Acceptance Criteria
+
+- [ ] GC reclaims unreachable packs without inflating reachable objects (copy raw pack entries, or drop packs whose objects no ref reaches), and completes for a repository whose reachable content inflates past `maxInflatedBytes`. A real-git test proves it.
+- [ ] GC work is deadline-bounded and resumable, with throughput stated at the 30,000-object / 256 MiB envelope (`.claude/rules/81-work-bounds-must-state-throughput.md`).
+- [ ] Ingest records delta depth and refuses a pack whose chains exceed `maxDeltaDepth`. A real-git test pushes `--depth=250` and is refused, and a normal pack is accepted.
+- [ ] Errors raised while streaming an upload-pack response end the stream cleanly.
+- [ ] GC no longer blocks reads for the whole sweep; a test shows a clone proceeding while GC runs.
+- [ ] Decide on and implement per-token push rate limiting, or record why not.
+- [ ] Every malformed command line is answered with `ng` or a refusal, never dropped.
