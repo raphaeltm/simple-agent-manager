@@ -110,8 +110,9 @@ function exportContract(
     manifest.chatSessionId !== snapshot.chatSessionId ||
     typeof manifest.workspaceId !== 'string' ||
     !manifest.workspaceId ||
-    (snapshot.workspaceId !== null && manifest.workspaceId !== snapshot.workspaceId) ||
-    (manifest.agentSessionId ?? null) !== snapshot.agentSessionId ||
+    // Not compared with the row's current workspaceId/agentSessionId: recovery refreshes those
+    // routing fields (ensureSessionSnapshotForSleep) while the last verified generation, and
+    // its manifest naming the earlier workspace, stays authoritative.
     (manifest.baseCommit ?? null) !== snapshot.baseCommit ||
     manifest.status !== snapshot.status ||
     manifest.degradation !== snapshot.degradation

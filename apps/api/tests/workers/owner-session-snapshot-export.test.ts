@@ -1,9 +1,9 @@
+import type { ProjectData } from '@simple-agent-manager/project-data/durable-object';
 import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { drizzle } from 'drizzle-orm/d1';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import type { ProjectData } from '@simple-agent-manager/project-data/durable-object';
 import type { Env } from '../../src/env';
 import { createRequestScopedD1 } from '../../src/lib/d1-session';
 import { AppError } from '../../src/middleware/error';
@@ -189,6 +189,22 @@ describe('human owner retained snapshot export across route/DO/D1/R2', () => {
     const ok = await app(owner).request(f.url(), {}, bindings);
     expect(ok.status).toBe(200);
     await ok.arrayBuffer();
+  });
+
+  it('still exports the verified generation after recovery refreshes the routing fields', async () => {
+    const f = await fixture();
+    // ensureSessionSnapshotForSleep moves the row to a replacement workspace and agent session
+    // but keeps the last verified generation and its manifest naming the earlier workspace.
+    await update(f.id, {
+      workspaceId: null,
+      agentSessionId: 'replacement-agent-session',
+    });
+    const wip = await app().request(f.url(), {}, bindings);
+    expect(wip.status).toBe(200);
+    expect(new Uint8Array(await wip.arrayBuffer())).toEqual(bytes);
+    const manifest = await app().request(f.url('manifest'), {}, bindings);
+    expect(manifest.status).toBe(200);
+    expect(await manifest.text()).toBe(f.manifest);
   });
 
   it('does not let a project owner export another member creator snapshot', async () => {
