@@ -191,8 +191,8 @@ export class GitStore {
   addPushEdges(children: string[]): void {
     for (let i = 0; i < children.length; i += 64) {
       const batch = children.slice(i, i + 64);
-      const values = batch.map(() => "(?)").join(",");
-      this.sql.exec(`INSERT INTO push_edges (child) VALUES ${values}`, ...batch);
+      const placeholders = batch.map(() => "(?)").join(",");
+      this.sql.exec(`INSERT INTO push_edges (child) VALUES ${placeholders}`, ...batch);
     }
   }
 
@@ -238,9 +238,13 @@ export class GitStore {
   }
 
   wipe(): void {
-    for (const t of ["objects", "chunks", "refs", "meta", "reachable", "peeled", "stats_cache"]) {
-      this.sql.exec(`DROP TABLE IF EXISTS ${t}`);
-    }
+    this.sql.exec("DROP TABLE IF EXISTS objects");
+    this.sql.exec("DROP TABLE IF EXISTS chunks");
+    this.sql.exec("DROP TABLE IF EXISTS refs");
+    this.sql.exec("DROP TABLE IF EXISTS meta");
+    this.sql.exec("DROP TABLE IF EXISTS reachable");
+    this.sql.exec("DROP TABLE IF EXISTS peeled");
+    this.sql.exec("DROP TABLE IF EXISTS stats_cache");
     this.packs.wipe();
     // meta (with the flag) is gone; a fresh empty repo has no loose objects
     this.hasLoose = false;

@@ -1,6 +1,6 @@
 // @ts-nocheck -- vendored dgit core, see ../UPSTREAM.md (upstream typechecks strict, without noUncheckedIndexedAccess)
 /* eslint-disable */
-// FILE SIZE EXCEPTION: vendored third-party code kept identical to upstream dgit (see ../UPSTREAM.md)
+// FILE SIZE EXCEPTION: vendored dgit core with SAM resource bounds and static SQL identifiers (see ../UPSTREAM.md)
 import pako from "pako";
 import { inflate as inflateAll } from "./zlib";
 import { chargeGitWork, gitWorkLimits, readGitChunk } from "./budget";
@@ -260,9 +260,10 @@ export class PackStore {
   }
 
   wipe(): void {
-    for (const t of ["pack_meta", "pack_data", "pack_objects", "pack_pending"]) {
-      this.sql.exec(`DROP TABLE IF EXISTS ${t}`);
-    }
+    this.sql.exec("DROP TABLE IF EXISTS pack_meta");
+    this.sql.exec("DROP TABLE IF EXISTS pack_data");
+    this.sql.exec("DROP TABLE IF EXISTS pack_objects");
+    this.sql.exec("DROP TABLE IF EXISTS pack_pending");
     this.chunks.clear(); // pack ids restart from 1: cached rows would be stale
     this.backend.clear();
   }
@@ -516,9 +517,9 @@ export class PackStore {
       )
       .toArray();
     for (const o of orphans) {
-      for (const t of ["pack_data", "pack_objects", "pack_pending"]) {
-        this.sql.exec(`DELETE FROM ${t} WHERE pack_id = ?`, o.pack_id);
-      }
+      this.sql.exec("DELETE FROM pack_data WHERE pack_id = ?", o.pack_id);
+      this.sql.exec("DELETE FROM pack_objects WHERE pack_id = ?", o.pack_id);
+      this.sql.exec("DELETE FROM pack_pending WHERE pack_id = ?", o.pack_id);
       // an interrupted R2 ingest may have left a completed raw object; delete it
       if (this.r2) {
         try {
@@ -671,9 +672,9 @@ export class PackStore {
     let objBatchRows = 0;
     const flushObjects = () => {
       if (!objBatchRows) return;
-      const values = Array(objBatchRows).fill("(?,?,?,?,?,?,?,?,?)").join(",");
+      const placeholders = Array(objBatchRows).fill("(?,?,?,?,?,?,?,?,?)").join(",");
       this.sql.exec(
-        `INSERT OR IGNORE INTO pack_objects (oid, pack_id, offset, data_off, data_len, type, size, entry_size, base_oid) VALUES ${values}`,
+        `INSERT OR IGNORE INTO pack_objects (oid, pack_id, offset, data_off, data_len, type, size, entry_size, base_oid) VALUES ${placeholders}`,
         ...objBatch
       );
       objBatch = [];
