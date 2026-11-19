@@ -160,4 +160,18 @@ describe('selfhost:deploy', { timeout: CHILD_TEST_TIMEOUT_MS }, () => {
     expect(result.status).toBe(1);
     expect(result.out).toContain('VM_AGENT_REQUIRED_VERSION is generated');
   });
+
+  // F21 L5: `CELLD_INTERNAL_PORT=20001 docker compose up` would run celld's operator API inside the
+  // lease range whatever the .env says; the deploy run from the same shell must refuse it.
+  it('refuses a box port that a shell override puts inside the lease range', async () => {
+    const envFile = writeBox(dir, ['CELLD_INTERNAL_PORT=7001']);
+    const refused = await runDeploy(envFile, ['--init'], { CELLD_INTERNAL_PORT: '20001' });
+    expect(refused.status).not.toBe(0);
+    expect(refused.out).toContain('CELLD_INTERNAL_PORT from the shell environment overrides');
+    expect(refused.out).toMatch(/contains CELLD_INTERNAL_PORT \(20001\); a node could bind it/);
+    expect(existsSync(join(state, 'gateway.env'))).toBe(false);
+    // Control: the same box without the override initialises.
+    const init = await runDeploy(envFile, ['--init']);
+    expect(init.status, init.out).toBe(0);
+  });
 });

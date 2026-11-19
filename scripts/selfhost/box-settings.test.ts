@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
 
 import {
   BOX_RESERVED_PORTS,
@@ -24,6 +25,7 @@ import {
   resolveTunnelSettings,
   trimSlashes,
   tunnelWorkerVars,
+  withComposePortOverrides,
 } from './box-settings.js';
 import { syncGatewayEnv } from './deploy-steps.js';
 import { parseDotenv } from './secret-files.js';
@@ -216,6 +218,64 @@ describe('presignVars', () => {
     const vars = presignVars({ CELLD_BUCKET: bucket }, 'assets');
     expect(performance.now() - started).toBeLessThan(200);
     expect(vars.R2_S3_KEY_PREFIX).toBe(`a${'/'.repeat(50_000)}x/r2/assets/`);
+  });
+});
+
+const COMPOSE_TEXT = readFileSync(
+  join(import.meta.dirname, '../../deploy/selfhost/docker-compose.yml'),
+  'utf8'
+);
+
+describe('BOX_RESERVED_PORTS', () => {
+  it('matches the defaults docker-compose.yml actually uses', () => {
+    const defaults = [...COMPOSE_TEXT.matchAll(/\$\{([A-Z_]+):-(\d+)\}/g)].map(
+      (m) => [m[1]!, Number(m[2])] as const
+    );
+    for (const [name, port] of Object.entries(BOX_RESERVED_PORTS)) {
+      const used = defaults.filter(([found]) => found === name).map(([, value]) => value);
+      expect(used.length, name).toBeGreaterThan(0);
+      // Every interpolation of the port in the file falls back to the same default.
+      expect(new Set(used), name).toEqual(new Set([port]));
+    }
+  });
+
+  // F21 L5: caddy/start.sh can only check the ports compose passes it.
+  it('are all passed to Caddy, whose start.sh refuses any inside the lease range', () => {
+    const compose = parse(COMPOSE_TEXT) as {
+      services: { caddy: { environment: Record<string, string> } };
+    };
+    const startSh = readFileSync(
+      join(import.meta.dirname, '../../deploy/selfhost/caddy/start.sh'),
+      'utf8'
+    );
+    for (const [name, port] of Object.entries(BOX_RESERVED_PORTS)) {
+      expect(compose.services.caddy.environment[name], name).toBe(`\${${name}:-${port}}`);
+      expect(startSh, name).toMatch(new RegExp(`\\b${name}\\b`));
+    }
+  });
+});
+
+describe('withComposePortOverrides (F21 L5)', () => {
+  it('applies a shell port override, as docker compose does, and reports it', () => {
+    const { box, overridden } = withComposePortOverrides(
+      { CELLD_INTERNAL_PORT: '7001', SAM_DOMAIN: 'box.example' },
+      { CELLD_INTERNAL_PORT: '20001', SAM_DOMAIN: 'other.example', PATH: '/usr/bin' }
+    );
+    expect(overridden).toEqual(['CELLD_INTERNAL_PORT']);
+    expect(box).toEqual({ CELLD_INTERNAL_PORT: '20001', SAM_DOMAIN: 'box.example' });
+    // ...so the range check sees the port compose will really bind.
+    expect(() => resolveTunnelPortRange(box)).toThrow(/contains CELLD_INTERNAL_PORT \(20001\)/);
+  });
+
+  it('control: without a shell override the .env value is checked and passes', () => {
+    const { box, overridden } = withComposePortOverrides({ CELLD_INTERNAL_PORT: '7001' }, {});
+    expect(overridden).toEqual([]);
+    expect(resolveTunnelPortRange(box)).toEqual({ start: 20000, end: 29999 });
+  });
+
+  it('also catches a shell port for a name the .env never set', () => {
+    const { box } = withComposePortOverrides({}, { FRPS_BIND_PORT: '25000' });
+    expect(() => resolveTunnelPortRange(box)).toThrow(/contains FRPS_BIND_PORT \(25000\)/);
   });
 });
 
