@@ -2,6 +2,7 @@ import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { resolveD1BindingIdentity } from '../lib/d1-session';
+import { joinSharedFlight, SharedFlightAbandonedError } from '../lib/shared-flight';
 import type { AdminSettingName } from './admin-settings-registry';
 import { DEFAULT_CONFIG_READ_TIMEOUT_MS } from './config-read-deadline';
 import { withDeadline } from './fetch-timeout';
@@ -170,7 +171,9 @@ export class AdminSettingsCache {
     if (snapshot) return snapshot;
     const flight = this.flight(primary, state, useCache, readTimeoutMs);
     try {
-      const rows = await flight.promise;
+      // Joined under this request's own timer: on celld a flight whose starter's client went
+      // away never settles (lib/shared-flight.ts).
+      const rows = await joinSharedFlight(flight.promise, flight.deadlineAt, this.now());
       if (state.generation !== flight.generation) return undefined;
       if (useCache && state.inFlight !== flight) {
         if (state.inFlight || state.snapshot) return undefined;
@@ -186,7 +189,12 @@ export class AdminSettingsCache {
           expiresAt: flight.startedAt + ttlMs,
         };
       return structuredClone(rows);
-    } catch {
+    } catch (error) {
+      if (error instanceof SharedFlightAbandonedError) {
+        // Drop the dead flight; the bounded outer loop starts this request's own read.
+        if (state.inFlight === flight) delete state.inFlight;
+        return undefined;
+      }
       if (state.generation !== flight.generation) return undefined;
       if (useCache && state.inFlight !== flight) {
         if (state.inFlight || state.snapshot) return undefined;
