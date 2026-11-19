@@ -293,3 +293,7 @@ List Compose profiles explicitly: `COMPOSE_PROFILES=*` is refused, since it woul
 optional GCE broker even for an S3 installation. The broker accepts only its fixed native
 client audience query; it never uses caller queries to select a token audience, scope or bucket.
 Celld stdout/stderr redact the broker path credential before Docker records logs.
+
+Metadata transport timeouts apply per attempt. The pinned Google STS SDK enables its bounded
+retry policy for transient failures; callers receive a generic failure if exchange cannot complete.
+Redirects and oversized responses are refused on every attempt.

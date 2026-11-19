@@ -68,6 +68,7 @@ export function tokenSource(config: TokenConfig, endpoints = DEFAULT_ENDPOINTS) 
     // fetch-native defaults survive merging for both metadata and SDK-owned STS requests.
     redirect: 'error',
     size: config.maxResponseBytes,
+    // Metadata makes one attempt; the pinned STS SDK supplies its own bounded retry policy.
     retry: false,
   });
   // The pinned official SDK's public STS class supports transporter limits. DownscopedClient
