@@ -63,37 +63,55 @@ errors a day. The owner confirmed in the Hetzner console that no such server exi
 
 ## Implementation checklist
 
-- [ ] (c) Diagnose why the pinned credential did not resolve (generation changed vs removed /
+- [x] (c) Diagnose why the pinned credential did not resolve (generation changed vs removed /
       disabled) and throw `NodeTeardownBlockedError` from the providerless path; empty exact
       inventory throws `teardown_allocation_unresolved`. Add both reasons to
       `NODE_TEARDOWN_BLOCKED_REASONS`.
-- [ ] (b) Service `recordOperatorNodeDeletion` (shared helpers with the owner path, no fork):
+- [x] (b) Service `recordOperatorNodeDeletion` (shared helpers with the owner path, no fork):
       superadmin only, platform capacity only, managed VM only, status destroying/deleting/error,
       providerless nodes outside the provisioning recovery window, provider existence check
       (pinned or current platform/owner credentials; any server with this node's instance ID or
       exact labels → 409; lookup failure → 503; no credential can look → operator's word).
-- [ ] Record proof as attested (`runtime_termination_attested_at`), audit event
+- [x] Record proof as attested (`runtime_termination_attested_at`), audit event
       `deleted_by_operator` / `operator_attested_manual_deletion` in `node_health_events`,
       plus an `operations_audit_log` row naming the superadmin.
-- [ ] Route `POST /api/admin/nodes/:id/operator-deletion` (`{confirmed:true}`) and
+- [x] Route `POST /api/admin/nodes/:id/operator-deletion` (`{confirmed:true}`) and
       `GET /api/admin/nodes/stranded` (platform-capacity VM nodes stuck in
       destroying/deleting/error, capped, with total).
-- [ ] Admin UI: "Stuck nodes" panel on Admin → Infrastructure with a confirm dialog naming the
+- [x] Admin UI: "Stuck nodes" panel on Admin → Infrastructure with a confirm dialog naming the
       provider and instance (or "no server ID was recorded"), phone usable.
-- [ ] Docs: self-hosting / admin docs mention the operator path; api reference.
-- [ ] Tests (workers, real D1 + migrations): incident reproduction through the real cleanup
+- [x] Docs: self-hosting / admin docs mention the operator path; api reference.
+- [x] Tests (workers, real D1 + migrations): incident reproduction through the real cleanup
       entry point (named reason recorded, full backoff) that fails pre-fix; operator removal of
       the incident node; live-server controls (providerless labelled server via current
       platform credential; instance ID still exists) refuse and change nothing; non-superadmin
       and owner refused; user-capacity node refused (owner path control); recovery window
       refused; proven discriminating.
-- [ ] Playwright visual audit of the panel (375 / 1280), diverse data.
+- [x] Playwright visual audit of the panel (375 / 1280), diverse data.
 
 ## Acceptance criteria
 
-- [ ] The incident node shape is removed through the admin path, audited as operator-attested.
-- [ ] A node whose server still exists at the provider is refused (409) with nothing changed.
-- [ ] Non-superadmins cannot list or act; user-capacity nodes are refused by the admin path.
-- [ ] The providerless refusal names its condition in `cleanup_blocked_reason` and keeps the full
+- [x] The incident node shape is removed through the admin path, audited as operator-attested.
+- [x] A node whose server still exists at the provider is refused (409) with nothing changed.
+- [x] Non-superadmins cannot list or act; user-capacity nodes are refused by the admin path.
+- [x] The providerless refusal names its condition in `cleanup_blocked_reason` and keeps the full
       failure backoff.
 - [ ] Staging2 node `01M7MTMV89F5ZV23VSF0ZVPJPS` cleared through the new UI path.
+
+## Implementation notes
+
+- Proof writers moved to `services/strict-node-termination-proof.ts` (strict-node-deletion.ts was at
+  499 lines); `markRuntimeTerminationConfirmed` gained an optional `admission` SQL for the operator
+  path's reciprocal predicate. `requireStrictNodeProvider` was removed (its only caller now uses
+  `requirePinnedProviderlessCredential`).
+- Coordinator guardrails (2026-11-19): only `destroying` with a recorded block; refuse fresh
+  heartbeat / active workspace / task placement claim in the final CAS; typed node ID + note stored
+  with who/when (operations_audit_log, task_id `admin-ui`); security review; visual audit.
+- Discrimination (workers test `node-operator-deletion.test.ts`): no admission SQL → active
+  workspace + fresh heartbeat tests red; no provider lookup → both live-server controls + incident
+  (liveness) red; no superadmin middleware → authz test red; pre-fix reconcile → three naming tests
+  + incident red.
+- Known edge: an operator removal interrupted after the proof write and finished later by the
+  owner's Delete is audited as `owner_attested_manual_deletion` (still attested, never strict).
+- Docs updated: admin-settings (new section), session-troubleshooting, security.md, api.md. The
+  task file was committed on the branch, not main.
