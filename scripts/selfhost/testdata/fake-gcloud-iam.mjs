@@ -51,8 +51,14 @@ else if (cmd.startsWith('iam workload-identity-pools providers')) {
     if (!db.providers[id]) fail('not found');
     if (format.includes('issuerUri')) out(db.providers[id].issuer);
     if (format.includes('state')) out(db.providers[id].state ?? 'ACTIVE');
+    if (format.includes('attributeCondition')) out(db.providers[id].condition ?? '');
+    if (format.includes('disabled')) out(db.providers[id].disabled ? 'True' : 'False');
   } else if (op === 'create-oidc') {
-    db.providers[id] = { issuer: flag('issuer-uri'), pool };
+    db.providers[id] = { issuer: flag('issuer-uri'), pool, condition: flag('attribute-condition') };
+    save();
+  } else if (op === 'update-oidc') {
+    if (!db.providers[id]) fail('not found');
+    db.providers[id].condition = flag('attribute-condition');
     save();
   } else fail(`unexpected ${cmd}`);
 } else if (cmd.startsWith('iam workload-identity-pools')) {
@@ -61,6 +67,7 @@ else if (cmd.startsWith('iam workload-identity-pools providers')) {
     // A deleted pool still describes, with state DELETED, for 30 days (as Google keeps it).
     if (!db.pools[id]) fail('not found');
     if (format.includes('state')) out(db.pools[id].state ?? 'ACTIVE');
+    if (format.includes('disabled')) out(db.pools[id].disabled ? 'True' : 'False');
   } else if (op === 'create') {
     db.pools[id] = { description: flag('description') };
     save();

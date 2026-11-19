@@ -103,7 +103,12 @@ printf '%s' "$POOL_ID" | grep -Eq '^[a-z][a-z0-9-]{3,31}$' || die "invalid --poo
 printf '%s' "$PROVIDER_ID" | grep -Eq '^[a-z][a-z0-9-]{3,31}$' || die "invalid --provider-id: $PROVIDER_ID"
 printf '%s' "$SA_ID" | grep -Eq '^[a-z][a-z0-9-]{5,29}$' || die "invalid --service-account: $SA_ID"
 SA_EMAIL="${SA_ID}@${PROJECT}.iam.gserviceaccount.com"
-CONDITION="assertion.iss == '${ISSUER}'"
+# Only tokens SAM signs for the installation's own (platform) credential: SAM sets
+# user_id = platform:<userId> for those and the bare owner id for a user's credential
+# (gcpIdentityTokenUserId in apps/api/src/services/gcp-sts.ts). So a user's GCP credential that
+# names this pool cannot reach the node service account, even if that user claimed the pool in
+# SAM before the operator saved the platform credential.
+CONDITION="assertion.iss == '${ISSUER}' && assertion.user_id.startsWith('platform:')"
 
 # Read-only calls run in every mode; changes go through `change`.
 change() {
@@ -154,6 +159,12 @@ if pool_state="$(gcloud iam workload-identity-pools describe "$POOL_ID" --projec
   --location=global --format='value(state)' 2>/dev/null)"; then
   [[ "$pool_state" != "DELETED" ]] \
     || die "workload identity pool ${POOL_ID} was deleted (Google keeps a deleted pool for 30 days, and its id cannot be reused until it is purged). Either undelete it: gcloud iam workload-identity-pools undelete ${POOL_ID} --project=${PROJECT} --location=global, then run this again; or pass --pool-id <a new id> and put the new values in the platform credential (Admin -> Credentials)."
+  # A disabled pool still reports state ACTIVE (`disabled` is a separate field) and exchanges no
+  # tokens, so every node exchange would fail later.
+  pool_disabled="$(gcloud iam workload-identity-pools describe "$POOL_ID" --project="$PROJECT" \
+    --location=global --format='value(disabled)')" || die "cannot read workload identity pool ${POOL_ID}"
+  [[ "${pool_disabled,,}" != "true" ]] \
+    || die "workload identity pool ${POOL_ID} is disabled, and a disabled pool exchanges no tokens. Either enable it: gcloud iam workload-identity-pools update ${POOL_ID} --project=${PROJECT} --location=global --no-disabled, then run this again; or pass --pool-id <a new id>."
   # The service account binding below is pool-wide, so every provider in the pool would be
   # admitted: reuse the pool only when each provider in it (deleted ones too, which can be
   # undeleted) is PROVIDER_ID trusting this install's issuer.
@@ -181,15 +192,30 @@ if provider_state="$(gcloud iam workload-identity-pools providers describe "$PRO
   --format='value(state)' 2>/dev/null)"; then
   [[ "$provider_state" != "DELETED" ]] \
     || die "provider ${POOL_ID}/${PROVIDER_ID} was deleted (Google keeps it for 30 days). Undelete it: gcloud iam workload-identity-pools providers undelete ${PROVIDER_ID} --workload-identity-pool=${POOL_ID} --project=${PROJECT} --location=global, then run this again; or pass --provider-id <a new id>."
+  provider_disabled="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
+    --project="$PROJECT" --location=global --workload-identity-pool="$POOL_ID" \
+    --format='value(disabled)')" || die "cannot read provider ${POOL_ID}/${PROVIDER_ID}"
+  [[ "${provider_disabled,,}" != "true" ]] \
+    || die "provider ${POOL_ID}/${PROVIDER_ID} is disabled, and a disabled provider exchanges no tokens. Either enable it: gcloud iam workload-identity-pools providers update-oidc ${PROVIDER_ID} --workload-identity-pool=${POOL_ID} --project=${PROJECT} --location=global --no-disabled, then run this again; or pass --provider-id <a new id>."
   current="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
     --project="$PROJECT" --location=global --workload-identity-pool="$POOL_ID" \
     --format='value(oidc.issuerUri)')"
   [[ "$current" = "$ISSUER" ]] \
     || die "provider ${POOL_ID}/${PROVIDER_ID} already trusts ${current}, not ${ISSUER}; refusing to retarget it. Use another --pool-id."
   echo "provider ${PROVIDER_ID}: exists, issuer ${ISSUER}"
+  # A provider made by an earlier version of this script admits every token of this issuer:
+  # narrow it to the platform-only condition.
+  current_condition="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
+    --project="$PROJECT" --location=global --workload-identity-pool="$POOL_ID" \
+    --format='value(attributeCondition)')" \
+    || die "cannot read the attribute condition of provider ${POOL_ID}/${PROVIDER_ID}"
+  if [[ "$current_condition" != "$CONDITION" ]]; then
+    change iam workload-identity-pools providers update-oidc "$PROVIDER_ID" --project="$PROJECT" \
+      --location=global --workload-identity-pool="$POOL_ID" --attribute-condition="$CONDITION"
+  fi
 else
-  # Only this install's issuer is admitted (attributeCondition), and only tokens addressed to
-  # this provider: SAM signs aud=https://iam.googleapis.com/<provider> (gcp-sts.ts). Mapping
+  # Only this install's platform tokens are admitted (attributeCondition), and only tokens
+  # addressed to this provider: SAM signs aud=https://iam.googleapis.com/<provider> (gcp-sts.ts). Mapping
   # matches the guided setup (gcp-setup.ts).
   change iam workload-identity-pools providers create-oidc "$PROVIDER_ID" --project="$PROJECT" \
     --location=global --workload-identity-pool="$POOL_ID" --display-name="SAM API" \
@@ -211,14 +237,12 @@ for role in "${NODE_ROLES[@]}"; do
     --role="$role" --condition=None --quiet --format=none
 done
 
-# Scope: the whole pool. Its only provider (checked above on every run) admits tokens whose
-# issuer is this install's API origin and whose audience is that provider, so the binding admits
-# ANY token this installation signs for the provider's audience, not only the ones it signs for
-# node provisioning. SAM does not currently stop a user's own GCP credential from naming this
-# pool, provider and service account, so a user of this install could obtain such a token and act
-# as the node service account; closing that needs a Worker change (SAM task
-# 01M7SB8FRZ08M5NEX9WGM74X61). Any provider added to this pool later would inherit the service
-# account too, so do not add providers to it.
+# Scope: the whole pool. Its only provider (checked above on every run) admits only tokens whose
+# issuer is this install's API origin, whose audience is that provider, and whose user_id is a
+# platform identity, so the binding admits the tokens SAM signs for the installation's own
+# credential and no user's. SAM also refuses a user credential that names a pool the platform
+# credential holds (gcp-wif-pool-ownership.ts). Any provider added to this pool later would
+# inherit the service account too, so do not add providers to it.
 change_retry iam service-accounts add-iam-policy-binding "$SA_EMAIL" --project="$PROJECT" \
   --role=roles/iam.workloadIdentityUser \
   --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/*" \

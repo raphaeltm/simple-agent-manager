@@ -16,6 +16,9 @@ vi.setConfig({ testTimeout: 60_000 });
 
 const SCRIPT = resolve(import.meta.dirname, '../../deploy/selfhost/gcp-bootstrap.sh');
 const ISSUER = 'https://api.vmtest.example.org';
+// Platform tokens only: SAM signs user_id = platform:<userId> for the installation's credential
+// and the bare owner id for a user's (gcpIdentityTokenUserId, apps/api/src/services/gcp-sts.ts).
+const CONDITION = `assertion.iss == '${ISSUER}' && assertion.user_id.startsWith('platform:')`;
 
 // The fake keeps Google Cloud state in $STATE/gcp.json and appends every call to $STATE/calls.
 const FAKE_GCLOUD = `#!/usr/bin/env bash
@@ -52,8 +55,11 @@ function run(args: string[], advertisedIssuer = ISSUER, env: NodeJS.ProcessEnv =
 }
 
 interface FakeGcp {
-  pools: Record<string, { description: string; state?: string }>;
-  providers: Record<string, { issuer: string; pool?: string; state?: string }>;
+  pools: Record<string, { description: string; state?: string; disabled?: boolean }>;
+  providers: Record<
+    string,
+    { issuer: string; pool?: string; state?: string; condition?: string; disabled?: boolean }
+  >;
   accounts: Record<string, { description: string }>;
   bindings: string[];
 }
@@ -77,7 +83,7 @@ function calls(): string[] {
 }
 
 const MUTATING =
-  /^(services enable|iam workload-identity-pools( providers)? create|iam service-accounts create|projects add-iam-policy-binding|iam service-accounts add-iam-policy-binding)/;
+  /^(services enable|iam workload-identity-pools( providers)? (create|update)|iam service-accounts create|projects add-iam-policy-binding|iam service-accounts add-iam-policy-binding)/;
 
 describe('pnpm selfhost:gcp-bootstrap', () => {
   it('creates the pool, issuer-scoped provider, service account and bindings, and prints the five form values', () => {
@@ -86,7 +92,8 @@ describe('pnpm selfhost:gcp-bootstrap', () => {
 
     const provider = result.calls.find((c) => c.includes('providers create-oidc'))!;
     expect(provider).toContain(`--issuer-uri=${ISSUER}`);
-    expect(provider).toContain(`--attribute-condition=assertion.iss == '${ISSUER}'`);
+    expect(provider).toContain(`--attribute-condition=${CONDITION}`);
+    expect(gcp().providers['sam-api'].condition).toBe(CONDITION);
     expect(provider).toContain(
       '--allowed-audiences=https://iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/'
     );
@@ -135,7 +142,7 @@ describe('pnpm selfhost:gcp-bootstrap', () => {
     const second = run(['--project', 'sam-vm-test', '--api-url', ISSUER]);
     expect(second.status, second.stderr).toBe(0);
     const secondCalls = second.calls.slice(before);
-    expect(secondCalls.filter((c) => / create/.test(c))).toEqual([]);
+    expect(secondCalls.filter((c) => / (create|update)/.test(c))).toEqual([]);
     expect(second.stdout.split('Add the installation')[1]).toBe(
       first.stdout.split('Add the installation')[1]
     );
@@ -147,6 +154,65 @@ describe('pnpm selfhost:gcp-bootstrap', () => {
     expect(result.calls.filter((c) => MUTATING.test(c))).toEqual([]);
     expect(result.stdout).toContain('would run: gcloud iam workload-identity-pools create');
     expect(result.stdout).toContain('Dry run: nothing was changed.');
+  });
+
+  describe('a provider made by an earlier version (issuer-only condition)', () => {
+    const narrow = (extra: string[] = []) => {
+      expect(run(['--project', 'sam-vm-test', '--api-url', ISSUER]).status).toBe(0);
+      setGcp((db) => {
+        db.providers['sam-api'].condition = `assertion.iss == '${ISSUER}'`;
+      });
+      return run(['--project', 'sam-vm-test', '--api-url', ISSUER, ...extra]);
+    };
+
+    it('is narrowed to platform tokens on the next run', () => {
+      const result = narrow();
+      expect(result.status, result.stderr).toBe(0);
+      expect(gcp().providers['sam-api'].condition).toBe(CONDITION);
+      expect(result.calls.filter((c) => c.includes('providers update-oidc'))).toHaveLength(1);
+    });
+
+    it('dry run only shows the update', () => {
+      const result = narrow(['--dry-run']);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain(
+        'would run: gcloud iam workload-identity-pools providers update-oidc'
+      );
+      expect(gcp().providers['sam-api'].condition).toBe(`assertion.iss == '${ISSUER}'`);
+    });
+  });
+
+  it('a disabled pool (state still ACTIVE): stops with the enable command, binds nothing', () => {
+    expect(
+      run(['--project', 'sam-vm-test', '--api-url', ISSUER, '--pool-id', 'sam-off']).status
+    ).toBe(0);
+    setGcp((db) => {
+      db.pools['sam-off'].disabled = true;
+    });
+    const before = calls().length;
+    const result = run(['--project', 'sam-vm-test', '--api-url', ISSUER, '--pool-id', 'sam-off']);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('workload identity pool sam-off is disabled');
+    expect(result.stderr).toContain('--no-disabled');
+    // API enablement runs first and is idempotent; nothing in IAM changes.
+    expect(
+      result.calls.slice(before).filter((c) => MUTATING.test(c) && !c.startsWith('services enable'))
+    ).toEqual([]);
+  });
+
+  it('a disabled provider: stops with the enable command, binds nothing', () => {
+    expect(run(['--project', 'sam-vm-test', '--api-url', ISSUER]).status).toBe(0);
+    setGcp((db) => {
+      db.providers['sam-api'].disabled = true;
+    });
+    const before = calls().length;
+    const result = run(['--project', 'sam-vm-test', '--api-url', ISSUER]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/provider sam-[0-9a-f]{8}\/sam-api is disabled/);
+    // API enablement runs first and is idempotent; nothing in IAM changes.
+    expect(
+      result.calls.slice(before).filter((c) => MUTATING.test(c) && !c.startsWith('services enable'))
+    ).toEqual([]);
   });
 
   it('refuses to retarget a provider that already trusts another install', () => {

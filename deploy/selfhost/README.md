@@ -78,11 +78,11 @@ From the repository root on the VM:
    **Use a GCP project dedicated to SAM's nodes**, not the box's: the node service account's
    roles apply to the whole project, so in a shared project it could change or delete the box VM
    and its firewall. An existing `--pool-id` is reused only when its sole provider is this
-   install's. Known gap: the service account trusts every token this install signs for that
-   provider, and SAM does not yet stop a user's own GCP credential from naming this pool, so a
-   user of the install could act as the node service account (fix tracked as SAM task
-   01M7SB8FRZ08M5NEX9WGM74X61). Until then, give accounts on a GCP-node install only to people
-   you would trust with that project.
+   install's. The provider admits only tokens SAM signs for the installation's own credential
+   (`assertion.user_id` starts with `platform:`), and re-running the script narrows a provider
+   made by an earlier version. SAM also refuses a user's GCP credential that names a pool the
+   platform credential already holds, so add the printed credential in Admin -> Credentials as
+   soon as the script finishes.
 
 `pnpm selfhost:deploy --dry-run` prints the Worker configuration it would deploy, secrets redacted.
 
