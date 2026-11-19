@@ -163,7 +163,7 @@ if pool_state="$(gcloud iam workload-identity-pools describe "$POOL_ID" --projec
   # tokens, so every node exchange would fail later.
   pool_disabled="$(gcloud iam workload-identity-pools describe "$POOL_ID" --project="$PROJECT" \
     --location=global --format='value(disabled)')" || die "cannot read workload identity pool ${POOL_ID}"
-  [[ "${pool_disabled,,}" != "true" ]] \
+  [[ "$pool_disabled" != [Tt][Rr][Uu][Ee] ]] \
     || die "workload identity pool ${POOL_ID} is disabled, and a disabled pool exchanges no tokens. Either enable it: gcloud iam workload-identity-pools update ${POOL_ID} --project=${PROJECT} --location=global --no-disabled, then run this again; or pass --pool-id <a new id>."
   # The service account binding below is pool-wide, so every provider in the pool would be
   # admitted: reuse the pool only when each provider in it (deleted ones too, which can be
@@ -197,7 +197,7 @@ if provider_state="$(gcloud iam workload-identity-pools providers describe "$PRO
   provider_disabled="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
     --project="$PROJECT" --location=global --workload-identity-pool="$POOL_ID" \
     --format='value(disabled)')" || die "cannot read provider ${POOL_ID}/${PROVIDER_ID}"
-  [[ "${provider_disabled,,}" != "true" ]] \
+  [[ "$provider_disabled" != [Tt][Rr][Uu][Ee] ]] \
     || die "provider ${POOL_ID}/${PROVIDER_ID} is disabled, and a disabled provider exchanges no tokens. Either enable it: gcloud iam workload-identity-pools providers update-oidc ${PROVIDER_ID} --workload-identity-pool=${POOL_ID} --project=${PROJECT} --location=global --no-disabled, then run this again; or pass --provider-id <a new id>."
   current="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
     --project="$PROJECT" --location=global --workload-identity-pool="$POOL_ID" \
@@ -234,16 +234,89 @@ else
     --attribute-condition="$CONDITION"
 fi
 
+sa_existed=0
 if exists iam service-accounts describe "$SA_EMAIL" --project="$PROJECT"; then
+  sa_existed=1
   # A disabled account can be granted roles but mints no tokens, so every node exchange would fail.
   sa_disabled="$(gcloud iam service-accounts describe "$SA_EMAIL" --project="$PROJECT" \
     --format='value(disabled)')" || die "cannot read service account ${SA_EMAIL}"
-  [[ "${sa_disabled,,}" != "true" ]] \
+  [[ "$sa_disabled" != [Tt][Rr][Uu][Ee] ]] \
     || die "service account ${SA_EMAIL} is disabled, and a disabled account mints no tokens. Either enable it: gcloud iam service-accounts enable ${SA_EMAIL} --project=${PROJECT}, then run this again; or pass --service-account <a new id>."
   echo "service account ${SA_EMAIL}: exists"
 else
   change iam service-accounts create "$SA_ID" --project="$PROJECT" --display-name="SAM nodes" \
     --description="Creates and deletes SAM workspace VMs and their firewall rules for ${ISSUER}"
+fi
+
+POOL_PRINCIPAL="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/*"
+# add-iam-policy-binding only adds a member, so a reused account keeps every grant it already has:
+# a member from an older --pool-id, or anyone given workloadIdentityUser, serviceAccountTokenCreator,
+# serviceAccountUser or any other role on it, could act as the node account. Refuse while its policy
+# holds anything but this pool's workloadIdentityUser binding, or a conditional binding;
+# revoking is the operator's decision. This runs before ANY grant, the project roles included, so
+# a member refused here never gains the node roles. The policy is parsed as JSON and anything
+# unexpected refuses: a filter that silently matched nothing would let the grants through.
+# User-managed keys are refused below. Roles inherited from the project, folder or organisation
+# are not visible here; that is why the
+# node project must be dedicated to SAM (README).
+# A just-created account has an empty policy (and IAM may not list it yet), so it is skipped.
+if [[ "$sa_existed" -eq 1 ]]; then
+  sa_policy="$(gcloud iam service-accounts get-iam-policy "$SA_EMAIL" --project="$PROJECT" \
+    --format=json)" || die "cannot read the IAM policy of ${SA_EMAIL}"
+  # Prints one "role<TAB>member" per member other than this pool's workloadIdentityUser binding;
+  # exits 2 on output that is not a policy, 3 on a conditional binding.
+  parse_status=0
+  stray="$(printf '%s' "$sa_policy" | POOL_PRINCIPAL="$POOL_PRINCIPAL" node -e '
+    let text = "";
+    process.stdin.on("data", (chunk) => (text += chunk));
+    process.stdin.on("end", () => {
+      let policy;
+      try { policy = JSON.parse(text); } catch { process.exit(2); }
+      if (policy === null || typeof policy !== "object" || Array.isArray(policy)) process.exit(2);
+      const bindings = policy.bindings ?? [];
+      if (!Array.isArray(bindings)) process.exit(2);
+      for (const binding of bindings) {
+        if (!binding || typeof binding.role !== "string" || !Array.isArray(binding.members)) process.exit(2);
+        if (binding.condition) process.exit(3);
+        for (const member of binding.members) {
+          if (typeof member !== "string") process.exit(2);
+          const ours = binding.role === "roles/iam.workloadIdentityUser" && member === process.env.POOL_PRINCIPAL;
+          if (!ours) console.log(`${binding.role}\t${member}`);
+        }
+      }
+    });
+  ')" || parse_status=$?
+  case "$parse_status" in
+  0) ;;
+  3) die "service account ${SA_EMAIL} has a conditional IAM binding; this script cannot tell who it admits. Remove it (gcloud iam service-accounts get-iam-policy ${SA_EMAIL} --project=${PROJECT}), then run this again; or pass --service-account <a new id>." ;;
+  *) die "could not parse the IAM policy of ${SA_EMAIL}; refusing to grant anything." ;;
+  esac
+  if [[ -n "$stray" ]]; then
+    role="${stray%%$'\t'*}"
+    member="$(printf '%s' "${stray#*$'\t'}" | head -n 1)"
+    role="$(printf '%s' "$role" | head -n 1)"
+    printf '%s\n' "$member" | grep -Eq '^[A-Za-z0-9:/._@+*=-]+$' || member="(a member with unusual characters)"
+    die "service account ${SA_EMAIL} grants ${role} to ${member}, which this install does not use; that member could act as the node account. Remove it: gcloud iam service-accounts remove-iam-policy-binding ${SA_EMAIL} --project=${PROJECT} --role=${role} --member=${member}, then run this again (every other member is refused the same way); or pass --service-account <a new id>."
+  fi
+  # A user-managed key authenticates as the account without any IAM binding, so the policy above
+  # cannot show who holds one. Nodes never use keys (workload identity only): refuse any, and
+  # anything that is not a JSON list, before the grants.
+  sa_keys="$(gcloud iam service-accounts keys list --iam-account="$SA_EMAIL" --project="$PROJECT" \
+    --managed-by=user --format=json)" || die "cannot list the keys of ${SA_EMAIL}"
+  key_count=0
+  key_count="$(printf '%s' "$sa_keys" | node -e '
+    let text = "";
+    process.stdin.on("data", (chunk) => (text += chunk));
+    process.stdin.on("end", () => {
+      let keys;
+      try { keys = JSON.parse(text); } catch { process.exit(2); }
+      if (!Array.isArray(keys)) process.exit(2);
+      console.log(String(keys.length));
+    });
+  ')" || die "could not parse the key list of ${SA_EMAIL}; refusing to grant anything."
+  [[ "$key_count" =~ ^[0-9]+$ ]] || die "could not parse the key list of ${SA_EMAIL}; refusing to grant anything."
+  [[ "$key_count" -eq 0 ]] \
+    || die "service account ${SA_EMAIL} has ${key_count} user-managed key(s); anyone holding one acts as the node account. Delete them (gcloud iam service-accounts keys list --iam-account=${SA_EMAIL} --managed-by=user, then gcloud iam service-accounts keys delete <key-id> --iam-account=${SA_EMAIL}), then run this again; or pass --service-account <a new id>."
 fi
 
 for role in "${NODE_ROLES[@]}"; do
@@ -257,19 +330,6 @@ done
 # credential and no user's. SAM also refuses a user credential that names a pool the platform
 # credential holds (gcp-wif-pool-ownership.ts). Any provider added to this pool later would
 # inherit the service account too, so do not add providers to it.
-POOL_PRINCIPAL="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/*"
-# add-iam-policy-binding only adds a member: an account reused after a --pool-id change (or one
-# granted elsewhere) would still be impersonable through the old member. Refuse while any other
-# member holds workloadIdentityUser on it; revoking is the operator's decision.
-if exists iam service-accounts describe "$SA_EMAIL" --project="$PROJECT"; then
-  wi_members="$(gcloud iam service-accounts get-iam-policy "$SA_EMAIL" --project="$PROJECT" \
-    --flatten='bindings[].members' --filter='bindings.role=roles/iam.workloadIdentityUser' \
-    --format='value(bindings.members)')" || die "cannot read the IAM policy of ${SA_EMAIL}"
-  while IFS= read -r member; do
-    [[ -z "$member" || "$member" == "$POOL_PRINCIPAL" ]] && continue
-    die "service account ${SA_EMAIL} can also be impersonated by ${member} (roles/iam.workloadIdentityUser), which this install does not use. Remove it: gcloud iam service-accounts remove-iam-policy-binding ${SA_EMAIL} --project=${PROJECT} --role=roles/iam.workloadIdentityUser --member='${member}', then run this again; or pass --service-account <a new id>."
-  done <<<"$wi_members"
-fi
 change_retry iam service-accounts add-iam-policy-binding "$SA_EMAIL" --project="$PROJECT" \
   --role=roles/iam.workloadIdentityUser --member="$POOL_PRINCIPAL" \
   --condition=None --quiet --format=none

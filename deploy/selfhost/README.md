@@ -79,7 +79,9 @@ From the repository root on the VM:
    **Use a GCP project dedicated to SAM's nodes**, not the box's: the node service account's
    roles apply to the whole project, so in a shared project it could change or delete the box VM
    and its firewall. An existing `--pool-id` is reused only when its sole provider is this
-   install's. The provider admits only tokens SAM signs for the installation's own credential
+   install's, and an existing `--service-account` only when nothing but this pool holds any role on
+   it (the script names any other member and how to remove it). The provider admits only tokens SAM
+   signs for the installation's own credential
    (`assertion.user_id` starts with `platform:`), and re-running the script narrows a provider
    made by an earlier version. SAM also refuses a user's GCP credential that names a pool the
    platform credential already holds, so add the printed credential in Admin -> Credentials as

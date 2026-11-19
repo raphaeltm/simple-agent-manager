@@ -70,6 +70,8 @@ interface FakeGcp {
   accounts: Record<string, { description: string; disabled?: boolean }>;
   bindings: string[];
   saBindings?: Record<string, string[]>;
+  saKeys?: Record<string, { name: string; keyType: string }[]>;
+  saExtraBindings?: Record<string, { role: string; members: string[]; condition?: object }[]>;
 }
 
 function gcp(): FakeGcp {
@@ -246,11 +248,97 @@ describe('pnpm selfhost:gcp-bootstrap', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('workloadIdentityPools/sam-old/*');
     expect(result.stderr).toContain('remove-iam-policy-binding');
+    // Nothing is granted before the refusal: neither the impersonation binding nor the node's
+    // project roles, which the stray member could otherwise use at once.
     expect(
       result.calls
         .slice(before)
-        .filter((c) => c.startsWith('iam service-accounts add-iam-policy-binding'))
+        .filter((c) => /^(iam service-accounts|projects) add-iam-policy-binding/.test(c))
     ).toEqual([]);
+  });
+
+  describe('a reused node account with other grants on it', () => {
+    const SA = 'sam-nodes@sam-vm-test.iam.gserviceaccount.com';
+    const grants = (calls: string[]) =>
+      calls.filter((c) => /^(iam service-accounts|projects) add-iam-policy-binding/.test(c));
+    const rerun = (setup: (db: FakeGcp) => void, env: NodeJS.ProcessEnv = {}) => {
+      expect(run(['--project', 'sam-vm-test', '--api-url', ISSUER]).status).toBe(0);
+      setGcp(setup);
+      const before = calls().length;
+      const result = run(['--project', 'sam-vm-test', '--api-url', ISSUER], ISSUER, env);
+      return { ...result, after: result.calls.slice(before) };
+    };
+
+    // Any role on the account lets its member act as it (token creator, account user, ...).
+    it('refuses serviceAccountTokenCreator held by someone else, granting nothing', () => {
+      const result = rerun((db) => {
+        db.saExtraBindings = {
+          [SA]: [
+            { role: 'roles/iam.serviceAccountTokenCreator', members: ['user:mallory@example.com'] },
+          ],
+        };
+      });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        'grants roles/iam.serviceAccountTokenCreator to user:mallory@example.com'
+      );
+      expect(grants(result.after)).toEqual([]);
+    });
+
+    it('refuses a conditional binding, granting nothing', () => {
+      const result = rerun((db) => {
+        db.saExtraBindings = {
+          [SA]: [
+            {
+              role: 'roles/iam.serviceAccountUser',
+              members: ['group:ops@example.com'],
+              condition: { title: 'weekdays', expression: 'request.time.getDayOfWeek() < 5' },
+            },
+          ],
+        };
+      });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('has a conditional IAM binding');
+      expect(grants(result.after)).toEqual([]);
+    });
+
+    // A user-managed key acts as the account without any IAM binding the policy check could see.
+    it('refuses an account with a user-managed key, granting nothing', () => {
+      const result = rerun((db) => {
+        db.saKeys = {
+          [SA]: [
+            {
+              name: `projects/sam-vm-test/serviceAccounts/${SA}/keys/abc123`,
+              keyType: 'USER_MANAGED',
+            },
+          ],
+        };
+      });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('has 1 user-managed key(s)');
+      expect(grants(result.after)).toEqual([]);
+    });
+
+    it.each(['', 'not json', '{}'])(
+      'refuses an unparseable key list %j, granting nothing',
+      (raw) => {
+        const result = rerun(() => {}, { FAKE_GCLOUD_KEYS_RAW: raw });
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('could not parse the key list');
+        expect(grants(result.after)).toEqual([]);
+      }
+    );
+
+    // A policy read that yields nothing usable must not read as "no other members".
+    it.each(['', 'not json', '[]', '{"bindings": "x"}'])(
+      'refuses unparseable policy output %j, granting nothing',
+      (raw) => {
+        const result = rerun(() => {}, { FAKE_GCLOUD_POLICY_RAW: raw });
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('could not parse the IAM policy');
+        expect(grants(result.after)).toEqual([]);
+      }
+    );
   });
 
   it('control: the same pool on a re-run is not a stale member', () => {

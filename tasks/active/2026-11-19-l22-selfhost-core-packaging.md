@@ -92,24 +92,38 @@ and trimmed. Nothing in L22 may change Cloudflare behaviour.
   - SonarCloud: live-suite TLS verification, `--ignore-scripts`, non-root Caddy plus the
     caddy-volumes ownership hand-off, smells.
   - Secret Scan: reviewed-baseline entry for the synthetic deploy-harness fixture.
-- [ ] Security HIGH (gcp-bootstrap pool/* binding admits a user credential naming the pool; same
+- [x] Security HIGH (gcp-bootstrap pool/* binding admits a user credential naming the pool; same
       shape in main's guided setup): Worker fix is SAM task 01M7SB8FRZ08M5NEX9WGM74X61 / PR #2905.
-      Coordinator: do not merge PR 3 until #2905 is deployed, then re-run security-auditor.
+      #2905 merged at 7de72d642 and Deploy Production 44519016428 succeeded. The security-auditor
+      re-ran on main plus #2906: PASS. Its MEDIUM (a pool claimable before the platform credential
+      is saved) is fixed in cd175f708: the bootstrap provider admits only `platform:` tokens.
 - [x] BOX round R18 (fresh teardown + README rebuild from c4fac57ca, upgrade to 795bf674f):
   - Passed: install, admin by email, GCP reverse-tunnel node heartbeat through frps, the 0255
     lease table on fresh D1, and an upgrade that rebuilt only Caddy. Evidence is in the #2906
     body.
   - README findings fixed in 754d86cde.
-- [x] Owed, as agreed by the coordinator on 2026-11-19:
-  - Agent session on a box: owed to the first slice that gives a box a repository source
-    (hosted git). Main plus L22 cannot create a project: artifacts is disabled and there is no
-    GitHub/GitLab app.
+- [x] Agent session on a box: proven by H2 (task 01M7SR1B79DTRBBW2J2H226MGB, PR #2907) on combined
+      head e7ac643b, which contains #2906's head 08e2f605a unchanged. Box upgraded in place; a
+      hosted project was created; agent task 01M7T0VJHK2381FBXA2VG6PM8Q replied "pong"; push
+      164c22e3d was verified by a separate clone. Everything was cleaned up (BOX FREE, seq 405).
+      Merged alone, #2906 cannot run a session (hosted git lives in #2907). Raphaël decided on
+      2026-11-19 (inbox ask 01M7SVG6J5MJT8Q7T4EE5ERH2N): "Merge L22c now; the agent-session proof
+      moves to H2". The validator HIGH is deferred to #2907 with his explicit approval.
+- [x] Still owed (not acceptance criteria), as agreed by the coordinator on 2026-11-19:
   - L19 celld guided-login teardown: no gVisor; guided login is held.
   - L13 metered ceiling: the box has no platform AI key.
 - [x] task-completion-validator: the agent-session gap is recorded as owed (above) and the HIGH
       is blocked on #2905. The live suite passed locally at 795bf674f (6 files, 208 tests); CI
       `Self-host Live (Docker)` runs on every head.
-- [ ] CI green, merge after #2905 deploys plus a security re-review, Deploy Production
+- [x] CI green on 4cefefcec. One main-owned flaky test was re-run earlier
+      (idea 01M7T0AY9DBBWVM48HD6EJABF6).
+- [x] Codex review rounds: every finding fixed (cd175f708, eba71510c, 662a092f9, 3e3ef8d30,
+      539625202, 0991b27ff, e14044338, 7c00e5b0f, 4cefefcec) or deferred with a plan to idea
+      01M7SXD931W6SR8S8PT0EXPNT2.
+- [x] gcp-bootstrap security: the delta review, its confirmation and an adversarial review all
+      PASS (0 CRITICAL/HIGH). The deferred MEDIUMs (project-level grants, existing consumers,
+      extra roles) are bounded by the dedicated-project requirement (idea item 8).
+- [ ] Merge #2906 (Raphaël: merge now), then Deploy Production
 
 Not fixed here (accepted as tracked by the coordinator):
 
@@ -128,5 +142,6 @@ Not fixed here (accepted as tracked by the coordinator):
 - Cloudflare Worker import graph unchanged by PRs 2-3; Worker behaviour unchanged except the
   bounded joins in PR 1.
 - A box installed from main alone deploys, serves the app, creates an admin by email, runs one
-  agent session and heartbeats a reverse-tunnel node. (The agent session is OWED to the hosted-git
-  slice, per the coordinator on 2026-11-19; every other part was proven in BOX round R18.)
+  agent session and heartbeats a reverse-tunnel node. (The agent session was proven on #2906 plus
+  hosted git #2907, head e7ac643b. On main it arrives with #2907; Raphaël approved merging #2906
+  first. Every other part was proven in BOX round R18.)

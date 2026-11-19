@@ -4,8 +4,17 @@ import { createServer, type IncomingHttpHeaders, request } from 'node:http';
 import { S3Client } from '@aws-sdk/client-s3';
 import { describe, expect, it } from 'vitest';
 
-import { createBuildContextUpload } from '../../src/build-context-upload';
-import type { ComposeImageArtifactPresignTarget } from '../../src/compose-image-artifacts';
+import {
+  createBuildContextDownload,
+  createBuildContextUpload,
+} from '../../src/build-context-upload';
+import {
+  COMPOSE_IMAGE_ARTIFACT_MEDIA_TYPE,
+  type ComposeImageArtifactPresignTarget,
+  createComposeImageArtifactDownloads,
+  createComposeImageArtifactUploads,
+} from '../../src/compose-image-artifacts';
+import type { AppDeploymentEnv } from '../../src/env';
 
 const secret = 'fake-secret';
 // The worker's shared R2 client (apps/api/src/services/r2-s3-client.ts) as it is configured on
@@ -23,7 +32,11 @@ const target: ComposeImageArtifactPresignTarget = {
 
 // Independent SigV4 verification, deliberately not the SDK signer under test.
 // Only dummy credentials are used, and the HTTP destination is localhost.
-function verifySignature(url: URL, headers: IncomingHttpHeaders): boolean {
+function verifySignature(
+  url: URL,
+  headers: IncomingHttpHeaders,
+  method: 'PUT' | 'GET' = 'PUT'
+): boolean {
   const encode = (value: string) =>
     encodeURIComponent(value).replace(
       /[!'()*]/g,
@@ -46,7 +59,7 @@ function verifySignature(url: URL, headers: IncomingHttpHeaders): boolean {
     .map(([key, value]) => `${key}=${value}`)
     .join('&');
   const canonical = [
-    'PUT',
+    method,
     url.pathname,
     query,
     canonicalHeaders,
@@ -153,6 +166,99 @@ describe('real SDK context presigner', () => {
       await new Promise<void>((resolve, reject) =>
         server.close((err) => (err ? reject(err) : resolve()))
       );
+    }
+  });
+});
+
+// Use the real client and presigner together: mocks would miss the dependency/type split.
+describe('real SDK download and artifact presigners', () => {
+  it('signs a prefixed build-context GET and refuses a changed key or method', async () => {
+    const prefixed = {
+      ...target,
+      client: new S3Client({
+        region: 'auto',
+        endpoint: 'https://operator-store.example',
+        forcePathStyle: true,
+        requestChecksumCalculation: 'WHEN_REQUIRED',
+        credentials: { accessKeyId: 'fake-access', secretAccessKey: secret },
+      }),
+      objectKey: (key: string) => `installation/${key}`,
+    };
+    const key = 'compose-build-contexts/project/env/job/3.tar.zst';
+    const url = new URL(await createBuildContextDownload(key, 123, prefixed));
+    expect(url.pathname).toBe(`/fake-bucket/installation/${key}`);
+    expect(url.searchParams.get('X-Amz-Expires')).toBe('123');
+    expect(verifySignature(url, { host: url.host }, 'GET')).toBe(true);
+    expect(verifySignature(url, { host: url.host }, 'PUT')).toBe(false);
+    url.pathname = url.pathname.replace('/project/', '/other-project/');
+    expect(verifySignature(url, { host: url.host }, 'GET')).toBe(false);
+  });
+
+  it('independently verifies upload and download signatures for distinct artifact services', async () => {
+    // Match the worker compose-artifact boundary: SDK_DEFAULT, an operator prefix,
+    // and dummy credentials only. No network call or real credential is needed to sign.
+    const artifactsTarget: ComposeImageArtifactPresignTarget = {
+      client: new S3Client({
+        region: 'auto',
+        endpoint: 'https://operator-store.example',
+        forcePathStyle: true,
+        credentials: { accessKeyId: 'fake-access', secretAccessKey: secret },
+      }),
+      bucket: 'fake-bucket',
+      objectKey: (key) => `installation/${key}`,
+    };
+    // These functions read only TTL/size settings from the otherwise unused Worker env.
+    const env = {
+      COMPOSE_IMAGE_ARTIFACT_UPLOAD_URL_TTL_SECONDS: '321',
+      COMPOSE_IMAGE_ARTIFACT_DOWNLOAD_URL_TTL_SECONDS: '123',
+    } as AppDeploymentEnv;
+    const uploads = await createComposeImageArtifactUploads(
+      env,
+      {
+        projectId: 'project',
+        environmentId: 'env',
+        workspaceId: 'workspace',
+        uploadId: 'upload',
+        services: [
+          { serviceName: 'web', sourceRef: 'web:latest' },
+          { serviceName: 'worker', sourceRef: 'worker:latest' },
+        ],
+      },
+      artifactsTarget
+    );
+    expect(uploads).toHaveLength(2);
+    expect(new Set(uploads.map((upload) => upload.r2Key)).size).toBe(2);
+    for (const upload of uploads) {
+      const url = new URL(upload.uploadUrl);
+      expect(url.pathname).toBe(`/fake-bucket/installation/${upload.r2Key}`);
+      expect(upload.r2Key).toBe(
+        `compose-image-artifacts/project/env/workspace/upload/${upload.serviceName}.docker-save.tar`
+      );
+      expect(upload.mediaType).toBe(COMPOSE_IMAGE_ARTIFACT_MEDIA_TYPE);
+      expect(url.searchParams.get('X-Amz-Expires')).toBe('321');
+      expect(url.searchParams.get('X-Amz-Credential')).toMatch(/^fake-access\//);
+      expect(verifySignature(url, { host: url.host }, 'PUT')).toBe(true);
+      expect(verifySignature(url, { host: url.host }, 'GET')).toBe(false);
+    }
+    const downloads = await createComposeImageArtifactDownloads(
+      env,
+      uploads.map((upload) => ({
+        ...upload,
+        sizeBytes: 42,
+        archiveSha256: `sha256:${'a'.repeat(64)}`,
+      })),
+      artifactsTarget
+    );
+    expect(downloads.map((download) => download.r2Key)).toEqual(
+      uploads.map((upload) => upload.r2Key)
+    );
+    for (const download of downloads) {
+      const url = new URL(download.downloadUrl);
+      expect(url.pathname).toBe(`/fake-bucket/installation/${download.r2Key}`);
+      expect(url.searchParams.get('X-Amz-Expires')).toBe('123');
+      expect(verifySignature(url, { host: url.host }, 'GET')).toBe(true);
+      url.searchParams.set('X-Amz-Expires', '999');
+      expect(verifySignature(url, { host: url.host }, 'GET')).toBe(false);
     }
   });
 });
