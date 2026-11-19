@@ -14,7 +14,7 @@ import { replacePrivateFile } from './secret-files.js';
 /** Bounds daemon discovery, stop and recreate; --wait also checks fence health before celld. */
 const DEFAULT_COMPOSE_TIMEOUT_MS = 60_000;
 const COMPOSE_OUTPUT_MAX_BYTES = 64 * 1024;
-const SERVICES: readonly string[] = ['egress-fence', 'celld', 'gce-metadata-proxy'];
+const SERVICES: ReadonlySet<string> = new Set(['egress-fence', 'celld', 'gce-metadata-proxy']);
 
 interface FenceReconcileInput {
   stateDir: string;
@@ -87,7 +87,7 @@ function serviceStates(existing: boolean, compose: Compose): Map<string, string>
         typeof row.State !== 'string'
       )
         throw new Error('invalid service');
-      if (SERVICES.includes(row.Service)) states.set(row.Service, row.State);
+      if (SERVICES.has(row.Service)) states.set(row.Service, row.State);
     }
   } catch {
     throw new Error('fence reconciliation failed: invalid Compose service state');
