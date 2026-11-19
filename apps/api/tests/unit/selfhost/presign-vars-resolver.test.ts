@@ -1,6 +1,6 @@
 /**
  * The self-host deploy writes the operator-store presign vars (scripts/selfhost/box-settings.ts
- * `presignVars`); the Worker reads them through main's `resolveR2PresignConfig` (L20), which
+ * `presignVars`); the Worker reads them through `resolveR2PresignConfig` (r2-presign-config.ts), which
  * refuses an operator store without a signing region. Run the real producer into the real
  * consumer so a box cannot deploy vars its own Worker turns into "presigning off".
  */

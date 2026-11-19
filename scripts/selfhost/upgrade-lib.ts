@@ -26,9 +26,9 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
+import { log, REPO_ROOT } from './deploy-steps.js';
 import { assertPrivateFile, parseDotenv } from './secret-files.js';
 
-export const REPO_ROOT = resolve(import.meta.dirname, '../..');
 export const SELFHOST_DIR = join(REPO_ROOT, 'deploy/selfhost');
 
 /** Files under .state/ that docker compose services read (`env_file`). */
@@ -132,7 +132,7 @@ export function loadBox(
     ...(secretsFile ? { secretsFile: resolve(secretsFile) } : {}),
     composeFiles: composeFilesFor(box, SELFHOST_DIR),
     run: runCommand,
-    log: (message) => process.stdout.write(`[selfhost] ${message}\n`),
+    log,
   };
 }
 
@@ -160,9 +160,7 @@ function stateFingerprint(stateDir: string): string {
 }
 
 /** The `pnpm selfhost:deploy` arguments that select this box (env file, state dir, secrets). */
-export function deployBoxArgs(
-  ctx: Pick<BoxContext, 'envFile' | 'stateDir' | 'secretsFile'>
-): string[] {
+function deployBoxArgs(ctx: Pick<BoxContext, 'envFile' | 'stateDir' | 'secretsFile'>): string[] {
   return [
     '--env-file',
     ctx.envFile,
@@ -178,7 +176,7 @@ export function deployBoxArgs(
  */
 const composeInBoxDir = (args: string) => `(cd deploy/selfhost && docker compose ${args})`;
 
-export function rollbackSteps(
+function rollbackSteps(
   from: string,
   migrationsChanged: boolean,
   composeChanged: boolean,

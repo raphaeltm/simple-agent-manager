@@ -246,7 +246,7 @@ const INHERITED_ENV = [
 ] as const;
 
 /** celld's storage settings, taken from the compose .env. */
-export const STORAGE_ENV_KEYS = [
+const STORAGE_ENV_KEYS = [
   'CELLD_BUCKET',
   'S3_ENDPOINT',
   'AWS_REGION',

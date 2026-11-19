@@ -180,7 +180,7 @@ describe('runUpgrade', () => {
   });
 });
 
-// sam-box, 2026-11-12 (R4): .env had COMPOSE_FILE listing an override file. The upgrade's
+// Seen on a box, 2026-11-12: .env had COMPOSE_FILE listing an override file. The upgrade's
 // `docker compose -f docker-compose.yml up -d --build` replaced that list and recreated celld
 // without what the override added.
 describe('runUpgrade with the box .env COMPOSE_FILE', () => {

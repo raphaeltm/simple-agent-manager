@@ -18,13 +18,13 @@ import { join } from 'node:path';
 import { resolveSmtpConfig } from '../../packages/agent-email/src/smtp-config.js';
 import { writePrivateFile } from './secret-files.js';
 
-export const MAIL_COLLECTOR_PROFILE = 'mail-collector';
+const MAIL_COLLECTOR_PROFILE = 'mail-collector';
 /** Mailpit's SMTP listener (loopback, no TLS: plaintext SMTP is accepted only to loopback). */
 export const DEFAULT_MAIL_COLLECTOR_SMTP_PORT = 1025;
 /** Mailpit's web UI (loopback; Caddy publishes it behind basic auth). */
 export const DEFAULT_MAIL_COLLECTOR_UI_PORT = 8025;
 /** The collector UI is served at <label>.SAM_DOMAIN. */
-export const DEFAULT_MAIL_COLLECTOR_HOST_LABEL = 'mail';
+const DEFAULT_MAIL_COLLECTOR_HOST_LABEL = 'mail';
 /** Basic-auth user name for the collector UI; the password is generated. */
 export const MAIL_COLLECTOR_UI_USER = 'collector';
 /** Generated UI password length in bytes (hex-encoded, so twice as many characters). */
@@ -34,7 +34,7 @@ export const MAIL_COLLECTOR_PASSWORD_FILE = 'mail-collector-ui-password';
 /** env_file docker compose gives Caddy (caddy/start.sh, caddy/mail-collector/on.caddy). */
 export const MAIL_COLLECTOR_ENV_FILE = 'mail-collector.env';
 /** env_file docker compose gives Mailpit: MP_UI_AUTH, its own check of the same credentials. */
-export const MAIL_COLLECTOR_UI_ENV_FILE = 'mail-collector-ui.env';
+const MAIL_COLLECTOR_UI_ENV_FILE = 'mail-collector-ui.env';
 
 /** Worker vars the box .env may set; SMTP_PASSWORD belongs in secrets.env. */
 const SMTP_VAR_NAMES = [

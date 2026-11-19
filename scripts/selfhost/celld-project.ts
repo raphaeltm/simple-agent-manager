@@ -117,8 +117,8 @@ export function prepareCelldProject(options: PrepareProjectOptions): void {
     // The primary database also gets the self-host-only migrations (reverse-tunnel leases,
     // apps/api/src/selfhost/migrations/), which apps/api/wrangler.toml never lists.
     if (dir.sourceDir === PRIMARY_MIGRATIONS_DIR) appendReverseTunnelMigrations(apiDir, target);
-    // OBSERVABILITY_DATABASE gets the D1 analytics sink's table the same way (L20,
-    // apps/api/src/selfhost/observability-migrations.ts).
+    // OBSERVABILITY_DATABASE gets the D1 analytics sink's table the same way
+    // (apps/api/src/selfhost/observability-migrations.ts).
     if (dir.sourceDir === OBSERVABILITY_MIGRATIONS_DIR) {
       appendSelfhostObservabilityMigrations(apiDir, target);
     }

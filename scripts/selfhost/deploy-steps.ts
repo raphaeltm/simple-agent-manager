@@ -2,13 +2,23 @@
  * Small steps of `pnpm selfhost:deploy` (deploy.ts), kept apart so the orchestration stays short.
  */
 import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
-import { gatewayEnvAction } from './box-settings.js';
+import { BOX_RESERVED_PORTS, gatewayEnvAction } from './box-settings.js';
 import type { CelldWranglerConfig } from './celld-config.js';
 import { writePrivateFile } from './secret-files.js';
 
-function log(message: string): void {
+/** The repository checkout the self-host scripts run from. */
+export const REPO_ROOT = resolve(import.meta.dirname, '../..');
+
+/** Progress output of the self-host scripts. */
+export function log(message: string): void {
   console.log(`[selfhost] ${message}`);
+}
+
+/** celld's API port on loopback: CELLD_PORT from the compose .env, else compose's default. */
+export function celldPort(box: Readonly<Record<string, string | undefined>>): string {
+  return box.CELLD_PORT || String(BOX_RESERVED_PORTS.CELLD_PORT);
 }
 
 export function redact(config: CelldWranglerConfig, secretNames: Set<string>): CelldWranglerConfig {

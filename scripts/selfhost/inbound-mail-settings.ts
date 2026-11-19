@@ -8,7 +8,7 @@
  */
 import { composeProfiles } from './mail-settings.js';
 
-export const MAIL_IN_PROFILE = 'mail-in';
+const MAIL_IN_PROFILE = 'mail-in';
 
 type Box = Readonly<Record<string, string>>;
 

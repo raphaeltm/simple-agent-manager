@@ -33,15 +33,11 @@ import {
 } from './account-sql.js';
 import { celldChildEnv, redactSecrets, STORAGE_SECRET_KEYS } from './box-settings.js';
 import { ensureCelldBinary, resolveEsbuild } from './celld-binary.js';
+import { log, REPO_ROOT } from './deploy-steps.js';
 import { assertPrivateFile, parseDotenv, readSecretsFile } from './secret-files.js';
 
-const REPO_ROOT = resolve(import.meta.dirname, '../..');
 /** Upper bound on captured celld output. */
 const CHILD_OUTPUT_MAX_BYTES = 16 * 1024 * 1024;
-
-function log(message: string): void {
-  console.log(`[selfhost] ${message}`);
-}
 
 /**
  * Why `--superadmin` was refused, or null. The SQL writes nothing for a non-owner superadmin

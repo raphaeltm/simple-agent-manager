@@ -23,7 +23,7 @@ export const SELFHOST_VAR_OVERRIDES: Readonly<Record<string, string>> = {
   SANDBOX_ENABLED: 'false',
   // Managed devcontainer cache uses the Cloudflare container registry API.
   DEVCONTAINER_CACHE_ENABLED: 'false',
-  // Not forced off here (overnight B3): task titles use the admin's OpenAI-compatible endpoint
+  // Not forced off here: task titles use the admin's OpenAI-compatible endpoint
   // and truncate without one (task-title.ts); the AI proxy without a gateway stays off until an
   // admin turns on `aiProxy.directUpstreamEnabled` (ai-proxy-availability.ts); read-aloud follows
   // the `speech.synthesis.*` settings (platform-capabilities.ts). The stalled-task classifier
@@ -41,13 +41,13 @@ export const SELFHOST_VAR_OVERRIDES: Readonly<Record<string, string>> = {
   // no-gateway branch (direct Anthropic/OpenAI URLs, no AI Gateway log or cost queries).
   AI_GATEWAY_ID: '',
   // Nodes reach the box through frps on loopback instead of per-node Cloudflare DNS/tunnels
-  // (reverse-tunnel transport, sibling task T2 on sam/selfhost-pass-2).
+  // (reverse-tunnel transport, apps/api/src/selfhost/reverse-tunnel/).
   VM_AGENT_TRANSPORT: 'reverse-tunnel',
   // The environment label that, with SAM_INSTALLATION_ID, scopes provider resources to this
   // install (node-provider-labels.ts). Cloudflare deploys set staging/production in
   // sync-wrangler-config.ts; unset, a node whose create response was lost can never be
   // recovered ("Allocation ownership scope is unavailable") and the provider-orphan sweep is
-  // skipped. Verified on the T4 GCP box.
+  // skipped.
   ENVIRONMENT: 'selfhost',
 };
 
@@ -56,7 +56,7 @@ export const SELFHOST_VAR_OVERRIDES: Readonly<Record<string, string>> = {
  * secrets.env last): the domain and bucket the config was built for, and the vm-agent release
  * this deploy published.
  */
-export const OPERATOR_FORBIDDEN_VARS = [
+const OPERATOR_FORBIDDEN_VARS = [
   'BASE_DOMAIN',
   'R2_BUCKET_NAME',
   'VM_AGENT_REQUIRED_VERSION',
@@ -131,8 +131,8 @@ export interface CelldConfigOptions {
 }
 
 /** Name used for the per-database flat migration directories inside the project dir. */
-export const MIGRATIONS_ROOT = 'd1-migrations';
-export const ASSETS_BINDING = 'ASSETS';
+const MIGRATIONS_ROOT = 'd1-migrations';
+const ASSETS_BINDING = 'ASSETS';
 
 type Rule =
   | { kind: 'drop'; reason: string }

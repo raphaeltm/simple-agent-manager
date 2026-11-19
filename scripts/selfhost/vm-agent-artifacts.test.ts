@@ -102,7 +102,7 @@ describe('build pins', () => {
   });
 
   it("treats only celld's missing-object error for this exact key and bucket as absent", () => {
-    // Captured from celld 0.6.3 on the T4 box (`celld r2 get workspaces-dev-assets agents/nope`).
+    // Captured from celld 0.6.3 on a GCS-backed box (`celld r2 get workspaces-dev-assets agents/nope`).
     const real = 'Error: no object "agents/nope" in r2 bucket "workspaces-dev-assets"';
     const logged = `2026-11-10T19:36:40Z  INFO object_store::gcp::credential: fetching token\n${real}\n`;
     expect(isR2NoObjectError(logged, 'workspaces-dev-assets', 'agents/nope')).toBe(true);
