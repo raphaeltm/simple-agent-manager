@@ -5,7 +5,8 @@
  * the self-host-only code back into the Cloudflare bundle.
  *
  * - The shared entry `apps/api/src/index.ts` (wrangler.toml's `main`) must not reach
- *   `SELFHOST_ONLY_PATHS`, `apps/api/src/selfhost/build.ts` included.
+ *   `CLOUDFLARE_ENTRY_FORBIDDEN_PATHS`: the self-host-only code (`apps/api/src/selfhost/build.ts`
+ *   included) and the operator tooling under `scripts/` (scripts/selfhost/ included).
  * - The generated celld entry (scripts/selfhost/celld-project.ts `renderCelldMain`) is what reaches
  *   them: it imports `selfhost/build.ts`, whose graph the walker must see, so this guard cannot
  *   pass because the walker went blind.
@@ -20,6 +21,7 @@ import type { WranglerToml } from '../../../../../scripts/deploy/types';
 import { renderCelldMain, SOURCE_LINK } from '../../../../../scripts/selfhost/celld-project';
 import {
   API_SRC,
+  CLOUDFLARE_ENTRY_FORBIDDEN_PATHS,
   collectImportGraph,
   REPO_ROOT,
   selfhostOnlyFindings,
@@ -37,7 +39,7 @@ function celldEntryImports(): string[] {
 }
 
 describe('self-host-only code stays out of the Cloudflare Worker', () => {
-  it('the shared entry reaches no self-host-only module or package', () => {
+  it('the shared entry reaches no self-host-only module, package or script', () => {
     const toml = TOML.parse(
       readFileSync(resolve(REPO_ROOT, 'apps/api/wrangler.toml'), 'utf8')
     ) as unknown as WranglerToml;
@@ -47,7 +49,7 @@ describe('self-host-only code stays out of the Cloudflare Worker', () => {
     // over a thousand files.
     expect(graph.files.length).toBeGreaterThan(1000);
     expect(graph.files).not.toContain(SELFHOST_BUILD);
-    expect(selfhostOnlyFindings(graph)).toEqual([]);
+    expect(selfhostOnlyFindings(graph, CLOUDFLARE_ENTRY_FORBIDDEN_PATHS)).toEqual([]);
   });
 
   it('positive control: the celld entry reaches the self-host build and its modules', () => {
