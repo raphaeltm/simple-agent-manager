@@ -39,8 +39,10 @@ References: `.agents/skills/do/SKILL.md`, rules 02/05/09/13/14/25, constitution 
 - Fresh original head 3233d51bba069b30605874d4f31d67a4374e9a93; no review threads, closing issues, other active owners or associations. Associated to this task; merged current main normally in original branch worktree.
 - Existing receiver suite plus four new protocol tests: 39 pass under race detector, vet and binary build pass; Dockerfile build passes on original Go/Alpine pins.
 - New controls: rejected chunk cannot issue QUIT, command limit restored between chunks, Postmaster still rejected by SAM, consecutive signed BDAT deliveries assert exact gateway bytes/auth identity.
-- pnpm selfhost:test: 15 files / 212 tests pass. API dependency build: 12 tasks pass. Broader SMTP vertical tests and runtime checks pending.
+- pnpm selfhost:test: 15 files / 212 tests pass. API dependency build: 12 tasks pass. Seven SMTP/real-receiver vertical suites pass (110 tests); workerd SMTP suite passes (6 tests). Actual built image runs UID7102:7102 with all capabilities dropped except NET_BIND_SERVICE, binds internal25, EHLO250, relay550, agentRCPT250 and unsignedDATA550; test container removed. Coordinated live staging/self-host proof remains pending.
 - Both staging queues free 12:13Z. L22 released box; next claimant H2 contacted; no box mutation performed.
 - Workflow task-only push to main rejected by required CI; task record carried in this PR rather than bypassing protection.
 - No public docs reference the old dependency pin; no user-facing SAM interface/configuration changed.
 - Remaining checklist items for other PRs intentionally pending sequential execution after #2891.
+
+- Independent Go/security/completion reviews: implementation PASS; misleading upstream compare claims corrected. CI, CodeRabbit and live deployed environment gates still pending. Task remains active for the four-PR sequence.
