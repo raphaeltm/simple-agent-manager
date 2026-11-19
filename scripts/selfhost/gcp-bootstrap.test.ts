@@ -246,10 +246,12 @@ describe('pnpm selfhost:gcp-bootstrap', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('workloadIdentityPools/sam-old/*');
     expect(result.stderr).toContain('remove-iam-policy-binding');
+    // Nothing is granted before the refusal: neither the impersonation binding nor the node's
+    // project roles, which the stray member could otherwise use at once.
     expect(
       result.calls
         .slice(before)
-        .filter((c) => c.startsWith('iam service-accounts add-iam-policy-binding'))
+        .filter((c) => /^(iam service-accounts|projects) add-iam-policy-binding/.test(c))
     ).toEqual([]);
   });
 
