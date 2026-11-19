@@ -502,6 +502,18 @@ Cancelling queued work revokes its admission authority. A later free slot cannot
 task or provision a machine for it. If cancellation races a new allocation, SAM retires only
 that newly allocated empty machine, preserving occupied hosts and other placement claims.
 
+A VM provisioned for an active task is held until that task places its workspace, fails, or is
+cancelled. Other tasks skip it during selection, and atomic workspace admission also enforces
+the hold, including direct workspace creation, attachment, and restart
+(`services/provisioned-node-ownership.ts:buildProvisionedNodeHoldSqlPredicate`).
+
+If the owner's VM still cannot admit it after `operations.workspacePlacementMaxRejections`,
+TaskRunner releases the claim once and returns to normal placement. It can reuse another VM,
+provision within the existing limits, or wait under the pool's exhaustion policy. The rejected
+VM retains its normal cleanup and lifetime guards; occupied VMs are preserved. A second
+exhausted refusal budget fails the run instead of starting an endless replacement chain
+(`task-runner/workspace-placement-fallback.ts:resumeWorkspacePlacementFallback`).
+
 ## Exhaustion policy: what happens when nothing is available
 
 Providers run out of capacity, regions sell out, and accounts hit server limits. **Exhaustion

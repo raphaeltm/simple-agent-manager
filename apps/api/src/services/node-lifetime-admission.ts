@@ -7,7 +7,8 @@
  * The condition is "the lifetime sweep will reap this node soon". The signal is the node's age
  * against the same ceiling, over the same population as `sweepMaxLifetimeNodes`
  * (`scheduled/node-cleanup/node-phases.ts`), so the two cannot diverge: a node the sweep never
- * reaps (user-owned, or not auto-provisioned by a task) is never cut off.
+ * reaps (user-owned, or not auto-provisioned by a task) is never cut off. Released placement
+ * fallback history retains auto-provisioning provenance after the task chooses another host.
  *
  * Enforced in the final atomic reservation (`workspace-admission-sql.ts`) and, as a hint, in the
  * task runner's candidate queries (`task-runner/node-selection.ts`), per rule 69.
@@ -24,6 +25,7 @@ import {
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { resolveAdminSetting } from './admin-settings-resolution';
+import { taskProvisionedNodeConditionSql } from './node-teardown-provenance';
 
 /**
  * The node age at which new placements stop, or null when the cutoff is disabled (0 percent).
@@ -60,10 +62,7 @@ export async function resolvePlacementAdmissionPolicy(
 function pastCutoffCondition(alias: string): string {
   return `(
              ${alias}.node_class != 'user-owned'
-             AND EXISTS (
-               SELECT 1 FROM tasks lifetime_task
-               WHERE lifetime_task.auto_provisioned_node_id = ${alias}.id
-             )
+             AND ${taskProvisionedNodeConditionSql(alias)}
              AND ${alias}.created_at < ?
            )`;
 }
