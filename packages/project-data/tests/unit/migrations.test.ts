@@ -574,7 +574,9 @@ describe('DO Migrations', () => {
       // updated_at, status/updated_at, reply thread/sequence, reply scope).
       // Project event cost (077): one FK lookup index; four retired event
       // indexes remain CREATE statements in the append-only migration history.
-      expect(indexes).toHaveLength(148);
+      // Inbox-archived ACP interaction markers for the summary delta (082): one.
+      expect(indexes).toHaveLength(149);
+      expect(indexes.some((query) => query.includes('idx_attention_inbox_archived_at'))).toBe(true);
       expect(indexes.some((query) => query.includes('idx_session_access_grants_expiry_due'))).toBe(
         true
       );

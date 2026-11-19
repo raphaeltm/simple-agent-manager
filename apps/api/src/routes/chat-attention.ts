@@ -4,7 +4,11 @@
  * (`.claude/rules/18-file-size-limits.md`).
  */
 import type { ArchiveCheckinHold } from '@simple-agent-manager/operations';
-import { HUMAN_INPUT_CATEGORIES, type HumanInputCategory } from '@simple-agent-manager/shared';
+import {
+  ACP_INTERACTION_ATTENTION_SOURCE,
+  HUMAN_INPUT_CATEGORIES,
+  type HumanInputCategory,
+} from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Context, Hono } from 'hono';
 
@@ -400,4 +404,43 @@ export async function archiveAttention(
   await announceQuestionArchived(env, { projectId, sessionId, askId: markerId, ...hold });
   await recordSharedSessionAnswer(env, writer, { markerId, archived: true });
   return { agentNotified: false };
+}
+
+/**
+ * Archive a pending ACP interaction (a permission, form or link request) from the inbox: nothing
+ * is answered, so the agent is told nothing and stays where it is (Raphaël, 2026-11-17: every
+ * inbox kind archives silently). Its marker is flagged `inbox_archived_at`, not resolved: it
+ * leaves the inbox, while SAM's silent-agent reconciliation still sees the chat as waiting on a
+ * person and does not cancel the prompt. The interaction stays pending in its chat, where the
+ * person can still answer it. The marker is projected once per interaction
+ * (`projectInteractionAttention`), so it does not come back.
+ */
+export async function archiveInteractionAttention(
+  env: Env,
+  userId: string,
+  projectId: string,
+  sessionId: string,
+  markerId: string
+): Promise<void> {
+  const db = drizzle(env.DATABASE, { schema });
+  await requireProjectCapability(db, projectId, userId, 'task:write');
+  const writer = await requireSessionWriter(env, projectId, sessionId, userId, {
+    db,
+    action: 'archive the agent request in this session',
+  });
+  // Bound to this chat and to a pending interaction marker before anything is written.
+  const { marker } = await loadAttentionForViewer(env, projectId, sessionId, markerId, userId);
+  if (!marker || marker.source !== ACP_INTERACTION_ATTENTION_SOURCE)
+    throw markRejectedBeforeEffects(errors.notFound('Attention request'));
+  if (marker.resolvedAt !== null || marker.inboxArchivedAt !== null)
+    throw markRejectedBeforeEffects(errors.conflict('Attention request is already resolved'));
+  const archived = await projectDataService.archiveInteractionMarker(
+    env,
+    projectId,
+    sessionId,
+    markerId
+  );
+  if (archived === 0) throw errors.conflict('Attention request is already resolved');
+  // A grantee's archive is recorded like their answers and question archives.
+  await recordSharedSessionAnswer(env, writer, { markerId, archived: true });
 }
