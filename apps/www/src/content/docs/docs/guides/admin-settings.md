@@ -276,27 +276,28 @@ where it says so and the app continues from there.
 Listed under **Chat**. Bounds for the [inbox](/docs/reference/api/#inbox) list and for the inbox
 items agents file (`packages/operations/src/inbox-settings-definition.ts`).
 
-| Setting                            | Default | Range      | What it limits                                                                            |
-| ---------------------------------- | ------- | ---------- | ----------------------------------------------------------------------------------------- |
-| `inbox.listPageSize`               | 25      | 1–200      | Items one list page returns when the app does not ask for a number                        |
-| `inbox.listPageMax`                | 100     | 1–200      | Most items one list page returns                                                          |
-| `inbox.titleMaxChars`              | 200     | 40–1,000   | Characters of an item title; longer titles are refused when the item is filed             |
-| `inbox.bodyMaxChars`               | 4,000   | 200–20,000 | Characters of an item body (the agent's reason)                                           |
-| `inbox.linksMax`                   | 20      | 0–100      | Links one item may carry                                                                  |
-| `inbox.openItemsPerChat`           | 20      | 1–500      | Open items one chat may have at once; filing past it is refused                           |
-| `inbox.answerMaxChars`             | 4,000   | 100–20,000 | Characters of a typed answer or comment                                                   |
-| `inbox.similarMatchesMax`          | 3       | 0–20       | Similar open items an agent is shown when it files an ask or a review; 0 turns it off     |
-| `inbox.similarScanMax`             | 50      | 1–500      | Newest open items of the project compared when an agent files (rows read per filing)      |
-| `inbox.noticeRetryMinutes`         | 60      | 5–1,440    | Minutes the sweep retries telling an agent its item was answered, archived or expired     |
-| `inbox.automationFailureThreshold` | 2       | 1–20       | Failed runs in a row that file an inbox error item for an automation's owner              |
-| `inbox.errorSweepBatchSize`        | 10      | 1–50       | Error items one five-minute sweep files at most (failed tasks, automations, lost answers) |
-| `inbox.errorLookbackMinutes`       | 30      | 5–1,440    | How far back that sweep looks for failures with no error item yet                         |
-| `inbox.sweepBatchSize`             | 10      | 1–50       | Items each step of the five-minute sweep handles (reminders, expiries, notice retries)    |
-| `inbox.openTasksPerChat`           | 20      | 1–200      | Open human tasks one chat may have assigned; assigning past it is refused                 |
-| `inbox.taskStepsMax`               | 20      | 1–50       | Steps one human task may list                                                             |
-| `inbox.watchersPerItemMax`         | 10      | 1–50       | Chats that may watch one task (the one that assigned it plus chats that attached)         |
-| `inbox.taskActivityMax`            | 100     | 10–500     | Lifecycle rows a task view returns, newest kept; the view says when older ones exist      |
-| `inbox.closedTaskWatchHours`       | 168     | 1–2,160    | Hours a finished, archived or cancelled task still wakes the chats watching it            |
+| Setting                            | Default | Range      | What it limits                                                                                                          |
+| ---------------------------------- | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `inbox.listPageSize`               | 25      | 1–200      | Items one list page returns when the app does not ask for a number                                                      |
+| `inbox.listPageMax`                | 100     | 1–200      | Most items one list page returns                                                                                        |
+| `inbox.titleMaxChars`              | 200     | 40–1,000   | Characters of an item title; longer titles are refused when the item is filed                                           |
+| `inbox.bodyMaxChars`               | 4,000   | 200–20,000 | Characters of an item body (the agent's reason)                                                                         |
+| `inbox.linksMax`                   | 20      | 0–100      | Links one item may carry                                                                                                |
+| `inbox.openItemsPerChat`           | 20      | 1–500      | Open items one chat may have at once; filing past it is refused                                                         |
+| `inbox.answerMaxChars`             | 4,000   | 100–20,000 | Characters of a typed answer or comment                                                                                 |
+| `inbox.similarMatchesMax`          | 3       | 0–20       | Similar open items an agent is shown when it files an ask, review or result; 0 turns it off                             |
+| `inbox.similarScanMax`             | 50      | 1–500      | Newest open items of the project compared when an agent files (rows read per filing)                                    |
+| `inbox.noticeRetryMinutes`         | 60      | 5–1,440    | Minutes the sweep retries telling an agent its item was answered or expired, or a task archived                         |
+| `inbox.automationFailureThreshold` | 2       | 1–20       | Failed runs in a row that file an inbox error item for an automation's owner                                            |
+| `inbox.errorSweepBatchSize`        | 10      | 1–50       | Error items one five-minute sweep files at most (failed tasks, automations, lost answers)                               |
+| `inbox.errorLookbackMinutes`       | 30      | 5–1,440    | How far back that sweep looks for failures with no error item yet                                                       |
+| `inbox.sweepBatchSize`             | 10      | 1–50       | Items each step of the five-minute sweep handles (reminders, expiries, notice retries)                                  |
+| `inbox.openTasksPerChat`           | 20      | 1–200      | Open human tasks one chat may have assigned; assigning past it is refused                                               |
+| `inbox.taskStepsMax`               | 20      | 1–50       | Steps one human task may list                                                                                           |
+| `inbox.watchersPerItemMax`         | 10      | 1–50       | Chats that may watch one task (the one that assigned it plus chats that attached)                                       |
+| `inbox.taskActivityMax`            | 100     | 10–500     | Lifecycle rows a task view returns, newest kept; the view says when older ones exist                                    |
+| `inbox.archiveCheckinHoldHours`    | 168     | 1–2,160    | Hours SAM's automatic check-ins stay off a chat after its question is archived, unless someone writes in the chat first |
+| `inbox.closedTaskWatchHours`       | 168     | 1–2,160    | Hours a finished, archived or cancelled task still wakes the chats watching it                                          |
 
 A question an agent asks with `request_human_input` is an inbox item, and these settings set its
 schedule (`apps/api/src/services/inbox/sweep.ts`, every five minutes):
@@ -349,6 +350,17 @@ setups, Accounts and People tabs (`packages/operations/src/insights-page-setting
 | `insights.setupsMemoryHeadroomPercent`   | 25      | 0–200      | Headroom added to the 90th-percentile peak memory when suggesting a memory request                                                                |
 | `insights.peopleWaitingItemsListed`      | 10      | 1–50       | Open items listed per person under "Waiting on" (each person still shows how many are open)                                                       |
 | `insights.peopleReviewScanCap`           | 2,000   | 100–20,000 | Review requests in the range, newest first, examined for "Review pickup"; the page says when the cap cut it short                                 |
+
+## Insights for agents
+
+Listed under **Operations**. The per-chat rate limit of the sam-mcp `project_insights` tool
+(`packages/operations/src/insights-agent-settings.ts`, enforced by
+`apps/api/src/routes/mcp/project-insights-tool.ts` on the `McpRateCounter` Durable Object).
+
+| Setting                            | Default | Range     | What it limits                                                         |
+| ---------------------------------- | ------- | --------- | ---------------------------------------------------------------------- |
+| `insights.agentToolCallsPerWindow` | 30      | 1–1,000   | Calls one agent chat may make to `project_insights` per window         |
+| `insights.agentToolWindowSeconds`  | 600     | 10–86,400 | Length of that window in seconds; later calls wait for the next window |
 
 ## Node provisioning
 
@@ -905,7 +917,7 @@ attempts count).
 | `operations.opsAnomalyTerminalTaskGraceMs`    | 900,000    | 0–7 days      | Time after a task ends before its still-running workspace is reported                                                                                                                                           |
 | `operations.opsAnomalyIdleTaskMinutes`        | 60         | 1–10,080      | Minutes without task or workspace activity before an in-progress task is reported                                                                                                                               |
 | `operations.opsAnomalyDestroyingNodeHours`    | 6          | 1–720         | Hours a node may stay destroying, counted from its last heartbeat, before its unfinished teardown is reported with any recorded cleanup refusal                                                                 |
-| `operations.opsAnomalyWakingMinutes`          | 60         | 1–43,200      | Minutes a sleeping chat may stay waking, counted from its wake claim, before the wake is reported (`session_wake_stalled`), with no lookback limit                                                              |
+| `operations.opsAnomalyWakingMinutes`          | 60         | 1–43,200      | Minutes a sleeping chat may stay waking, counted from its wake claim, before the wake is reported (`session_wake_stalled`), with no lookback limit; a provider-limit hold is reported only past its deadline    |
 | `operations.opsAnomalyLookbackHours`          | 24         | 1–720         | Hours of snapshot failures and deletion-quarantine reports the anomaly check looks at                                                                                                                           |
 | `operations.opsAnomalyMaxPerClass`            | 25         | 1–200         | Findings returned per anomaly type; each type still reports its total                                                                                                                                           |
 | `operations.opsNodeLogMaxLines`               | 200        | 1–1,000       | Most log lines one `ops_node_logs` call returns                                                                                                                                                                 |
@@ -1021,6 +1033,7 @@ Superadmins can search for these controls in **Admin → Settings**. Values are 
 | `agentEmail.signInCodesPerEmailPerHour`        |       5 |         1–100 | Sign-in codes SAM emails to one address per hour. Further requests send nothing                                                                                                                                  |
 | `agentEmail.signInCodesPerIpPerHour`           |      20 |       1–1,000 | Sign-in code requests one IP address can make per hour                                                                                                                                                           |
 | `agentEmail.signInCodeAttemptsPerEmailPerHour` |      10 |         1–100 | Sign-in code guesses accepted for one address per hour, across all IP addresses                                                                                                                                  |
+| `agentEmail.smtpTimeoutMs`                     |   15000 |   1000–120000 | Milliseconds for one SMTP exchange (sign-in codes and alerts on installs that send through `SMTP_HOST` instead of Cloudflare)                                                                                    |
 | `performance.githubRequestTimeoutMs`           |    5000 |    100–120000 | Each GitHub discovery HTTP request, including its response body.                                                                                                                                                 |
 | `performance.githubInstallationsDeadlineMs`    |   15000 |    100–120000 | Overall GitHub installation discovery route.                                                                                                                                                                     |
 | `performance.userAccessTokenLockTimeoutMs`     |   60000 |  10000–120000 | How long one GitHub or GitLab user-token lookup may hold its per-user lock. Past it, the waiting caller gets `503`, and one waiting lookup takes the lock over. Low values risk two token refreshes overlapping. |
@@ -1046,6 +1059,21 @@ These control the live Google Cloud catalog described in [Google Cloud](/docs/gu
 | `gcpCatalog.apiIssueTtlMinutes`             | 10080                                           | 60–43200          | How long a Google API problem Google reported stays shown on a credential; a successful check clears it.                                                       |
 | `gcpCatalog.bootDiskGbPerVcpu`              | 20                                              | 1–256             | GB of boot disk a new Google Cloud node gets per vCPU, used by the catalog, prices and new nodes from the next catalog refresh; running nodes keep their disk. |
 | `gcpCatalog.bootDiskMinGb`                  | 50                                              | 10–4096           | Smallest boot disk, in GB, a new Google Cloud node gets whatever its vCPU count; same refresh rule.                                                            |
+
+### Infomaniak boot volume
+
+Infomaniak flavors carry a small local root disk (20 GB on the default `a2/a4/a8-…-disk20-perf1` flavors), which devcontainer builds fill. SAM boots every new Infomaniak VM from a Cinder volume of this size instead, created by Nova from the image and deleted with the server (`InfomaniakProvider.createVM`, `packages/providers/src/infomaniak-boot-volume.ts`). The volume uses the project's default Cinder volume type.
+
+| Setting                   | Default | Allowed range | Applies to                                                                                                                                                |
+| ------------------------- | ------: | ------------: | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `infomaniak.bootVolumeGb` |      80 |       20–4096 | Disk the Infomaniak catalog advertises and new Infomaniak VMs boot from, from the next catalog refresh. Running VMs keep the disk they were created with. |
+
+Nodes created before this change still boot from the flavor's local disk and keep reporting it; SAM does not migrate them. Replace such a node (delete it and let SAM provision a new one) to move it onto a boot volume. A pool candidate published before this change still names 20 GB until its catalog refreshes; SAM creates the volume at the larger of the candidate's disk and this setting, so such a node still gets the configured size.
+
+- It is also the largest boot volume a request may ask for: a node or workspace request with a larger `bootDiskSizeGb` is refused before anything is created, because the node may run on a shared platform credential. Lowering the setting does not affect nodes already recorded with a larger size.
+- The volume counts against your Infomaniak block storage quota (volume count and gigabytes).
+- It uses the project's default Cinder volume type, which may differ from `INFOMANIAK_VOLUME_TYPE` (used for data volumes): selecting a type needs a newer Nova API version than SAM requests.
+- Nova deletes the volume with the server. If a delete ever leaves an unattached volume behind, SAM does not track it (boot volumes carry no SAM labels): look for unattached volumes in the Infomaniak console after a failed node deletion.
 
 ### Provider fallback
 
@@ -1122,6 +1150,7 @@ replay, duplicate count and fingerprint-conflict behavior in either mode. A skip
 event has no delivery-key ledger; a later redelivery is evaluated against the
 subscriptions active at that later admission. GitHub trigger execution remains
 independent of canonical project-event storage (`routes/github-webhook.ts`).
+
 ## Use an OpenAI-compatible model server
 
 Under **AI models**, set `llm.openAICompatible.baseUrl`, the model ID and optional API key.
@@ -1135,3 +1164,61 @@ for all keys, budgets, proxy availability and accounting limits.
 
 <!-- Verified: services/llm-endpoint-settings.ts, services/llm-chat-target.ts,
      services/platform-capabilities.ts:resolveLlmEndpointCapability. -->
+
+## Guided-login cleanup recovery
+
+`credentialSetup.cleanupRecoveryStepTimeoutMs` (Operations) limits each remote step when a
+guided credential-login cleanup is retried by its recovery alarm: D1 repair, sandbox scrub,
+sandbox destruction and pool release. The default is 5,000 ms per step (range 1–10,000 ms),
+capped by `SANDBOX_EXEC_TIMEOUT_MS`. `credentialSetup.cleanupRecoveryMaxAttempts` sets the
+number of recovery work attempts (default 3, range 1–10). Its value is fixed for each cleanup
+when recovery first begins; changing it affects future cleanups. Legacy cleanup already in
+progress keeps its original cap of three. Waiting for an
+already-issued SDK operation does not consume an attempt. Remote waits total
+at most 20 seconds per attempt by default (40 seconds at the maximum), plus the existing
+bounded settings read. A late successful scrub and a successful destruction may each continue once without spending
+another attempt. Including these two bounded continuation passes, the maximum configured
+cap allows 480 seconds of remote waits; the default allows 100 seconds. A final bounded
+D1/pool reconciliation after proven destruction adds at most 20 seconds (10 seconds by
+default), making the conservative episode limits 500 and 110 seconds respectively. Only recovery reads these settings; inline cancellation keeps the
+interactive sandbox timeout.
+
+An alarm joining cleanup already owned by an inline cancellation waits at most one
+recovery-step timeout. If that owner is still blocked in D1 or pool bookkeeping, the
+alarm preserves its ownership and schedules the same immutable uncertainty watchdog.
+Settlement wakes recovery sooner when cleanup is still owed; a permanent stall reaches
+quarantine without starting duplicate sandbox work or repeatedly polling the blocked RPC.
+
+A deadline stops waiting; it does not cancel an SDK operation. Cleanup cannot record
+successful destruction or release its pool slot while earlier sandbox work may still start
+the container. D1 status writes run outside the sandbox-flight counter: once the actual
+SDK work settles, a stalled status write cannot delay sandbox cleanup. Any subsequent
+SDK read rechecks the session lifecycle before starting. Unfinished cleanup remains marked pending. If an isolate dies before that
+work's settlement is observed, recovery preserves the uncertainty. After the recovery cap,
+the session is quarantined and reported as an operator-visible platform error; a late
+settlement does not reset the cap. Pending SDK work has a separate watchdog at the later
+of the original session expiry and one interactive timeout plus a capture poll after teardown.
+Observed settlement wakes cleanup earlier. A timed-out destruction remains tracked: only its
+original successful completion records destruction proof, and recovery waits before another
+sandbox operation or pool release. A rejected or nonzero scrub remains retryable until scrub
+or destruction succeeds. If an alarm cannot establish a durable next wake while cleanup is
+still owed, it fails so Cloudflare can apply its bounded alarm retry policy.
+
+Initial cancellation establishes its recovery alarm before committing a terminal state. If
+arming fails, cancellation fails with the session still active and eligible for the existing
+sweep. Recovery scrubs a provisioning sandbox after its SDK flight settles because a
+background login driver may already have started. A late successful scrub or a successful destruction
+can finish its current attempt once; it never reopens quarantined cleanup. Once destruction
+is proven, successful D1/pool bookkeeping clears pending cleanup before the failure budget
+is checked; failed bookkeeping still spends the bounded budget.
+
+## Library browser uploads
+
+Search for **library.multipart** in **Admin → Settings** to lower the browser file
+ceiling or adjust multipart overhead, part/header limits and ingress time. The default
+file ceiling is 50 MiB and cannot be raised above that memory-safe ceiling. Existing
+`LIBRARY_UPLOAD_MAX_BYTES` overrides may lower it further. Library writes, downloads/previews and agent transfers share a 50 MiB memory budget
+per Worker isolate. Small uploads and previews run together; a transfer that does not fit
+receives `429` (or an MCP retry error); retry after the active transfer finishes. HTTP reads hold their reservation through response
+consumption/cancellation and use the existing download timeout for their egress deadline. See [Browser Library upload limits](/docs/reference/configuration/#browser-library-upload-limits)
+for defaults and throughput.

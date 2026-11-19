@@ -3,6 +3,7 @@ import {
   type NotificationPreference,
   type NotificationPreferencesResponse,
   type NotificationType,
+  RETIRED_NOTIFICATION_TYPES,
 } from '@simple-agent-manager/shared';
 import { Alert, Button, Card } from '@simple-agent-manager/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -31,6 +32,7 @@ const TYPE_LABELS: Record<NotificationType, { label: string; description: string
     label: 'Progress Update',
     description: 'When an agent reports progress on a task',
   },
+  // Retired: no longer sent, so not listed (SETTABLE_NOTIFICATION_TYPES).
   session_ended: {
     label: 'Session Ended',
     description: 'When an agent finishes its turn in a chat',
@@ -64,6 +66,11 @@ const TYPE_LABELS: Record<NotificationType, { label: string; description: string
     description: 'When an agent in any of your projects asks for a secret value',
   },
 };
+
+/** Types SAM still sends; a retired type keeps its label only for stored notifications. */
+const SETTABLE_NOTIFICATION_TYPES = NOTIFICATION_TYPES.filter(
+  (type) => !RETIRED_NOTIFICATION_TYPES.includes(type)
+);
 
 /** A global preference is one not scoped to any project (`projectId === null`). */
 function isGlobalInAppPref(pref: NotificationPreference): boolean {
@@ -182,7 +189,7 @@ export function SettingsNotifications() {
             </div>
           ) : (
             <div className="space-y-3">
-              {NOTIFICATION_TYPES.map((type) => {
+              {SETTABLE_NOTIFICATION_TYPES.map((type) => {
                 const config = TYPE_LABELS[type];
                 const enabled = isEnabled(type);
                 const isSaving = savingType === type;

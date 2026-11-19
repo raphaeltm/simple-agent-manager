@@ -5,6 +5,7 @@
  */
 import type { TriggerRow } from '@simple-agent-manager/worker-core/schema';
 
+import type { AgentEmailSender } from './provider';
 import type { AgentEmailSettingName } from './setting-definitions';
 
 /** Input for the shared trigger admission path when an email starts its trigger. */
@@ -62,4 +63,12 @@ export interface AgentEmailPorts {
     maxFieldLength: number
   ): { rendered: string };
   cloudflareApi: CloudflareApiPort;
+  /**
+   * Self-hosted agent email without the Cloudflare binding: the box's sam-mx receiver plus an
+   * SMTP relay for replies (the worker's `self-host-inbound.ts`). Consulted only when the
+   * `AGENT_EMAIL` binding is absent, so a Cloudflare deployment never reaches it.
+   */
+  selfHostInboundEmailConfigured(): boolean;
+  /** The SMTP reply sender for that self-hosted path, or null when it is not configured. */
+  selfHostAgentEmailSender(options: { smtpTimeoutMs: number }): AgentEmailSender | null;
 }

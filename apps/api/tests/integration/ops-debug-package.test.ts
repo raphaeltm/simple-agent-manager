@@ -56,13 +56,17 @@ function memoryR2(): R2Bucket {
       value: ArrayBuffer,
       options?: { customMetadata?: Record<string, string> }
     ) => {
-      r2Objects.set(key, { data: value, customMetadata: options?.customMetadata });
+      // R2 consumes the bytes before put resolves; callers retain ownership of their input.
+      r2Objects.set(key, { data: value.slice(0), customMetadata: options?.customMetadata });
       return {};
     },
     get: async (key: string) => {
       const object = r2Objects.get(key);
       if (!object) return null;
-      return { customMetadata: object.customMetadata, arrayBuffer: async () => object.data };
+      return {
+        customMetadata: object.customMetadata,
+        arrayBuffer: async () => object.data.slice(0),
+      };
     },
     // R2's binding accepts one key or an array of keys.
     delete: async (keys: string | string[]) => {
@@ -180,6 +184,47 @@ async function capture() {
 }
 
 describe('ops_capture_debug_package', () => {
+  it('returns retryable capacity through MCP while Library memory is busy, then succeeds after release', async () => {
+    const { acquireLibraryMemory } = await import('../../src/services/library-memory');
+    const release = acquireLibraryMemory();
+    const cancel = vi.fn();
+    boundary.fetch.mockResolvedValueOnce(
+      new Response(new ReadableStream({ cancel }), {
+        headers: { 'Content-Type': 'application/gzip' },
+      })
+    );
+    try {
+      const response = await callMcpTool(app, env, 'tok-admin', 'ops_capture_debug_package', {
+        nodeId: NODE,
+      });
+
+      expect(response.error).toEqual({
+        code: -32603,
+        message: 'Another Library transfer is in progress. Please retry shortly.',
+        data: { httpStatus: 429, retryable: true },
+      });
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(r2Objects.size).toBe(0);
+      expect(main.prepare('SELECT COUNT(*) AS n FROM project_files').get()).toEqual({ n: 0 });
+      const audit = main
+        .prepare(`SELECT outcome, detail FROM operations_audit_log WHERE tool = 'ops_capture_debug_package'`)
+        .get() as { outcome: string; detail: string };
+      expect(audit.outcome).toBe('failed');
+      expect(JSON.parse(audit.detail)).toEqual({ error: response.error?.message });
+    } finally {
+      release();
+    }
+
+    expect((await capture()).status).toBe('ok');
+  });
+
+  it('keeps invalid capture parameters non-retryable', async () => {
+    const response = await callMcpTool(app, env, 'tok-admin', 'ops_capture_debug_package', {});
+
+    expect(response.error).toEqual({ code: -32602, message: 'nodeId is required' });
+    expect(boundary.fetch).not.toHaveBeenCalled();
+  });
+
   it('stores the package in the Operations library, readable byte-for-byte, then the purge deletes it after retention', async () => {
     const body = await capture();
 

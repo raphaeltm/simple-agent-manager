@@ -22,6 +22,7 @@ import type {
 
 import type { Env } from '../../env';
 import type { TaskStartCapacityPoolSelection } from '../../services/placement-resolver';
+import type { ProviderLimitRecoveryApproval } from '../../services/provider-limit-recovery-approval';
 import type { ProjectEventWakeRecoveryGuard } from '../../services/session-recovery-authority';
 import type { TaskRunnerStartGuard } from '../../services/task-runner-start-guard';
 
@@ -134,6 +135,8 @@ export interface TaskRunConfig {
   systemPromptAppend: string | null;
   /** Agent profile ID — stored on workspace for GitHub CLI policy enforcement. */
   agentProfileHint: string | null;
+  /** Saved skill identity; optional for runners persisted before skill propagation. */
+  skillId?: string | null;
   /** File attachments uploaded to R2 before task submission. Null = no attachments. */
   attachments: TaskAttachment[] | null;
   /** Per-project scaling overrides. Null values mean "use platform default". */
@@ -182,6 +185,7 @@ export interface TaskRunConfig {
   projectEventWakeGuard?: ProjectEventWakeRecoveryGuard | null;
   /** Member whose continued write permission authorizes a scheduled wake. */
   recoveryRequiredProjectMemberId?: string | null;
+  providerLimitRecoveryApproval?: ProviderLimitRecoveryApproval | null;
 }
 
 export interface TaskRunnerState {

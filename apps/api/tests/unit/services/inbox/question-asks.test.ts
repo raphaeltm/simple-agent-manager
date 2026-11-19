@@ -14,6 +14,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const edges = vi.hoisted(() => ({
   acceptPromptDelivery: vi.fn(),
   recordQuestionAsked: vi.fn(),
+  recordQuestionArchived: vi.fn(),
   expireQuestionAsk: vi.fn(),
   getSessionAccess: vi.fn(),
   prepareAttentionAnswer: vi.fn(),
@@ -28,6 +29,7 @@ vi.mock('../../../../src/services/project-data', async () => ({
   )),
   acceptPromptDelivery: edges.acceptPromptDelivery,
   recordQuestionAsked: edges.recordQuestionAsked,
+  recordQuestionArchived: edges.recordQuestionArchived,
   expireQuestionAsk: edges.expireQuestionAsk,
   getSessionAccess: edges.getSessionAccess,
   prepareAttentionAnswer: edges.prepareAttentionAnswer,
@@ -107,6 +109,7 @@ beforeEach(() => {
   for (const edge of Object.values(edges)) edge.mockReset();
   edges.acceptPromptDelivery.mockResolvedValue({ message: { id: 'd' } });
   edges.recordQuestionAsked.mockResolvedValue(undefined);
+  edges.recordQuestionArchived.mockResolvedValue(undefined);
   edges.expireQuestionAsk.mockResolvedValue({ outcome: 'expired' });
   edges.getSessionAccess.mockResolvedValue({
     session: { topic: 'Deploy chat' },
@@ -415,7 +418,27 @@ describe('answering a question', () => {
     ).rejects.toMatchObject({ code: 'conflict' });
   });
 
-  it('archiving from the inbox closes it and tells the agent in question words', async () => {
+  it('a failed live update does not fail the archive', async () => {
+    const { id } = await question();
+    edges.recordQuestionArchived.mockRejectedValue(new Error('DO down'));
+    const ctx = {
+      env,
+      ports: createOperationPorts(env),
+      actor: {
+        userId: 'owner',
+        via: 'web' as const,
+        scopes: new Set(['sam.read', 'sam.write'] as const),
+      },
+      requestId: 't',
+    };
+    await expect(archiveInboxItem(ctx, { projectId: P1, ref: `ask:${id}` })).resolves.toMatchObject(
+      { outcome: 'archived', agentNotified: false }
+    );
+    expect(askRow(id).status).toBe('archived');
+    expect(edges.recordQuestionArchived).toHaveBeenCalledTimes(1);
+  });
+
+  it('archiving from the inbox closes it and tells the agent nothing', async () => {
     const { id } = await question();
     const ctx = {
       env,
@@ -428,12 +451,24 @@ describe('answering a question', () => {
       requestId: 't',
     };
     await expect(archiveInboxItem(ctx, { projectId: P1, ref: `ask:${id}` })).resolves.toMatchObject(
-      { outcome: 'archived', agentNotified: true }
+      { outcome: 'archived', agentNotified: false }
     );
     expect(askRow(id).status).toBe('archived');
-    const delivery = edges.acceptPromptDelivery.mock.calls[0]![2];
-    expect(delivery.deliveryContent).toContain('archived your question');
-    expect(delivery.metadata).toMatchObject({ questionAskId: id, outcome: 'archived' });
+    expect(askRow(id).notified_at).not.toBeNull();
+    expect(edges.acceptPromptDelivery).not.toHaveBeenCalled();
+    // Open chat views are told it closed (a live update, not a message to the agent).
+    // ...and SAM's check-ins stay off the chat for the configured hold (168 hours by default).
+    expect(edges.recordQuestionArchived).toHaveBeenCalledWith(env, P1, {
+      sessionId: 'chat-1',
+      askId: id,
+      archivedAt: expect.any(Number),
+      holdCheckinsUntil: expect.any(Number),
+    });
+    const [, , archivedInput] = edges.recordQuestionArchived.mock.calls[0]!;
+    expect(archivedInput.holdCheckinsUntil).toBeGreaterThan(Date.now() + 167 * 3_600_000);
+    // Read before the closing write, so a chat message persisted after the close is newer than
+    // it and ends the hold (`ProjectData.recordQuestionArchived`).
+    expect(archivedInput.archivedAt).toBeLessThanOrEqual(Number(askRow(id).resolved_at));
     // A late answer from the chat card meets the archived row.
     await expect(answer(id, 'eu')).rejects.toMatchObject({ statusCode: 409 });
   });

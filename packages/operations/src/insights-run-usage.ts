@@ -47,6 +47,44 @@ const RUN_USAGE_SQL = `SELECT r.source AS source, r.model AS model, r.credential
   ORDER BY r.source, r.model, r.credential_key
   LIMIT ?`;
 
+/** Sticky refusal metadata, scoped independently so an outage with zero accepted rows is visible. */
+export function runUsageAdmissionHitStatement(input: {
+  projectId: string;
+  chatSessionId?: string;
+  sinceMs?: number;
+}): FlowStatement {
+  if (input.chatSessionId !== undefined)
+    return {
+      sql: `SELECT 1 AS limited FROM agent_run_usage_admission_hits
+      WHERE project_id = ? AND chat_session_id = ? LIMIT 1`,
+      binds: [input.projectId, input.chatSessionId],
+    };
+  // Two indexed probes: recent refusals (including marker-only runs), or recent accepted
+  // harness rows of a previously limited run. Complete proxy measurements take precedence.
+  return {
+    sql: `SELECT 1 AS limited WHERE EXISTS (
+      SELECT 1 FROM agent_run_usage_admission_hits h
+      WHERE h.project_id = ? AND h.last_rejected_at >= ?
+        AND NOT EXISTS (SELECT 1 FROM agent_run_usage p
+          WHERE p.project_id = h.project_id AND p.chat_session_id = h.chat_session_id
+            AND p.source = 'ai_proxy')
+    ) OR EXISTS (
+      SELECT 1 FROM agent_run_usage r
+      JOIN agent_run_usage_admission_hits h
+        ON h.project_id = r.project_id AND h.chat_session_id = r.chat_session_id
+      WHERE r.project_id = ? AND r.updated_at >= ? AND r.source = 'harness'
+        AND NOT EXISTS (SELECT 1 FROM agent_run_usage p
+          WHERE p.project_id = r.project_id AND p.chat_session_id = r.chat_session_id
+            AND p.source = 'ai_proxy')
+    )`,
+    binds: [input.projectId, input.sinceMs ?? 0, input.projectId, input.sinceMs ?? 0],
+  };
+}
+
+export function hasRunUsageAdmissionHit(rows: InsightsRows | undefined): boolean {
+  return rows?.some((row) => row.limited === 1) ?? false;
+}
+
 // TOTAL() never overflows (it sums as a float), so one hostile or buggy reporter cannot make the
 // read throw; the counts come back whole numbers well inside the safe integer range.
 const CountSchema = v.pipe(
@@ -93,7 +131,7 @@ function credentialKindOf(row: {
 export interface RunUsageRead {
   source: RunUsageSource;
   models: RunUsageModelRow[];
-  /** True when the run had more rows than `maxRows`; totals are then a floor. */
+  /** True when admission or the read cap omitted usage; totals are then a floor. */
   limited: boolean;
 }
 
@@ -105,11 +143,13 @@ export async function readRunUsage(
   db: D1Database,
   input: { projectId: string; chatSessionId: string; maxRows: number }
 ): Promise<RunUsageRead | null> {
-  const result = await db
-    .prepare(RUN_USAGE_SQL)
-    .bind(input.projectId, input.chatSessionId, input.maxRows + 1)
-    .all<Record<string, unknown>>();
-  const raw = result.results ?? [];
+  const hit = runUsageAdmissionHitStatement(input);
+  const [result, marker] = await db.batch<Record<string, unknown>>([
+    db.prepare(RUN_USAGE_SQL).bind(input.projectId, input.chatSessionId, input.maxRows + 1),
+    db.prepare(hit.sql).bind(...hit.binds),
+  ]);
+  const raw = result?.results ?? [];
+  const admissionLimited = hasRunUsageAdmissionHit(marker?.results);
   const rows: RunUsageRow[] = [];
   // One unreadable row is skipped and logged, never the whole read (rule 50).
   for (const candidate of raw.slice(0, input.maxRows)) {
@@ -144,8 +184,9 @@ export async function readRunUsage(
       cacheWrite: row.cache_write_tokens,
       reasoning: row.reasoning_tokens,
     }));
-  if (models.length === 0) return null;
-  return { source, models, limited: raw.length > input.maxRows };
+  const limited = raw.length > input.maxRows || (source === 'harness' && admissionLimited);
+  if (models.length === 0 && !limited) return null;
+  return { source, models, limited };
 }
 
 /** Catalog id for a harness model name: Claude Code decorates ids such as `claude-x[1m]`. */
@@ -197,6 +238,7 @@ export function summarizeRunTokens(
   options: { spendVisible: boolean } = { spendVisible: true }
 ): RunReceiptTokens {
   if (!read) return { state: 'not_reported' };
+  if (read.models.length === 0) return { state: 'not_reported', limited: read.limited };
   // One row per model even when the run switched accounts or restarted its agent.
   const byModel = new Map<string, RunTokenCounts>();
   for (const row of read.models) {

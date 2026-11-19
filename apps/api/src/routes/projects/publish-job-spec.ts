@@ -1,10 +1,10 @@
-import { createBuildContextDownload } from '@simple-agent-manager/app-deployment';
 import { Hono } from 'hono';
 
 import type { Env } from '../../env';
 import { extractBearerToken } from '../../lib/auth-helpers';
 import { errors } from '../../middleware/error';
 import { resolveAdminSetting } from '../../services/admin-settings';
+import { createBuildContextDownload } from '../../services/build-context-upload';
 import { loadDeploymentBuildInterpolationEnv } from '../../services/deployment-environment-config';
 import { verifyPublishJobToken } from '../../services/publish-job-token';
 

@@ -66,6 +66,19 @@ export const GCP_BOOT_DISK_FLOOR_GB = 10;
 /** Persistent Disk allows far more for one disk; this bounds a typo in the admin setting. */
 export const GCP_BOOT_DISK_MAX_GB = 4_096;
 
+/**
+ * Infomaniak boot volume size. Infomaniak flavors carry a small local root disk (20 GB on the
+ * default flavors), which devcontainer builds fill, so SAM boots Infomaniak VMs from a Cinder
+ * volume of this size instead. Admin-editable as `infomaniak.bootVolumeGb`; applied by
+ * `InfomaniakProvider` (packages/providers/src/infomaniak-boot-volume.ts) to the catalog and to
+ * new VMs. Running VMs keep the disk they were created with.
+ */
+export const DEFAULT_INFOMANIAK_BOOT_VOLUME_GB = 80;
+/** Smallest boot volume SAM creates: the size of the flavor root disk it replaces. */
+export const INFOMANIAK_BOOT_VOLUME_MIN_GB = 20;
+/** Bounds a typo in the admin setting; Cinder allows larger volumes. */
+export const INFOMANIAK_BOOT_VOLUME_MAX_GB = 4_096;
+
 /** Default GCP WIF pool ID. Override via GCP_WIF_POOL_ID env var. */
 export const DEFAULT_GCP_WIF_POOL_ID = 'sam-pool';
 

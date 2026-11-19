@@ -33,7 +33,7 @@
   },
   "dependencies": {
     "valibot": "catalog:",
-    "yaml": "2.9.0",
+    "yaml": "2.9.1",
     "zod": "catalog:"
   }
 }

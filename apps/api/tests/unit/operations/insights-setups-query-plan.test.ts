@@ -14,7 +14,11 @@ import { SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { createAllSchemaTables, createDeclaredIndexes } from '../../helpers/sqlite-d1';
+import {
+  applySqliteMigration,
+  createAllSchemaTables,
+  createDeclaredIndexes,
+} from '../../helpers/sqlite-d1';
 
 let sqlite: Database.Database | null = null;
 afterEach(() => {
@@ -25,7 +29,17 @@ afterEach(() => {
 describe('setupRunsStatement query plan', () => {
   it('searches per picked run by index and joins rework instead of scanning per merge', () => {
     sqlite = new Database(':memory:');
-    createAllSchemaTables(sqlite, schema);
+    createAllSchemaTables(
+      sqlite,
+      Object.fromEntries(
+        Object.entries(schema).filter(([name]) => name !== 'agentRunUsageAdmissionHits')
+      )
+    );
+    // The shipped marker is WITHOUT ROWID; use its real migration for the primary-key plan.
+    applySqliteMigration(
+      sqlite,
+      new URL('../../../src/db/migrations/0261_agent_run_usage_admission_hits.sql', import.meta.url)
+    );
     createDeclaredIndexes(
       sqlite,
       Object.values(schema).filter((value): value is SQLiteTable => is(value, SQLiteTable))
@@ -50,6 +64,12 @@ describe('setupRunsStatement query plan', () => {
       /SEARCH rs USING INDEX idx_workspace_resource_summaries_project_task \(project_id=\? AND task_id=\?\)/
     );
     expect(text).not.toMatch(/SEARCH u USING INDEX idx_agent_run_usage_project_updated/);
+    // Admission probes stay bounded to the picked run's exact project/chat key.
+    expect(text).toMatch(/SEARCH h USING PRIMARY KEY \(project_id=\? AND chat_session_id=\?\)/);
+    expect(text).toMatch(
+      /SEARCH proxy USING COVERING INDEX idx_agent_run_usage_key \(project_id=\? AND chat_session_id=\? AND source=\?\)/
+    );
+    expect(text).not.toMatch(/SCAN (?:h|proxy)\b/);
     // Rework: a join on an automatic index, never a scan of later pull requests per merge.
     expect(text).toMatch(
       /SEARCH b USING AUTOMATIC COVERING INDEX \(repository=\? AND head_ref=\?\)/

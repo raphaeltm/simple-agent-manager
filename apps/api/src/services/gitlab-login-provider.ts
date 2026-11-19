@@ -15,6 +15,7 @@ import * as v from 'valibot';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { untrustedGitLabAccountSubject } from './gitlab-sign-in-identity';
+import { keepLinkedAccountEmail } from './linked-account-identity';
 import { resolveOutboundMaxRedirects } from './outbound-fetch-settings';
 import type { GitLabOAuthConfig } from './platform-config-oauth';
 
@@ -61,12 +62,14 @@ export function gitLabLoginProvider(env: Env, config: GitLabOAuthConfig): Gitlab
             if (!response.ok) return null;
             const profile = await readResponseJson(response, gitlabUserSchema, 'gitlab.user');
             if (profile.state !== 'active' || profile.locked || !profile.email) return null;
+            const accountId = config.identityTrusted ? String(profile.id) : untrustedGitLabAccountSubject(config.host, profile.id);
+            const identity = await keepLinkedAccountEmail(env, 'gitlab', accountId, { email: profile.email, emailVerified: config.identityTrusted && (profile.email_verified ?? false) });
             return {
               user: {
                 name: profile.name ?? profile.username ?? '',
-                email: profile.email,
+                email: identity.email ?? profile.email,
                 image: profile.avatar_url ?? undefined,
-                emailVerified: config.identityTrusted && (profile.email_verified ?? false),
+                emailVerified: identity.emailVerified,
               },
               // BetterAuth reads data.id as the account key. Untrusted hosts retain
               // their host-scoped string key; GitlabProfile only types numeric ids.

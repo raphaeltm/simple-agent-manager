@@ -55,35 +55,35 @@ The assistant reuses existing `SAM_MODEL` (code default `@cf/deepseek-ai/deepsee
 
 These are Cloudflare Worker secrets, set during deployment. Pulumi auto-generates security keys on first deploy.
 
-| Secret                                     | Description                                                                                                                                                                                                                                                                                                                     |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ENCRYPTION_KEY`                           | AES-256-GCM master key. Used for BetterAuth session cookies and user credential encryption unless a purpose-specific override below is set (auto-generated)                                                                                                                                                                     |
-| `BETTER_AUTH_SECRET`                       | Optional purpose-specific override for BetterAuth session cookie signing/encryption. Falls back to `ENCRYPTION_KEY` when unset (`apps/api/src/lib/secrets.ts`)                                                                                                                                                                  |
-| `BOOTSTRAP_OWNER_EMAIL`                    | Optional installer-managed Worker secret restricting first administration to this verified login email. Unset preserves manual-install behavior. Set before enabling login; preserve across updates. Also the recovery path when no superadmin remains (self-hosting guide).                                                    |
-| `CREDENTIAL_ENCRYPTION_KEY`                | Optional purpose-specific override for AES-GCM encryption of user cloud/agent credentials. Falls back to `ENCRYPTION_KEY` when unset (`apps/api/src/lib/secrets.ts`)                                                                                                                                                            |
-| `JWT_PRIVATE_KEY`                          | RSA-2048 private key for signing tokens (auto-generated)                                                                                                                                                                                                                                                                        |
-| `JWT_PUBLIC_KEY`                           | RSA-2048 public key for token verification (exposed via JWKS)                                                                                                                                                                                                                                                                   |
-| `DEPLOY_SIGNING_PRIVATE_KEY`               | Ed25519 private key for signing deployment apply payloads (auto-generated)                                                                                                                                                                                                                                                      |
-| `DEPLOY_SIGNING_PUBLIC_KEY`                | Ed25519 public key derived during deployment for deployment node verification (auto-generated)                                                                                                                                                                                                                                  |
-| `VAPID_PRIVATE_KEY`                        | Base64url P-256 private scalar used to authenticate Web Push delivery (auto-generated)                                                                                                                                                                                                                                          |
-| `VAPID_PUBLIC_KEY`                         | Uncompressed base64url P-256 public key returned to browsers at runtime (derived during deployment)                                                                                                                                                                                                                             |
-| `VAPID_SUBJECT`                            | RFC 8292 contact URI for Web Push, defaulting to the deployment app origin (generated during deployment)                                                                                                                                                                                                                        |
-| `CF_API_TOKEN`                             | Cloudflare API token for infrastructure, DNS, Origin CA certificate issuance, observability, AI Gateway, Containers, and admin logs. Requires **Account → Containers → Edit** and **Account → SSL and Certificates → Edit**. Optional **Account → Account Analytics → Read** enables Admin Analytics charts and the daily Cloudflare cost snapshot on Admin → Health & cost.                                                                                                    |
-| `CF_AIG_TOKEN`                             | Optional narrower Cloudflare AI Gateway Unified Billing token                                                                                                                                                                                                                                                                   |
-| `CF_ZONE_ID`                               | Cloudflare zone ID for DNS record management                                                                                                                                                                                                                                                                                    |
-| `CF_ACCOUNT_ID`                            | Cloudflare account ID                                                                                                                                                                                                                                                                                                           |
-| `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN`  | Optional narrower Cloudflare token for managed devcontainer registry credentials                                                                                                                                                                                                                                                |
-| `DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID` | Optional Cloudflare account override for managed devcontainer registry credentials                                                                                                                                                                                                                                              |
-| `GITHUB_CLIENT_ID`                         | Optional fallback GitHub App client ID for OAuth; runtime admin config takes precedence                                                                                                                                                                                                                                         |
-| `GITHUB_CLIENT_SECRET`                     | Optional fallback GitHub App client secret for OAuth; runtime admin config takes precedence                                                                                                                                                                                                                                     |
-| `GITHUB_APP_ID`                            | Optional fallback GitHub App ID for installation tokens; runtime admin config takes precedence                                                                                                                                                                                                                                  |
-| `GITHUB_APP_PRIVATE_KEY`                   | Optional fallback GitHub App private key (PEM or base64); runtime admin config takes precedence                                                                                                                                                                                                                                 |
-| `GITHUB_APP_SLUG`                          | Optional fallback GitHub App URL slug; runtime admin config takes precedence                                                                                                                                                                                                                                                    |
-| `GITHUB_WEBHOOK_SECRET`                    | Optional fallback GitHub App webhook HMAC secret; runtime admin config takes precedence                                                                                                                                                                                                                                         |
-| `GITLAB_HOST`                              | Optional fallback GitLab OAuth host, such as `https://gitlab.com`; runtime admin config takes precedence. A self-managed host set here can link GitLab sign-ins to existing accounts by email; one saved at runtime cannot                                                                                                      |
-| `GITLAB_CLIENT_ID`                         | Optional fallback GitLab OAuth application ID; runtime admin config takes precedence                                                                                                                                                                                                                                            |
-| `GITLAB_CLIENT_SECRET`                     | Optional fallback GitLab OAuth secret; runtime admin config takes precedence                                                                                                                                                                                                                                                    |
-| `AGENT_SIGN_IN_TRUST`                      | Optional, test instances only. JSON trust configuration that lets agents on a trusted SAM installation sign in here through workload identity. Unset, empty or invalid: off. Deploy-time only; removing the GitHub secret and redeploying deletes it. See [Let agents sign in to a test instance](/docs/guides/agent-sign-in/). |
+| Secret                                     | Description                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ENCRYPTION_KEY`                           | AES-256-GCM master key. Used for BetterAuth session cookies and user credential encryption unless a purpose-specific override below is set (auto-generated)                                                                                                                                                                                                                  |
+| `BETTER_AUTH_SECRET`                       | Optional purpose-specific override for BetterAuth session cookie signing/encryption. Falls back to `ENCRYPTION_KEY` when unset (`apps/api/src/lib/secrets.ts`)                                                                                                                                                                                                               |
+| `BOOTSTRAP_OWNER_EMAIL`                    | Optional installer-managed Worker secret restricting first administration to this verified login email. Unset preserves manual-install behavior. Set before enabling login; preserve across updates. Also the recovery path when no superadmin remains (self-hosting guide).                                                                                                 |
+| `CREDENTIAL_ENCRYPTION_KEY`                | Optional purpose-specific override for AES-GCM encryption of user cloud/agent credentials. Falls back to `ENCRYPTION_KEY` when unset (`apps/api/src/lib/secrets.ts`)                                                                                                                                                                                                         |
+| `JWT_PRIVATE_KEY`                          | RSA-2048 private key for signing tokens (auto-generated)                                                                                                                                                                                                                                                                                                                     |
+| `JWT_PUBLIC_KEY`                           | RSA-2048 public key for token verification (exposed via JWKS)                                                                                                                                                                                                                                                                                                                |
+| `DEPLOY_SIGNING_PRIVATE_KEY`               | Ed25519 private key for signing deployment apply payloads (auto-generated)                                                                                                                                                                                                                                                                                                   |
+| `DEPLOY_SIGNING_PUBLIC_KEY`                | Ed25519 public key derived during deployment for deployment node verification (auto-generated)                                                                                                                                                                                                                                                                               |
+| `VAPID_PRIVATE_KEY`                        | Base64url P-256 private scalar used to authenticate Web Push delivery (auto-generated)                                                                                                                                                                                                                                                                                       |
+| `VAPID_PUBLIC_KEY`                         | Uncompressed base64url P-256 public key returned to browsers at runtime (derived during deployment)                                                                                                                                                                                                                                                                          |
+| `VAPID_SUBJECT`                            | RFC 8292 contact URI for Web Push, defaulting to the deployment app origin (generated during deployment)                                                                                                                                                                                                                                                                     |
+| `CF_API_TOKEN`                             | Cloudflare API token for infrastructure, DNS, Origin CA certificate issuance, observability, AI Gateway, Containers, and admin logs. Requires **Account → Containers → Edit** and **Account → SSL and Certificates → Edit**. Optional **Account → Account Analytics → Read** enables Admin Analytics charts and the daily Cloudflare cost snapshot on Admin → Health & cost. |
+| `CF_AIG_TOKEN`                             | Optional narrower Cloudflare AI Gateway Unified Billing token                                                                                                                                                                                                                                                                                                                |
+| `CF_ZONE_ID`                               | Cloudflare zone ID for DNS record management                                                                                                                                                                                                                                                                                                                                 |
+| `CF_ACCOUNT_ID`                            | Cloudflare account ID                                                                                                                                                                                                                                                                                                                                                        |
+| `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN`  | Optional narrower Cloudflare token for managed devcontainer registry credentials                                                                                                                                                                                                                                                                                             |
+| `DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID` | Optional Cloudflare account override for managed devcontainer registry credentials                                                                                                                                                                                                                                                                                           |
+| `GITHUB_CLIENT_ID`                         | Optional fallback GitHub App client ID for OAuth; runtime admin config takes precedence                                                                                                                                                                                                                                                                                      |
+| `GITHUB_CLIENT_SECRET`                     | Optional fallback GitHub App client secret for OAuth; runtime admin config takes precedence                                                                                                                                                                                                                                                                                  |
+| `GITHUB_APP_ID`                            | Optional fallback GitHub App ID for installation tokens; runtime admin config takes precedence                                                                                                                                                                                                                                                                               |
+| `GITHUB_APP_PRIVATE_KEY`                   | Optional fallback GitHub App private key (PEM or base64); runtime admin config takes precedence                                                                                                                                                                                                                                                                              |
+| `GITHUB_APP_SLUG`                          | Optional fallback GitHub App URL slug; runtime admin config takes precedence                                                                                                                                                                                                                                                                                                 |
+| `GITHUB_WEBHOOK_SECRET`                    | Optional fallback GitHub App webhook HMAC secret; runtime admin config takes precedence                                                                                                                                                                                                                                                                                      |
+| `GITLAB_HOST`                              | Optional fallback GitLab OAuth host, such as `https://gitlab.com`; runtime admin config takes precedence. A self-managed host set here can link GitLab sign-ins to existing accounts by email; one saved at runtime cannot                                                                                                                                                   |
+| `GITLAB_CLIENT_ID`                         | Optional fallback GitLab OAuth application ID; runtime admin config takes precedence                                                                                                                                                                                                                                                                                         |
+| `GITLAB_CLIENT_SECRET`                     | Optional fallback GitLab OAuth secret; runtime admin config takes precedence                                                                                                                                                                                                                                                                                                 |
+| `AGENT_SIGN_IN_TRUST`                      | Optional, test instances only. JSON trust configuration that lets agents on a trusted SAM installation sign in here through workload identity. Unset, empty or invalid: off. Deploy-time only; removing the GitHub secret and redeploying deletes it. See [Let agents sign in to a test instance](/docs/guides/agent-sign-in/).                                              |
 
 ## Worker Variables
 
@@ -335,6 +335,51 @@ removed offerings, or permit reuse of unverified nodes. Keep the additive schema
 and saved plans; do not drop columns or recreate tables as a rollback step.
 
 Activity coalescing and binding caches are per Worker isolate, so burst reduction scales with the number of active isolates for the same session. Delayed flushes carry their original observed event time, and ProjectData rejects stale writes so a delayed intermediate report cannot overwrite a newer idle/error state from another isolate.
+
+### Browser Library upload limits
+
+Browser Library uploads and replacements accept one file of up to 50 MiB by default.
+Their effective file limit is the smaller of `LIBRARY_UPLOAD_MAX_BYTES` and
+`library.multipartFileMaxBytes` in **Admin → Settings**. The browser limit cannot
+exceed 50 MiB, including when the legacy environment override is higher: whole-file
+AES-GCM retains plaintext and ciphertext concurrently. Existing encrypted objects,
+metadata and download compatibility are unchanged.
+
+| Runtime setting                     | Default             | Purpose                                                                     |
+| ----------------------------------- | ------------------- | --------------------------------------------------------------------------- |
+| `library.multipartFileMaxBytes`     | `52428800` (50 MiB) | Browser file ceiling; may be lowered, maximum 50 MiB.                       |
+| `library.multipartOverheadMaxBytes` | `65536` (64 KiB)    | Additional wire bytes above the file ceiling, and aggregate metadata bytes. |
+| `library.multipartMaxParts`         | `16`                | Parts per request, including ignored fields.                                |
+| `library.multipartMaxHeaderBytes`   | `8192`              | Header bytes per part.                                                      |
+| `library.multipartReadTimeoutMs`    | `120000`            | Total ingress and parsing deadline, in milliseconds.                        |
+
+The 120-second ingress budget permits a full 50 MiB file at about 427 KiB/s;
+metadata consumes a small additional portion. Parsing uses 64 KiB allocation chunks
+(at most 802 buffers at the default wire limit) and releases them before encryption.
+Browser writes, HTTP downloads/previews, agent transfers and diagnostic-package
+capture share a 50 MiB memory budget per Worker isolate (`acquireLibraryMemory()` in
+`apps/api/src/services/library-memory.ts`). A browser upload reserves its declared
+`Content-Length`, which is then enforced while streaming; a download or preview reserves
+the stored file size and refuses (`409`) a stored object larger than that reservation.
+Every reservation adds 256 KiB for fixed buffers, so at most about 200 transfers fit.
+Agent transfers, diagnostic capture and uploads without a declared length reserve the
+whole budget. So several small uploads or previews run together, while a maximum-size
+file runs alone. A transfer that does not fit
+receives `429` (or the MCP retry error) without queuing file buffers. The reservation
+follows the file through encryption/storage or its actual consumer. HTTP reads copy at
+most 64 KiB per response pull and keep their reservation until consumption,
+cancellation or the egress deadline. Decrypted plaintext and ciphertext are released
+after their consumers finish. A load timeout keeps the reservation until the underlying
+load settles, so late work cannot overlap a new transfer.
+
+`LIBRARY_DOWNLOAD_TIMEOUT_MS` (default 60000) bounds loading and HTTP egress separately;
+a full 50 MiB response needs about 854 KiB/s to meet the egress deadline. Awaited agent
+transfers use their existing VM transfer deadline and retain admission through request-body
+termination and exposed transport settlement. An opaque container RPC may retain bounded
+chunk copies after its existing timeout; it never receives a view of the whole plaintext. Multipart settings apply to browser writes; existing agent file-size limits
+remain in place. The canonical ownership implementation is
+`apps/api/src/services/library-memory.ts`; multipart parsing is in
+`apps/api/src/routes/library-upload-request.ts`.
 
 ### Project file library cleanup
 
@@ -689,6 +734,21 @@ retain the KV procedure in `.claude/rules/55-runaway-cost-emergency-ops.md`.
 | `DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS` | `1000`                         | Minimum delayed re-arm for an already-completed diagnosis step                                                                                |
 | `ORCHESTRATOR_ZERO_TASK_GRACE_MS`       | `600000` (10 min)              | Grace period before an active orchestration with no tasks ends                                                                                |
 | `ORCHESTRATOR_MAX_MISSION_LIFETIME_MS`  | `86400000` (24 hr)             | Backstop that force-completes active or completing orchestrations                                                                             |
+
+The five `orchestrator.cancellation*` controls are typed runtime settings editable in Admin Settings under Operations, rather than environment variables. The residence limit is captured as a durable deadline when cancellation starts or is explicitly retried; changing the setting does not extend an existing episode. Expired episodes block locally before any settings or D1 lookup.
+
+| Runtime setting | Default | Description |
+| --- | --- | --- |
+| `orchestrator.cancellationPageSize` | `25` | Maximum tasks visited in one mission cancellation turn. |
+| `orchestrator.cancellationTurnMs` | `5000` | Elapsed turn budget checked between task operations. |
+| `orchestrator.cancellationRetryPasses` | `3` | Maximum passes before failed cancellation is blocked for explicit retry. |
+| `orchestrator.cancellationResidenceMs` | `900000` | Maximum cancellation episode residence before blocking. |
+| `orchestrator.cancellationIntervalMs` | `1000` | Alarm delay between pending cancellation turns. |
+
+Mission cancellation uses the existing orchestrator tracking and alarm (`project-orchestrator/cancel-mission.ts`, `cancellation-config.ts`). The mission stays paused while its tasks are being cancelled; completion is recorded only after no nonterminal task remains. A blocked cancellation stops rearming and requires an explicit cancellation retry. Completed task cancellations remain complete across retries.
+
+These bounds limit work rather than guarantee completion within one episode. At the defaults, 10,000 tasks require at least 400 turns. If every turn uses its full five-second work budget plus the one-second alarm delay, that is approximately 40 minutes before scheduler and RPC overhead, exceeding the fifteen-minute residence limit. Such a mission will require explicit retries; raise the bounds deliberately for larger workloads. The turn budget is checked between operations and does not interrupt an RPC already in progress.
+
 
 The scheduled Durable Object billing monitor reads these non-secret variables
 from the selected GitHub Environment, not from the API Worker runtime:
@@ -1059,26 +1119,26 @@ need the person, so a page can list fewer; the app follows `nextCursor` for more
 
 Durable prompt delivery is enabled by default so a follow-up can remain queued while a sleeping VM is replaced and restored. Legacy VM compatibility remains disabled: targets must advertise stable delivery receipts, and receipt ambiguity fails visibly rather than being guessed or replayed.
 
-| Variable                                     | Default           | Description                                                                                                                                                            |
-| -------------------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DURABLE_PROMPT_DELIVERY_ENABLED`            | `true`            | Persist prompts and deliver them from ProjectData alarms, including sleeping-session wake.                                                                             |
-| `PROMPT_DELIVERY_LEGACY_VM_COMPAT_ENABLED`   | `false`           | Explicit old-VM compatibility switch; receipt ambiguity still fails visibly and is never guessed or replayed.                                                          |
-| `PROMPT_DELIVERY_MAX_CANDIDATES_PER_ALARM`   | `5`               | Maximum delivery claims started by one alarm pass.                                                                                                                     |
-| `PROMPT_DELIVERY_MAX_ATTEMPTS`               | `5`               | Counted delivery attempts before retryable busy/not-ready waits use capped backoff; TTL remains the hard bound.                                                        |
-| `PROMPT_DELIVERY_RETRY_BASE_MS`              | `5000`            | Initial retry delay.                                                                                                                                                   |
-| `PROMPT_DELIVERY_RETRY_MAX_MS`               | `300000`          | Maximum exponential retry delay.                                                                                                                                       |
-| `PROMPT_DELIVERY_TTL_MS`                     | `3600000`         | Maximum unresolved delivery lifetime.                                                                                                                                  |
-| `PROMPT_DELIVERY_RECEIPT_TIMEOUT_MS`         | `30000`           | Age at which an unconfirmed claim enters receipt reconciliation.                                                                                                       |
-| `PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS`      | `5000`            | Deadline for pre-send target/recovery preparation; also bounds background VM submit and receipt calls. Preparation timeouts remain retryable without sending a prompt. |
-| `PROMPT_DELIVERY_MIN_ALARM_DELAY_MS`         | `1000`            | Minimum delay before the next delivery alarm.                                                                                                                          |
-| `ACP_LONG_TURN_SUPERVISOR_ENABLED`           | `false`           | Reserved long-turn candidate/preemption engine switch; this release leaves it inert.                                                                                   |
-| `ACP_LONG_TURN_CHECKPOINT_MS`                | `18000000` (5 hr) | Reserved checkpoint eligibility threshold.                                                                                                                             |
-| `ACP_CHECKPOINT_PREEMPT_GRACE_MS`            | `30000`           | Reserved graceful preemption window.                                                                                                                                   |
-| `ORCHESTRATOR_WAIT_RECONCILE_INTERVAL_MS`    | `30000`           | D1 reconciliation backstop interval for active parent waits.                                                                                                           |
-| `ORCHESTRATOR_WAIT_MAX_CHILDREN`             | `20`              | Maximum same-project task IDs selected by one durable wait (hard ceiling: `90`, preserving D1 bind headroom).                                                          |
-| `ORCHESTRATOR_WAIT_MAX_ACTIVE_PER_PROJECT`   | `100`             | Maximum active durable parent waits per project.                                                                                                                       |
-| `ORCHESTRATOR_WAIT_MAX_DURATION_MS`          | `86400000`        | Maximum finite wait deadline.                                                                                                                                          |
-| `ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM` | `10`              | Maximum wait subscriptions reconciled by one ProjectData alarm.                                                                                                        |
+| Variable                                     | Default           | Description                                                                                                                                                                                               |
+| -------------------------------------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DURABLE_PROMPT_DELIVERY_ENABLED`            | `true`            | Persist prompts and deliver them from ProjectData alarms, including sleeping-session wake.                                                                                                                |
+| `PROMPT_DELIVERY_LEGACY_VM_COMPAT_ENABLED`   | `false`           | Explicit old-VM compatibility switch; receipt ambiguity still fails visibly and is never guessed or replayed.                                                                                             |
+| `PROMPT_DELIVERY_MAX_CANDIDATES_PER_ALARM`   | `5`               | Maximum delivery claims started by one alarm pass.                                                                                                                                                        |
+| `PROMPT_DELIVERY_MAX_ATTEMPTS`               | `5`               | Counted delivery attempts before retryable busy/not-ready waits use capped backoff; TTL remains the hard bound.                                                                                           |
+| `PROMPT_DELIVERY_RETRY_BASE_MS`              | `5000`            | Initial retry delay.                                                                                                                                                                                      |
+| `PROMPT_DELIVERY_RETRY_MAX_MS`               | `300000`          | Maximum exponential retry delay.                                                                                                                                                                          |
+| `PROMPT_DELIVERY_TTL_MS`                     | `3600000`         | Maximum unresolved delivery lifetime.                                                                                                                                                                     |
+| `PROMPT_DELIVERY_RECEIPT_TIMEOUT_MS`         | `30000`           | Age at which an unconfirmed claim enters receipt reconciliation.                                                                                                                                          |
+| `PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS`      | `5000`            | Deadline for pre-send target/recovery preparation and owner-approved recovery repair; also bounds background VM submit and receipt calls. Preparation timeouts remain retryable without sending a prompt. |
+| `PROMPT_DELIVERY_MIN_ALARM_DELAY_MS`         | `1000`            | Minimum delay before the next delivery alarm.                                                                                                                                                             |
+| `ACP_LONG_TURN_SUPERVISOR_ENABLED`           | `false`           | Reserved long-turn candidate/preemption engine switch; this release leaves it inert.                                                                                                                      |
+| `ACP_LONG_TURN_CHECKPOINT_MS`                | `18000000` (5 hr) | Reserved checkpoint eligibility threshold.                                                                                                                                                                |
+| `ACP_CHECKPOINT_PREEMPT_GRACE_MS`            | `30000`           | Reserved graceful preemption window.                                                                                                                                                                      |
+| `ORCHESTRATOR_WAIT_RECONCILE_INTERVAL_MS`    | `30000`           | D1 reconciliation backstop interval for active parent waits.                                                                                                                                              |
+| `ORCHESTRATOR_WAIT_MAX_CHILDREN`             | `20`              | Maximum same-project task IDs selected by one durable wait (hard ceiling: `90`, preserving D1 bind headroom).                                                                                             |
+| `ORCHESTRATOR_WAIT_MAX_ACTIVE_PER_PROJECT`   | `100`             | Maximum active durable parent waits per project.                                                                                                                                                          |
+| `ORCHESTRATOR_WAIT_MAX_DURATION_MS`          | `86400000`        | Maximum finite wait deadline.                                                                                                                                                                             |
+| `ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM` | `10`              | Maximum wait subscriptions reconciled by one ProjectData alarm.                                                                                                                                           |
 
 ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed by ACP session and prompt epoch. Sleeping-session prompts stay in that queue until strict restore succeeds, then use stable receipts for exactly-once acceptance. Task agents can register `wait_for_subtasks` for same-project tasks; terminal hooks provide low-latency nudges, bounded alarms reconcile missed writers, and one stable delivery ID wakes the caller exactly once. Automatic checkpoint preemption remains disabled.
 
@@ -1800,6 +1860,18 @@ them doesn't; the upload-link lifetime isn't checked in the browser. Set them in
 | `ATTACHMENT_MAX_FILES`              | `20`                 | Max files per message        |
 | `ATTACHMENT_PRESIGN_EXPIRY_SECONDS` | `900` (15 min)       | Lifetime of each upload link |
 
+Upload links (attachments, session snapshots, compose image artifacts and build contexts) are all
+signed by one client, `getR2PresignTarget()` in `apps/api/src/services/r2-s3-client.ts`. On
+Cloudflare it addresses `https://<CF_ACCOUNT_ID>.r2.cloudflarestorage.com` with `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY` and `R2_BUCKET_NAME`. A runtime whose R2 binding keeps objects in its own S3
+store sets `R2_S3_ENDPOINT`, `R2_S3_BUCKET`, `R2_S3_KEY_PREFIX` and `R2_S3_REGION` (its SigV4
+signing region, for example `auto` for Google Cloud Storage or `us-west-2` for AWS S3; there is no
+default, because a wrong region makes every signed URL fail), plus optional
+`R2_S3_FORCE_PATH_STYLE` (default path style); links then target
+`<R2_S3_BUCKET>/<R2_S3_KEY_PREFIX><key>` (`resolveR2PresignConfig()` in
+`apps/api/src/services/r2-presign-config.ts`). A partially configured store disables presigning
+rather than falling back to Cloudflare, and attachment requests then answer `403`.
+
 ### Workspace uploads and downloads
 
 These apply to files uploaded straight into a workspace from its own page, and to files downloaded
@@ -1989,6 +2061,25 @@ Client page/referrer fields follow a privacy normalization contract before enque
 | `MAX_ANALYTICS_INGEST_BODY_BYTES`           | `65536`                                         | Max ingest request body size in bytes                                              |
 | `MAX_ANALYTICS_DURATION_MS`                 | `3600000`                                       | Max accepted page-duration value; larger values are clamped                        |
 
+Cloudflare installations write analytics to Workers Analytics Engine and read them through the
+Analytics Engine SQL API (`queryAnalyticsEngine()` in `apps/api/src/routes/admin-analytics-query.ts`),
+which needs `CF_ACCOUNT_ID` and `CF_API_TOKEN`. Without them the admin analytics routes answer
+`404 FEATURE_UNAVAILABLE` (`analyticsQuery`) instead of a server error. A self-hosted build can
+instead install a local sink (`installAnalyticsD1Sink()` in `apps/api/src/selfhost/analytics/`):
+with `ANALYTICS_SINK="d1"` it records and reads the same events in the `analytics_events` table of
+`OBSERVABILITY_DATABASE`. That table is created by a self-host-only migration
+(`apps/api/src/selfhost/observability-migrations.ts`), never on Cloudflare, and its retention is
+bounded by the self-host admin settings `analytics.d1.retentionDays` (default 90) and
+`analytics.d1.maxRows` (default 500,000), applied by the 5-minute observability purge in batches
+of `analytics.d1.purgeBatchRows` (default 5,000) for at most `analytics.d1.purgeTickBudgetMs`
+(default 10,000) per run; unfinished deletes continue on the next run. The
+Cloudflare Worker does not install the sink, so `ANALYTICS_SINK` has no effect there.
+
+Admin → Logs search reads Workers Observability with the same account API (`queryWorkerLogs()`),
+and Admin → Stream is fed by the tail worker. A deployment without a tail worker declares
+`LOG_TAIL_AVAILABLE="false"`; both pages then show where to read logs on the server instead
+(`publicPlatformCapabilities()` reports `logSearch` and `liveLogStream`).
+
 ## Analytics Forwarding
 
 External analytics forwarding is off by default. When enabled, SAM forwards only analytics rows already accepted by first-party ingestion/middleware; it does not bypass the client-side URL normalization contract.
@@ -2133,6 +2224,7 @@ default (`services/llm-endpoint-settings.ts`).
 | `llm.openAICompatible.aiProxyModel`        | unset   | Override for the proxy's Workers AI chat route.                                                                                                                                     |
 | `llm.openAICompatible.allowPrivateNetwork` | `false` | Explicitly allow an operator endpoint on a private host. Metadata/link-local hosts remain forbidden.                                                                                |
 | `aiProxy.directUpstreamEnabled`            | `false` | Enable platform and BYO AI proxy routes when no addressable Cloudflare AI Gateway exists. Requires a provider credential for platform calls. Ignored when a gateway is addressable. |
+| `aiProxy.perUserMonthlyCostCeilingUsd`     | `0`     | Monthly spend ceiling applied to every user, in whole USD (`0` = none). Superadmin only. Applies only without an addressable gateway; ignored when one exists.                      |
 
 The endpoint capability reuses the existing per-isolate settings cache (up to 60 seconds); a warm,
 unconfigured Cloudflare call performs no additional D1 or credential reads. Configured URL/key
@@ -2165,3 +2257,39 @@ remains the spend record. An operator endpoint's model has no catalog price and 
 dollars to this cap, including on installations with a gateway; set spending limits at the
 endpoint/provider as appropriate (`packages/ai-proxy/src/ai-monthly-cost-cap.ts`,
 `packages/ai-proxy/src/ai-gateway-availability.ts:isMonthlyCostCapAvailable`).
+
+Without a gateway, the cap each call is checked against is the lower of the user's own cap and
+`aiProxy.perUserMonthlyCostCeilingUsd` (`ai-monthly-cost-cap.ts:effectiveMonthlyCostCapUsd`, the one cap
+predicate shared by the gate, `GET /api/usage/ai/budget` and budget validation). A user who clears
+their cap is still held to the ceiling, and `PUT /api/usage/ai/budget` refuses a cap above it. The
+ceiling is per user, not a total across users. The operator chooses its amount in Admin; validation
+requires nonnegative whole USD within numeric precision, with no separate business maximum.
+It is read from the per-isolate admin settings
+cache (a change applies within 60 seconds), only on the no-gateway path, so a gateway
+installation's `/ai/v1` reads are unchanged. If the settings snapshot cannot be read after its cache expires,
+locally metered platform-funded inference is refused with a retryable `503 SERVICE_UNAVAILABLE`,
+logged as `ai_proxy.monthly_cost_ceiling_unreadable`. The same protection applies on a cold
+isolate; no extra last-known ceiling is reused during an outage (`services/ai-proxy-ports.ts`).
+Gateway calls and locally own-funded calls do not read this ceiling. A failed monthly-spend read
+also refuses inference with a retryable 503, without reporting that the cap has been reached.
+Once a ceiling is set, every gated call on such an installation reads the month's
+priced total (one Durable Object call), not only calls by users with their own cap. Passthrough
+calls served by a platform-owned credential are priced too; a user's or project's own credential
+is their own spend. Spend is priced after each response, so calls
+admitted together before the total crosses the cap can each overshoot it by their own cost. A
+stored per-user settings row that cannot be parsed is ignored (platform defaults, logged as
+`ai_proxy.budget_settings_row_skipped`) rather than failing the call. Priced calls also record a
+per-model, per-day row in the same counter transaction, which the usage page shows as model and
+day breakdowns on installations without a gateway (`packages/ai-proxy/src/ai-model-usage.ts`).
+
+Locally metered passthrough calls using an installation-owned credential must use a model in
+SAM's pricing catalog and that model's canonical provider endpoint (origin and base path).
+Unknown models and custom endpoints aliasing catalog model names are refused before forwarding:
+a compatible protocol or configured provider label does not establish a catalog price. Use a
+user/project-owned credential for custom passthrough endpoints; the native operator-endpoint
+exception described above is unchanged. Missing provider usage is
+estimated from serialized request bytes (including tool schemas, system prompts and structured
+tool history) and generated output. Provider-reported usage takes precedence over these fallback
+estimates. User- and project-owned credentials remain usable after
+platform-funded monthly spend reaches its limit; daily token budgets still apply to all calls.
+An administrator ceiling denial directs the user to their administrator or the next month.

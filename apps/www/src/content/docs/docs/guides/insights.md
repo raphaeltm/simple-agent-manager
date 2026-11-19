@@ -153,7 +153,8 @@ whose agent session recorded no credential appear as **Account not recorded**.
 - **Spend** (API keys only): an **estimate** at SAM's model catalog prices, never a bill, with the
   estimate per merged pull request beside it. Subscriptions and SAM's platform credential show tokens
   only. A model SAM has no price for, or a custom OpenAI-compatible endpoint, is named under the
-  figure and makes the total partial (**At least**); SAM never guesses a price. A key with no
+  figure and makes the total partial (**At least**); when none of the key's usage has a price, the
+  figure reads **No estimate**. SAM never guesses a price. A key with no
   measured usage in the range shows **Not reported**. A teammate's personal key shows its tokens but
   its spend is **Private**: only the key's owner sees it, as with its name. Shared project keys show
   spend to every member. Each run's own tokens per model are on its chat's

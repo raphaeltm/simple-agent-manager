@@ -20,6 +20,7 @@ import {
   DEFAULT_NODE_PROVIDER_DELETION_CONFIRM_MAX_MS,
   DEFAULT_NODE_PROVIDER_DELETION_REQUEST_TIMEOUT_MS,
   DEFAULT_NODE_PROVISIONING_ATTEMPT_DEADLINE_MS,
+  DEFAULT_RUN_USAGE_MAX_ROWS_PER_SESSION,
   DEFAULT_WEBHOOK_QUEUE_MAX_PENDING,
   DEFAULT_WEBHOOK_QUEUE_TTL_SECONDS,
   DEFAULT_WEBHOOK_SIGNATURE_TOLERANCE_SECONDS,
@@ -50,6 +51,17 @@ import { DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BUDGET_MS } from './default-cap
 import { ENV_KEYS, SECRET_KINDS, SETTING_KEYS } from './platform-config-store';
 import { DEFAULT_SESSION_STALE_TURN_NO_WORK_MINUTES } from './session-idleness';
 export const CORE_SETTINGS: AdminSettingDefinition[] = [
+  {
+    ...integerDefinition(
+      'insights.runUsageMaxRowsPerSession',
+      DEFAULT_RUN_USAGE_MAX_ROWS_PER_SESSION,
+      'Operations',
+      'Lifetime bound on new harness usage rows per chat across epochs, models and credentials. Existing counters remain updatable; history is never deleted.',
+      { min: 1, max: 10000 }
+    ),
+    // Refuse new keys if policy cannot be resolved; existing counters still update.
+    unavailableValue: 0,
+  },
   integerDefinition(
     'operations.nodeCleanupRefusalWarnAfterMs',
     DEFAULT_CLEANUP_REFUSAL_WARN_AFTER_MS,

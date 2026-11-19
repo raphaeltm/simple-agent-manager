@@ -14,7 +14,7 @@ catalog:
   '@astrojs/check': 0.9.10
   eslint: 9.39.5
   eslint-plugin-astro: 1.7.0
-  globals: 17.9.0
+  globals: 17.14.0
   oxlint: 1.77.0
   jsdom: 29.1.1
 
@@ -40,7 +40,7 @@ catalog:
   eslint-plugin-react-hooks: 7.1.1
   '@types/react': 19.3.0
   '@types/react-dom': 19.3.0
-  react-router: 7.14.2
+  react-router: 8.5.1
   lucide-react: 0.460.0
 
   # === Testing ===
@@ -59,10 +59,10 @@ catalog:
   # One copy each in the worker bundle: apps/api and app-deployment must never diverge.
   '@aws-sdk/client-s3': 3.1141.0
   '@aws-sdk/s3-request-presigner': 3.1141.0
-  yaml: 2.9.0
+  yaml: 2.9.1
   # One jose copy: the API worker and repo-hosting both sign and verify JWTs.
   jose: 6.2.3
-  execa: 9.6.1
+  execa: 10.2.1
   prism-react-renderer: 2.4.1
   react-markdown: 10.1.0
   react-virtuoso: 4.18.13

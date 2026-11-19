@@ -8,7 +8,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { getUserId, optionalAuth, requireApproved, requireAuth } from '../middleware/auth';
-import { errors } from '../middleware/error';
+import { AppError, errors } from '../middleware/error';
 import {
   getAuthenticatedGitHubUser,
   getRepositoryBranches,
@@ -55,7 +55,12 @@ registerGitHubInstallationsRoute(githubRoutes);
 githubRoutes.get('/install-url', requireAuth(), requireApproved(), async (c) => {
   const appSlug = (await getGitHubAppConfig(c.env))?.slug;
   if (!appSlug) {
-    throw errors.internal('GitHub App slug is not configured');
+    // A setup state, not a server fault: say who can fix it and where.
+    throw new AppError(
+      409,
+      'GITHUB_APP_NOT_CONFIGURED',
+      'This SAM installation has no GitHub App yet. An administrator can create one in Admin → Integrations (Create GitHub App).'
+    );
   }
   const url = `https://github.com/apps/${appSlug}/installations/new`;
   return c.json({ url });

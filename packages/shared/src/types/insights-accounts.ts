@@ -145,6 +145,11 @@ export interface ProjectAccountsResponse {
    * are then a floor.
    */
   usageLimited: boolean;
+  /**
+   * A run in this range lost harness usage at write admission. This page-level warning does
+   * not mean every account is incomplete. Absent means no known admission loss (older servers).
+   */
+  usageAdmissionLimited?: boolean;
   unavailable: InsightsAccountsSection[];
   generatedAt: string;
 }

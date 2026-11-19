@@ -3,6 +3,11 @@
  * Create/delete live in focused modules and are re-exported for compatibility.
  */
 import {
+  cronToHumanReadable,
+  cronToNextFire,
+  validateCronExpression,
+} from '@simple-agent-manager/cron';
+import {
   ResourceRequirementsValidationError,
   serializeModernResourceRequirementsInput,
   serializeResourceRequirementsInput,
@@ -20,11 +25,6 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { AppError } from '../../middleware/error';
-import {
-  cronToHumanReadable,
-  cronToNextFire,
-  validateCronExpression,
-} from '../../services/cron-utils';
 import {
   assertGitHubTriggerConfigExists,
   readGitHubTriggerConfig,
