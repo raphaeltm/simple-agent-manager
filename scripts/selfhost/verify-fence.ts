@@ -17,7 +17,17 @@ import { networkInterfaces } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
-import { composeArgs, composeFilesFor } from './backup-lib.js';
+import { composeFilesFor } from './compose-env.js';
+
+function composeArgs(input: { composeFiles: string[]; envFile: string }, args: string[]): string[] {
+  return [
+    'compose',
+    '--env-file',
+    input.envFile,
+    ...input.composeFiles.flatMap((file) => ['-f', file]),
+    ...args,
+  ];
+}
 import { resolveTunnelPortRange } from './box-settings.js';
 import { EGRESS_FENCE_TABLE, parseNameservers } from './egress-fence.js';
 import { buildProbeScript, parseProbeOutput, type ProbeOutcome } from './fence-probes.js';
@@ -41,7 +51,7 @@ const CONTROL_UID = 65534;
 /** Above the ~1 s a refused TCP connect() takes (it is reported on the first SYN retransmit). */
 const DEFAULT_PROBE_TIMEOUT_SECONDS = 4;
 /** Same default as SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS in docker-compose.yml. */
-const DEFAULT_ATTESTATION_MAX_AGE_SECONDS = 20;
+const DEFAULT_ATTESTATION_MAX_AGE_SECONDS = 2;
 const ATTESTATION_PATH = '/run/sam-egress-fence/attestation';
 
 interface Run {
@@ -162,6 +172,7 @@ async function verify(envFile: string, publicProbe: string, publicName: string):
     range: resolveTunnelPortRange(box),
     publicProbe,
     localAddresses: own,
+    resolvConf: readFileSync('/etc/resolv.conf', 'utf8'),
   });
   const name = startProbeContainer(envFile);
   try {

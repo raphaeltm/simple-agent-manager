@@ -252,3 +252,10 @@ export function writeMailCollectorFiles(
   }
   return changed;
 }
+
+/** Exact local SMTP endpoint the celld fence opens for the optional mail collector. */
+export function mailEgressEndpoints(box: Box): Array<{ address: string; port: number }> {
+  return mailCollectorEnabled(box)
+    ? [{ address: '127.0.0.1', port: mailCollectorPorts(box).smtp }]
+    : [];
+}

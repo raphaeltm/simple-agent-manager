@@ -78,6 +78,7 @@ import {
   SELFHOST_DIR,
   syncGatewayEnv,
 } from './deploy-steps.js';
+import { writeFenceFiles } from './fence-state.js';
 import { inboundMailWorkerVars } from './inbound-mail-settings.js';
 import {
   ensureMailCollectorPassword,
@@ -387,6 +388,9 @@ async function main(): Promise<void> {
   const { box, stateDir, projectDir, baseDomain } = inputs;
   const { keys, tunnelSettings, collectorPasswordPath, collectorPassword } =
     prepareBoxState(inputs);
+  if (!inputs.dryRun) {
+    await writeFenceFiles({ stateDir, box, leaseRange: tunnelSettings.range });
+  }
   if (inputs.init) return;
   const { installationId, secrets } = resolveWorkerSecrets(inputs, keys);
   const { plan, vmAgentRelease } = planWorker(inputs, tunnelSettings, installationId, secrets);

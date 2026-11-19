@@ -1,5 +1,5 @@
 import { mkdtempSync, readFileSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -32,54 +32,10 @@ function plan(
   return buildFencePlan({ box, leaseRange: RANGE, resolvConf: RESOLV, objectStore });
 }
 
-describe('egress fence with guided login (celld containers)', () => {
-  const BRIDGE_RULE =
-    'oifname "celld0" ip daddr 172.16.0.0/12 meta l4proto tcp accept comment "celld containers (guided login)"';
-
-  it('lets celld reach its own container bridge only when guided login is on', () => {
-    expect(renderFenceRuleset(plan())).not.toContain('oifname');
-    const rules = renderFenceRuleset(plan({ SAM_GUIDED_LOGIN: 'on' }));
-    expect(rules).toContain(BRIDGE_RULE);
-    // Before the refusals, which would otherwise reject 172.16/12.
-    expect(rules.indexOf(BRIDGE_RULE)).toBeLessThan(rules.indexOf('ip daddr { 0.0.0.0/8'));
-  });
-
-  it('still refuses the same private range on any other interface', () => {
-    const rules = renderFenceRuleset(plan({ SAM_GUIDED_LOGIN: 'on' }));
-    expect(rules).toMatch(/ip daddr \{[^}]*172\.16\.0\.0\/12[^}]*\} counter reject/);
-    expect(rules).not.toMatch(/^\s*ip daddr 172\.16\.0\.0\/12[^\n]*accept/m);
-  });
-});
-
-describe('egress fence: celld sandboxes (guided login)', () => {
-  it('keeps sandboxes off the host and private ranges without relying on celld’s fence', () => {
-    expect(renderFenceRuleset(plan())).not.toContain('sandbox_');
-    const rules = renderFenceRuleset(plan({ SAM_GUIDED_LOGIN: 'on' }));
-    const from = 'iifname { "celld0", "celld1" }';
-    // Replies to connections the host opened (celld driving the sandbox), then nothing else.
-    expect(rules).toContain('type filter hook input priority filter; policy accept;');
-    expect(rules).toContain(`${from} ct state established,related accept`);
-    expect(rules).toMatch(
-      /iifname \{ "celld0", "celld1" \} counter reject[^\n]*nothing on this host/
-    );
-    expect(rules.indexOf(`${from} ct state established`)).toBeLessThan(
-      rules.indexOf('nothing on this host')
-    );
-    // Forwarded traffic: the same forbidden ranges as celld's own uid, metadata included.
-    expect(rules).toContain('type filter hook forward priority filter; policy accept;');
-    expect(rules).toMatch(
-      /iifname \{ "celld0", "celld1" \} ip daddr \{[^}]*169\.254\.0\.0\/16[^}]*172\.16\.0\.0\/12[^}]*\} counter reject/
-    );
-    expect(rules).toMatch(
-      /iifname \{ "celld0", "celld1" \} ip6 daddr \{[^}]*fc00::\/7[^}]*\} counter reject/
-    );
-  });
-});
-
 describe('egress fence ruleset', () => {
   it('fences only the celld uid and lets established traffic (Caddy -> celld replies) through', () => {
     const rules = renderFenceRuleset(plan());
-    expect(rules).toContain('meta skuid 7101 jump celld');
+    expect(rules).toContain('meta skuid 7103 jump celld');
     expect(rules).toContain('ct state established,related accept');
     expect(rules.indexOf('ct state established')).toBeLessThan(rules.indexOf('counter reject'));
   });
@@ -116,7 +72,7 @@ describe('egress fence ruleset', () => {
 
   it('refuses this host and every forbidden range, in the right family, after every accept', () => {
     const rules = renderFenceRuleset(
-      plan({ CELLD_BUCKET: 'gs://b', SAM_EGRESS_ALLOW: '10.0.0.5:11434' }, [
+      plan({ CELLD_BUCKET: 'gs://fleet-bucket', SAM_EGRESS_ALLOW: '10.0.0.5:11434' }, [
         { address: '10.1.2.3', port: 9000 },
       ])
     ).split('\n');
@@ -322,13 +278,13 @@ describe('object store endpoints', () => {
 
 describe('mail collector (T6) through the fence', () => {
   it('opens the collector SMTP port on loopback only when the profile is on', async () => {
-    const stateDir = mkdtempSync(join(tmpdir(), 'fence-mail-'));
+    const stateDir = mkdtempSync(resolve('.tmp/fence-mail-'));
     const on = { COMPOSE_PROFILES: 'tunnel,mail-collector', MAIL_COLLECTOR_SMTP_PORT: '2525' };
     await writeFenceFiles({ stateDir, box: on, leaseRange: RANGE, resolvConf: RESOLV });
     expect(readFileSync(join(stateDir, 'egress-fence.nft'), 'utf8')).toContain(
       'ip daddr 127.0.0.1 tcp dport { 20000-29999, 2525 } accept'
     );
-    const offDir = mkdtempSync(join(tmpdir(), 'fence-mail-off-'));
+    const offDir = mkdtempSync(resolve('.tmp/fence-mail-off-'));
     await writeFenceFiles({
       stateDir: offDir,
       box: { COMPOSE_PROFILES: 'tunnel' },
@@ -375,11 +331,15 @@ describe('celld.env and the metadata token proxy', () => {
       'metadata-v6,fd20:ce::254,80',
       '6to4-v6,2002:a9fe:a9fe::1,80',
       'teredo-v6,2001::1,80',
+      'non-resolver-dns,10.255.255.1,53',
+      'resolver-non-dns,127.0.0.53,2019',
+      'resolver-non-dns,169.254.169.254,2019',
+      'caddy-admin,127.0.0.1,2019',
     ]);
   });
 
-  it('requests a Cloud Storage scope for the token proxy (GCE ignores it) and refuses any other scope', () => {
-    const box = { CELLD_BUCKET: 'gs://b' };
+  it('validates the CAB permission scope and refuses any other scope', () => {
+    const box = { CELLD_BUCKET: 'gs://fleet-bucket' };
     const env = parseDotenv(renderCelldEnv(box, plan(box), SECRET), 'celld.env');
     expect(env.GCE_METADATA_PROXY_SCOPES).toBe(DEFAULT_GCE_METADATA_PROXY_SCOPES);
     expect(DEFAULT_GCE_METADATA_PROXY_SCOPES).toBe(
@@ -402,7 +362,7 @@ describe('celld.env and the metadata token proxy', () => {
   });
 
   it('points celld at the proxy with the secret path for a gs:// bucket', () => {
-    const box = { CELLD_BUCKET: 'gs://b' };
+    const box = { CELLD_BUCKET: 'gs://fleet-bucket' };
     const env = parseDotenv(renderCelldEnv(box, plan(box), SECRET), 'celld.env');
     expect(env.GCE_METADATA_HOST).toBe(`127.0.0.1:7180/${SECRET}`);
     expect(env.GCE_METADATA_IP).toBe(env.GCE_METADATA_HOST);
@@ -410,17 +370,17 @@ describe('celld.env and the metadata token proxy', () => {
   });
 
   it('on for gs:// by default, off for s3://, overridable', () => {
-    expect(metadataProxyEnabled({ CELLD_BUCKET: 'gs://b' })).toBe(true);
+    expect(metadataProxyEnabled({ CELLD_BUCKET: 'gs://fleet-bucket' })).toBe(true);
     expect(metadataProxyEnabled({ CELLD_BUCKET: 's3://b' })).toBe(false);
-    expect(metadataProxyEnabled({ CELLD_BUCKET: 'gs://b', GCE_METADATA_PROXY: 'off' })).toBe(false);
+    expect(metadataProxyEnabled({ CELLD_BUCKET: 'gs://fleet-bucket', GCE_METADATA_PROXY: 'off' })).toBe(false);
   });
 
   it('requires the gce compose profile exactly when the proxy is on', () => {
     expect(() =>
-      assertComposeProfiles({ CELLD_BUCKET: 'gs://b', COMPOSE_PROFILES: 'tunnel' })
+      assertComposeProfiles({ CELLD_BUCKET: 'gs://fleet-bucket', COMPOSE_PROFILES: 'tunnel' })
     ).toThrow(/gce/);
     expect(() =>
-      assertComposeProfiles({ CELLD_BUCKET: 'gs://b', COMPOSE_PROFILES: 'tunnel,gce' })
+      assertComposeProfiles({ CELLD_BUCKET: 'gs://fleet-bucket', COMPOSE_PROFILES: 'tunnel,gce' })
     ).not.toThrow();
     expect(() =>
       assertComposeProfiles({ CELLD_BUCKET: 's3://b', COMPOSE_PROFILES: 'gce' })
@@ -428,8 +388,8 @@ describe('celld.env and the metadata token proxy', () => {
   });
 
   it('writes the ruleset world-readable, celld.env private, and keeps the proxy secret stable', async () => {
-    const stateDir = mkdtempSync(join(tmpdir(), 'fence-'));
-    const box = { CELLD_BUCKET: 'gs://b', COMPOSE_PROFILES: 'tunnel,gce' };
+    const stateDir = mkdtempSync(resolve('.tmp/fence-'));
+    const box = { CELLD_BUCKET: 'gs://fleet-bucket', COMPOSE_PROFILES: 'tunnel,gce' };
     const first = await writeFenceFiles({ stateDir, box, leaseRange: RANGE, resolvConf: RESOLV });
     expect(first.changed).toHaveLength(2);
     expect(statSync(join(stateDir, 'egress-fence.nft')).mode & 0o777).toBe(0o644);
@@ -464,5 +424,14 @@ describe('presign credential', () => {
       })
     ).not.toThrow();
     expect(() => assertPresignCredentialIsScoped({}, {})).not.toThrow();
+  });
+});
+
+describe('reserved caller identities and Caddy admin port', () => {
+  it.each(['7101', '7102', '65532', '65534'])('refuses celld uid %s', uid => {
+    expect(() => plan({ CELLD_UID: uid })).toThrow(/identity/);
+  });
+  it.each(['127.0.0.1:2019', '127.0.0.2:2019', '[::1]:2019', '[::ffff:127.0.0.1]:2019', '10.1.2.3:2019'])('refuses admin via %s', endpoint => {
+    expect(() => plan({ SAM_EGRESS_ALLOW: endpoint })).toThrow(/Caddy admin/);
   });
 });

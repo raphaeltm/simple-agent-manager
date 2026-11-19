@@ -159,7 +159,7 @@ function stateFingerprint(stateDir: string): string {
   const hash = createHash('sha256');
   if (!existsSync(stateDir)) return '';
   for (const name of readdirSync(stateDir).sort()) {
-    if (!name.endsWith(GENERATED_STATE_FILE_SUFFIX)) continue;
+    if (!name.endsWith(GENERATED_STATE_FILE_SUFFIX) && name !== 'egress-fence.nft') continue;
     try {
       hash.update(name).update(readFileSync(join(stateDir, name)));
     } catch {
@@ -343,6 +343,8 @@ async function applyUpgrade(
   git(['checkout', '--detach', plan.to]);
   pnpm(['install', '--frozen-lockfile']);
   const before = stateFingerprint(ctx.stateDir);
+  const fenceFile = join(ctx.stateDir, 'egress-fence.nft');
+  const fenceBefore = existsSync(fenceFile) ? readFileSync(fenceFile, 'utf8') : null;
   pnpm(['selfhost:deploy', '--init', ...plan.boxArgs]);
   const stateChanged = stateFingerprint(ctx.stateDir) !== before;
   progress.stateChanged = stateChanged;
@@ -355,6 +357,12 @@ async function applyUpgrade(
       ctx.log(`rebuilding ${progress.imagesRebuilt.join(', ')} (build inputs changed)`);
       docker(['build', ...progress.imagesRebuilt]);
     }
+  }
+  const fenceAfter = existsSync(fenceFile) ? readFileSync(fenceFile, 'utf8') : null;
+  if (fenceAfter !== null && fenceBefore !== fenceAfter) {
+    // Bind-file changes do not alter Compose's service hash. The immutable watcher is latched
+    // unhealthy, so recreate it explicitly before the rest of the stack waits for healthy.
+    docker(['up', '-d', '--force-recreate', 'egress-fence']);
   }
   let composeRestarted = false;
   if (plan.composeFilesChanged || stateChanged || progress.imagesRebuilt.length > 0) {

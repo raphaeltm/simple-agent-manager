@@ -16,6 +16,7 @@ import {
   composePort,
   metadataProxyEnabled,
   metadataProxyPort,
+  parseNameservers,
   resolveObjectStoreEndpoints,
 } from './egress-fence.js';
 import { hostAddresses, type ProbeOutcome, type ProbeSpec, REMOTE_PROBES } from './fence-probes.js';
@@ -26,6 +27,7 @@ export interface VerifyTarget {
   host: string;
   port: number;
   expect: 'blocked' | 'reachable';
+  protocol?: 'tcp' | 'udp';
 }
 
 export interface Verdict {
@@ -45,7 +47,11 @@ function isLocalHost(host: string, localAddresses: ReadonlySet<string>): boolean
 /** Every probe a target needs: TCP always, plus UDP for a forbidden one. */
 export function probeSpecs(targets: readonly VerifyTarget[]): ProbeSpec[] {
   return targets.flatMap((target): ProbeSpec[] => {
-    const tcp: ProbeSpec = { host: target.host, port: target.port, protocol: 'tcp' };
+    const tcp: ProbeSpec = {
+      host: target.host,
+      port: target.port,
+      protocol: target.protocol ?? 'tcp',
+    };
     return target.expect === 'blocked' ? [tcp, { ...tcp, protocol: 'udp' }] : [tcp];
   });
 }
@@ -105,6 +111,7 @@ export interface TargetInput {
   publicProbe: string;
   /** This host's interface addresses (os.networkInterfaces()). */
   localAddresses: readonly string[];
+  resolvConf?: string;
 }
 
 function localTargets(
@@ -196,6 +203,18 @@ export async function verifyTargets(input: TargetInput): Promise<VerifyTarget[]>
   const targets: VerifyTarget[] = [
     ...localTargets(box, own),
     ...remoteTargets(box, input.localAddresses),
+    { label: 'DNS on a non-resolver', host: '10.255.255.1', port: 53, expect: 'blocked' },
+    ...parseNameservers(input.resolvConf ?? '').flatMap((host) => [
+      { label: 'configured resolver TCP', host, port: 53, expect: 'reachable' as const },
+      {
+        label: 'configured resolver UDP',
+        host,
+        port: 53,
+        protocol: 'udp' as const,
+        expect: 'reachable' as const,
+      },
+      { label: 'resolver non-DNS service', host, port: 2019, expect: 'blocked' as const },
+    ]),
     allow('node tunnel lease port', '127.0.0.1', range.start),
     allow('public internet', publicHost, Number(publicPort)),
     ...own.map((host) =>

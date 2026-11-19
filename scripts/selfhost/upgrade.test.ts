@@ -32,6 +32,7 @@ let diff: string[];
 let dirty: boolean;
 let failDeploy: boolean;
 let initRewritesState: boolean;
+let initRewritesFence: boolean;
 /** What the fake checkout has checked out (`git checkout --detach` moves it). */
 let head: string;
 /** docker-compose.yml at each ref, and the services `docker compose config --services` lists. */
@@ -91,6 +92,9 @@ function run(command: string, args: string[], env?: NodeJS.ProcessEnv): RunResul
   if (deploy && args.includes('--init') && initRewritesState) {
     writeFileSync(join(root, 'state/gateway.env'), 'FRPS_PORT_RANGE=21000-21999\n');
   }
+  if (deploy && args.includes('--init') && initRewritesFence) {
+    writeFileSync(join(root, 'state/egress-fence.nft'), 'table inet changed {}\n');
+  }
   if (command === 'docker' && args.includes('config')) return ok(activeServices.join('\n'));
   if (deploy && !args.includes('--init') && failDeploy) {
     return { status: 1, stdout: '', stderr: 'migration 0219 failed' };
@@ -128,6 +132,7 @@ beforeEach(() => {
   dirty = false;
   failDeploy = false;
   initRewritesState = false;
+  initRewritesFence = false;
   head = FROM;
   composeAt = { [FROM]: COMPOSE(), [TO]: COMPOSE() };
   trackedAt = {};
@@ -143,6 +148,17 @@ const compact = () =>
   steps.map((s) => (s.startsWith('docker compose') ? s.replace(/ -f .* --env-file \S+/, '') : s));
 
 describe('runUpgrade', () => {
+  it('recreates the fence before restarting the stack after a generated nft-only change', async () => {
+    initRewritesFence = true;
+    const result = await upgrade();
+    expect(result.composeRestarted).toBe(true);
+    const order = compact();
+    expect(order).toContain('docker compose up -d --force-recreate egress-fence');
+    expect(order.indexOf('docker compose up -d --force-recreate egress-fence')).toBeLessThan(
+      order.indexOf('docker compose up -d')
+    );
+  });
+
   it('checks out, migrates and deploys with no backup, and leaves the stack running when compose inputs are unchanged', async () => {
     const result = await upgrade();
     // No backup step: nothing touches the bucket and the celld container is never stopped.

@@ -30,7 +30,8 @@ probes="${SAM_EGRESS_FENCE_PROBES:?SAM_EGRESS_FENCE_PROBES is not set; run pnpm 
 attestation="${SAM_EGRESS_FENCE_ATTESTATION:?SAM_EGRESS_FENCE_ATTESTATION is not set}"
 max_age="${SAM_EGRESS_FENCE_ATTESTATION_MAX_AGE_SECONDS:-20}"
 wait_seconds="${SAM_EGRESS_FENCE_WAIT_SECONDS:-60}"
-check_seconds="${SAM_EGRESS_FENCE_CHECK_SECONDS:-1}"
+check_seconds="${SAM_EGRESS_FENCE_CHECK_SECONDS:-0.1}"
+case "$check_seconds" in 0.1|0.05|0.01) ;; *) echo "invalid fence check interval" >&2; exit 64;; esac
 celld="${SAM_CELLD_BIN:-/usr/local/bin/celld}"
 
 log() { echo "[celld-start] $*" >&2; }
@@ -48,6 +49,7 @@ send_error() {
 # Sets $result to why the fence is not in effect, or empty when it is.
 fence_problem() {
   result=""
+  [ ! -f "$(dirname "$attestation")/lost" ] || { result="fence loss latched"; return; }
   local entry name host port out now stamp state
   for entry in $probes; do
     IFS=, read -r name host port <<<"$entry"
@@ -62,7 +64,7 @@ fence_problem() {
   done
   read -r state stamp <"$attestation" 2>/dev/null || { result="no attestation at $attestation"; return; }
   now="$(date +%s)"
-  if [ "$state" != "ok" ] || ! [[ "$stamp" =~ ^[0-9]+$ ]] || ((now - stamp > max_age)); then
+  if [ "$state" != "ok" ] || ! [[ "$stamp" =~ ^[0-9]+$ ]] || ((stamp > now || now - stamp > max_age)); then
     result="attestation '${state:-} ${stamp:-}' is not a recent ok (max age ${max_age}s)"
   fi
 }
@@ -91,10 +93,8 @@ while kill -0 "$pid" 2>/dev/null; do
   kill -0 "$pid" 2>/dev/null || break
   fence_problem
   [ -z "$result" ] && continue
-  fence_problem
-  [ -z "$result" ] && continue
   kill -KILL "$pid" 2>/dev/null || true
-  log "egress fence is gone ($result); killed celld"
+  echo '{"level":"error","event":"egress_fence.celld_killed"}' >&2
   wait "$pid" || true
   exit 1
 done
